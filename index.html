@@ -25,7 +25,7 @@
     <!-- Lucide Icons -->
     <script src="https://unpkg.com/lucide@latest"></script>
 
-    <!-- Custom Config for Tailwind (si'se Theme - Calm Blue/Green) -->
+    <!-- Custom Config for Tailwind (si'se Theme - Gentle Green) -->
     <script>
         tailwind.config = {
             darkMode: 'class',
@@ -33,22 +33,22 @@
                 extend: {
                     colors: {
                         sise: {
-                            50: '#f0f9ff',
-                            100: '#e0f2fe',
-                            200: '#bae6fd',
-                            300: '#7dd3fc',
-                            400: '#38bdf8',
-                            500: '#0ea5e9', // Brand Primary
-                            600: '#0284c7',
-                            700: '#0369a1',
-                            800: '#075985',
-                            900: '#0c4a6e',
+                            50: '#f0fdf4',   // 非常に薄い緑
+                            100: '#dcfce7',  // 薄い緑
+                            200: '#bbf7d0',  // 明るい緑
+                            300: '#86efac',  // 柔らかい緑
+                            400: '#4ade80',  // ミディアム緑
+                            500: '#22c55e',  // Brand Primary - 優しい緑
+                            600: '#16a34a',  // 深い緑
+                            700: '#15803d',  // 暗い緑
+                            800: '#166534',  // より暗い緑
+                            900: '#14532d',  // 最も暗い緑
                         },
                         accent: {
-                            50: '#f0fdf4',
-                            100: '#dcfce7',
-                            500: '#22c55e', // Success/Accent
-                            600: '#16a34a',
+                            50: '#fefce8',
+                            100: '#fef9c3',
+                            500: '#eab308',  // Success/Accent - 黄緑
+                            600: '#ca8a04',
                         }
                     },
                     fontFamily: {
@@ -107,7 +107,7 @@
         }
 
         .dark .border-sise-200 {
-            border-color: #0369a1 !important;
+            border-color: #15803d !important;
         }
 
         /* Custom Scrollbar */
@@ -118,7 +118,7 @@
             background: #f1f5f9;
         }
         ::-webkit-scrollbar-thumb {
-            background: #0ea5e9;
+            background: #22c55e;
             border-radius: 4px;
         }
 
@@ -126,7 +126,7 @@
         .glass-panel {
             background: rgba(255, 255, 255, 0.9);
             backdrop-filter: blur(12px);
-            border: 1px solid rgba(14, 165, 233, 0.2);
+            border: 1px solid rgba(34, 197, 94, 0.2);
         }
 
         /* Loading Animation */
@@ -167,7 +167,7 @@
     <div id="root">
         <div id="loading-indicator" style="display: flex; justify-content: center; align-items: center; min-height: 100vh; background: #f8fafc;">
             <div style="text-align: center;">
-                <div style="width: 50px; height: 50px; border: 5px solid #0ea5e9; border-top: 5px solid transparent; border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto 20px;"></div>
+                <div style="width: 50px; height: 50px; border: 5px solid #22c55e; border-top: 5px solid transparent; border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto 20px;"></div>
                 <p style="color: #1e293b; font-size: 16px; font-family: sans-serif;">si'se Dashboard</p>
                 <p style="color: #64748b; font-size: 12px; font-family: sans-serif; margin-top: 10px;">読み込み中...</p>
             </div>
@@ -183,23 +183,33 @@
         // 設定・定数
         // ========================================
 
-        // 店舗マスタ
+        // 店舗マスタ - 各店舗ごとにSquare設定を保持
         const stores = [
-            { id: 1, name: "新宿店", code: "shinjuku" },
-            { id: 2, name: "渋谷店", code: "shibuya" }
+            {
+                id: 1,
+                name: "新宿店",
+                code: "shinjuku",
+                squareConfig: {
+                    accessToken: 'YOUR_SQUARE_ACCESS_TOKEN_SHINJUKU',
+                    locationId: 'YOUR_LOCATION_ID_SHINJUKU',
+                    baseUrl: 'https://connect.squareup.com/v2'
+                }
+            },
+            {
+                id: 2,
+                name: "渋谷店",
+                code: "shibuya",
+                squareConfig: {
+                    accessToken: 'YOUR_SQUARE_ACCESS_TOKEN_SHIBUYA',
+                    locationId: 'YOUR_LOCATION_ID_SHIBUYA',
+                    baseUrl: 'https://connect.squareup.com/v2'
+                }
+            }
         ];
 
         // Google Apps Script Web App URL (日報データ取得用)
         // ※実際のデプロイ後URLに置き換えてください
         const GOOGLE_FORM_SHEET_URL = 'YOUR_GOOGLE_APPS_SCRIPT_URL';
-
-        // Square API設定
-        // ※実際のアクセストークンとロケーションIDに置き換えてください
-        const SQUARE_CONFIG = {
-            accessToken: 'YOUR_SQUARE_ACCESS_TOKEN',
-            locationId: 'YOUR_LOCATION_ID',
-            baseUrl: 'https://connect.squareup.com/v2'
-        };
 
         // ========================================
         // ヘルパー関数
@@ -264,7 +274,8 @@
         // Square API連携
         // ========================================
 
-        const useSquareData = () => {
+        // 店舗ごとのSquareデータ取得フック
+        const useSquareData = (storeId = null) => {
             const [memberData, setMemberData] = useState({
                 totalMembers: 0,
                 activeMembers: 0,
@@ -277,16 +288,21 @@
             });
 
             const fetchSquareData = useCallback(async () => {
+                // 店舗が指定されている場合、その店舗のSquare設定を取得
+                const store = storeId ? stores.find(s => s.id === storeId || s.name === storeId) : null;
+                const squareConfig = store?.squareConfig;
+
                 // デモモード: 実際のAPIが設定されていない場合はサンプルデータを返す
-                if (SQUARE_CONFIG.accessToken === 'YOUR_SQUARE_ACCESS_TOKEN') {
-                    // サンプルデータ
+                if (!squareConfig || squareConfig.accessToken.startsWith('YOUR_SQUARE_ACCESS_TOKEN')) {
+                    // サンプルデータ（店舗ごとに異なる値を生成）
+                    const baseMembers = storeId === 1 || storeId === "新宿店" ? 85 : 71;
                     setMemberData({
-                        totalMembers: 156,
-                        activeMembers: 142,
-                        newMembersThisMonth: 12,
-                        churnedMembers: 5,
-                        churnRate: 3.2,
-                        expectedRevenue: 1420000, // 142人 × 10,000円/月
+                        totalMembers: Math.floor(baseMembers * 1.1),
+                        activeMembers: baseMembers,
+                        newMembersThisMonth: Math.floor(Math.random() * 8) + 4,
+                        churnedMembers: Math.floor(Math.random() * 4) + 1,
+                        churnRate: (Math.random() * 3 + 1.5).toFixed(1),
+                        expectedRevenue: baseMembers * 10000,
                         loading: false,
                         error: null
                     });
@@ -295,10 +311,10 @@
 
                 try {
                     // Square Customers APIでサブスク会員を取得
-                    const response = await fetch(`${SQUARE_CONFIG.baseUrl}/customers/search`, {
+                    const response = await fetch(`${squareConfig.baseUrl}/customers/search`, {
                         method: 'POST',
                         headers: {
-                            'Authorization': `Bearer ${SQUARE_CONFIG.accessToken}`,
+                            'Authorization': `Bearer ${squareConfig.accessToken}`,
                             'Content-Type': 'application/json',
                             'Square-Version': '2024-01-18'
                         },
@@ -323,17 +339,17 @@
                     const customers = data.customers || [];
 
                     // サブスクリプションデータを取得
-                    const subscriptionsResponse = await fetch(`${SQUARE_CONFIG.baseUrl}/subscriptions/search`, {
+                    const subscriptionsResponse = await fetch(`${squareConfig.baseUrl}/subscriptions/search`, {
                         method: 'POST',
                         headers: {
-                            'Authorization': `Bearer ${SQUARE_CONFIG.accessToken}`,
+                            'Authorization': `Bearer ${squareConfig.accessToken}`,
                             'Content-Type': 'application/json',
                             'Square-Version': '2024-01-18'
                         },
                         body: JSON.stringify({
                             query: {
                                 filter: {
-                                    location_ids: [SQUARE_CONFIG.locationId]
+                                    location_ids: [squareConfig.locationId]
                                 }
                             }
                         })
@@ -379,7 +395,7 @@
                         error: error.message
                     }));
                 }
-            }, []);
+            }, [storeId]);
 
             useEffect(() => {
                 fetchSquareData();
@@ -389,6 +405,95 @@
             }, [fetchSquareData]);
 
             return { memberData, refreshSquareData: fetchSquareData };
+        };
+
+        // 全店舗のSquareデータを取得するフック
+        const useAllStoresSquareData = () => {
+            const [allStoresData, setAllStoresData] = useState({});
+            const [loading, setLoading] = useState(true);
+
+            const fetchAllStoresData = useCallback(async () => {
+                setLoading(true);
+                const dataPromises = stores.map(async (store) => {
+                    // 各店舗のSquare設定を確認
+                    const squareConfig = store.squareConfig;
+
+                    // デモモードチェック
+                    if (!squareConfig || squareConfig.accessToken.startsWith('YOUR_SQUARE_ACCESS_TOKEN')) {
+                        // サンプルデータ
+                        const baseMembers = store.id === 1 ? 85 : 71;
+                        return {
+                            storeId: store.id,
+                            storeName: store.name,
+                            data: {
+                                totalMembers: Math.floor(baseMembers * 1.1),
+                                activeMembers: baseMembers,
+                                newMembersThisMonth: Math.floor(Math.random() * 8) + 4,
+                                churnedMembers: Math.floor(Math.random() * 4) + 1,
+                                churnRate: (Math.random() * 3 + 1.5),
+                                expectedRevenue: baseMembers * 10000,
+                            }
+                        };
+                    }
+
+                    // 実際のAPI呼び出し（上記のロジックと同じ）
+                    try {
+                        const response = await fetch(`${squareConfig.baseUrl}/subscriptions/search`, {
+                            method: 'POST',
+                            headers: {
+                                'Authorization': `Bearer ${squareConfig.accessToken}`,
+                                'Content-Type': 'application/json',
+                                'Square-Version': '2024-01-18'
+                            },
+                            body: JSON.stringify({
+                                query: {
+                                    filter: {
+                                        location_ids: [squareConfig.locationId]
+                                    }
+                                }
+                            })
+                        });
+
+                        const subsData = await response.json();
+                        const subscriptions = subsData.subscriptions || [];
+                        const activeSubscriptions = subscriptions.filter(s => s.status === 'ACTIVE');
+
+                        return {
+                            storeId: store.id,
+                            storeName: store.name,
+                            data: {
+                                activeMembers: activeSubscriptions.length,
+                                expectedRevenue: activeSubscriptions.length * 10000,
+                            }
+                        };
+                    } catch (error) {
+                        console.error(`Error fetching data for ${store.name}:`, error);
+                        return {
+                            storeId: store.id,
+                            storeName: store.name,
+                            data: { error: error.message }
+                        };
+                    }
+                });
+
+                const results = await Promise.all(dataPromises);
+                const dataMap = {};
+                results.forEach(result => {
+                    dataMap[result.storeId] = result.data;
+                });
+
+                setAllStoresData(dataMap);
+                setLoading(false);
+            }, []);
+
+            useEffect(() => {
+                fetchAllStoresData();
+                // 5分ごとに更新
+                const interval = setInterval(fetchAllStoresData, 5 * 60 * 1000);
+                return () => clearInterval(interval);
+            }, [fetchAllStoresData]);
+
+            return { allStoresData, loading, refreshAllStoresData: fetchAllStoresData };
         };
 
         // ========================================
@@ -483,8 +588,41 @@
         // ダッシュボードメインビュー
         // ========================================
 
-        const DashboardView = ({ memberData, reportData, selectedStore, setSelectedStore }) => {
+        const DashboardView = ({ reportData, selectedStore, setSelectedStore }) => {
             const [dateRange, setDateRange] = useState('month'); // 'week', 'month', 'quarter'
+
+            // 選択された店舗のSquareデータを取得
+            const selectedStoreObj = stores.find(s => s.name === selectedStore);
+            const { memberData } = useSquareData(selectedStore === 'all' ? null : selectedStoreObj?.id);
+            const { allStoresData } = useAllStoresSquareData();
+
+            // 全店舗のSquareデータを集計
+            const aggregatedMemberData = useMemo(() => {
+                if (selectedStore === 'all') {
+                    const totalData = {
+                        totalMembers: 0,
+                        activeMembers: 0,
+                        newMembersThisMonth: 0,
+                        churnedMembers: 0,
+                        expectedRevenue: 0,
+                    };
+
+                    Object.values(allStoresData).forEach(storeData => {
+                        totalData.totalMembers += storeData.totalMembers || 0;
+                        totalData.activeMembers += storeData.activeMembers || 0;
+                        totalData.newMembersThisMonth += storeData.newMembersThisMonth || 0;
+                        totalData.churnedMembers += storeData.churnedMembers || 0;
+                        totalData.expectedRevenue += storeData.expectedRevenue || 0;
+                    });
+
+                    totalData.churnRate = totalData.totalMembers > 0
+                        ? (totalData.churnedMembers / totalData.totalMembers * 100)
+                        : 0;
+
+                    return totalData;
+                }
+                return memberData;
+            }, [selectedStore, memberData, allStoresData]);
 
             if (!window.Recharts) return <div className="p-8 text-center">チャートを読み込み中...</div>;
 
@@ -583,7 +721,7 @@
                 };
             }, [reportData.reports, selectedStore, dateRange]);
 
-            const CHART_COLORS = ['#0ea5e9', '#22c55e', '#f97316', '#a855f7'];
+            const CHART_COLORS = ['#22c55e', '#4ade80', '#86efac', '#16a34a', '#f97316', '#a855f7'];
 
             return (
                 <div className="space-y-6">
@@ -625,15 +763,15 @@
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                         <KpiCard
                             title="アクティブ会員数"
-                            value={formatNumber(memberData.activeMembers)}
-                            subValue={`総会員: ${formatNumber(memberData.totalMembers)}人`}
+                            value={formatNumber(aggregatedMemberData.activeMembers)}
+                            subValue={`総会員: ${formatNumber(aggregatedMemberData.totalMembers)}人`}
                             trend={null}
                             icon="users"
                             color="bg-sise-500"
                         />
                         <KpiCard
                             title="今月の想定売上"
-                            value={formatCurrency(memberData.expectedRevenue)}
+                            value={formatCurrency(aggregatedMemberData.expectedRevenue)}
                             subValue="サブスク収益"
                             trend={null}
                             icon="wallet"
@@ -641,7 +779,7 @@
                         />
                         <KpiCard
                             title="今月の新規会員"
-                            value={formatNumber(memberData.newMembersThisMonth)}
+                            value={formatNumber(aggregatedMemberData.newMembersThisMonth)}
                             subValue="入会者数"
                             trend={null}
                             icon="user-plus"
@@ -649,11 +787,11 @@
                         />
                         <KpiCard
                             title="退会率"
-                            value={formatPercent(memberData.churnRate)}
-                            subValue={`退会者: ${memberData.churnedMembers}人`}
-                            trend={memberData.churnRate > 5 ? null : null}
+                            value={formatPercent(aggregatedMemberData.churnRate)}
+                            subValue={`退会者: ${aggregatedMemberData.churnedMembers}人`}
+                            trend={aggregatedMemberData.churnRate > 5 ? null : null}
                             icon="user-minus"
-                            color={memberData.churnRate > 5 ? "bg-red-500" : "bg-slate-500"}
+                            color={aggregatedMemberData.churnRate > 5 ? "bg-red-500" : "bg-slate-500"}
                         />
                     </div>
 
@@ -708,7 +846,7 @@
                                         formatter={(value, name) => [value, name === 'new' ? '新規' : '契約']}
                                     />
                                     <Legend formatter={(value) => value === 'new' ? '新規数' : '契約数'} />
-                                    <Bar dataKey="new" name="new" fill="#0ea5e9" radius={[4, 4, 0, 0]} />
+                                    <Bar dataKey="new" name="new" fill="#4ade80" radius={[4, 4, 0, 0]} />
                                     <Bar dataKey="contract" name="contract" fill="#22c55e" radius={[4, 4, 0, 0]} />
                                 </BarChart>
                             </ResponsiveContainer>
@@ -726,9 +864,9 @@
                                         contentStyle={{ backgroundColor: '#fff', borderColor: '#e2e8f0' }}
                                     />
                                     <Legend />
-                                    <Line type="monotone" dataKey="new" name="新規" stroke="#0ea5e9" strokeWidth={2} dot={{ r: 3 }} />
+                                    <Line type="monotone" dataKey="new" name="新規" stroke="#4ade80" strokeWidth={2} dot={{ r: 3 }} />
                                     <Line type="monotone" dataKey="contract" name="契約" stroke="#22c55e" strokeWidth={2} dot={{ r: 3 }} />
-                                    <Line type="monotone" dataKey="treatments" name="施術" stroke="#f97316" strokeWidth={2} dot={{ r: 3 }} />
+                                    <Line type="monotone" dataKey="treatments" name="施術" stroke="#86efac" strokeWidth={2} dot={{ r: 3 }} />
                                 </LineChart>
                             </ResponsiveContainer>
                         </Card>
@@ -943,8 +1081,41 @@
         // 会員管理ビュー（Square連携）
         // ========================================
 
-        const MemberManagementView = ({ memberData, refreshSquareData }) => {
+        const MemberManagementView = ({ selectedStore, setSelectedStore }) => {
             const [isRefreshing, setIsRefreshing] = useState(false);
+
+            // 選択された店舗のSquareデータを取得
+            const selectedStoreObj = stores.find(s => s.name === selectedStore);
+            const { memberData, refreshSquareData } = useSquareData(selectedStore === 'all' ? null : selectedStoreObj?.id);
+            const { allStoresData } = useAllStoresSquareData();
+
+            // 全店舗のSquareデータを集計
+            const aggregatedMemberData = useMemo(() => {
+                if (selectedStore === 'all') {
+                    const totalData = {
+                        totalMembers: 0,
+                        activeMembers: 0,
+                        newMembersThisMonth: 0,
+                        churnedMembers: 0,
+                        expectedRevenue: 0,
+                    };
+
+                    Object.values(allStoresData).forEach(storeData => {
+                        totalData.totalMembers += storeData.totalMembers || 0;
+                        totalData.activeMembers += storeData.activeMembers || 0;
+                        totalData.newMembersThisMonth += storeData.newMembersThisMonth || 0;
+                        totalData.churnedMembers += storeData.churnedMembers || 0;
+                        totalData.expectedRevenue += storeData.expectedRevenue || 0;
+                    });
+
+                    totalData.churnRate = totalData.totalMembers > 0
+                        ? (totalData.churnedMembers / totalData.totalMembers * 100)
+                        : 0;
+
+                    return totalData;
+                }
+                return memberData;
+            }, [selectedStore, memberData, allStoresData]);
 
             const handleRefresh = async () => {
                 setIsRefreshing(true);
@@ -956,7 +1127,7 @@
             const monthlyPrice = 10000;
 
             // LTV計算（平均継続月数を仮定）
-            const avgRetentionMonths = memberData.churnRate > 0 ? Math.round(100 / memberData.churnRate) : 24;
+            const avgRetentionMonths = aggregatedMemberData.churnRate > 0 ? Math.round(100 / aggregatedMemberData.churnRate) : 24;
             const estimatedLTV = monthlyPrice * avgRetentionMonths;
 
             return (
@@ -966,14 +1137,26 @@
                             <h2 className="text-xl font-bold text-slate-900">会員管理</h2>
                             <p className="text-sm text-slate-500 mt-1">Square連携データ</p>
                         </div>
-                        <button
-                            onClick={handleRefresh}
-                            disabled={isRefreshing}
-                            className="flex items-center px-4 py-2 bg-sise-500 hover:bg-sise-600 text-white rounded-lg font-medium shadow-sm transition-colors disabled:opacity-50"
-                        >
-                            <Icon name={isRefreshing ? "loader" : "refresh-cw"} size={18} className={`mr-2 ${isRefreshing ? 'animate-spin' : ''}`} />
-                            {isRefreshing ? '更新中...' : 'データ更新'}
-                        </button>
+                        <div className="flex items-center gap-3">
+                            <select
+                                value={selectedStore}
+                                onChange={(e) => setSelectedStore(e.target.value)}
+                                className="px-4 py-2 border border-slate-300 rounded-lg focus:border-sise-500 focus:ring-1 focus:ring-sise-500 outline-none"
+                            >
+                                <option value="all">全店舗</option>
+                                {stores.map(s => (
+                                    <option key={s.id} value={s.name}>{s.name}</option>
+                                ))}
+                            </select>
+                            <button
+                                onClick={handleRefresh}
+                                disabled={isRefreshing}
+                                className="flex items-center px-4 py-2 bg-sise-500 hover:bg-sise-600 text-white rounded-lg font-medium shadow-sm transition-colors disabled:opacity-50"
+                            >
+                                <Icon name={isRefreshing ? "loader" : "refresh-cw"} size={18} className={`mr-2 ${isRefreshing ? 'animate-spin' : ''}`} />
+                                {isRefreshing ? '更新中...' : 'データ更新'}
+                            </button>
+                        </div>
                     </div>
 
                     {memberData.error && (
@@ -992,8 +1175,8 @@
                                 <span className="text-sm font-medium text-sise-700">アクティブ会員</span>
                                 <Icon name="users" size={20} className="text-sise-500" />
                             </div>
-                            <p className="text-3xl font-bold text-sise-900">{memberData.activeMembers}</p>
-                            <p className="text-xs text-sise-600 mt-1">累計: {memberData.totalMembers}人</p>
+                            <p className="text-3xl font-bold text-sise-900">{aggregatedMemberData.activeMembers}</p>
+                            <p className="text-xs text-sise-600 mt-1">累計: {aggregatedMemberData.totalMembers}人</p>
                         </Card>
 
                         <Card className="bg-gradient-to-br from-green-50 to-green-100 border-green-200">
@@ -1001,7 +1184,7 @@
                                 <span className="text-sm font-medium text-green-700">月間想定売上</span>
                                 <Icon name="trending-up" size={20} className="text-green-500" />
                             </div>
-                            <p className="text-3xl font-bold text-green-900">{formatCurrency(memberData.expectedRevenue)}</p>
+                            <p className="text-3xl font-bold text-green-900">{formatCurrency(aggregatedMemberData.expectedRevenue)}</p>
                             <p className="text-xs text-green-600 mt-1">@{formatCurrency(monthlyPrice)}/月</p>
                         </Card>
 
@@ -1010,20 +1193,20 @@
                                 <span className="text-sm font-medium text-blue-700">今月の新規入会</span>
                                 <Icon name="user-plus" size={20} className="text-blue-500" />
                             </div>
-                            <p className="text-3xl font-bold text-blue-900">{memberData.newMembersThisMonth}</p>
+                            <p className="text-3xl font-bold text-blue-900">{aggregatedMemberData.newMembersThisMonth}</p>
                             <p className="text-xs text-blue-600 mt-1">新規獲得</p>
                         </Card>
 
-                        <Card className={`bg-gradient-to-br ${memberData.churnRate > 5 ? 'from-red-50 to-red-100 border-red-200' : 'from-slate-50 to-slate-100 border-slate-200'}`}>
+                        <Card className={`bg-gradient-to-br ${aggregatedMemberData.churnRate > 5 ? 'from-red-50 to-red-100 border-red-200' : 'from-slate-50 to-slate-100 border-slate-200'}`}>
                             <div className="flex items-center justify-between mb-2">
-                                <span className={`text-sm font-medium ${memberData.churnRate > 5 ? 'text-red-700' : 'text-slate-700'}`}>退会率</span>
-                                <Icon name="user-minus" size={20} className={memberData.churnRate > 5 ? 'text-red-500' : 'text-slate-500'} />
+                                <span className={`text-sm font-medium ${aggregatedMemberData.churnRate > 5 ? 'text-red-700' : 'text-slate-700'}`}>退会率</span>
+                                <Icon name="user-minus" size={20} className={aggregatedMemberData.churnRate > 5 ? 'text-red-500' : 'text-slate-500'} />
                             </div>
-                            <p className={`text-3xl font-bold ${memberData.churnRate > 5 ? 'text-red-900' : 'text-slate-900'}`}>
-                                {formatPercent(memberData.churnRate)}
+                            <p className={`text-3xl font-bold ${aggregatedMemberData.churnRate > 5 ? 'text-red-900' : 'text-slate-900'}`}>
+                                {formatPercent(aggregatedMemberData.churnRate)}
                             </p>
-                            <p className={`text-xs mt-1 ${memberData.churnRate > 5 ? 'text-red-600' : 'text-slate-600'}`}>
-                                退会者: {memberData.churnedMembers}人
+                            <p className={`text-xs mt-1 ${aggregatedMemberData.churnRate > 5 ? 'text-red-600' : 'text-slate-600'}`}>
+                                退会者: {aggregatedMemberData.churnedMembers}人
                             </p>
                         </Card>
                     </div>
@@ -1039,7 +1222,7 @@
                                 </div>
                                 <div className="flex justify-between items-center p-3 bg-slate-50 rounded-lg">
                                     <span className="text-slate-600">年間想定売上</span>
-                                    <span className="font-bold text-green-600">{formatCurrency(memberData.expectedRevenue * 12)}</span>
+                                    <span className="font-bold text-green-600">{formatCurrency(aggregatedMemberData.expectedRevenue * 12)}</span>
                                 </div>
                                 <div className="flex justify-between items-center p-3 bg-slate-50 rounded-lg">
                                     <span className="text-slate-600">平均継続期間</span>
@@ -1058,24 +1241,24 @@
                                 <div>
                                     <div className="flex justify-between text-sm mb-1">
                                         <span className="text-slate-600">会員維持率</span>
-                                        <span className="font-semibold text-green-600">{formatPercent(100 - memberData.churnRate)}</span>
+                                        <span className="font-semibold text-green-600">{formatPercent(100 - aggregatedMemberData.churnRate)}</span>
                                     </div>
                                     <div className="w-full bg-slate-200 rounded-full h-2">
                                         <div
                                             className="bg-green-500 h-2 rounded-full transition-all"
-                                            style={{ width: `${100 - memberData.churnRate}%` }}
+                                            style={{ width: `${100 - aggregatedMemberData.churnRate}%` }}
                                         ></div>
                                     </div>
                                 </div>
                                 <div>
                                     <div className="flex justify-between text-sm mb-1">
                                         <span className="text-slate-600">目標会員数達成率</span>
-                                        <span className="font-semibold text-sise-600">{formatPercent(memberData.activeMembers / 200 * 100)}</span>
+                                        <span className="font-semibold text-sise-600">{formatPercent(aggregatedMemberData.activeMembers / 200 * 100)}</span>
                                     </div>
                                     <div className="w-full bg-slate-200 rounded-full h-2">
                                         <div
                                             className="bg-sise-500 h-2 rounded-full transition-all"
-                                            style={{ width: `${Math.min(memberData.activeMembers / 200 * 100, 100)}%` }}
+                                            style={{ width: `${Math.min(aggregatedMemberData.activeMembers / 200 * 100, 100)}%` }}
                                         ></div>
                                     </div>
                                     <p className="text-xs text-slate-500 mt-1">目標: 200人</p>
@@ -1211,10 +1394,10 @@
             const [isSidebarOpen, setIsSidebarOpen] = useState(false);
             const [isDarkMode, setIsDarkMode] = useState(false);
 
-            // Square データ取得
-            const { memberData, refreshSquareData } = useSquareData();
             // 日報データ取得
             const { reportData, refreshReportData } = useDailyReportData();
+            // 全店舗のSquareデータを取得
+            const { allStoresData, refreshAllStoresData } = useAllStoresSquareData();
 
             // ダークモード切り替え
             useEffect(() => {
@@ -1236,7 +1419,6 @@
                 switch (currentView) {
                     case 'dashboard':
                         return <DashboardView
-                            memberData={memberData}
                             reportData={reportData}
                             selectedStore={selectedStore}
                             setSelectedStore={setSelectedStore}
@@ -1244,12 +1426,11 @@
                     case 'reports':
                         return <DailyReportListView reportData={reportData} />;
                     case 'members':
-                        return <MemberManagementView memberData={memberData} refreshSquareData={refreshSquareData} />;
+                        return <MemberManagementView selectedStore={selectedStore} setSelectedStore={setSelectedStore} />;
                     case 'settings':
                         return <SettingsView />;
                     default:
                         return <DashboardView
-                            memberData={memberData}
                             reportData={reportData}
                             selectedStore={selectedStore}
                             setSelectedStore={setSelectedStore}
@@ -1281,7 +1462,7 @@
                             </div>
                             <div className="flex items-center gap-2">
                                 <button
-                                    onClick={() => { refreshReportData(); refreshSquareData(); }}
+                                    onClick={() => { refreshReportData(); refreshAllStoresData(); }}
                                     className="p-2 rounded-lg hover:bg-slate-100 text-slate-600"
                                     title="データ更新"
                                 >
