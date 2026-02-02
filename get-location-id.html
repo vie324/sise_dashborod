@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Square Location ID取得ツール</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 20px;
+        }
+        .input-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            font-weight: bold;
+            margin-bottom: 5px;
+            color: #555;
+        }
+        input, select {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 14px;
+            box-sizing: border-box;
+        }
+        button {
+            background: #006aff;
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 5px;
+            font-size: 16px;
+            cursor: pointer;
+            width: 100%;
+        }
+        button:hover {
+            background: #0051cc;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .result {
+            margin-top: 30px;
+            padding: 20px;
+            background: #f9f9f9;
+            border-radius: 5px;
+            border-left: 4px solid #006aff;
+        }
+        .location-item {
+            background: white;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 5px;
+            border: 1px solid #e0e0e0;
+        }
+        .location-name {
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 5px;
+        }
+        .location-id {
+            font-family: monospace;
+            color: #006aff;
+            font-size: 16px;
+            background: #f0f7ff;
+            padding: 5px 10px;
+            border-radius: 3px;
+            display: inline-block;
+            margin-top: 5px;
+        }
+        .copy-btn {
+            background: #28a745;
+            color: white;
+            padding: 5px 15px;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 12px;
+            margin-left: 10px;
+        }
+        .copy-btn:hover {
+            background: #218838;
+        }
+        .error {
+            color: #dc3545;
+            background: #f8d7da;
+            padding: 15px;
+            border-radius: 5px;
+            margin-top: 20px;
+        }
+        .info {
+            background: #d1ecf1;
+            color: #0c5460;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            font-size: 14px;
+        }
+        .success {
+            color: #155724;
+            background: #d4edda;
+            padding: 10px;
+            border-radius: 3px;
+            margin-top: 10px;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔍 Square Location ID取得ツール</h1>
+
+        <div class="info">
+            <strong>使い方：</strong><br>
+            1. Square Developer Dashboardから「Access Token」をコピー<br>
+            2. 環境を選択（Sandbox または Production）<br>
+            3. 「Location IDを取得」ボタンをクリック
+        </div>
+
+        <div class="input-group">
+            <label>Square Access Token</label>
+            <input
+                type="text"
+                id="accessToken"
+                placeholder="EAAAl... で始まるトークンを貼り付け"
+            />
+        </div>
+
+        <div class="input-group">
+            <label>環境</label>
+            <select id="environment">
+                <option value="sandbox">Sandbox（テスト環境）</option>
+                <option value="production">Production（本番環境）</option>
+            </select>
+        </div>
+
+        <button id="fetchBtn" onclick="fetchLocations()">Location IDを取得</button>
+
+        <div id="result"></div>
+    </div>
+
+    <script>
+        async function fetchLocations() {
+            const accessToken = document.getElementById('accessToken').value.trim();
+            const environment = document.getElementById('environment').value;
+            const resultDiv = document.getElementById('result');
+            const fetchBtn = document.getElementById('fetchBtn');
+
+            // バリデーション
+            if (!accessToken) {
+                resultDiv.innerHTML = '<div class="error">❌ Access Tokenを入力してください</div>';
+                return;
+            }
+
+            // ボタンを無効化
+            fetchBtn.disabled = true;
+            fetchBtn.textContent = '取得中...';
+            resultDiv.innerHTML = '';
+
+            // APIエンドポイント
+            const baseUrl = environment === 'sandbox'
+                ? 'https://connect.squareupsandbox.com/v2'
+                : 'https://connect.squareup.com/v2';
+
+            try {
+                const response = await fetch(`${baseUrl}/locations`, {
+                    method: 'GET',
+                    headers: {
+                        'Authorization': `Bearer ${accessToken}`,
+                        'Content-Type': 'application/json',
+                        'Square-Version': '2024-01-18'
+                    }
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.errors ? data.errors[0].detail : 'APIリクエストに失敗しました');
+                }
+
+                // 成功: Location一覧を表示
+                if (data.locations && data.locations.length > 0) {
+                    let html = '<div class="result"><h3>✅ Location ID取得成功！</h3>';
+
+                    data.locations.forEach((location, index) => {
+                        html += `
+                            <div class="location-item">
+                                <div class="location-name">
+                                    ${index + 1}. ${location.name || '名前なし'}
+                                    ${location.status === 'ACTIVE' ? '✅' : '❌'}
+                                </div>
+                                <div>
+                                    <strong>Location ID:</strong>
+                                    <span class="location-id" id="locationId${index}">${location.id}</span>
+                                    <button class="copy-btn" onclick="copyToClipboard('${location.id}', ${index})">
+                                        コピー
+                                    </button>
+                                    <span class="success" id="success${index}">✅ コピーしました！</span>
+                                </div>
+                                <div style="margin-top: 10px; font-size: 12px; color: #666;">
+                                    住所: ${location.address?.address_line_1 || '未設定'}<br>
+                                    ステータス: ${location.status}
+                                </div>
+                            </div>
+                        `;
+                    });
+
+                    html += '</div>';
+                    resultDiv.innerHTML = html;
+                } else {
+                    resultDiv.innerHTML = '<div class="error">⚠️ Locationが見つかりませんでした。<br>Square Dashboardで店舗を作成してください。</div>';
+                }
+
+            } catch (error) {
+                resultDiv.innerHTML = `
+                    <div class="error">
+                        <strong>❌ エラーが発生しました</strong><br>
+                        ${error.message}<br><br>
+                        <strong>確認事項：</strong><br>
+                        ✓ Access Tokenが正しいか<br>
+                        ✓ 環境（Sandbox/Production）が正しいか<br>
+                        ✓ トークンの前後にスペースが入っていないか
+                    </div>
+                `;
+            } finally {
+                // ボタンを再度有効化
+                fetchBtn.disabled = false;
+                fetchBtn.textContent = 'Location IDを取得';
+            }
+        }
+
+        function copyToClipboard(text, index) {
+            navigator.clipboard.writeText(text).then(() => {
+                const successMsg = document.getElementById(`success${index}`);
+                successMsg.style.display = 'inline-block';
+                setTimeout(() => {
+                    successMsg.style.display = 'none';
+                }, 2000);
+            });
+        }
+
+        // Enterキーで実行
+        document.getElementById('accessToken').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                fetchLocations();
+            }
+        });
+    </script>
+</body>
+</html>
