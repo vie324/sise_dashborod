@@ -1,0 +1,21 @@
+{
+  "name": "sise-dashboard",
+  "version": "1.0.0",
+  "description": "si'se Subscription Management Dashboard with Square API Integration",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "keywords": [
+    "square",
+    "subscription",
+    "dashboard",
+    "membership"
+  ],
+  "author": "",
+  "license": "MIT",
+  "engines": {
+    "node": ">=14.0.0"
+  }
+}

@@ -194,11 +194,13 @@
         const GOOGLE_FORM_SHEET_URL = 'YOUR_GOOGLE_APPS_SCRIPT_URL';
 
         // Square API設定
-        // ※Sandbox環境での設定（本番環境に移行する際は要変更）
+        // ※サーバー経由でAPIにアクセス（CORS問題を回避）
         const SQUARE_CONFIG = {
-            accessToken: 'EAAAl5R0doojggXSLfNzzTaBW2g3DWJM3o1Koiz2Rml13JpHPLDbSq98qPeGwIu0',
+            accessToken: '', // サーバー側で設定
             locationId: 'LCEDWZPT7QHJ3',
-            baseUrl: 'https://connect.squareupsandbox.com/v2' // Sandbox環境
+            baseUrl: window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+                ? 'http://localhost:3000/api/square' // サーバー経由
+                : 'https://connect.squareupsandbox.com/v2' // 直接アクセス（デモモード）
         };
 
         // ========================================
