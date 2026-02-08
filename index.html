@@ -177,7 +177,7 @@
     <script type="text/babel">
         const { useState, useEffect, useMemo, useCallback } = React;
         const RechartsLib = window.Recharts || {};
-        const { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LineChart, Line, AreaChart, Area, PieChart, Pie, Cell } = RechartsLib;
+        const { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LineChart, Line, AreaChart, Area, PieChart, Pie, Cell, ComposedChart } = RechartsLib;
 
         // ========================================
         // 設定・定数
@@ -193,13 +193,33 @@
         // ※実際のデプロイ後URLに置き換えてください
         const GOOGLE_FORM_SHEET_URL = 'YOUR_GOOGLE_APPS_SCRIPT_URL';
 
-        // Square API設定
-        // ※Sandbox環境での設定（本番環境に移行する際は要変更）
-        const SQUARE_CONFIG = {
-            accessToken: 'EAAAl5R0doojggXSLfNzzTaBW2g3DWJM3o1Koiz2Rml13JpHPLDbSq98qPeGwIu0',
-            locationId: 'LCEDWZPT7QHJ3',
-            baseUrl: 'https://connect.squareupsandbox.com/v2' // Sandbox環境
+        // Square API設定（localStorageから読み込み、フォールバック付き）
+        const getSquareConfig = () => {
+            try {
+                const saved = localStorage.getItem('sise_square_config');
+                if (saved) {
+                    const parsed = JSON.parse(saved);
+                    return {
+                        accessToken: parsed.accessToken || 'YOUR_SQUARE_ACCESS_TOKEN',
+                        locationId: parsed.locationId || '',
+                        environment: parsed.environment || 'sandbox',
+                        baseUrl: parsed.environment === 'production'
+                            ? 'https://connect.squareup.com/v2'
+                            : 'https://connect.squareupsandbox.com/v2',
+                        monthlyPrice: parsed.monthlyPrice || 10000
+                    };
+                }
+            } catch (e) {}
+            return {
+                accessToken: 'EAAAl5R0doojggXSLfNzzTaBW2g3DWJM3o1Koiz2Rml13JpHPLDbSq98qPeGwIu0',
+                locationId: 'LCEDWZPT7QHJ3',
+                environment: 'sandbox',
+                baseUrl: 'https://connect.squareupsandbox.com/v2',
+                monthlyPrice: 10000
+            };
         };
+
+        const SQUARE_CONFIG = getSquareConfig();
 
         // ========================================
         // ヘルパー関数
@@ -278,10 +298,38 @@
                 error: null
             });
 
+            // ページネーション付きAPI呼び出しヘルパー
+            const fetchAllPages = async (url, bodyBuilder, resultKey) => {
+                const config = getSquareConfig();
+                let allResults = [];
+                let cursor = null;
+                do {
+                    const body = bodyBuilder(cursor);
+                    const response = await fetch(`${config.baseUrl}${url}`, {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `Bearer ${config.accessToken}`,
+                            'Content-Type': 'application/json',
+                            'Square-Version': '2025-01-23'
+                        },
+                        body: JSON.stringify(body)
+                    });
+                    if (!response.ok) {
+                        const errorBody = await response.json().catch(() => ({}));
+                        throw new Error(`Square API ${url}: ${response.status} - ${JSON.stringify(errorBody.errors || [])}`);
+                    }
+                    const data = await response.json();
+                    allResults = allResults.concat(data[resultKey] || []);
+                    cursor = data.cursor || null;
+                } while (cursor);
+                return allResults;
+            };
+
             const fetchSquareData = useCallback(async () => {
+                const config = getSquareConfig();
+
                 // デモモード: 実際のAPIが設定されていない場合はサンプルデータを返す
-                if (SQUARE_CONFIG.accessToken === 'YOUR_SQUARE_ACCESS_TOKEN') {
-                    // サンプル会員データを生成
+                if (config.accessToken === 'YOUR_SQUARE_ACCESS_TOKEN') {
                     const sampleMembers = generateSampleMembers();
                     const sampleMonthlyTrend = generateMonthlyTrend();
 
@@ -291,7 +339,7 @@
                         newMembersThisMonth: 12,
                         churnedMembers: 5,
                         churnRate: 3.2,
-                        expectedRevenue: 1420000, // 142人 × 10,000円/月
+                        expectedRevenue: 1420000,
                         members: sampleMembers,
                         monthlyTrend: sampleMonthlyTrend,
                         loading: false,
@@ -301,130 +349,186 @@
                 }
 
                 try {
-                    // Square Customers APIでサブスク会員を取得
-                    const response = await fetch(`${SQUARE_CONFIG.baseUrl}/customers/search`, {
-                        method: 'POST',
-                        headers: {
-                            'Authorization': `Bearer ${SQUARE_CONFIG.accessToken}`,
-                            'Content-Type': 'application/json',
-                            'Square-Version': '2024-01-18'
-                        },
-                        body: JSON.stringify({
+                    // 1. Customers API - 全顧客を取得（ページネーション付き）
+                    const customers = await fetchAllPages(
+                        '/customers/search',
+                        (cursor) => ({
                             limit: 100,
+                            ...(cursor ? { cursor } : {})
+                        }),
+                        'customers'
+                    );
+
+                    // 2. Subscriptions API - ロケーションのサブスクリプション取得
+                    const subscriptions = await fetchAllPages(
+                        '/subscriptions/search',
+                        (cursor) => ({
                             query: {
                                 filter: {
-                                    // サブスク会員をフィルタ（実際の設定に合わせて調整）
-                                    group_ids: {
-                                        any: ['YOUR_SUBSCRIPTION_GROUP_ID']
-                                    }
-                                }
-                            }
-                        })
-                    });
-
-                    if (!response.ok) {
-                        throw new Error('Square API request failed');
-                    }
-
-                    const data = await response.json();
-                    const customers = data.customers || [];
-
-                    // サブスクリプションデータを取得
-                    const subscriptionsResponse = await fetch(`${SQUARE_CONFIG.baseUrl}/subscriptions/search`, {
-                        method: 'POST',
-                        headers: {
-                            'Authorization': `Bearer ${SQUARE_CONFIG.accessToken}`,
-                            'Content-Type': 'application/json',
-                            'Square-Version': '2024-01-18'
-                        },
-                        body: JSON.stringify({
-                            query: {
-                                filter: {
-                                    location_ids: [SQUARE_CONFIG.locationId]
-                                }
-                            }
-                        })
-                    });
-
-                    const subsData = await subscriptionsResponse.json();
-                    const subscriptions = subsData.subscriptions || [];
-
-                    // 請求書データを取得（Invoices API）
-                    const invoicesResponse = await fetch(`${SQUARE_CONFIG.baseUrl}/invoices/search`, {
-                        method: 'POST',
-                        headers: {
-                            'Authorization': `Bearer ${SQUARE_CONFIG.accessToken}`,
-                            'Content-Type': 'application/json',
-                            'Square-Version': '2024-01-18'
-                        },
-                        body: JSON.stringify({
-                            query: {
-                                filter: {
-                                    location_ids: [SQUARE_CONFIG.locationId]
+                                    location_ids: [config.locationId]
                                 }
                             },
-                            limit: 200
-                        })
-                    });
+                            ...(cursor ? { cursor } : {})
+                        }),
+                        'subscriptions'
+                    );
 
-                    const invoicesData = await invoicesResponse.json();
-                    const invoices = invoicesData.invoices || [];
+                    // 3. Catalog API - プラン名と金額の解決
+                    const planIds = [...new Set(subscriptions
+                        .filter(s => s.plan_variation_id)
+                        .map(s => s.plan_variation_id))];
 
-                    // 会員詳細データを構築
+                    let catalogMap = {};
+                    if (planIds.length > 0) {
+                        try {
+                            const catalogResponse = await fetch(`${config.baseUrl}/catalog/batch-retrieve`, {
+                                method: 'POST',
+                                headers: {
+                                    'Authorization': `Bearer ${config.accessToken}`,
+                                    'Content-Type': 'application/json',
+                                    'Square-Version': '2025-01-23'
+                                },
+                                body: JSON.stringify({ object_ids: planIds })
+                            });
+                            if (catalogResponse.ok) {
+                                const catalogData = await catalogResponse.json();
+                                (catalogData.objects || []).forEach(obj => {
+                                    const subPlan = obj.subscription_plan_variation_data || obj.subscription_plan_data;
+                                    catalogMap[obj.id] = {
+                                        name: subPlan?.name || obj.id,
+                                        phases: subPlan?.phases || []
+                                    };
+                                });
+                            }
+                        } catch (e) {
+                            console.warn('Catalog API fetch failed, using fallback:', e);
+                        }
+                    }
+
+                    // 4. Invoices API - 請求書・支払い履歴
+                    const invoices = await fetchAllPages(
+                        '/invoices/search',
+                        (cursor) => ({
+                            query: {
+                                filter: {
+                                    location_ids: [config.locationId]
+                                }
+                            },
+                            limit: 200,
+                            ...(cursor ? { cursor } : {})
+                        }),
+                        'invoices'
+                    );
+
+                    // 5. 会員詳細データの構築
                     const membersList = subscriptions.map(sub => {
                         const customer = customers.find(c => c.id === sub.customer_id);
-                        const memberInvoices = invoices.filter(inv => inv.primary_recipient?.customer_id === sub.customer_id);
+                        const memberInvoices = invoices.filter(inv =>
+                            inv.primary_recipient?.customer_id === sub.customer_id
+                        );
+
+                        // プラン金額をphasesから取得
+                        let monthlyPrice = config.monthlyPrice;
+                        let planName = 'スタンダードプラン';
+                        let cadence = 'MONTHLY';
+
+                        // Catalog APIからプラン情報取得
+                        if (sub.plan_variation_id && catalogMap[sub.plan_variation_id]) {
+                            const plan = catalogMap[sub.plan_variation_id];
+                            planName = plan.name;
+                            if (plan.phases && plan.phases.length > 0) {
+                                const phase = plan.phases[0];
+                                cadence = phase.cadence || 'MONTHLY';
+                                if (phase.recurring_price_money) {
+                                    monthlyPrice = phase.recurring_price_money.amount || monthlyPrice;
+                                }
+                            }
+                        }
+
+                        // Subscription phasesから直接取得（フォールバック）
+                        if (sub.phases && sub.phases.length > 0) {
+                            const activePhase = sub.phases.find(p => !p.uid || p) || sub.phases[0];
+                            if (activePhase.recurring_price_money) {
+                                monthlyPrice = activePhase.recurring_price_money.amount || monthlyPrice;
+                            }
+                            if (activePhase.cadence) {
+                                cadence = activePhase.cadence;
+                            }
+                        }
+
+                        // Invoice金額の正しい取得
+                        const paymentHistory = memberInvoices
+                            .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+                            .slice(0, 10)
+                            .map(inv => {
+                                let amount = 0;
+                                if (inv.payment_requests && inv.payment_requests.length > 0) {
+                                    const req = inv.payment_requests[0];
+                                    amount = req.computed_amount_money?.amount
+                                        || req.fixed_amount_requested_money?.amount
+                                        || 0;
+                                }
+                                return {
+                                    id: inv.id,
+                                    date: inv.created_at,
+                                    amount: amount,
+                                    status: inv.status, // DRAFT, UNPAID, PAID, CANCELED等
+                                    invoiceNumber: inv.invoice_number || '-'
+                                };
+                            });
 
                         return {
                             id: sub.id,
                             customerId: sub.customer_id,
-                            name: customer ? `${customer.given_name || ''} ${customer.family_name || ''}`.trim() || '未登録' : '未登録',
+                            name: customer ? `${customer.family_name || ''}${customer.given_name || ''}`.trim() || '未登録' : '未登録',
                             email: customer?.email_address || '-',
                             phone: customer?.phone_number || '-',
-                            status: sub.status, // ACTIVE, CANCELED, PAUSED, PENDING
+                            status: sub.status,
                             startDate: sub.start_date,
                             canceledDate: sub.canceled_date || null,
-                            planName: sub.plan_variation_id || 'スタンダードプラン',
-                            monthlyPrice: sub.monthly_billing_anchor_date ? 10000 : 0, // 実際のプラン金額
-                            cadence: sub.cadence || 'MONTHLY',
-                            paymentHistory: memberInvoices.map(inv => ({
-                                id: inv.id,
-                                date: inv.created_at,
-                                amount: inv.primary_recipient?.request_amount || 0,
-                                status: inv.status
-                            })).slice(0, 5) // 最新5件
+                            createdAt: sub.created_at,
+                            planName: planName,
+                            planVariationId: sub.plan_variation_id,
+                            monthlyPrice: monthlyPrice,
+                            cadence: cadence,
+                            paymentHistory: paymentHistory
                         };
                     });
 
+                    // 6. 集計
                     const activeSubscriptions = subscriptions.filter(s => s.status === 'ACTIVE');
                     const now = new Date();
+                    const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+                    const thisMonthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+
                     const canceledThisMonth = subscriptions.filter(s => {
                         if (s.status !== 'CANCELED' || !s.canceled_date) return false;
                         const cancelDate = new Date(s.canceled_date);
-                        return cancelDate.getMonth() === now.getMonth() &&
-                               cancelDate.getFullYear() === now.getFullYear();
+                        return cancelDate >= thisMonthStart && cancelDate <= thisMonthEnd;
                     });
 
                     const newThisMonth = subscriptions.filter(s => {
                         const startDate = new Date(s.start_date);
-                        return startDate.getMonth() === now.getMonth() &&
-                               startDate.getFullYear() === now.getFullYear();
+                        return startDate >= thisMonthStart && startDate <= thisMonthEnd;
                     });
 
                     // 月間トレンドデータを生成
                     const monthlyTrend = generateMonthlyTrendFromData(subscriptions);
 
-                    const monthlyPrice = 10000; // サブスク月額（実際の設定に合わせて）
+                    // 実際の売上を計算（会員ごとの金額を合計）
+                    const totalExpectedRevenue = membersList
+                        .filter(m => m.status === 'ACTIVE')
+                        .reduce((sum, m) => sum + m.monthlyPrice, 0);
 
                     setMemberData({
-                        totalMembers: customers.length,
+                        totalMembers: subscriptions.length,
                         activeMembers: activeSubscriptions.length,
                         newMembersThisMonth: newThisMonth.length,
                         churnedMembers: canceledThisMonth.length,
-                        churnRate: customers.length > 0
-                            ? (canceledThisMonth.length / customers.length * 100)
+                        churnRate: subscriptions.length > 0
+                            ? (canceledThisMonth.length / activeSubscriptions.length * 100)
                             : 0,
-                        expectedRevenue: activeSubscriptions.length * monthlyPrice,
+                        expectedRevenue: totalExpectedRevenue,
                         members: membersList,
                         monthlyTrend: monthlyTrend,
                         loading: false,
@@ -612,10 +716,11 @@
             return trend;
         };
 
-        // 実データから月間トレンドを生成
+        // 実データから月間トレンドを生成（累積会員数付き）
         const generateMonthlyTrendFromData = (subscriptions) => {
             const trend = [];
             const now = new Date();
+            let cumulativeActive = 0;
 
             for (let i = 11; i >= 0; i--) {
                 const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
@@ -633,11 +738,25 @@
                     return cancelDate >= monthStart && cancelDate <= monthEnd;
                 }).length;
 
+                // 各月末時点のアクティブ会員数を計算
+                const activeAtMonthEnd = subscriptions.filter(s => {
+                    const startDate = new Date(s.start_date);
+                    if (startDate > monthEnd) return false;
+                    if (s.status === 'CANCELED' && s.canceled_date) {
+                        const cancelDate = new Date(s.canceled_date);
+                        return cancelDate > monthEnd;
+                    }
+                    return s.status === 'ACTIVE' || s.status === 'PENDING' || s.status === 'PAUSED'
+                        || (s.status === 'CANCELED' && s.canceled_date && new Date(s.canceled_date) > monthEnd);
+                }).length;
+
                 trend.push({
                     month: date.toLocaleDateString('ja-JP', { year: 'numeric', month: 'short' }),
+                    monthKey: `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`,
                     newMembers: newMembers,
                     churnedMembers: churnedMembers,
-                    netGrowth: newMembers - churnedMembers
+                    netGrowth: newMembers - churnedMembers,
+                    activeMembers: activeAtMonthEnd
                 });
             }
 
@@ -1171,6 +1290,23 @@
                 }
             };
 
+            // 頻度ラベル
+            const getCadenceLabel = (cadence) => {
+                switch (cadence) {
+                    case 'DAILY': return '日次';
+                    case 'WEEKLY': return '週次';
+                    case 'EVERY_TWO_WEEKS': return '隔週';
+                    case 'MONTHLY': return '月額';
+                    case 'EVERY_TWO_MONTHS': return '隔月';
+                    case 'QUARTERLY': return '四半期';
+                    case 'EVERY_FOUR_MONTHS': return '4ヶ月毎';
+                    case 'EVERY_SIX_MONTHS': return '半年';
+                    case 'ANNUAL': return '年額';
+                    case 'EVERY_TWO_YEARS': return '2年毎';
+                    default: return cadence || '月額';
+                }
+            };
+
             return (
                 <div className="space-y-6">
                     <div className="flex flex-wrap items-center justify-between gap-4">
@@ -1300,17 +1436,19 @@
                     <Card>
                         <h3 className="text-lg font-bold text-slate-900 mb-4">月間入退会トレンド</h3>
                         {window.Recharts && (
-                            <ResponsiveContainer width="100%" height={300}>
-                                <BarChart data={memberData.monthlyTrend || []}>
+                            <ResponsiveContainer width="100%" height={350}>
+                                <ComposedChart data={memberData.monthlyTrend || []}>
                                     <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                                    <XAxis dataKey="month" tick={{ fontSize: 12 }} />
-                                    <YAxis tick={{ fontSize: 12 }} />
+                                    <XAxis dataKey="month" tick={{ fontSize: 11 }} />
+                                    <YAxis yAxisId="left" tick={{ fontSize: 12 }} label={{ value: '人数', angle: -90, position: 'insideLeft', style: { fontSize: 11 } }} />
+                                    <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 12 }} label={{ value: '累積会員', angle: 90, position: 'insideRight', style: { fontSize: 11 } }} />
                                     <Tooltip
-                                        contentStyle={{ backgroundColor: '#fff', borderColor: '#e2e8f0' }}
+                                        contentStyle={{ backgroundColor: '#fff', borderColor: '#e2e8f0', borderRadius: '8px' }}
                                         formatter={(value, name) => {
                                             if (name === 'newMembers') return [value + '人', '新規入会'];
                                             if (name === 'churnedMembers') return [value + '人', '退会'];
-                                            if (name === 'netGrowth') return [value + '人', '純増'];
+                                            if (name === 'netGrowth') return [value + '人', '純増減'];
+                                            if (name === 'activeMembers') return [value + '人', 'アクティブ会員'];
                                             return [value, name];
                                         }}
                                     />
@@ -1318,16 +1456,70 @@
                                         formatter={(value) => {
                                             if (value === 'newMembers') return '新規入会';
                                             if (value === 'churnedMembers') return '退会';
-                                            if (value === 'netGrowth') return '純増';
+                                            if (value === 'netGrowth') return '純増減';
+                                            if (value === 'activeMembers') return 'アクティブ会員';
                                             return value;
                                         }}
                                     />
-                                    <Bar dataKey="newMembers" name="newMembers" fill="#22c55e" radius={[4, 4, 0, 0]} />
-                                    <Bar dataKey="churnedMembers" name="churnedMembers" fill="#ef4444" radius={[4, 4, 0, 0]} />
-                                    <Line type="monotone" dataKey="netGrowth" name="netGrowth" stroke="#0ea5e9" strokeWidth={2} />
-                                </BarChart>
+                                    <Bar yAxisId="left" dataKey="newMembers" name="newMembers" fill="#22c55e" radius={[4, 4, 0, 0]} />
+                                    <Bar yAxisId="left" dataKey="churnedMembers" name="churnedMembers" fill="#ef4444" radius={[4, 4, 0, 0]} />
+                                    <Line yAxisId="left" type="monotone" dataKey="netGrowth" name="netGrowth" stroke="#f59e0b" strokeWidth={2} strokeDasharray="5 5" dot={{ r: 3 }} />
+                                    <Line yAxisId="right" type="monotone" dataKey="activeMembers" name="activeMembers" stroke="#0ea5e9" strokeWidth={3} dot={{ r: 4, fill: '#0ea5e9' }} />
+                                </ComposedChart>
                             </ResponsiveContainer>
                         )}
+                    </Card>
+
+                    {/* 月別サマリーテーブル */}
+                    <Card>
+                        <h3 className="text-lg font-bold text-slate-900 mb-4">月別入退会サマリー</h3>
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-sm">
+                                <thead>
+                                    <tr className="border-b-2 border-slate-200 bg-slate-50">
+                                        <th className="text-left py-3 px-3 font-semibold text-slate-600">月</th>
+                                        <th className="text-right py-3 px-3 font-semibold text-green-600">入会</th>
+                                        <th className="text-right py-3 px-3 font-semibold text-red-600">退会</th>
+                                        <th className="text-right py-3 px-3 font-semibold text-sise-600">純増減</th>
+                                        <th className="text-right py-3 px-3 font-semibold text-slate-600">アクティブ</th>
+                                        <th className="text-left py-3 px-3 font-semibold text-slate-600">推移</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {(memberData.monthlyTrend || []).slice().reverse().map((m, idx) => {
+                                        const maxActive = Math.max(...(memberData.monthlyTrend || []).map(t => t.activeMembers || 0), 1);
+                                        return (
+                                            <tr key={m.month} className={`border-b border-slate-100 ${idx === 0 ? 'bg-sise-50' : 'hover:bg-slate-50'}`}>
+                                                <td className="py-3 px-3 font-medium text-slate-900">
+                                                    {m.month}
+                                                    {idx === 0 && <span className="ml-2 text-xs bg-sise-100 text-sise-700 px-2 py-0.5 rounded-full">今月</span>}
+                                                </td>
+                                                <td className="text-right py-3 px-3">
+                                                    <span className="font-bold text-green-600">+{m.newMembers}</span>
+                                                </td>
+                                                <td className="text-right py-3 px-3">
+                                                    <span className="font-bold text-red-500">-{m.churnedMembers}</span>
+                                                </td>
+                                                <td className="text-right py-3 px-3">
+                                                    <span className={`font-bold px-2 py-1 rounded ${m.netGrowth >= 0 ? 'text-green-700 bg-green-50' : 'text-red-700 bg-red-50'}`}>
+                                                        {m.netGrowth >= 0 ? '+' : ''}{m.netGrowth}
+                                                    </span>
+                                                </td>
+                                                <td className="text-right py-3 px-3 font-semibold text-slate-900">{m.activeMembers || '-'}</td>
+                                                <td className="py-3 px-3">
+                                                    <div className="w-full bg-slate-200 rounded-full h-2 min-w-[80px]">
+                                                        <div
+                                                            className="bg-sise-500 h-2 rounded-full transition-all"
+                                                            style={{ width: `${((m.activeMembers || 0) / maxActive) * 100}%` }}
+                                                        ></div>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
                     </Card>
 
                     {/* 会員一覧テーブル */}
@@ -1361,7 +1553,8 @@
                                         <th className="text-left py-3 px-3 font-semibold text-slate-600">会員名</th>
                                         <th className="text-left py-3 px-3 font-semibold text-slate-600">ステータス</th>
                                         <th className="text-left py-3 px-3 font-semibold text-slate-600">プラン</th>
-                                        <th className="text-right py-3 px-3 font-semibold text-slate-600">月額</th>
+                                        <th className="text-right py-3 px-3 font-semibold text-slate-600">金額</th>
+                                        <th className="text-center py-3 px-3 font-semibold text-slate-600">頻度</th>
                                         <th className="text-left py-3 px-3 font-semibold text-slate-600">入会日</th>
                                         <th className="text-left py-3 px-3 font-semibold text-slate-600">退会日</th>
                                         <th className="text-center py-3 px-3 font-semibold text-slate-600">支払履歴</th>
@@ -1384,6 +1577,11 @@
                                             <td className="py-3 px-3 text-slate-700">{member.planName}</td>
                                             <td className="text-right py-3 px-3 font-semibold text-slate-900">
                                                 {formatCurrency(member.monthlyPrice)}
+                                            </td>
+                                            <td className="text-center py-3 px-3">
+                                                <span className="px-2 py-1 bg-slate-100 text-slate-600 rounded text-xs font-medium">
+                                                    {getCadenceLabel(member.cadence)}
+                                                </span>
                                             </td>
                                             <td className="py-3 px-3 text-slate-700">
                                                 {new Date(member.startDate).toLocaleDateString('ja-JP', { year: 'numeric', month: 'short', day: 'numeric' })}
@@ -1430,24 +1628,65 @@
                                         <Icon name="x" size={20} />
                                     </button>
                                 </div>
+                                {/* 会員情報サマリ */}
+                                <div className="grid grid-cols-2 gap-3 mb-4 p-3 bg-slate-50 rounded-lg">
+                                    <div>
+                                        <span className="text-xs text-slate-500">プラン</span>
+                                        <p className="font-medium text-slate-900">{selectedMember.planName}</p>
+                                    </div>
+                                    <div>
+                                        <span className="text-xs text-slate-500">金額 / 頻度</span>
+                                        <p className="font-medium text-slate-900">{formatCurrency(selectedMember.monthlyPrice)} / {getCadenceLabel(selectedMember.cadence)}</p>
+                                    </div>
+                                    <div>
+                                        <span className="text-xs text-slate-500">入会日</span>
+                                        <p className="font-medium text-slate-900">{new Date(selectedMember.startDate).toLocaleDateString('ja-JP')}</p>
+                                    </div>
+                                    <div>
+                                        <span className="text-xs text-slate-500">ステータス</span>
+                                        <p><span className={`px-2 py-1 rounded text-xs font-medium border ${getStatusColor(selectedMember.status)}`}>{getStatusLabel(selectedMember.status)}</span></p>
+                                    </div>
+                                </div>
+                                <h4 className="text-sm font-semibold text-slate-700 mb-3">請求・支払い履歴（最新10件）</h4>
                                 <div className="space-y-3">
-                                    {selectedMember.paymentHistory.map((payment) => (
-                                        <div key={payment.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg border border-slate-200">
-                                            <div>
-                                                <p className="font-medium text-slate-900">{formatCurrency(payment.amount)}</p>
-                                                <p className="text-xs text-slate-500">
-                                                    {new Date(payment.date).toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric' })}
-                                                </p>
+                                    {selectedMember.paymentHistory.map((payment) => {
+                                        const getPaymentStatusStyle = (status) => {
+                                            switch (status) {
+                                                case 'PAID': return 'bg-green-100 text-green-700';
+                                                case 'UNPAID': return 'bg-yellow-100 text-yellow-700';
+                                                case 'DRAFT': return 'bg-slate-100 text-slate-600';
+                                                case 'CANCELED': return 'bg-red-100 text-red-600';
+                                                case 'SCHEDULED': return 'bg-blue-100 text-blue-600';
+                                                default: return 'bg-slate-100 text-slate-600';
+                                            }
+                                        };
+                                        const getPaymentStatusLabel = (status) => {
+                                            switch (status) {
+                                                case 'PAID': return '支払済';
+                                                case 'UNPAID': return '未払';
+                                                case 'DRAFT': return '下書き';
+                                                case 'CANCELED': return 'キャンセル';
+                                                case 'SCHEDULED': return '予定';
+                                                case 'PARTIALLY_PAID': return '一部支払';
+                                                case 'PAYMENT_PENDING': return '処理中';
+                                                default: return status;
+                                            }
+                                        };
+                                        return (
+                                            <div key={payment.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg border border-slate-200">
+                                                <div>
+                                                    <p className="font-medium text-slate-900">{formatCurrency(payment.amount)}</p>
+                                                    <p className="text-xs text-slate-500">
+                                                        {new Date(payment.date).toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric' })}
+                                                        {payment.invoiceNumber !== '-' && ` / ${payment.invoiceNumber}`}
+                                                    </p>
+                                                </div>
+                                                <span className={`px-2 py-1 rounded text-xs font-medium ${getPaymentStatusStyle(payment.status)}`}>
+                                                    {getPaymentStatusLabel(payment.status)}
+                                                </span>
                                             </div>
-                                            <span className={`px-2 py-1 rounded text-xs font-medium ${
-                                                payment.status === 'PAID'
-                                                    ? 'bg-green-100 text-green-700'
-                                                    : 'bg-yellow-100 text-yellow-700'
-                                            }`}>
-                                                {payment.status === 'PAID' ? '支払済' : '未払'}
-                                            </span>
-                                        </div>
-                                    ))}
+                                        );
+                                    })}
                                     {selectedMember.paymentHistory.length === 0 && (
                                         <p className="text-center text-slate-500 py-4">支払履歴がありません</p>
                                     )}
@@ -1485,15 +1724,124 @@
         // 設定ビュー
         // ========================================
 
-        const SettingsView = () => {
-            const [googleFormUrl, setGoogleFormUrl] = useState(GOOGLE_FORM_SHEET_URL);
-            const [squareToken, setSquareToken] = useState('');
-            const [squareLocationId, setSquareLocationId] = useState('');
-            const [monthlyPrice, setMonthlyPrice] = useState(10000);
+        const SettingsView = ({ onSettingsSaved }) => {
+            const loadSavedSettings = () => {
+                try {
+                    const sq = JSON.parse(localStorage.getItem('sise_square_config') || '{}');
+                    const gas = localStorage.getItem('sise_gas_url') || GOOGLE_FORM_SHEET_URL;
+                    return { sq, gas };
+                } catch (e) {
+                    return { sq: {}, gas: GOOGLE_FORM_SHEET_URL };
+                }
+            };
+
+            const saved = loadSavedSettings();
+            const [googleFormUrl, setGoogleFormUrl] = useState(saved.gas);
+            const [squareToken, setSquareToken] = useState(saved.sq.accessToken || '');
+            const [squareLocationId, setSquareLocationId] = useState(saved.sq.locationId || '');
+            const [squareEnv, setSquareEnv] = useState(saved.sq.environment || 'sandbox');
+            const [monthlyPrice, setMonthlyPrice] = useState(saved.sq.monthlyPrice || 10000);
+            const [saveMessage, setSaveMessage] = useState('');
+
+            const handleSave = () => {
+                try {
+                    localStorage.setItem('sise_square_config', JSON.stringify({
+                        accessToken: squareToken,
+                        locationId: squareLocationId,
+                        environment: squareEnv,
+                        monthlyPrice: monthlyPrice
+                    }));
+                    localStorage.setItem('sise_gas_url', googleFormUrl);
+                    setSaveMessage('設定を保存しました。ページをリロードすると反映されます。');
+                    if (onSettingsSaved) onSettingsSaved();
+                    setTimeout(() => setSaveMessage(''), 5000);
+                } catch (e) {
+                    setSaveMessage('保存に失敗しました: ' + e.message);
+                }
+            };
 
             return (
                 <div className="space-y-6">
-                    <h2 className="text-xl font-bold text-slate-900">設定</h2>
+                    <div className="flex items-center justify-between">
+                        <h2 className="text-xl font-bold text-slate-900">設定</h2>
+                        <button
+                            onClick={handleSave}
+                            className="flex items-center px-6 py-2 bg-sise-500 hover:bg-sise-600 text-white rounded-lg font-medium shadow-sm transition-colors"
+                        >
+                            <Icon name="save" size={18} className="mr-2" />
+                            保存
+                        </button>
+                    </div>
+
+                    {saveMessage && (
+                        <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                            <p className="text-green-700 text-sm flex items-center">
+                                <Icon name="check-circle" size={16} className="mr-2" />
+                                {saveMessage}
+                            </p>
+                        </div>
+                    )}
+
+                    <Card>
+                        <h3 className="text-lg font-semibold text-slate-900 mb-4">Square API連携</h3>
+                        <div className="space-y-4">
+                            <div>
+                                <label className="block text-sm font-medium text-slate-700 mb-1">環境</label>
+                                <div className="flex gap-3">
+                                    <button
+                                        onClick={() => setSquareEnv('sandbox')}
+                                        className={`flex-1 py-2 px-4 rounded-lg text-sm font-medium border transition-colors ${
+                                            squareEnv === 'sandbox'
+                                                ? 'bg-amber-50 border-amber-300 text-amber-700'
+                                                : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-50'
+                                        }`}
+                                    >
+                                        Sandbox（テスト）
+                                    </button>
+                                    <button
+                                        onClick={() => setSquareEnv('production')}
+                                        className={`flex-1 py-2 px-4 rounded-lg text-sm font-medium border transition-colors ${
+                                            squareEnv === 'production'
+                                                ? 'bg-green-50 border-green-300 text-green-700'
+                                                : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-50'
+                                        }`}
+                                    >
+                                        Production（本番）
+                                    </button>
+                                </div>
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-slate-700 mb-1">アクセストークン</label>
+                                <input
+                                    type="password"
+                                    value={squareToken}
+                                    onChange={(e) => setSquareToken(e.target.value)}
+                                    className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:border-sise-500 focus:ring-1 focus:ring-sise-500 outline-none"
+                                    placeholder={squareEnv === 'sandbox' ? 'EAAA...' : 'sq0atp-...'}
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-slate-700 mb-1">ロケーションID</label>
+                                <input
+                                    type="text"
+                                    value={squareLocationId}
+                                    onChange={(e) => setSquareLocationId(e.target.value)}
+                                    className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:border-sise-500 focus:ring-1 focus:ring-sise-500 outline-none"
+                                    placeholder="L..."
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-slate-700 mb-1">デフォルト月額（円）</label>
+                                <input
+                                    type="number"
+                                    value={monthlyPrice}
+                                    onChange={(e) => setMonthlyPrice(Number(e.target.value))}
+                                    className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:border-sise-500 focus:ring-1 focus:ring-sise-500 outline-none"
+                                />
+                                <p className="text-xs text-slate-500 mt-1">Catalog APIからプラン金額を取得できない場合のフォールバック値</p>
+                            </div>
+                        </div>
+                    </Card>
 
                     <Card>
                         <h3 className="text-lg font-semibold text-slate-900 mb-4">Googleフォーム連携</h3>
@@ -1509,50 +1857,42 @@
                                     className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:border-sise-500 focus:ring-1 focus:ring-sise-500 outline-none"
                                     placeholder="https://script.google.com/macros/s/..."
                                 />
-                                <p className="text-xs text-slate-500 mt-1">
-                                    Googleフォームの回答を取得するGASのデプロイURLを入力してください
-                                </p>
                             </div>
                         </div>
                     </Card>
 
-                    <Card>
-                        <h3 className="text-lg font-semibold text-slate-900 mb-4">Square API連携</h3>
-                        <div className="space-y-4">
+                    <Card className="bg-sise-50 border-sise-200">
+                        <div className="flex items-start">
+                            <Icon name="info" size={20} className="text-sise-500 mr-3 mt-0.5" />
                             <div>
-                                <label className="block text-sm font-medium text-slate-700 mb-1">
-                                    アクセストークン
-                                </label>
-                                <input
-                                    type="password"
-                                    value={squareToken}
-                                    onChange={(e) => setSquareToken(e.target.value)}
-                                    className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:border-sise-500 focus:ring-1 focus:ring-sise-500 outline-none"
-                                    placeholder="sq0atp-..."
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-slate-700 mb-1">
-                                    ロケーションID
-                                </label>
-                                <input
-                                    type="text"
-                                    value={squareLocationId}
-                                    onChange={(e) => setSquareLocationId(e.target.value)}
-                                    className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:border-sise-500 focus:ring-1 focus:ring-sise-500 outline-none"
-                                    placeholder="L..."
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-slate-700 mb-1">
-                                    サブスク月額（円）
-                                </label>
-                                <input
-                                    type="number"
-                                    value={monthlyPrice}
-                                    onChange={(e) => setMonthlyPrice(Number(e.target.value))}
-                                    className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:border-sise-500 focus:ring-1 focus:ring-sise-500 outline-none"
-                                />
+                                <h4 className="font-semibold text-sise-900 mb-2">デプロイについて</h4>
+                                <p className="text-sm text-sise-700 mb-3">
+                                    GitHub Pagesではブラウザから直接Square APIを呼ぶため、CORSやトークン露出の問題があります。
+                                    本番運用には以下の方法をおすすめします：
+                                </p>
+                                <ul className="text-sm text-sise-700 space-y-2">
+                                    <li className="flex items-start">
+                                        <span className="font-bold mr-2">1.</span>
+                                        <div>
+                                            <strong>Vercel + Serverless Functions</strong>（推奨）<br/>
+                                            <span className="text-xs text-sise-600">無料枠あり。APIキーをサーバーサイドに隠してプロキシ経由で呼び出し。</span>
+                                        </div>
+                                    </li>
+                                    <li className="flex items-start">
+                                        <span className="font-bold mr-2">2.</span>
+                                        <div>
+                                            <strong>Cloudflare Pages + Workers</strong><br/>
+                                            <span className="text-xs text-sise-600">無料枠あり。エッジコンピューティングで高速。Workers内でSquare APIを呼び出し。</span>
+                                        </div>
+                                    </li>
+                                    <li className="flex items-start">
+                                        <span className="font-bold mr-2">3.</span>
+                                        <div>
+                                            <strong>Netlify + Functions</strong><br/>
+                                            <span className="text-xs text-sise-600">無料枠あり。Vercelと同様のサーバーレス構成。</span>
+                                        </div>
+                                    </li>
+                                </ul>
                             </div>
                         </div>
                     </Card>
@@ -1561,10 +1901,10 @@
                         <div className="flex items-start">
                             <Icon name="alert-triangle" size={20} className="text-amber-500 mr-3 mt-0.5" />
                             <div>
-                                <h4 className="font-semibold text-amber-900 mb-1">注意</h4>
+                                <h4 className="font-semibold text-amber-900 mb-1">セキュリティ注意</h4>
                                 <p className="text-sm text-amber-700">
-                                    このページで入力した設定は、ブラウザをリロードするとリセットされます。
-                                    本番環境では、HTMLファイル内の定数を直接編集してください。
+                                    設定はlocalStorageに保存されます。同一ブラウザ・ドメインでのみ有効です。
+                                    本番環境ではサーバーサイドプロキシ経由でのAPI呼び出しを強く推奨します。
                                 </p>
                             </div>
                         </div>
@@ -1618,7 +1958,7 @@
                     case 'members':
                         return <MemberManagementView memberData={memberData} refreshSquareData={refreshSquareData} />;
                     case 'settings':
-                        return <SettingsView />;
+                        return <SettingsView onSettingsSaved={() => {}} />;
                     default:
                         return <DashboardView
                             memberData={memberData}
