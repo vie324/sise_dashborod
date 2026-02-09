@@ -2,11 +2,23 @@
 // Forwards requests to Square API with server-side authentication
 // This keeps the API token safe (never exposed to the browser)
 
-const ALLOWED_ENDPOINTS = [
+// Read-only endpoints (always allowed)
+const READ_ENDPOINTS = [
   'customers/search',
   'subscriptions/search',
   'invoices/search',
   'catalog/batch-retrieve',
+  'locations',
+];
+
+// Write endpoints (only allowed in sandbox for test data creation)
+const SANDBOX_WRITE_ENDPOINTS = [
+  'customers',
+  'catalog/object',
+  'subscriptions',
+  'orders',
+  'invoices',
+  'cards',
 ];
 
 export default async function handler(req, res) {
@@ -36,19 +48,24 @@ export default async function handler(req, res) {
   const { path } = req.query;
   const squarePath = Array.isArray(path) ? path.join('/') : path;
 
-  // Whitelist check - only allow known Square API endpoints
-  if (!ALLOWED_ENDPOINTS.some(ep => squarePath.startsWith(ep))) {
+  // Determine environment
+  const env = process.env.SQUARE_ENVIRONMENT || 'sandbox';
+  const isSandbox = env !== 'production';
+
+  // Whitelist check
+  const isReadAllowed = READ_ENDPOINTS.some(ep => squarePath.startsWith(ep));
+  const isWriteAllowed = isSandbox && SANDBOX_WRITE_ENDPOINTS.some(ep => squarePath.startsWith(ep));
+
+  if (!isReadAllowed && !isWriteAllowed) {
     return res.status(403).json({
       error: 'Endpoint not allowed',
-      allowed: ALLOWED_ENDPOINTS
+      allowed: isSandbox ? [...READ_ENDPOINTS, ...SANDBOX_WRITE_ENDPOINTS] : READ_ENDPOINTS
     });
   }
 
-  // Determine base URL from environment
-  const env = process.env.SQUARE_ENVIRONMENT || 'sandbox';
-  const baseUrl = env === 'production'
-    ? 'https://connect.squareup.com/v2'
-    : 'https://connect.squareupsandbox.com/v2';
+  const baseUrl = isSandbox
+    ? 'https://connect.squareupsandbox.com/v2'
+    : 'https://connect.squareup.com/v2';
 
   try {
     const response = await fetch(`${baseUrl}/${squarePath}`, {

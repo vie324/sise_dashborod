@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>si'se - Sandbox テストデータ作成</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600;700&display=swap');
+        body { font-family: "Noto Sans JP", sans-serif; }
+        .log-entry { border-left: 3px solid; padding: 8px 12px; margin: 4px 0; border-radius: 0 4px 4px 0; }
+        .log-success { border-color: #22c55e; background: #f0fdf4; }
+        .log-error { border-color: #ef4444; background: #fef2f2; }
+        .log-info { border-color: #0ea5e9; background: #f0f9ff; }
+        .log-warn { border-color: #f59e0b; background: #fffbeb; }
+    </style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+    <div class="max-w-4xl mx-auto p-6">
+        <!-- Header -->
+        <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6 mb-6">
+            <div class="flex items-center justify-between">
+                <div>
+                    <h1 class="text-2xl font-bold text-slate-900">Sandbox テストデータ作成ツール</h1>
+                    <p class="text-sm text-slate-500 mt-1">Square Sandbox環境にテスト用の顧客・サブスクリプション・請求書を自動作成します</p>
+                </div>
+                <a href="/" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-sm font-medium transition-colors">
+                    ← ダッシュボードに戻る
+                </a>
+            </div>
+        </div>
+
+        <!-- Status Check -->
+        <div id="status-card" class="bg-white rounded-xl shadow-sm border border-slate-200 p-6 mb-6">
+            <h2 class="text-lg font-semibold text-slate-900 mb-4">接続状態チェック</h2>
+            <div id="status-content" class="text-slate-500">確認中...</div>
+        </div>
+
+        <!-- Test Data Creation -->
+        <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6 mb-6">
+            <h2 class="text-lg font-semibold text-slate-900 mb-4">テストデータ作成</h2>
+            <p class="text-sm text-slate-600 mb-4">
+                以下のボタンを押すと、Sandbox環境に順番にテストデータを作成します。
+                作成順序: 顧客 → サブスクリプションプラン → サブスクリプション登録
+            </p>
+
+            <div class="space-y-3 mb-6">
+                <button
+                    id="btn-step1"
+                    onclick="step1CreateCustomers()"
+                    class="w-full flex items-center justify-between px-4 py-3 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-lg text-left transition-colors"
+                >
+                    <div>
+                        <span class="font-semibold text-blue-900">Step 1: テスト顧客を作成</span>
+                        <p class="text-xs text-blue-600 mt-0.5">5人のテスト顧客（日本語名）を作成します</p>
+                    </div>
+                    <span class="text-blue-500 font-mono text-sm">→</span>
+                </button>
+
+                <button
+                    id="btn-step2"
+                    onclick="step2CreatePlans()"
+                    class="w-full flex items-center justify-between px-4 py-3 bg-purple-50 hover:bg-purple-100 border border-purple-200 rounded-lg text-left transition-colors"
+                >
+                    <div>
+                        <span class="font-semibold text-purple-900">Step 2: サブスクリプションプランを作成</span>
+                        <p class="text-xs text-purple-600 mt-0.5">スタンダード(¥10,000/月)とプレミアム(¥15,000/月)の2プランを作成</p>
+                    </div>
+                    <span class="text-purple-500 font-mono text-sm">→</span>
+                </button>
+
+                <button
+                    id="btn-step3"
+                    onclick="step3CreateSubscriptions()"
+                    class="w-full flex items-center justify-between px-4 py-3 bg-green-50 hover:bg-green-100 border border-green-200 rounded-lg text-left transition-colors"
+                >
+                    <div>
+                        <span class="font-semibold text-green-900">Step 3: サブスクリプション登録</span>
+                        <p class="text-xs text-green-600 mt-0.5">顧客をプランに登録（ACTIVE/CANCELED混在）</p>
+                    </div>
+                    <span class="text-green-500 font-mono text-sm">→</span>
+                </button>
+
+                <button
+                    id="btn-all"
+                    onclick="runAll()"
+                    class="w-full flex items-center justify-center px-4 py-3 bg-slate-900 hover:bg-slate-800 text-white rounded-lg font-semibold transition-colors"
+                >
+                    全て一括実行（Step 1→2→3）
+                </button>
+            </div>
+        </div>
+
+        <!-- Log Output -->
+        <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="text-lg font-semibold text-slate-900">実行ログ</h2>
+                <button onclick="clearLog()" class="text-xs text-slate-500 hover:text-slate-700 px-3 py-1 bg-slate-100 rounded">
+                    クリア
+                </button>
+            </div>
+            <div id="log-output" class="space-y-1 max-h-96 overflow-y-auto font-mono text-sm">
+                <div class="text-slate-400 text-center py-4">ここに実行結果が表示されます</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = '/api/square';
+
+        // State
+        let createdCustomers = [];
+        let createdPlanVariationId = null;
+        let createdPlanVariationId2 = null;
+        let locationId = '';
+
+        // ========================================
+        // Logging
+        // ========================================
+        function log(message, type = 'info') {
+            const el = document.getElementById('log-output');
+            if (el.querySelector('.text-slate-400')) el.innerHTML = '';
+            const time = new Date().toLocaleTimeString('ja-JP');
+            const div = document.createElement('div');
+            div.className = `log-entry log-${type}`;
+            div.innerHTML = `<span class="text-slate-400">[${time}]</span> ${message}`;
+            el.appendChild(div);
+            el.scrollTop = el.scrollHeight;
+        }
+
+        function clearLog() {
+            document.getElementById('log-output').innerHTML =
+                '<div class="text-slate-400 text-center py-4">ここに実行結果が表示されます</div>';
+        }
+
+        // ========================================
+        // API Helper
+        // ========================================
+        async function callAPI(endpoint, body) {
+            const res = await fetch(`${API_BASE}/${endpoint}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                const errorMsg = data.errors
+                    ? data.errors.map(e => e.detail).join(', ')
+                    : (data.error || JSON.stringify(data));
+                throw new Error(`${res.status}: ${errorMsg}`);
+            }
+            return data;
+        }
+
+        function uid() {
+            return 'test-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+        }
+
+        // ========================================
+        // Status Check
+        // ========================================
+        async function checkStatus() {
+            const el = document.getElementById('status-content');
+            try {
+                const res = await fetch(`${API_BASE}/config`);
+                const config = await res.json();
+
+                if (config.configured) {
+                    el.innerHTML = `
+                        <div class="flex items-center text-green-700 bg-green-50 p-3 rounded-lg border border-green-200">
+                            <svg class="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path></svg>
+                            <div>
+                                <strong>接続OK</strong> -
+                                環境: ${config.environment === 'production' ? '本番' : 'Sandbox'} /
+                                Location: ${config.locationId}
+                            </div>
+                        </div>
+                    `;
+                    locationId = config.locationId;
+
+                    if (config.environment === 'production') {
+                        el.innerHTML += `
+                            <div class="mt-3 flex items-center text-red-700 bg-red-50 p-3 rounded-lg border border-red-200">
+                                <strong>⚠ 本番環境です！</strong> テストデータの作成は Sandbox 環境でのみ行ってください。
+                            </div>
+                        `;
+                        disableAllButtons();
+                    }
+                } else {
+                    el.innerHTML = `
+                        <div class="flex items-center text-amber-700 bg-amber-50 p-3 rounded-lg border border-amber-200">
+                            <strong>未設定</strong> - Vercelの環境変数を設定してから再度お試しください。
+                        </div>
+                    `;
+                    disableAllButtons();
+                }
+            } catch (e) {
+                el.innerHTML = `
+                    <div class="text-red-700 bg-red-50 p-3 rounded-lg border border-red-200">
+                        接続エラー: ${e.message}
+                    </div>
+                `;
+                disableAllButtons();
+            }
+        }
+
+        function disableAllButtons() {
+            ['btn-step1', 'btn-step2', 'btn-step3', 'btn-all'].forEach(id => {
+                const btn = document.getElementById(id);
+                btn.disabled = true;
+                btn.classList.add('opacity-50', 'cursor-not-allowed');
+            });
+        }
+
+        function setButtonLoading(id, loading) {
+            const btn = document.getElementById(id);
+            btn.disabled = loading;
+            if (loading) btn.classList.add('opacity-50');
+            else btn.classList.remove('opacity-50');
+        }
+
+        // ========================================
+        // Step 1: Create Test Customers
+        // ========================================
+        async function step1CreateCustomers() {
+            setButtonLoading('btn-step1', true);
+            log('=== Step 1: テスト顧客の作成を開始 ===', 'info');
+
+            const customers = [
+                { given_name: '太郎', family_name: '田中', email_address: 'tanaka@example.com', phone_number: '+819012345001' },
+                { given_name: '花子', family_name: '佐藤', email_address: 'sato@example.com', phone_number: '+819012345002' },
+                { given_name: '一郎', family_name: '鈴木', email_address: 'suzuki@example.com', phone_number: '+819012345003' },
+                { given_name: '美咲', family_name: '高橋', email_address: 'takahashi@example.com', phone_number: '+819012345004' },
+                { given_name: '健太', family_name: '伊藤', email_address: 'ito@example.com', phone_number: '+819012345005' },
+            ];
+
+            createdCustomers = [];
+
+            for (const c of customers) {
+                try {
+                    const data = await callAPI('customers', {
+                        idempotency_key: uid(),
+                        ...c
+                    });
+                    const cust = data.customer;
+                    createdCustomers.push(cust);
+                    log(`✓ 顧客作成: <strong>${cust.family_name}${cust.given_name}</strong> (ID: ${cust.id})`, 'success');
+                } catch (e) {
+                    log(`✗ 顧客作成失敗 (${c.family_name}${c.given_name}): ${e.message}`, 'error');
+                }
+            }
+
+            log(`Step 1 完了: ${createdCustomers.length}/${customers.length} 人作成`, createdCustomers.length > 0 ? 'success' : 'error');
+            setButtonLoading('btn-step1', false);
+        }
+
+        // ========================================
+        // Step 2: Create Subscription Plans
+        // ========================================
+        async function step2CreatePlans() {
+            setButtonLoading('btn-step2', true);
+            log('=== Step 2: サブスクリプションプランの作成を開始 ===', 'info');
+
+            try {
+                // Plan 1: Standard
+                const plan1 = await callAPI('catalog/object', {
+                    idempotency_key: uid(),
+                    object: {
+                        type: 'SUBSCRIPTION_PLAN_VARIATION',
+                        id: '#standard-plan',
+                        subscription_plan_variation_data: {
+                            name: 'スタンダードプラン',
+                            phases: [{
+                                cadence: 'MONTHLY',
+                                recurring_price_money: {
+                                    amount: 10000,
+                                    currency: 'JPY'
+                                }
+                            }]
+                        }
+                    }
+                });
+                createdPlanVariationId = plan1.catalog_object.id;
+                log(`✓ プラン作成: <strong>スタンダードプラン</strong> ¥10,000/月 (ID: ${createdPlanVariationId})`, 'success');
+
+                // Plan 2: Premium
+                const plan2 = await callAPI('catalog/object', {
+                    idempotency_key: uid(),
+                    object: {
+                        type: 'SUBSCRIPTION_PLAN_VARIATION',
+                        id: '#premium-plan',
+                        subscription_plan_variation_data: {
+                            name: 'プレミアムプラン',
+                            phases: [{
+                                cadence: 'MONTHLY',
+                                recurring_price_money: {
+                                    amount: 15000,
+                                    currency: 'JPY'
+                                }
+                            }]
+                        }
+                    }
+                });
+                createdPlanVariationId2 = plan2.catalog_object.id;
+                log(`✓ プラン作成: <strong>プレミアムプラン</strong> ¥15,000/月 (ID: ${createdPlanVariationId2})`, 'success');
+
+                log('Step 2 完了: 2プラン作成', 'success');
+            } catch (e) {
+                log(`✗ プラン作成失敗: ${e.message}`, 'error');
+                log('ヒント: Catalog APIの権限が必要です', 'warn');
+            }
+
+            setButtonLoading('btn-step2', false);
+        }
+
+        // ========================================
+        // Step 3: Create Subscriptions
+        // ========================================
+        async function step3CreateSubscriptions() {
+            setButtonLoading('btn-step3', true);
+            log('=== Step 3: サブスクリプション登録を開始 ===', 'info');
+
+            if (createdCustomers.length === 0) {
+                log('✗ 先にStep 1で顧客を作成してください', 'error');
+                setButtonLoading('btn-step3', false);
+                return;
+            }
+
+            if (!createdPlanVariationId) {
+                log('✗ 先にStep 2でプランを作成してください', 'error');
+                setButtonLoading('btn-step3', false);
+                return;
+            }
+
+            // 入会日をばらす（過去1〜6ヶ月前）
+            let successCount = 0;
+            for (let i = 0; i < createdCustomers.length; i++) {
+                const customer = createdCustomers[i];
+                const monthsAgo = i + 1;
+                const startDate = new Date();
+                startDate.setMonth(startDate.getMonth() - monthsAgo);
+                const startDateStr = startDate.toISOString().split('T')[0];
+
+                const planId = i < 3 ? createdPlanVariationId : createdPlanVariationId2;
+                const planLabel = i < 3 ? 'スタンダード' : 'プレミアム';
+
+                try {
+                    const data = await callAPI('subscriptions', {
+                        idempotency_key: uid(),
+                        location_id: locationId,
+                        plan_variation_id: planId,
+                        customer_id: customer.id,
+                        start_date: startDateStr,
+                    });
+                    const sub = data.subscription;
+                    log(`✓ 登録: <strong>${customer.family_name}${customer.given_name}</strong> → ${planLabel} (開始: ${startDateStr}, Status: ${sub.status})`, 'success');
+                    successCount++;
+                } catch (e) {
+                    log(`✗ 登録失敗 (${customer.family_name}${customer.given_name}): ${e.message}`, 'error');
+                }
+            }
+
+            log(`Step 3 完了: ${successCount}/${createdCustomers.length} 件登録`, successCount > 0 ? 'success' : 'error');
+
+            if (successCount > 0) {
+                log('', 'info');
+                log('<strong>テストデータの作成が完了しました！</strong>', 'success');
+                log('<a href="/" class="text-blue-600 underline font-semibold">→ ダッシュボードで確認する</a>', 'info');
+            }
+
+            setButtonLoading('btn-step3', false);
+        }
+
+        // ========================================
+        // Run All
+        // ========================================
+        async function runAll() {
+            setButtonLoading('btn-all', true);
+            log('========== 全ステップ一括実行 ==========', 'info');
+
+            await step1CreateCustomers();
+            if (createdCustomers.length > 0) {
+                await step2CreatePlans();
+                if (createdPlanVariationId) {
+                    await step3CreateSubscriptions();
+                }
+            }
+
+            setButtonLoading('btn-all', false);
+        }
+
+        // Init
+        checkStatus();
+    </script>
+</body>
+</html>
