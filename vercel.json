@@ -1,0 +1,16 @@
+{
+  "buildCommand": "",
+  "outputDirectory": "public",
+  "rewrites": [
+    { "source": "/api/square/config", "destination": "/api/square/config" },
+    { "source": "/api/square/:path*", "destination": "/api/square/proxy?path=:path*" }
+  ],
+  "headers": [
+    {
+      "source": "/api/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-store" }
+      ]
+    }
+  ]
+}
