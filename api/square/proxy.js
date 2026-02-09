@@ -15,6 +15,7 @@ const READ_ENDPOINTS = [
 const SANDBOX_WRITE_ENDPOINTS = [
   'customers',
   'catalog/object',
+  'catalog/batch-upsert',
   'subscriptions',
   'orders',
   'invoices',
