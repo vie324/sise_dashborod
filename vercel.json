@@ -2,7 +2,8 @@
   "buildCommand": "",
   "outputDirectory": "public",
   "rewrites": [
-    { "source": "/api/(.*)", "destination": "/api/$1" }
+    { "source": "/api/square/config", "destination": "/api/square/config" },
+    { "source": "/api/square/:path*", "destination": "/api/square/proxy?path=:path*" }
   ],
   "headers": [
     {

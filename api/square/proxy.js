@@ -44,9 +44,19 @@ export default async function handler(req, res) {
     });
   }
 
-  // Build Square API path from URL segments
+  // Build Square API path from query parameter or URL segments
+  // Vercel rewrite passes path as query: /api/square/proxy?path=customers/search
   const { path } = req.query;
-  const squarePath = Array.isArray(path) ? path.join('/') : path;
+  let squarePath = '';
+  if (Array.isArray(path)) {
+    squarePath = path.join('/');
+  } else if (typeof path === 'string') {
+    squarePath = path;
+  }
+
+  if (!squarePath) {
+    return res.status(400).json({ error: 'Missing path parameter' });
+  }
 
   // Determine environment
   const env = process.env.SQUARE_ENVIRONMENT || 'sandbox';
