@@ -137,6 +137,7 @@
         // API Helper
         // ========================================
         async function callAPI(endpoint, body) {
+            log(`→ POST /api/square/${endpoint}`, 'info');
             const res = await fetch(`${API_BASE}/${endpoint}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -144,10 +145,12 @@
             });
             const data = await res.json();
             if (!res.ok) {
-                const errorMsg = data.errors
-                    ? data.errors.map(e => e.detail).join(', ')
-                    : (data.error || JSON.stringify(data));
-                throw new Error(`${res.status}: ${errorMsg}`);
+                // エラー詳細を全て表示
+                const errorDetails = data.errors
+                    ? data.errors.map(e => `[${e.category}/${e.code}] ${e.detail || e.field || ''}`).join(' | ')
+                    : JSON.stringify(data);
+                log(`← ${res.status} エラー: ${errorDetails}`, 'error');
+                throw new Error(errorDetails);
             }
             return data;
         }
@@ -265,98 +268,145 @@
             try {
                 // batch-upsert で親プラン + 2バリエーションを一括作成
                 // #temp-id を使って親子関係を指定
-                const data = await callAPI('catalog/batch-upsert', {
-                    idempotency_key: uid(),
-                    batches: [{
-                        objects: [
-                            {
-                                type: 'SUBSCRIPTION_PLAN',
-                                id: '#sise-subscription-plan',
-                                subscription_plan_data: {
-                                    name: "si'se サブスクリプション",
-                                    eligible_item_ids: [],
-                                    eligible_category_ids: [],
-                                    all_items: true
+                // 方法1: batch-upsertで一括作成を試行
+                let data;
+                try {
+                    data = await callAPI('catalog/batch-upsert', {
+                        idempotency_key: uid(),
+                        batches: [{
+                            objects: [
+                                {
+                                    type: 'SUBSCRIPTION_PLAN',
+                                    id: '#sise-plan',
+                                    subscription_plan_data: {
+                                        name: 'sise Subscription'
+                                    }
+                                },
+                                {
+                                    type: 'SUBSCRIPTION_PLAN_VARIATION',
+                                    id: '#standard-var',
+                                    subscription_plan_variation_data: {
+                                        name: 'Standard Plan',
+                                        subscription_plan_id: '#sise-plan',
+                                        phases: [{
+                                            cadence: 'MONTHLY',
+                                            recurring_price_money: { amount: 10000, currency: 'JPY' }
+                                        }]
+                                    }
+                                },
+                                {
+                                    type: 'SUBSCRIPTION_PLAN_VARIATION',
+                                    id: '#premium-var',
+                                    subscription_plan_variation_data: {
+                                        name: 'Premium Plan',
+                                        subscription_plan_id: '#sise-plan',
+                                        phases: [{
+                                            cadence: 'MONTHLY',
+                                            recurring_price_money: { amount: 15000, currency: 'JPY' }
+                                        }]
+                                    }
                                 }
-                            },
-                            {
-                                type: 'SUBSCRIPTION_PLAN_VARIATION',
-                                id: '#standard-variation',
-                                subscription_plan_variation_data: {
-                                    name: 'スタンダードプラン',
-                                    subscription_plan_id: '#sise-subscription-plan',
-                                    phases: [{
-                                        cadence: 'MONTHLY',
-                                        recurring_price_money: {
-                                            amount: 10000,
-                                            currency: 'JPY'
-                                        }
-                                    }]
-                                }
-                            },
-                            {
-                                type: 'SUBSCRIPTION_PLAN_VARIATION',
-                                id: '#premium-variation',
-                                subscription_plan_variation_data: {
-                                    name: 'プレミアムプラン',
-                                    subscription_plan_id: '#sise-subscription-plan',
-                                    phases: [{
-                                        cadence: 'MONTHLY',
-                                        recurring_price_money: {
-                                            amount: 15000,
-                                            currency: 'JPY'
-                                        }
-                                    }]
-                                }
+                            ]
+                        }]
+                    });
+                } catch (batchErr) {
+                    // 方法2: batch-upsertが失敗した場合、個別作成にフォールバック
+                    log('batch-upsert失敗。個別作成を試みます...', 'warn');
+
+                    // 親プランを作成
+                    const planRes = await callAPI('catalog/object', {
+                        idempotency_key: uid(),
+                        object: {
+                            type: 'SUBSCRIPTION_PLAN',
+                            id: '#sise-plan',
+                            subscription_plan_data: {
+                                name: 'sise Subscription'
                             }
-                        ]
-                    }]
-                });
+                        }
+                    });
+                    const parentPlanId = planRes.catalog_object.id;
+                    log(`✓ 親プラン作成: ID=${parentPlanId}`, 'success');
 
-                // レスポンスから作成されたオブジェクトのIDを取得
-                // batch-upsertは #temp-id を実際のIDに変換して返す
-                const mapping = data.id_mappings || [];
-                const objects = data.objects || [];
+                    // バリエーション1
+                    const var1Res = await callAPI('catalog/object', {
+                        idempotency_key: uid(),
+                        object: {
+                            type: 'SUBSCRIPTION_PLAN_VARIATION',
+                            id: '#standard-var',
+                            subscription_plan_variation_data: {
+                                name: 'Standard Plan',
+                                subscription_plan_id: parentPlanId,
+                                phases: [{
+                                    cadence: 'MONTHLY',
+                                    recurring_price_money: { amount: 10000, currency: 'JPY' }
+                                }]
+                            }
+                        }
+                    });
+                    createdPlanVariationId = var1Res.catalog_object.id;
 
-                // バリエーションIDを取得
-                const standardObj = objects.find(o =>
-                    o.type === 'SUBSCRIPTION_PLAN_VARIATION' &&
-                    o.subscription_plan_variation_data?.name === 'スタンダードプラン'
-                );
-                const premiumObj = objects.find(o =>
-                    o.type === 'SUBSCRIPTION_PLAN_VARIATION' &&
-                    o.subscription_plan_variation_data?.name === 'プレミアムプラン'
-                );
-                const planObj = objects.find(o => o.type === 'SUBSCRIPTION_PLAN');
+                    // バリエーション2
+                    const var2Res = await callAPI('catalog/object', {
+                        idempotency_key: uid(),
+                        object: {
+                            type: 'SUBSCRIPTION_PLAN_VARIATION',
+                            id: '#premium-var',
+                            subscription_plan_variation_data: {
+                                name: 'Premium Plan',
+                                subscription_plan_id: parentPlanId,
+                                phases: [{
+                                    cadence: 'MONTHLY',
+                                    recurring_price_money: { amount: 15000, currency: 'JPY' }
+                                }]
+                            }
+                        }
+                    });
+                    createdPlanVariationId2 = var2Res.catalog_object.id;
 
-                if (planObj) {
-                    log(`✓ 親プラン作成: <strong>si'se サブスクリプション</strong> (ID: ${planObj.id})`, 'success');
+                    data = null; // フォールバック成功
                 }
 
-                if (standardObj) {
-                    createdPlanVariationId = standardObj.id;
-                    log(`✓ バリエーション作成: <strong>スタンダードプラン</strong> ¥10,000/月 (ID: ${createdPlanVariationId})`, 'success');
-                }
+                // batch-upsertが成功した場合のID取得
+                if (data) {
+                    const mapping = data.id_mappings || [];
+                    const objects = data.objects || [];
 
-                if (premiumObj) {
-                    createdPlanVariationId2 = premiumObj.id;
-                    log(`✓ バリエーション作成: <strong>プレミアムプラン</strong> ¥15,000/月 (ID: ${createdPlanVariationId2})`, 'success');
-                }
+                    const standardObj = objects.find(o =>
+                        o.type === 'SUBSCRIPTION_PLAN_VARIATION' &&
+                        o.subscription_plan_variation_data?.name === 'Standard Plan'
+                    );
+                    const premiumObj = objects.find(o =>
+                        o.type === 'SUBSCRIPTION_PLAN_VARIATION' &&
+                        o.subscription_plan_variation_data?.name === 'Premium Plan'
+                    );
+                    const planObj = objects.find(o => o.type === 'SUBSCRIPTION_PLAN');
 
-                // マッピングでも確認（フォールバック）
-                if (!createdPlanVariationId && mapping.length > 0) {
-                    const stdMap = mapping.find(m => m.client_object_id === '#standard-variation');
-                    if (stdMap) createdPlanVariationId = stdMap.object_id;
-                    const premMap = mapping.find(m => m.client_object_id === '#premium-variation');
-                    if (premMap) createdPlanVariationId2 = premMap.object_id;
-                    log(`✓ マッピングから取得: Standard=${createdPlanVariationId}, Premium=${createdPlanVariationId2}`, 'success');
+                    if (planObj) {
+                        log(`✓ 親プラン作成: ID=${planObj.id}`, 'success');
+                    }
+                    if (standardObj) {
+                        createdPlanVariationId = standardObj.id;
+                    }
+                    if (premiumObj) {
+                        createdPlanVariationId2 = premiumObj.id;
+                    }
+
+                    // マッピングからフォールバック取得
+                    if (!createdPlanVariationId || !createdPlanVariationId2) {
+                        mapping.forEach(m => {
+                            if (m.client_object_id === '#standard-var') createdPlanVariationId = m.object_id;
+                            if (m.client_object_id === '#premium-var') createdPlanVariationId2 = m.object_id;
+                        });
+                    }
                 }
 
                 if (createdPlanVariationId && createdPlanVariationId2) {
-                    log('Step 2 完了: 親プラン1つ + バリエーション2つ作成', 'success');
+                    log(`✓ Standard Plan ¥10,000/月 (ID: ${createdPlanVariationId})`, 'success');
+                    log(`✓ Premium Plan ¥15,000/月 (ID: ${createdPlanVariationId2})`, 'success');
+                    log('Step 2 完了', 'success');
                 } else {
-                    log('Step 2: 一部のIDが取得できませんでした。レスポンス:', 'warn');
-                    log(JSON.stringify(data, null, 2).substring(0, 500), 'warn');
+                    log('Step 2: IDの取得に問題がありました', 'warn');
+                    if (data) log('レスポンス: ' + JSON.stringify(data).substring(0, 300), 'warn');
                 }
             } catch (e) {
                 log(`✗ プラン作成失敗: ${e.message}`, 'error');
