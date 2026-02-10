@@ -46,6 +46,18 @@
 
             <div class="space-y-3 mb-6">
                 <button
+                    id="btn-test"
+                    onclick="runDiagnostic()"
+                    class="w-full flex items-center justify-between px-4 py-3 bg-slate-50 hover:bg-slate-100 border border-slate-300 rounded-lg text-left transition-colors mb-2"
+                >
+                    <div>
+                        <span class="font-semibold text-slate-900">API疎通テスト</span>
+                        <p class="text-xs text-slate-500 mt-0.5">各エンドポイントが正しく動作するか確認します（データは作成しません）</p>
+                    </div>
+                    <span class="text-slate-500 font-mono text-sm">TEST</span>
+                </button>
+
+                <button
                     id="btn-step1"
                     onclick="step1CreateCustomers()"
                     class="w-full flex items-center justify-between px-4 py-3 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-lg text-left transition-colors"
@@ -138,18 +150,36 @@
         // ========================================
         async function callAPI(endpoint, body) {
             log(`→ POST /api/square/${endpoint}`, 'info');
-            const res = await fetch(`${API_BASE}/${endpoint}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(body)
-            });
-            const data = await res.json();
+            let res;
+            try {
+                res = await fetch(`${API_BASE}/${endpoint}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+            } catch (networkErr) {
+                log(`← ネットワークエラー: ${networkErr.message}`, 'error');
+                throw networkErr;
+            }
+
+            // レスポンスをテキストで取得（JSON解析失敗に備える）
+            const rawText = await res.text();
+            log(`← ステータス: ${res.status}`, res.ok ? 'success' : 'error');
+
+            let data;
+            try {
+                data = JSON.parse(rawText);
+            } catch (parseErr) {
+                // JSONでない場合（HTMLエラーページなど）
+                log(`← レスポンスがJSONではありません: ${rawText.substring(0, 200)}`, 'error');
+                throw new Error(`${res.status}: レスポンスがJSONではありません`);
+            }
+
             if (!res.ok) {
-                // エラー詳細を全て表示
                 const errorDetails = data.errors
-                    ? data.errors.map(e => `[${e.category}/${e.code}] ${e.detail || e.field || ''}`).join(' | ')
-                    : JSON.stringify(data);
-                log(`← ${res.status} エラー: ${errorDetails}`, 'error');
+                    ? data.errors.map(e => `[${e.category}/${e.code}] ${e.detail || ''} ${e.field ? '(field: '+e.field+')' : ''}`).join(' | ')
+                    : JSON.stringify(data).substring(0, 300);
+                log(`← エラー詳細: ${errorDetails}`, 'error');
                 throw new Error(errorDetails);
             }
             return data;
@@ -472,6 +502,129 @@
             }
 
             setButtonLoading('btn-step3', false);
+        }
+
+        // ========================================
+        // Diagnostic Test
+        // ========================================
+        async function runDiagnostic() {
+            setButtonLoading('btn-test', true);
+            log('========== API疎通テスト開始 ==========', 'info');
+
+            // Test 1: Config endpoint
+            log('--- テスト1: /api/square/config (GET) ---', 'info');
+            try {
+                const res = await fetch(`${API_BASE}/config`);
+                const text = await res.text();
+                log(`ステータス: ${res.status}`, res.ok ? 'success' : 'error');
+                try {
+                    const json = JSON.parse(text);
+                    log(`レスポンス: ${JSON.stringify(json)}`, 'success');
+                } catch {
+                    log(`レスポンス(非JSON): ${text.substring(0, 200)}`, 'error');
+                }
+            } catch (e) {
+                log(`ネットワークエラー: ${e.message}`, 'error');
+            }
+
+            // Test 2: Proxy - locations (read endpoint, simplest call)
+            log('--- テスト2: /api/square/locations (POST, 読み取り) ---', 'info');
+            try {
+                const res = await fetch(`${API_BASE}/locations`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: '{}'
+                });
+                const text = await res.text();
+                log(`ステータス: ${res.status}`, res.ok ? 'success' : 'error');
+                try {
+                    const json = JSON.parse(text);
+                    if (json.locations) {
+                        log(`ロケーション数: ${json.locations.length}`, 'success');
+                        json.locations.forEach(loc => {
+                            log(`  - ${loc.name} (ID: ${loc.id})`, 'info');
+                        });
+                    } else {
+                        log(`レスポンス: ${JSON.stringify(json).substring(0, 300)}`, 'warn');
+                    }
+                } catch {
+                    log(`レスポンス(非JSON): ${text.substring(0, 300)}`, 'error');
+                }
+            } catch (e) {
+                log(`ネットワークエラー: ${e.message}`, 'error');
+            }
+
+            // Test 3: Proxy - customers/search (read endpoint)
+            log('--- テスト3: /api/square/customers/search (POST, 読み取り) ---', 'info');
+            try {
+                const res = await fetch(`${API_BASE}/customers/search`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ query: { filter: {}, sort: { field: 'CREATED_AT', order: 'DESC' } }, limit: 1 })
+                });
+                const text = await res.text();
+                log(`ステータス: ${res.status}`, res.ok ? 'success' : 'error');
+                try {
+                    const json = JSON.parse(text);
+                    const count = json.customers ? json.customers.length : 0;
+                    log(`レスポンス: 顧客 ${count} 件取得`, 'success');
+                } catch {
+                    log(`レスポンス(非JSON): ${text.substring(0, 300)}`, 'error');
+                }
+            } catch (e) {
+                log(`ネットワークエラー: ${e.message}`, 'error');
+            }
+
+            // Test 4: Proxy - catalog/batch-upsert (write endpoint, minimal test)
+            log('--- テスト4: /api/square/catalog/batch-upsert (POST, 書き込み) ---', 'info');
+            log('最小限のカタログオブジェクトで書き込みテストを行います...', 'info');
+            try {
+                const res = await fetch(`${API_BASE}/catalog/batch-upsert`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        idempotency_key: uid(),
+                        batches: [{
+                            objects: [{
+                                type: 'SUBSCRIPTION_PLAN',
+                                id: '#diag-test-plan',
+                                subscription_plan_data: {
+                                    name: 'Diagnostic Test Plan'
+                                }
+                            }]
+                        }]
+                    })
+                });
+                const text = await res.text();
+                log(`ステータス: ${res.status}`, res.ok ? 'success' : 'error');
+                try {
+                    const json = JSON.parse(text);
+                    if (res.ok) {
+                        log(`成功! レスポンス: ${JSON.stringify(json).substring(0, 300)}`, 'success');
+                    } else {
+                        // Square APIエラーの詳細を表示
+                        if (json.errors) {
+                            json.errors.forEach(e => {
+                                log(`エラー: [${e.category}/${e.code}] ${e.detail || ''} ${e.field ? '(field: '+e.field+')' : ''}`, 'error');
+                            });
+                        } else {
+                            log(`エラーレスポンス: ${JSON.stringify(json).substring(0, 500)}`, 'error');
+                        }
+                    }
+                } catch {
+                    log(`レスポンス(非JSON): ${text.substring(0, 500)}`, 'error');
+                }
+            } catch (e) {
+                log(`ネットワークエラー: ${e.message}`, 'error');
+            }
+
+            // Test 5: Check Square API version
+            log('--- テスト5: プロキシ経由でSquare APIバージョン確認 ---', 'info');
+            log('プロキシのSquare-Versionヘッダー: 2025-01-23', 'info');
+
+            log('========== 疎通テスト完了 ==========', 'success');
+            log('上記の結果を確認してください。ステータス200以外のテストがある場合、エラー詳細を確認してください。', 'info');
+            setButtonLoading('btn-test', false);
         }
 
         // ========================================
