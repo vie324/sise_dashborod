@@ -424,7 +424,9 @@
                             if (plan.phases && plan.phases.length > 0) {
                                 const phase = plan.phases[0];
                                 cadence = phase.cadence || 'MONTHLY';
-                                if (phase.recurring_price_money) {
+                                if (phase.pricing && phase.pricing.price_money) {
+                                    monthlyPrice = phase.pricing.price_money.amount || monthlyPrice;
+                                } else if (phase.recurring_price_money) {
                                     monthlyPrice = phase.recurring_price_money.amount || monthlyPrice;
                                 }
                             }
@@ -433,7 +435,9 @@
                         // Subscription phasesから直接取得（フォールバック）
                         if (sub.phases && sub.phases.length > 0) {
                             const activePhase = sub.phases.find(p => !p.uid || p) || sub.phases[0];
-                            if (activePhase.recurring_price_money) {
+                            if (activePhase.pricing && activePhase.pricing.price_money) {
+                                monthlyPrice = activePhase.pricing.price_money.amount || monthlyPrice;
+                            } else if (activePhase.recurring_price_money) {
                                 monthlyPrice = activePhase.recurring_price_money.amount || monthlyPrice;
                             }
                             if (activePhase.cadence) {
