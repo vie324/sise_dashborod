@@ -1,5 +1,6 @@
 // Square API Proxy - Vercel Serverless Function
 // Forwards requests to Square API with server-side authentication
+// Supports multiple stores via X-Store-Id header
 // This keeps the API token safe (never exposed to the browser)
 
 // Read-only endpoints (always allowed)
@@ -8,6 +9,7 @@ const READ_ENDPOINTS = [
   'subscriptions/search',
   'invoices/search',
   'catalog/batch-retrieve',
+  'catalog/list',
   'locations',
 ];
 
@@ -22,11 +24,41 @@ const SANDBOX_WRITE_ENDPOINTS = [
   'cards',
 ];
 
+// Operation endpoints (allowed in all environments with confirmation)
+const OPERATION_ENDPOINTS = [
+  'subscriptions/',  // cancel, pause, resume use subscriptions/{id}/cancel etc.
+];
+
+// Get store configuration by store ID
+function getStoreConfig(storeId) {
+  // Multi-store: SQUARE_STORE_{ID}_ACCESS_TOKEN, SQUARE_STORE_{ID}_LOCATION_ID etc.
+  // Default store (backward compat): SQUARE_ACCESS_TOKEN, SQUARE_LOCATION_ID
+  if (!storeId || storeId === 'default') {
+    return {
+      token: process.env.SQUARE_ACCESS_TOKEN,
+      locationId: process.env.SQUARE_LOCATION_ID || '',
+      environment: process.env.SQUARE_ENVIRONMENT || 'sandbox',
+      name: process.env.SQUARE_STORE_NAME || 'デフォルト店舗',
+    };
+  }
+
+  const prefix = `SQUARE_STORE_${storeId}`;
+  const token = process.env[`${prefix}_ACCESS_TOKEN`];
+  if (!token) return null;
+
+  return {
+    token,
+    locationId: process.env[`${prefix}_LOCATION_ID`] || '',
+    environment: process.env[`${prefix}_ENVIRONMENT`] || process.env.SQUARE_ENVIRONMENT || 'sandbox',
+    name: process.env[`${prefix}_NAME`] || `店舗 ${storeId}`,
+  };
+}
+
 export default async function handler(req, res) {
   // CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Store-Id');
 
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
@@ -36,17 +68,18 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  // Validate environment variables
-  const token = process.env.SQUARE_ACCESS_TOKEN;
-  if (!token || token === 'YOUR_SQUARE_ACCESS_TOKEN') {
+  // Determine which store to use
+  const storeId = req.headers['x-store-id'] || req.query.store || 'default';
+  const storeConfig = getStoreConfig(storeId);
+
+  if (!storeConfig || !storeConfig.token || storeConfig.token === 'YOUR_SQUARE_ACCESS_TOKEN') {
     return res.status(500).json({
       error: 'Square API not configured',
-      message: 'Set SQUARE_ACCESS_TOKEN in Vercel environment variables'
+      message: `Store "${storeId}" is not configured. Set environment variables in Vercel.`
     });
   }
 
-  // Build Square API path from query parameter or URL segments
-  // Vercel rewrite passes path as query: /api/square/proxy?path=customers/search
+  // Build Square API path from query parameter
   const { path } = req.query;
   let squarePath = '';
   if (Array.isArray(path)) {
@@ -59,18 +92,17 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'Missing path parameter' });
   }
 
-  // Determine environment
-  const env = process.env.SQUARE_ENVIRONMENT || 'sandbox';
-  const isSandbox = env !== 'production';
+  const isSandbox = storeConfig.environment !== 'production';
 
   // Whitelist check
   const isReadAllowed = READ_ENDPOINTS.some(ep => squarePath.startsWith(ep));
   const isWriteAllowed = isSandbox && SANDBOX_WRITE_ENDPOINTS.some(ep => squarePath.startsWith(ep));
+  const isOperationAllowed = OPERATION_ENDPOINTS.some(ep => squarePath.startsWith(ep));
 
-  if (!isReadAllowed && !isWriteAllowed) {
+  if (!isReadAllowed && !isWriteAllowed && !isOperationAllowed) {
     return res.status(403).json({
       error: 'Endpoint not allowed',
-      allowed: isSandbox ? [...READ_ENDPOINTS, ...SANDBOX_WRITE_ENDPOINTS] : READ_ENDPOINTS
+      path: squarePath
     });
   }
 
@@ -82,7 +114,7 @@ export default async function handler(req, res) {
     const response = await fetch(`${baseUrl}/${squarePath}`, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${token}`,
+        'Authorization': `Bearer ${storeConfig.token}`,
         'Content-Type': 'application/json',
         'Square-Version': '2025-01-23'
       },
