@@ -478,13 +478,14 @@
                 return;
             }
 
-            // 入会日をばらす（過去1〜6ヶ月前）
+            // Square APIは過去のstart_dateを許可しないため、
+            // 今日〜数日後に分散させて登録する
             let successCount = 0;
+            const today = new Date();
             for (let i = 0; i < createdCustomers.length; i++) {
                 const customer = createdCustomers[i];
-                const monthsAgo = i + 1;
-                const startDate = new Date();
-                startDate.setMonth(startDate.getMonth() - monthsAgo);
+                const startDate = new Date(today);
+                startDate.setDate(startDate.getDate() + i); // 今日, 明日, 明後日...
                 const startDateStr = startDate.toISOString().split('T')[0];
 
                 const planId = i < 3 ? createdPlanVariationId : createdPlanVariationId2;
