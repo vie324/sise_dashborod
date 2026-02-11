@@ -183,11 +183,8 @@
         // 設定・定数
         // ========================================
 
-        // 店舗マスタ
-        const stores = [
-            { id: 1, name: "新宿店", code: "shinjuku" },
-            { id: 2, name: "渋谷店", code: "shibuya" }
-        ];
+        // 店舗マスタ（サーバーから動的に取得）
+        let serverStores = [];
 
         // Google Apps Script Web App URL (日報データ取得用)
         // ※実際のデプロイ後URLに置き換えてください
@@ -197,14 +194,19 @@
         // APIキーはVercel環境変数で管理、フロントエンドには露出しない
         const SQUARE_PROXY_BASE = '/api/square';
 
-        // サーバーから設定を取得
+        // サーバーから設定を取得（店舗一覧含む）
         const fetchSquareConfig = async () => {
             try {
                 const res = await fetch(`${SQUARE_PROXY_BASE}/config`);
-                if (res.ok) return await res.json();
+                if (res.ok) {
+                    const config = await res.json();
+                    serverStores = config.stores || [];
+                    return config;
+                }
             } catch (e) {}
             return {
                 configured: false,
+                stores: [],
                 environment: 'sandbox',
                 locationId: '',
                 defaultMonthlyPrice: 10000
@@ -274,7 +276,7 @@
         // Square API連携
         // ========================================
 
-        const useSquareData = () => {
+        const useSquareData = (activeStoreId) => {
             const [memberData, setMemberData] = useState({
                 totalMembers: 0,
                 activeMembers: 0,
@@ -284,19 +286,22 @@
                 expectedRevenue: 0,
                 members: [], // 会員詳細リスト
                 monthlyTrend: [], // 月間入退会トレンド
+                stores: [], // 利用可能な店舗一覧
                 loading: true,
                 error: null
             });
 
-            // ページネーション付きAPI呼び出しヘルパー（プロキシ経由）
-            const fetchAllPages = async (endpoint, bodyBuilder, resultKey) => {
+            // ページネーション付きAPI呼び出しヘルパー（プロキシ経由、店舗ID付き）
+            const fetchAllPages = async (endpoint, bodyBuilder, resultKey, storeId) => {
                 let allResults = [];
                 let cursor = null;
                 do {
                     const body = bodyBuilder(cursor);
+                    const headers = { 'Content-Type': 'application/json' };
+                    if (storeId && storeId !== 'all') headers['X-Store-Id'] = storeId;
                     const response = await fetch(`${SQUARE_PROXY_BASE}/${endpoint}`, {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
+                        headers,
                         body: JSON.stringify(body)
                     });
                     if (!response.ok) {
@@ -308,6 +313,25 @@
                     cursor = data.cursor || null;
                 } while (cursor);
                 return allResults;
+            };
+
+            // サブスクリプション操作（解約・一時停止・再開）
+            const operateSubscription = async (subscriptionId, action, storeId) => {
+                const headers = { 'Content-Type': 'application/json' };
+                if (storeId && storeId !== 'all') headers['X-Store-Id'] = storeId;
+                const response = await fetch(`${SQUARE_PROXY_BASE}/subscriptions/${subscriptionId}/${action}`, {
+                    method: 'POST',
+                    headers,
+                    body: JSON.stringify({})
+                });
+                if (!response.ok) {
+                    const errorBody = await response.json().catch(() => ({}));
+                    const detail = errorBody.errors
+                        ? errorBody.errors.map(e => e.detail || e.code).join(', ')
+                        : JSON.stringify(errorBody);
+                    throw new Error(detail);
+                }
+                return await response.json();
             };
 
             const fetchSquareData = useCallback(async () => {
@@ -328,82 +352,108 @@
                         expectedRevenue: 1420000,
                         members: sampleMembers,
                         monthlyTrend: sampleMonthlyTrend,
+                        stores: [],
                         loading: false,
                         error: null
                     });
                     return;
                 }
 
-                const locationId = serverConfig.locationId;
+                const stores = serverConfig.stores || [];
                 const defaultMonthlyPrice = serverConfig.defaultMonthlyPrice;
 
+                // 取得対象の店舗を決定
+                const targetStores = (activeStoreId && activeStoreId !== 'all')
+                    ? stores.filter(s => s.id === activeStoreId)
+                    : stores;
+
+                if (targetStores.length === 0) {
+                    setMemberData(prev => ({ ...prev, stores, loading: false, error: '対象店舗が見つかりません' }));
+                    return;
+                }
+
                 try {
-                    // 1. Customers API - 全顧客を取得（ページネーション付き）
-                    const customers = await fetchAllPages(
-                        'customers/search',
-                        (cursor) => ({
-                            limit: 100,
-                            ...(cursor ? { cursor } : {})
-                        }),
-                        'customers'
-                    );
-
-                    // 2. Subscriptions API - ロケーションのサブスクリプション取得
-                    const subscriptions = await fetchAllPages(
-                        'subscriptions/search',
-                        (cursor) => ({
-                            query: {
-                                filter: {
-                                    location_ids: [locationId]
-                                }
-                            },
-                            ...(cursor ? { cursor } : {})
-                        }),
-                        'subscriptions'
-                    );
-
-                    // 3. Catalog API - プラン名と金額の解決
-                    const planIds = [...new Set(subscriptions
-                        .filter(s => s.plan_variation_id)
-                        .map(s => s.plan_variation_id))];
-
+                    let allCustomers = [];
+                    let allSubscriptions = [];
+                    let allInvoices = [];
                     let catalogMap = {};
-                    if (planIds.length > 0) {
-                        try {
-                            const catalogResponse = await fetch(`${SQUARE_PROXY_BASE}/catalog/batch-retrieve`, {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ object_ids: planIds })
-                            });
-                            if (catalogResponse.ok) {
-                                const catalogData = await catalogResponse.json();
-                                (catalogData.objects || []).forEach(obj => {
-                                    const subPlan = obj.subscription_plan_variation_data || obj.subscription_plan_data;
-                                    catalogMap[obj.id] = {
-                                        name: subPlan?.name || obj.id,
-                                        phases: subPlan?.phases || []
-                                    };
+
+                    // 各店舗のデータを取得
+                    for (const store of targetStores) {
+                        const storeId = store.id;
+                        const locationId = store.locationId;
+
+                        // 1. Customers API
+                        const customers = await fetchAllPages(
+                            'customers/search',
+                            (cursor) => ({ limit: 100, ...(cursor ? { cursor } : {}) }),
+                            'customers',
+                            storeId
+                        );
+                        // 店舗情報をタグ付け
+                        customers.forEach(c => { c._storeId = storeId; c._storeName = store.name; });
+                        allCustomers = allCustomers.concat(customers);
+
+                        // 2. Subscriptions API
+                        const subscriptions = await fetchAllPages(
+                            'subscriptions/search',
+                            (cursor) => ({
+                                query: { filter: { location_ids: [locationId] } },
+                                ...(cursor ? { cursor } : {})
+                            }),
+                            'subscriptions',
+                            storeId
+                        );
+                        subscriptions.forEach(s => { s._storeId = storeId; s._storeName = store.name; });
+                        allSubscriptions = allSubscriptions.concat(subscriptions);
+
+                        // 3. Catalog API
+                        const planIds = [...new Set(subscriptions
+                            .filter(s => s.plan_variation_id)
+                            .map(s => s.plan_variation_id))];
+
+                        if (planIds.length > 0) {
+                            try {
+                                const headers = { 'Content-Type': 'application/json' };
+                                if (storeId) headers['X-Store-Id'] = storeId;
+                                const catalogResponse = await fetch(`${SQUARE_PROXY_BASE}/catalog/batch-retrieve`, {
+                                    method: 'POST',
+                                    headers,
+                                    body: JSON.stringify({ object_ids: planIds })
                                 });
+                                if (catalogResponse.ok) {
+                                    const catalogData = await catalogResponse.json();
+                                    (catalogData.objects || []).forEach(obj => {
+                                        const subPlan = obj.subscription_plan_variation_data || obj.subscription_plan_data;
+                                        catalogMap[obj.id] = {
+                                            name: subPlan?.name || obj.id,
+                                            phases: subPlan?.phases || []
+                                        };
+                                    });
+                                }
+                            } catch (e) {
+                                console.warn('Catalog API fetch failed:', e);
                             }
-                        } catch (e) {
-                            console.warn('Catalog API fetch failed, using fallback:', e);
                         }
+
+                        // 4. Invoices API
+                        const invoices = await fetchAllPages(
+                            'invoices/search',
+                            (cursor) => ({
+                                query: { filter: { location_ids: [locationId] } },
+                                limit: 200,
+                                ...(cursor ? { cursor } : {})
+                            }),
+                            'invoices',
+                            storeId
+                        );
+                        invoices.forEach(inv => { inv._storeId = storeId; inv._storeName = store.name; });
+                        allInvoices = allInvoices.concat(invoices);
                     }
 
-                    // 4. Invoices API - 請求書・支払い履歴
-                    const invoices = await fetchAllPages(
-                        'invoices/search',
-                        (cursor) => ({
-                            query: {
-                                filter: {
-                                    location_ids: [locationId]
-                                }
-                            },
-                            limit: 200,
-                            ...(cursor ? { cursor } : {})
-                        }),
-                        'invoices'
-                    );
+                    const customers = allCustomers;
+                    const subscriptions = allSubscriptions;
+                    const invoices = allInvoices;
 
                     // 5. 会員詳細データの構築
                     const membersList = subscriptions.map(sub => {
@@ -480,7 +530,9 @@
                             planVariationId: sub.plan_variation_id,
                             monthlyPrice: monthlyPrice,
                             cadence: cadence,
-                            paymentHistory: paymentHistory
+                            paymentHistory: paymentHistory,
+                            storeId: sub._storeId || 'default',
+                            storeName: sub._storeName || '',
                         };
                     });
 
@@ -514,12 +566,13 @@
                         activeMembers: activeSubscriptions.length,
                         newMembersThisMonth: newThisMonth.length,
                         churnedMembers: canceledThisMonth.length,
-                        churnRate: subscriptions.length > 0
+                        churnRate: activeSubscriptions.length > 0
                             ? (canceledThisMonth.length / activeSubscriptions.length * 100)
                             : 0,
                         expectedRevenue: totalExpectedRevenue,
                         members: membersList,
                         monthlyTrend: monthlyTrend,
+                        stores: stores,
                         loading: false,
                         error: null
                     });
@@ -532,7 +585,7 @@
                         error: error.message
                     }));
                 }
-            }, []);
+            }, [activeStoreId]);
 
             useEffect(() => {
                 fetchSquareData();
@@ -541,7 +594,7 @@
                 return () => clearInterval(interval);
             }, [fetchSquareData]);
 
-            return { memberData, refreshSquareData: fetchSquareData };
+            return { memberData, refreshSquareData: fetchSquareData, operateSubscription };
         };
 
         // ========================================
@@ -1216,16 +1269,37 @@
         // 会員管理ビュー（Square連携）
         // ========================================
 
-        const MemberManagementView = ({ memberData, refreshSquareData }) => {
+        const MemberManagementView = ({ memberData, refreshSquareData, operateSubscription, activeStoreId }) => {
             const [isRefreshing, setIsRefreshing] = useState(false);
             const [filterStatus, setFilterStatus] = useState('all'); // all, ACTIVE, CANCELED, PENDING
             const [searchQuery, setSearchQuery] = useState('');
             const [selectedMember, setSelectedMember] = useState(null);
+            const [actionLoading, setActionLoading] = useState(null); // 'cancel'|'pause'|'resume'
+            const [actionMessage, setActionMessage] = useState(null); // { type, text }
 
             const handleRefresh = async () => {
                 setIsRefreshing(true);
                 await refreshSquareData();
                 setIsRefreshing(false);
+            };
+
+            const handleAction = async (member, action) => {
+                const labels = { cancel: '解約', pause: '一時停止', resume: '再開' };
+                if (!confirm(`${member.name} のサブスクリプションを${labels[action]}しますか？`)) return;
+
+                setActionLoading(action);
+                setActionMessage(null);
+                try {
+                    await operateSubscription(member.id, action, member.storeId);
+                    setActionMessage({ type: 'success', text: `${labels[action]}が完了しました` });
+                    // データ更新
+                    await refreshSquareData();
+                    setSelectedMember(null);
+                } catch (e) {
+                    setActionMessage({ type: 'error', text: `${labels[action]}に失敗: ${e.message}` });
+                } finally {
+                    setActionLoading(null);
+                }
             };
 
             // 月額単価（設定可能にする）
@@ -1540,13 +1614,16 @@
                                 <thead>
                                     <tr className="border-b border-slate-200 bg-slate-50">
                                         <th className="text-left py-3 px-3 font-semibold text-slate-600">会員名</th>
+                                        {memberData.stores && memberData.stores.length > 1 && (
+                                            <th className="text-left py-3 px-3 font-semibold text-slate-600">店舗</th>
+                                        )}
                                         <th className="text-left py-3 px-3 font-semibold text-slate-600">ステータス</th>
                                         <th className="text-left py-3 px-3 font-semibold text-slate-600">プラン</th>
                                         <th className="text-right py-3 px-3 font-semibold text-slate-600">金額</th>
                                         <th className="text-center py-3 px-3 font-semibold text-slate-600">頻度</th>
                                         <th className="text-left py-3 px-3 font-semibold text-slate-600">入会日</th>
                                         <th className="text-left py-3 px-3 font-semibold text-slate-600">退会日</th>
-                                        <th className="text-center py-3 px-3 font-semibold text-slate-600">支払履歴</th>
+                                        <th className="text-center py-3 px-3 font-semibold text-slate-600">操作</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -1558,6 +1635,9 @@
                                                     <p className="text-xs text-slate-500">{member.email}</p>
                                                 </div>
                                             </td>
+                                            {memberData.stores && memberData.stores.length > 1 && (
+                                                <td className="py-3 px-3 text-xs text-slate-600">{member.storeName}</td>
+                                            )}
                                             <td className="py-3 px-3">
                                                 <span className={`px-2 py-1 rounded text-xs font-medium border ${getStatusColor(member.status)}`}>
                                                     {getStatusLabel(member.status)}
@@ -1584,9 +1664,9 @@
                                             <td className="text-center py-3 px-3">
                                                 <button
                                                     onClick={() => setSelectedMember(member)}
-                                                    className="text-sise-600 hover:text-sise-700 font-medium text-xs"
+                                                    className="text-sise-600 hover:text-sise-700 font-medium text-xs underline"
                                                 >
-                                                    {member.paymentHistory.length}件
+                                                    詳細
                                                 </button>
                                             </td>
                                         </tr>
@@ -1607,16 +1687,24 @@
                         )}
                     </Card>
 
-                    {/* 支払履歴モーダル */}
+                    {/* 会員詳細モーダル */}
                     {selectedMember && (
-                        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setSelectedMember(null)}>
-                            <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full p-6" onClick={(e) => e.stopPropagation()}>
+                        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => { setSelectedMember(null); setActionMessage(null); }}>
+                            <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full p-6 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
                                 <div className="flex items-center justify-between mb-4">
-                                    <h3 className="text-lg font-bold text-slate-900">{selectedMember.name} - 支払履歴</h3>
-                                    <button onClick={() => setSelectedMember(null)} className="p-2 hover:bg-slate-100 rounded-lg">
+                                    <h3 className="text-lg font-bold text-slate-900">{selectedMember.name}</h3>
+                                    <button onClick={() => { setSelectedMember(null); setActionMessage(null); }} className="p-2 hover:bg-slate-100 rounded-lg">
                                         <Icon name="x" size={20} />
                                     </button>
                                 </div>
+
+                                {/* 操作メッセージ */}
+                                {actionMessage && (
+                                    <div className={`mb-4 p-3 rounded-lg text-sm ${actionMessage.type === 'success' ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
+                                        {actionMessage.text}
+                                    </div>
+                                )}
+
                                 {/* 会員情報サマリ */}
                                 <div className="grid grid-cols-2 gap-3 mb-4 p-3 bg-slate-50 rounded-lg">
                                     <div>
@@ -1635,7 +1723,60 @@
                                         <span className="text-xs text-slate-500">ステータス</span>
                                         <p><span className={`px-2 py-1 rounded text-xs font-medium border ${getStatusColor(selectedMember.status)}`}>{getStatusLabel(selectedMember.status)}</span></p>
                                     </div>
+                                    {selectedMember.storeName && (
+                                        <div>
+                                            <span className="text-xs text-slate-500">店舗</span>
+                                            <p className="font-medium text-slate-900">{selectedMember.storeName}</p>
+                                        </div>
+                                    )}
+                                    <div>
+                                        <span className="text-xs text-slate-500">メール</span>
+                                        <p className="font-medium text-slate-900 text-sm">{selectedMember.email}</p>
+                                    </div>
                                 </div>
+
+                                {/* 操作ボタン */}
+                                <div className="mb-4">
+                                    <h4 className="text-sm font-semibold text-slate-700 mb-2">サブスクリプション操作</h4>
+                                    <div className="flex flex-wrap gap-2">
+                                        {selectedMember.status === 'ACTIVE' && (
+                                            <>
+                                                <button
+                                                    onClick={() => handleAction(selectedMember, 'pause')}
+                                                    disabled={actionLoading}
+                                                    className="flex items-center px-3 py-2 bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-700 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
+                                                >
+                                                    <Icon name="pause-circle" size={16} className="mr-1.5" />
+                                                    {actionLoading === 'pause' ? '処理中...' : '一時停止'}
+                                                </button>
+                                                <button
+                                                    onClick={() => handleAction(selectedMember, 'cancel')}
+                                                    disabled={actionLoading}
+                                                    className="flex items-center px-3 py-2 bg-red-50 hover:bg-red-100 border border-red-200 text-red-700 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
+                                                >
+                                                    <Icon name="x-circle" size={16} className="mr-1.5" />
+                                                    {actionLoading === 'cancel' ? '処理中...' : '解約'}
+                                                </button>
+                                            </>
+                                        )}
+                                        {selectedMember.status === 'PAUSED' && (
+                                            <button
+                                                onClick={() => handleAction(selectedMember, 'resume')}
+                                                disabled={actionLoading}
+                                                className="flex items-center px-3 py-2 bg-green-50 hover:bg-green-100 border border-green-200 text-green-700 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
+                                            >
+                                                <Icon name="play-circle" size={16} className="mr-1.5" />
+                                                {actionLoading === 'resume' ? '処理中...' : '再開'}
+                                            </button>
+                                        )}
+                                        {selectedMember.status === 'CANCELED' && (
+                                            <span className="px-3 py-2 bg-slate-50 text-slate-500 rounded-lg text-sm">
+                                                このサブスクリプションは既に解約済みです
+                                            </span>
+                                        )}
+                                    </div>
+                                </div>
+
                                 <h4 className="text-sm font-semibold text-slate-700 mb-3">請求・支払い履歴（最新10件）</h4>
                                 <div className="space-y-3">
                                     {selectedMember.paymentHistory.map((payment) => {
@@ -1769,19 +1910,44 @@
                                         </p>
                                         <p className="text-sm text-slate-600">
                                             {squareStatus.configured
-                                                ? `環境: ${squareStatus.environment === 'production' ? '本番' : 'Sandbox'} / Location: ${squareStatus.locationId}`
+                                                ? `${squareStatus.stores?.length || 1}店舗接続中 / 環境: ${squareStatus.environment === 'production' ? '本番' : 'Sandbox'}`
                                                 : 'Vercelダッシュボードで環境変数を設定してください'
                                             }
                                         </p>
                                     </div>
                                 </div>
 
+                                {/* 接続済み店舗一覧 */}
+                                {squareStatus.stores && squareStatus.stores.length > 0 && (
+                                    <div className="bg-slate-50 rounded-lg p-4 border border-slate-200">
+                                        <h4 className="font-semibold text-slate-900 mb-3">接続済み店舗</h4>
+                                        <div className="space-y-2">
+                                            {squareStatus.stores.map(store => (
+                                                <div key={store.id} className="flex items-center justify-between p-2 bg-white rounded border border-slate-200">
+                                                    <div>
+                                                        <span className="font-medium text-slate-900">{store.name}</span>
+                                                        <span className="text-xs text-slate-500 ml-2">ID: {store.id}</span>
+                                                    </div>
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="text-xs text-slate-500">Location: {store.locationId}</span>
+                                                        <span className={`text-xs px-2 py-0.5 rounded ${store.environment === 'production' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
+                                                            {store.environment === 'production' ? '本番' : 'Sandbox'}
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+
                                 <div className="bg-slate-50 rounded-lg p-4 border border-slate-200">
                                     <h4 className="font-semibold text-slate-900 mb-3">環境変数の設定方法</h4>
                                     <p className="text-sm text-slate-600 mb-3">
                                         Vercelダッシュボード &gt; Settings &gt; Environment Variables に以下を設定:
                                     </p>
-                                    <div className="space-y-2 font-mono text-xs">
+
+                                    <p className="text-xs font-semibold text-slate-700 mb-2">単一店舗の場合:</p>
+                                    <div className="space-y-2 font-mono text-xs mb-4">
                                         <div className="flex items-center p-2 bg-white rounded border border-slate-200">
                                             <span className="text-sise-600 font-semibold w-64">SQUARE_ACCESS_TOKEN</span>
                                             <span className="text-slate-500">= sq0atp-... or EAAA...</span>
@@ -1794,9 +1960,24 @@
                                             <span className="text-sise-600 font-semibold w-64">SQUARE_ENVIRONMENT</span>
                                             <span className="text-slate-500">= sandbox or production</span>
                                         </div>
+                                    </div>
+
+                                    <p className="text-xs font-semibold text-slate-700 mb-2">複数店舗の場合（店舗ごとに番号を付与）:</p>
+                                    <div className="space-y-2 font-mono text-xs">
                                         <div className="flex items-center p-2 bg-white rounded border border-slate-200">
-                                            <span className="text-sise-600 font-semibold w-64">SQUARE_DEFAULT_MONTHLY_PRICE</span>
-                                            <span className="text-slate-500">= 10000</span>
+                                            <span className="text-sise-600 font-semibold w-64">SQUARE_STORE_1_NAME</span>
+                                            <span className="text-slate-500">= 新宿店</span>
+                                        </div>
+                                        <div className="flex items-center p-2 bg-white rounded border border-slate-200">
+                                            <span className="text-sise-600 font-semibold w-64">SQUARE_STORE_1_ACCESS_TOKEN</span>
+                                            <span className="text-slate-500">= 店舗1のトークン</span>
+                                        </div>
+                                        <div className="flex items-center p-2 bg-white rounded border border-slate-200">
+                                            <span className="text-sise-600 font-semibold w-64">SQUARE_STORE_1_LOCATION_ID</span>
+                                            <span className="text-slate-500">= 店舗1のロケーションID</span>
+                                        </div>
+                                        <div className="flex items-center p-2 bg-slate-100 rounded border border-slate-200">
+                                            <span className="text-slate-500">... 2〜5も同様 (SQUARE_STORE_2_*, SQUARE_STORE_3_* ...)</span>
                                         </div>
                                     </div>
                                 </div>
@@ -1858,8 +2039,9 @@
             const [isSidebarOpen, setIsSidebarOpen] = useState(false);
             const [isDarkMode, setIsDarkMode] = useState(false);
 
-            // Square データ取得
-            const { memberData, refreshSquareData } = useSquareData();
+            const [activeStoreId, setActiveStoreId] = useState('all');
+            // Square データ取得（店舗選択に連動）
+            const { memberData, refreshSquareData, operateSubscription } = useSquareData(activeStoreId);
             // 日報データ取得
             const { reportData, refreshReportData } = useDailyReportData();
 
@@ -1891,7 +2073,7 @@
                     case 'reports':
                         return <DailyReportListView reportData={reportData} />;
                     case 'members':
-                        return <MemberManagementView memberData={memberData} refreshSquareData={refreshSquareData} />;
+                        return <MemberManagementView memberData={memberData} refreshSquareData={refreshSquareData} operateSubscription={operateSubscription} activeStoreId={activeStoreId} />;
                     case 'settings':
                         return <SettingsView onSettingsSaved={() => {}} />;
                     default:
@@ -1927,6 +2109,19 @@
                                 </div>
                             </div>
                             <div className="flex items-center gap-2">
+                                {/* 店舗セレクター */}
+                                {memberData.stores && memberData.stores.length > 1 && (
+                                    <select
+                                        value={activeStoreId}
+                                        onChange={(e) => setActiveStoreId(e.target.value)}
+                                        className="px-3 py-1.5 border border-slate-300 rounded-lg text-sm focus:border-sise-500 outline-none bg-white"
+                                    >
+                                        <option value="all">全店舗</option>
+                                        {memberData.stores.map(s => (
+                                            <option key={s.id} value={s.id}>{s.name}</option>
+                                        ))}
+                                    </select>
+                                )}
                                 <button
                                     onClick={() => { refreshReportData(); refreshSquareData(); }}
                                     className="p-2 rounded-lg hover:bg-slate-100 text-slate-600"
