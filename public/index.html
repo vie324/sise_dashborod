@@ -924,7 +924,7 @@
                                     className="px-4 py-2 border border-slate-300 rounded-lg focus:border-sise-500 focus:ring-1 focus:ring-sise-500 outline-none"
                                 >
                                     <option value="all">全店舗</option>
-                                    {stores.map(s => (
+                                    {serverStores.map(s => (
                                         <option key={s.id} value={s.name}>{s.name}</option>
                                     ))}
                                 </select>
@@ -1170,7 +1170,7 @@
                                 className="px-3 py-2 border border-slate-300 rounded-lg text-sm focus:border-sise-500 outline-none"
                             >
                                 <option value="all">全店舗</option>
-                                {stores.map(s => (
+                                {serverStores.map(s => (
                                     <option key={s.id} value={s.name}>{s.name}</option>
                                 ))}
                             </select>
