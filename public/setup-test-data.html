@@ -321,7 +321,10 @@
                                         subscription_plan_id: '#sise-plan',
                                         phases: [{
                                             cadence: 'MONTHLY',
-                                            recurring_price_money: { amount: 10000, currency: 'JPY' }
+                                            pricing: {
+                                                type: 'STATIC',
+                                                price_money: { amount: 10000, currency: 'JPY' }
+                                            }
                                         }]
                                     }
                                 },
@@ -333,7 +336,10 @@
                                         subscription_plan_id: '#sise-plan',
                                         phases: [{
                                             cadence: 'MONTHLY',
-                                            recurring_price_money: { amount: 15000, currency: 'JPY' }
+                                            pricing: {
+                                                type: 'STATIC',
+                                                price_money: { amount: 15000, currency: 'JPY' }
+                                            }
                                         }]
                                     }
                                 }
@@ -369,7 +375,10 @@
                                 subscription_plan_id: parentPlanId,
                                 phases: [{
                                     cadence: 'MONTHLY',
-                                    recurring_price_money: { amount: 10000, currency: 'JPY' }
+                                    pricing: {
+                                        type: 'STATIC',
+                                        price_money: { amount: 10000, currency: 'JPY' }
+                                    }
                                 }]
                             }
                         }
@@ -387,7 +396,10 @@
                                 subscription_plan_id: parentPlanId,
                                 phases: [{
                                     cadence: 'MONTHLY',
-                                    recurring_price_money: { amount: 15000, currency: 'JPY' }
+                                    pricing: {
+                                        type: 'STATIC',
+                                        price_money: { amount: 15000, currency: 'JPY' }
+                                    }
                                 }]
                             }
                         }
@@ -590,7 +602,21 @@
                                 type: 'SUBSCRIPTION_PLAN',
                                 id: '#diag-test-plan',
                                 subscription_plan_data: {
-                                    name: 'Diagnostic Test Plan'
+                                    name: 'Diagnostic Test Plan',
+                                    subscription_plan_variations: [{
+                                        type: 'SUBSCRIPTION_PLAN_VARIATION',
+                                        id: '#diag-test-var',
+                                        subscription_plan_variation_data: {
+                                            name: 'Diagnostic Variation',
+                                            phases: [{
+                                                cadence: 'MONTHLY',
+                                                pricing: {
+                                                    type: 'STATIC',
+                                                    price_money: { amount: 100, currency: 'JPY' }
+                                                }
+                                            }]
+                                        }
+                                    }]
                                 }
                             }]
                         }]
