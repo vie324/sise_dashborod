@@ -310,6 +310,54 @@
         };
 
         // ========================================
+        // スタッフ・アクセス管理
+        // ========================================
+
+        const STAFF_STORAGE_KEY = 'sise_staff_config';
+
+        // URLパラメータからアクセス情報をデコード
+        const parseAccessFromUrl = () => {
+            const params = new URLSearchParams(window.location.search);
+            const token = params.get('v');
+            if (!token) return null;
+            try {
+                const json = decodeURIComponent(escape(atob(token)));
+                const decoded = JSON.parse(json);
+                return {
+                    name: decoded.n || '不明',
+                    role: decoded.r || 'staff',
+                    storeIds: decoded.sid || [],
+                };
+            } catch (e) {
+                console.warn('Invalid access token');
+                return null;
+            }
+        };
+
+        // アクセストークン生成（UTF-8対応）
+        const generateStaffToken = (staff) => {
+            const payload = { n: staff.name, r: staff.role, sid: staff.storeIds };
+            return btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
+        };
+
+        // スタッフ用URL生成
+        const generateStaffUrl = (staff) => {
+            const token = generateStaffToken(staff);
+            const base = window.location.origin + window.location.pathname;
+            return `${base}?v=${token}`;
+        };
+
+        // localStorage管理
+        const loadStaffList = () => {
+            try { return JSON.parse(localStorage.getItem(STAFF_STORAGE_KEY)) || []; }
+            catch { return []; }
+        };
+        const saveStaffList = (list) => localStorage.setItem(STAFF_STORAGE_KEY, JSON.stringify(list));
+
+        // 現在のアクセス情報（URLから解析）
+        const currentAccess = parseAccessFromUrl();
+
+        // ========================================
         // ヘルパー関数
         // ========================================
 
@@ -372,7 +420,7 @@
         // Square API連携
         // ========================================
 
-        const useSquareData = (activeStoreId) => {
+        const useSquareData = (activeStoreId, allowedStoreIds) => {
             const [memberData, setMemberData] = useState({
                 totalMembers: 0,
                 activeMembers: 0,
@@ -458,10 +506,14 @@
                 const stores = serverConfig.stores || [];
                 const defaultMonthlyPrice = serverConfig.defaultMonthlyPrice;
 
-                // 取得対象の店舗を決定
+                // 取得対象の店舗を決定（アクセス制限適用）
+                let availStores = stores;
+                if (allowedStoreIds && allowedStoreIds.length > 0) {
+                    availStores = stores.filter(s => allowedStoreIds.includes(s.id));
+                }
                 const targetStores = (activeStoreId && activeStoreId !== 'all')
-                    ? stores.filter(s => s.id === activeStoreId)
-                    : stores;
+                    ? availStores.filter(s => s.id === activeStoreId)
+                    : availStores;
 
                 if (targetStores.length === 0) {
                     setMemberData(prev => ({ ...prev, stores, loading: false, error: '対象店舗が見つかりません' }));
@@ -681,7 +733,7 @@
                         error: error.message
                     }));
                 }
-            }, [activeStoreId]);
+            }, [activeStoreId, allowedStoreIds]);
 
             useEffect(() => {
                 fetchSquareData();
@@ -1020,7 +1072,10 @@
                                     className="px-4 py-2 border border-slate-300 rounded-lg focus:border-sise-500 focus:ring-1 focus:ring-sise-500 outline-none"
                                 >
                                     <option value="all">全店舗</option>
-                                    {serverStores.map(s => (
+                                    {(currentAccess
+                                        ? serverStores.filter(s => currentAccess.storeIds.includes(s.id))
+                                        : serverStores
+                                    ).map(s => (
                                         <option key={s.id} value={s.name}>{s.name}</option>
                                     ))}
                                 </select>
@@ -1266,7 +1321,10 @@
                                 className="px-3 py-2 border border-slate-300 rounded-lg text-sm focus:border-sise-500 outline-none"
                             >
                                 <option value="all">全店舗</option>
-                                {serverStores.map(s => (
+                                {(currentAccess
+                                    ? serverStores.filter(s => currentAccess.storeIds.includes(s.id))
+                                    : serverStores
+                                ).map(s => (
                                     <option key={s.id} value={s.name}>{s.name}</option>
                                 ))}
                             </select>
@@ -1849,8 +1907,8 @@
                                     </div>
                                 </div>
 
-                                {/* 操作ボタン */}
-                                <div className="mb-4">
+                                {/* 操作ボタン（管理者・責任者のみ） */}
+                                {(!currentAccess || currentAccess.role === 'manager') && <div className="mb-4">
                                     <h4 className="text-sm font-semibold text-slate-700 mb-2">サブスクリプション操作</h4>
                                     <div className="flex flex-wrap gap-2">
                                         {selectedMember.status === 'ACTIVE' && (
@@ -1889,7 +1947,7 @@
                                             </span>
                                         )}
                                     </div>
-                                </div>
+                                </div>}
 
                                 <h4 className="text-sm font-semibold text-slate-700 mb-3">請求・支払い履歴（最新10件）</h4>
                                 <div className="space-y-3">
@@ -1961,6 +2019,254 @@
                         </div>
                     </Card>
                 </div>
+            );
+        };
+
+        // ========================================
+        // スタッフ管理セクション
+        // ========================================
+
+        const StaffManagementSection = () => {
+            const [staffList, setStaffList] = useState(loadStaffList());
+            const [editingStaff, setEditingStaff] = useState(null);
+            const [isAdding, setIsAdding] = useState(false);
+            const [copiedId, setCopiedId] = useState(null);
+            const [formData, setFormData] = useState({ name: '', role: 'staff', storeIds: [] });
+
+            const handleSave = () => {
+                if (!formData.name.trim()) return;
+                let updated;
+                if (editingStaff) {
+                    updated = staffList.map(s => s.id === editingStaff.id ? { ...s, ...formData } : s);
+                } else {
+                    const newStaff = { ...formData, id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6) };
+                    updated = [...staffList, newStaff];
+                }
+                setStaffList(updated);
+                saveStaffList(updated);
+                setEditingStaff(null);
+                setIsAdding(false);
+                setFormData({ name: '', role: 'staff', storeIds: [] });
+            };
+
+            const handleDelete = (id) => {
+                if (!confirm('このスタッフを削除しますか？')) return;
+                const updated = staffList.filter(s => s.id !== id);
+                setStaffList(updated);
+                saveStaffList(updated);
+            };
+
+            const handleEdit = (staff) => {
+                setFormData({ name: staff.name, role: staff.role, storeIds: staff.storeIds || [] });
+                setEditingStaff(staff);
+                setIsAdding(true);
+            };
+
+            const handleCopyUrl = (staff) => {
+                const url = generateStaffUrl(staff);
+                navigator.clipboard.writeText(url).then(() => {
+                    setCopiedId(staff.id);
+                    setTimeout(() => setCopiedId(null), 2000);
+                });
+            };
+
+            const toggleStoreId = (storeId) => {
+                setFormData(prev => ({
+                    ...prev,
+                    storeIds: prev.storeIds.includes(storeId)
+                        ? prev.storeIds.filter(id => id !== storeId)
+                        : [...prev.storeIds, storeId]
+                }));
+            };
+
+            return (
+                <Card>
+                    <div className="flex items-center justify-between mb-4">
+                        <div>
+                            <h3 className="text-lg font-semibold text-slate-900">スタッフ管理</h3>
+                            <p className="text-xs text-sise-500 tracking-wide mt-0.5">STAFF ACCESS MANAGEMENT</p>
+                        </div>
+                        {!isAdding && (
+                            <button
+                                onClick={() => { setIsAdding(true); setEditingStaff(null); setFormData({ name: '', role: 'staff', storeIds: [] }); }}
+                                className="flex items-center px-3 py-2 bg-sise-500 hover:bg-sise-600 text-white rounded-xl text-sm font-medium shadow-lg shadow-sise-500/25 transition-all"
+                            >
+                                <Icon name="user-plus" size={16} className="mr-1.5" />
+                                スタッフを追加
+                            </button>
+                        )}
+                    </div>
+
+                    {/* 追加・編集フォーム */}
+                    {isAdding && (
+                        <div className="mb-6 p-4 bg-sise-50/50 rounded-xl border border-sise-200 animate-scale-in">
+                            <h4 className="font-semibold text-slate-800 mb-3">
+                                {editingStaff ? 'スタッフ編集' : '新規スタッフ追加'}
+                            </h4>
+                            <div className="space-y-3">
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-700 mb-1">名前</label>
+                                    <input
+                                        type="text"
+                                        value={formData.name}
+                                        onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
+                                        placeholder="例: 田中太郎"
+                                        className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:border-sise-400 focus:ring-1 focus:ring-sise-400/30 outline-none"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-700 mb-1">役割</label>
+                                    <div className="flex gap-3">
+                                        <label className={`flex items-center px-4 py-2.5 rounded-xl border cursor-pointer transition-all ${formData.role === 'staff' ? 'bg-sise-50 border-sise-300 text-sise-700' : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'}`}>
+                                            <input type="radio" name="role" value="staff" checked={formData.role === 'staff'} onChange={() => setFormData(prev => ({ ...prev, role: 'staff' }))} className="sr-only" />
+                                            <Icon name="user" size={16} className="mr-2" />
+                                            <div>
+                                                <p className="text-sm font-medium">スタッフ</p>
+                                                <p className="text-[10px] text-slate-400">自店舗のみ閲覧</p>
+                                            </div>
+                                        </label>
+                                        <label className={`flex items-center px-4 py-2.5 rounded-xl border cursor-pointer transition-all ${formData.role === 'manager' ? 'bg-sise-50 border-sise-300 text-sise-700' : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'}`}>
+                                            <input type="radio" name="role" value="manager" checked={formData.role === 'manager'} onChange={() => setFormData(prev => ({ ...prev, role: 'manager' }))} className="sr-only" />
+                                            <Icon name="shield" size={16} className="mr-2" />
+                                            <div>
+                                                <p className="text-sm font-medium">店舗責任者</p>
+                                                <p className="text-[10px] text-slate-400">複数店舗閲覧可</p>
+                                            </div>
+                                        </label>
+                                    </div>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-700 mb-1">
+                                        {formData.role === 'manager' ? '閲覧可能な店舗（複数選択可）' : '所属店舗'}
+                                    </label>
+                                    {serverStores.length > 0 ? (
+                                        <div className="space-y-2">
+                                            {serverStores.map(store => (
+                                                <label key={store.id} className={`flex items-center px-3 py-2 rounded-lg border cursor-pointer transition-all ${formData.storeIds.includes(store.id) ? 'bg-sise-50 border-sise-300' : 'bg-white border-slate-200 hover:border-slate-300'}`}>
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={formData.storeIds.includes(store.id)}
+                                                        onChange={() => toggleStoreId(store.id)}
+                                                        className="w-4 h-4 text-sise-500 border-slate-300 rounded focus:ring-sise-400"
+                                                    />
+                                                    <span className="ml-2 text-sm text-slate-700">{store.name}</span>
+                                                    <span className="ml-auto text-xs text-slate-400">ID: {store.id}</span>
+                                                </label>
+                                            ))}
+                                        </div>
+                                    ) : (
+                                        <p className="text-sm text-slate-500 bg-slate-50 p-3 rounded-lg">
+                                            店舗が未設定です。先にSquare APIを接続してください。<br />
+                                            デモモードでも手動で店舗IDを指定できます。
+                                        </p>
+                                    )}
+                                    {serverStores.length === 0 && (
+                                        <div className="mt-2">
+                                            <label className="block text-xs font-medium text-slate-500 mb-1">店舗ID（手動入力、カンマ区切り）</label>
+                                            <input
+                                                type="text"
+                                                value={formData.storeIds.join(',')}
+                                                onChange={(e) => setFormData(prev => ({ ...prev, storeIds: e.target.value.split(',').map(s => s.trim()).filter(Boolean) }))}
+                                                placeholder="例: 1,2,3"
+                                                className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:border-sise-400 outline-none"
+                                            />
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                            <div className="flex justify-end gap-2 mt-4">
+                                <button
+                                    onClick={() => { setIsAdding(false); setEditingStaff(null); }}
+                                    className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-xl transition-colors"
+                                >
+                                    キャンセル
+                                </button>
+                                <button
+                                    onClick={handleSave}
+                                    disabled={!formData.name.trim() || formData.storeIds.length === 0}
+                                    className="px-4 py-2 bg-sise-500 hover:bg-sise-600 text-white rounded-xl text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                    {editingStaff ? '更新' : '追加'}
+                                </button>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* スタッフ一覧 */}
+                    {staffList.length > 0 ? (
+                        <div className="space-y-3">
+                            {staffList.map(staff => (
+                                <div key={staff.id} className="p-4 bg-white rounded-xl border border-slate-200 hover:border-sise-200 transition-colors">
+                                    <div className="flex items-start justify-between">
+                                        <div className="flex items-center">
+                                            <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${staff.role === 'manager' ? 'bg-amber-50 text-amber-600' : 'bg-sise-50 text-sise-600'}`}>
+                                                <Icon name={staff.role === 'manager' ? 'shield' : 'user'} size={20} />
+                                            </div>
+                                            <div className="ml-3">
+                                                <p className="font-semibold text-slate-800">{staff.name}</p>
+                                                <div className="flex items-center gap-2 mt-0.5">
+                                                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${staff.role === 'manager' ? 'bg-amber-100 text-amber-700' : 'bg-sise-100 text-sise-700'}`}>
+                                                        {staff.role === 'manager' ? '店舗責任者' : 'スタッフ'}
+                                                    </span>
+                                                    <span className="text-xs text-slate-400">
+                                                        {(staff.storeIds || []).map(sid => {
+                                                            const store = serverStores.find(s => s.id === sid);
+                                                            return store ? store.name : `店舗${sid}`;
+                                                        }).join(', ')}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div className="flex items-center gap-1">
+                                            <button
+                                                onClick={() => handleCopyUrl(staff)}
+                                                className={`flex items-center px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all ${copiedId === staff.id ? 'bg-green-100 text-green-700' : 'bg-slate-100 hover:bg-sise-50 text-slate-600 hover:text-sise-600'}`}
+                                                title="URLをコピー"
+                                            >
+                                                <Icon name={copiedId === staff.id ? 'check' : 'link'} size={14} className="mr-1" />
+                                                {copiedId === staff.id ? 'コピー済' : 'URL'}
+                                            </button>
+                                            <button
+                                                onClick={() => handleEdit(staff)}
+                                                className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
+                                                title="編集"
+                                            >
+                                                <Icon name="pencil" size={14} />
+                                            </button>
+                                            <button
+                                                onClick={() => handleDelete(staff.id)}
+                                                className="p-1.5 rounded-lg hover:bg-red-50 text-slate-400 hover:text-red-500 transition-colors"
+                                                title="削除"
+                                            >
+                                                <Icon name="trash-2" size={14} />
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    ) : (
+                        !isAdding && (
+                            <div className="text-center py-8">
+                                <div className="w-16 h-16 bg-slate-100 rounded-2xl flex items-center justify-center mx-auto mb-3">
+                                    <Icon name="users" size={28} className="text-slate-300" />
+                                </div>
+                                <p className="text-slate-500 text-sm">スタッフが登録されていません</p>
+                                <p className="text-slate-400 text-xs mt-1">「スタッフを追加」から登録してください</p>
+                            </div>
+                        )
+                    )}
+
+                    {/* ヘルプ */}
+                    <div className="mt-4 p-3 bg-slate-50 rounded-lg border border-slate-200">
+                        <p className="text-xs text-slate-500 leading-relaxed">
+                            <Icon name="info" size={12} className="inline mr-1" />
+                            各スタッフの「URL」ボタンで専用リンクをコピーできます。
+                            そのURLを開くと、割り当てられた店舗のデータのみ表示されます。
+                            店舗責任者は複数店舗を閲覧可能です。管理者（URLなし）は全データにアクセスできます。
+                        </p>
+                    </div>
+                </Card>
             );
         };
 
@@ -2126,6 +2432,9 @@
                         </div>
                     </Card>
 
+                    {/* スタッフ管理 */}
+                    <StaffManagementSection />
+
                     {/* セキュリティ情報 */}
                     <Card className="bg-green-50 border-green-200">
                         <div className="flex items-start">
@@ -2153,9 +2462,15 @@
             const [isSidebarOpen, setIsSidebarOpen] = useState(false);
             const [isDarkMode, setIsDarkMode] = useState(false);
 
-            const [activeStoreId, setActiveStoreId] = useState('all');
-            // Square データ取得（店舗選択に連動）
-            const { memberData, refreshSquareData, operateSubscription } = useSquareData(activeStoreId);
+            const isStaffMode = !!currentAccess;
+            const [activeStoreId, setActiveStoreId] = useState(
+                isStaffMode && currentAccess.storeIds.length === 1 ? currentAccess.storeIds[0] : 'all'
+            );
+            // Square データ取得（店舗選択に連動、アクセス制限適用）
+            const { memberData, refreshSquareData, operateSubscription } = useSquareData(
+                activeStoreId,
+                isStaffMode ? currentAccess.storeIds : null
+            );
             // 日報データ取得
             const { reportData, refreshReportData } = useDailyReportData();
 
@@ -2172,7 +2487,7 @@
                 { id: 'dashboard', label: 'ダッシュボード', icon: 'layout-dashboard' },
                 { id: 'reports', label: '日報一覧', icon: 'clipboard-list' },
                 { id: 'members', label: '会員管理', icon: 'users' },
-                { id: 'settings', label: '設定', icon: 'settings' },
+                ...(!isStaffMode ? [{ id: 'settings', label: '設定', icon: 'settings' }] : []),
             ];
 
             const renderView = () => {
@@ -2189,7 +2504,9 @@
                     case 'members':
                         return <MemberManagementView memberData={memberData} refreshSquareData={refreshSquareData} operateSubscription={operateSubscription} activeStoreId={activeStoreId} />;
                     case 'settings':
-                        return <SettingsView onSettingsSaved={() => {}} />;
+                        return isStaffMode
+                            ? <DashboardView memberData={memberData} reportData={reportData} selectedStore={selectedStore} setSelectedStore={setSelectedStore} />
+                            : <SettingsView onSettingsSaved={() => {}} />;
                     default:
                         return <DashboardView
                             memberData={memberData}
@@ -2223,19 +2540,34 @@
                                 </div>
                             </div>
                             <div className="flex items-center gap-1.5">
-                                {/* 店舗セレクター */}
-                                {memberData.stores && memberData.stores.length > 1 && (
-                                    <select
-                                        value={activeStoreId}
-                                        onChange={(e) => setActiveStoreId(e.target.value)}
-                                        className="px-3 py-1.5 border border-sise-200 rounded-xl text-xs font-medium focus:border-sise-400 focus:ring-1 focus:ring-sise-400/30 outline-none bg-sise-50/50 text-sise-700"
-                                    >
-                                        <option value="all">全店舗</option>
-                                        {memberData.stores.map(s => (
-                                            <option key={s.id} value={s.id}>{s.name}</option>
-                                        ))}
-                                    </select>
+                                {/* スタッフ表示バッジ */}
+                                {isStaffMode && (
+                                    <div className="flex items-center px-3 py-1.5 bg-sise-50 border border-sise-200 rounded-xl">
+                                        <Icon name={currentAccess.role === 'manager' ? 'shield' : 'user'} size={14} className="text-sise-500 mr-1.5" />
+                                        <span className="text-xs font-medium text-sise-700">{currentAccess.name}</span>
+                                        <span className="text-[10px] text-sise-400 ml-1.5">
+                                            {currentAccess.role === 'manager' ? '責任者' : 'スタッフ'}
+                                        </span>
+                                    </div>
                                 )}
+                                {/* 店舗セレクター（アクセス制限適用） */}
+                                {(() => {
+                                    const visibleStores = isStaffMode
+                                        ? (memberData.stores || []).filter(s => currentAccess.storeIds.includes(s.id))
+                                        : (memberData.stores || []);
+                                    return visibleStores.length > 1 ? (
+                                        <select
+                                            value={activeStoreId}
+                                            onChange={(e) => setActiveStoreId(e.target.value)}
+                                            className="px-3 py-1.5 border border-sise-200 rounded-xl text-xs font-medium focus:border-sise-400 focus:ring-1 focus:ring-sise-400/30 outline-none bg-sise-50/50 text-sise-700"
+                                        >
+                                            <option value="all">全店舗</option>
+                                            {visibleStores.map(s => (
+                                                <option key={s.id} value={s.id}>{s.name}</option>
+                                            ))}
+                                        </select>
+                                    ) : null;
+                                })()}
                                 <button
                                     onClick={() => { refreshReportData(); refreshSquareData(); }}
                                     className="p-2 rounded-xl hover:bg-sise-50 text-slate-500 hover:text-sise-600 transition-colors"
@@ -2284,8 +2616,21 @@
                             ))}
                         </nav>
 
-                        {/* データ更新時刻 */}
+                        {/* データ更新時刻 / スタッフ情報 */}
                         <div className="absolute bottom-0 left-0 right-0 p-4 border-t border-slate-200/50">
+                            {isStaffMode && (
+                                <div className="flex items-center mb-2 px-1">
+                                    <div className={`w-7 h-7 rounded-lg flex items-center justify-center ${currentAccess.role === 'manager' ? 'bg-amber-50 text-amber-500' : 'bg-sise-50 text-sise-500'}`}>
+                                        <Icon name={currentAccess.role === 'manager' ? 'shield' : 'user'} size={14} />
+                                    </div>
+                                    <div className="ml-2">
+                                        <p className="text-xs font-medium text-slate-700 leading-tight">{currentAccess.name}</p>
+                                        <p className="text-[10px] text-slate-400">
+                                            {currentAccess.role === 'manager' ? '店舗責任者' : 'スタッフ'}
+                                        </p>
+                                    </div>
+                                </div>
+                            )}
                             <p className="text-[10px] text-slate-400 tracking-wide">
                                 LAST UPDATE: {reportData.lastUpdated
                                     ? reportData.lastUpdated.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })
