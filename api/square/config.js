@@ -2,7 +2,8 @@
 // Used by the frontend to know available stores, locationIds and environment
 
 export default function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  const allowedOrigin = process.env.ALLOWED_ORIGIN || '*';
+  res.setHeader('Access-Control-Allow-Origin', allowedOrigin);
   res.setHeader('Cache-Control', 'no-store');
 
   if (req.method !== 'GET') {
