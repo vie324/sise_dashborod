@@ -25,7 +25,7 @@
     <!-- Lucide Icons -->
     <script src="https://unpkg.com/lucide@latest"></script>
 
-    <!-- Custom Config for Tailwind (si'se Theme - Sage Green) -->
+    <!-- Custom Config for Tailwind (si'se Theme - Enhanced) -->
     <script>
         tailwind.config = {
             darkMode: 'class',
@@ -33,22 +33,32 @@
                 extend: {
                     colors: {
                         sise: {
-                            50: '#f1f8f4',
-                            100: '#dff0e6',
-                            200: '#c1e1cf',
-                            300: '#94ccac',
-                            400: '#63b185',
-                            500: '#3f9968', // Brand Primary - Sage Green
-                            600: '#2f7d53',
-                            700: '#276444',
-                            800: '#225038',
-                            900: '#1d422f',
+                            50: '#f0faf4',
+                            100: '#dbf2e3',
+                            200: '#b9e5ca',
+                            300: '#88d1a8',
+                            400: '#55b87f',
+                            500: '#33a065',
+                            600: '#238050',
+                            700: '#1d6641',
+                            800: '#1a5136',
+                            900: '#16432d',
+                            950: '#0b2519',
+                        },
+                        coral: {
+                            50: '#fff5f2',
+                            100: '#ffe8e0',
+                            200: '#ffd0c2',
+                            300: '#ffab93',
+                            400: '#ff7f5c',
+                            500: '#ff5733',
+                            600: '#e63e1a',
                         },
                         accent: {
                             50: '#fefce8',
                             100: '#fef9c3',
                             400: '#facc15',
-                            500: '#eab308', // Warm Gold accent
+                            500: '#eab308',
                             600: '#ca8a04',
                         }
                     },
@@ -58,7 +68,7 @@
                     },
                     keyframes: {
                         'fade-in-up': {
-                            '0%': { opacity: '0', transform: 'translateY(16px)' },
+                            '0%': { opacity: '0', transform: 'translateY(20px)' },
                             '100%': { opacity: '1', transform: 'translateY(0)' },
                         },
                         'fade-in': {
@@ -66,206 +76,336 @@
                             '100%': { opacity: '1' },
                         },
                         'slide-in-right': {
-                            '0%': { opacity: '0', transform: 'translateX(-20px)' },
+                            '0%': { opacity: '0', transform: 'translateX(-24px)' },
                             '100%': { opacity: '1', transform: 'translateX(0)' },
                         },
                         'scale-in': {
-                            '0%': { opacity: '0', transform: 'scale(0.95)' },
+                            '0%': { opacity: '0', transform: 'scale(0.92)' },
                             '100%': { opacity: '1', transform: 'scale(1)' },
                         },
                         'count-up': {
-                            '0%': { opacity: '0', transform: 'translateY(8px)' },
+                            '0%': { opacity: '0', transform: 'translateY(10px)' },
                             '100%': { opacity: '1', transform: 'translateY(0)' },
+                        },
+                        'float': {
+                            '0%, 100%': { transform: 'translateY(0px)' },
+                            '50%': { transform: 'translateY(-12px)' },
+                        },
+                        'float-slow': {
+                            '0%, 100%': { transform: 'translateY(0px) rotate(0deg)' },
+                            '50%': { transform: 'translateY(-8px) rotate(3deg)' },
+                        },
+                        'gradient-shift': {
+                            '0%': { backgroundPosition: '0% 50%' },
+                            '50%': { backgroundPosition: '100% 50%' },
+                            '100%': { backgroundPosition: '0% 50%' },
+                        },
+                        'shimmer': {
+                            '0%': { backgroundPosition: '-200% 0' },
+                            '100%': { backgroundPosition: '200% 0' },
+                        },
+                        'glow-pulse': {
+                            '0%, 100%': { boxShadow: '0 0 20px rgba(51,160,101,0.15)' },
+                            '50%': { boxShadow: '0 0 40px rgba(51,160,101,0.3)' },
                         },
                     },
                     animation: {
-                        'fade-in-up': 'fade-in-up 0.5s ease-out forwards',
-                        'fade-in': 'fade-in 0.4s ease-out forwards',
-                        'slide-in-right': 'slide-in-right 0.4s ease-out forwards',
-                        'scale-in': 'scale-in 0.3s ease-out forwards',
-                        'count-up': 'count-up 0.6s ease-out forwards',
+                        'fade-in-up': 'fade-in-up 0.6s cubic-bezier(0.16,1,0.3,1) forwards',
+                        'fade-in': 'fade-in 0.5s ease-out forwards',
+                        'slide-in-right': 'slide-in-right 0.5s cubic-bezier(0.16,1,0.3,1) forwards',
+                        'scale-in': 'scale-in 0.4s cubic-bezier(0.16,1,0.3,1) forwards',
+                        'count-up': 'count-up 0.7s cubic-bezier(0.16,1,0.3,1) forwards',
+                        'float': 'float 6s ease-in-out infinite',
+                        'float-slow': 'float-slow 8s ease-in-out infinite',
+                        'gradient-shift': 'gradient-shift 8s ease infinite',
+                        'shimmer': 'shimmer 2s linear infinite',
+                        'glow-pulse': 'glow-pulse 3s ease-in-out infinite',
                     },
                 }
             }
         }
     </script>
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;500;600;700&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;500;600;700;800&display=swap');
 
         * {
             -webkit-tap-highlight-color: transparent;
             -webkit-touch-callout: none;
+            box-sizing: border-box;
         }
 
         body {
-            background-color: #f6f9f7;
-            color: #1e293b;
+            background-color: #f4f8f5;
+            color: #1a2e23;
             font-family: "Noto Sans JP", "Hiragino Sans", sans-serif;
             margin: 0;
             padding: 0;
             -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
         }
 
-        /* Dark Mode Styles */
-        .dark body {
-            background-color: #0c1a12;
-            color: #e2e8f0;
-        }
+        /* Dark Mode */
+        .dark body { background-color: #0a1610; color: #e2e8f0; }
+        .dark .bg-white { background-color: #12231b !important; }
+        .dark .bg-slate-50 { background-color: #0d1c14 !important; }
+        .dark .text-slate-900 { color: #f1f5f9 !important; }
+        .dark .text-slate-800 { color: #e2e8f0 !important; }
+        .dark .text-slate-700 { color: #cbd5e1 !important; }
+        .dark .text-slate-600 { color: #94a3b8 !important; }
+        .dark .border-slate-200 { border-color: #1e3a2c !important; }
+        .dark .border-sise-200 { border-color: #1d6641 !important; }
+        .dark .glass-panel { background: rgba(18,35,27,0.9); border-color: rgba(51,160,101,0.15); }
+        .dark .glass-card { background: rgba(18,35,27,0.7); border-color: rgba(51,160,101,0.12); }
 
-        .dark .bg-white {
-            background-color: #162420 !important;
-        }
-
-        .dark .bg-slate-50 {
-            background-color: #0c1a12 !important;
-        }
-
-        .dark .text-slate-900 {
-            color: #f1f5f9 !important;
-        }
-
-        .dark .text-slate-700 {
-            color: #cbd5e1 !important;
-        }
-
-        .dark .text-slate-600 {
-            color: #94a3b8 !important;
-        }
-
-        .dark .border-slate-200 {
-            border-color: #1e3a2c !important;
-        }
-
-        .dark .border-sise-200 {
-            border-color: #276444 !important;
-        }
-
-        /* Custom Scrollbar */
-        ::-webkit-scrollbar {
-            width: 6px;
-        }
-        ::-webkit-scrollbar-track {
-            background: transparent;
-        }
-        ::-webkit-scrollbar-thumb {
-            background: #c1e1cf;
-            border-radius: 3px;
-        }
-        ::-webkit-scrollbar-thumb:hover {
-            background: #94ccac;
-        }
+        /* Scrollbar */
+        ::-webkit-scrollbar { width: 5px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #b9e5ca; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: #88d1a8; }
 
         /* Glass Panel */
         .glass-panel {
-            background: rgba(255, 255, 255, 0.85);
-            backdrop-filter: blur(20px);
-            -webkit-backdrop-filter: blur(20px);
-            border: 1px solid rgba(63, 153, 104, 0.12);
+            background: rgba(255,255,255,0.88);
+            backdrop-filter: blur(24px) saturate(1.8);
+            -webkit-backdrop-filter: blur(24px) saturate(1.8);
+            border: 1px solid rgba(51,160,101,0.1);
         }
 
-        /* Gradient backgrounds */
+        /* Glass Card */
+        .glass-card {
+            background: rgba(255,255,255,0.7);
+            backdrop-filter: blur(16px) saturate(1.4);
+            -webkit-backdrop-filter: blur(16px) saturate(1.4);
+            border: 1px solid rgba(51,160,101,0.08);
+            border-radius: 20px;
+            transition: all 0.4s cubic-bezier(0.16,1,0.3,1);
+        }
+        .glass-card:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 16px 48px -12px rgba(51,160,101,0.18);
+            border-color: rgba(51,160,101,0.2);
+        }
+
+        /* Animated mesh background */
         .bg-mesh {
             background-image:
-                radial-gradient(at 20% 20%, rgba(63, 153, 104, 0.06) 0px, transparent 60%),
-                radial-gradient(at 80% 60%, rgba(99, 177, 133, 0.05) 0px, transparent 60%),
-                radial-gradient(at 40% 80%, rgba(148, 204, 172, 0.04) 0px, transparent 60%);
+                radial-gradient(at 15% 15%, rgba(51,160,101,0.08) 0px, transparent 55%),
+                radial-gradient(at 85% 25%, rgba(85,184,127,0.06) 0px, transparent 55%),
+                radial-gradient(at 50% 80%, rgba(136,209,168,0.05) 0px, transparent 55%),
+                radial-gradient(at 80% 80%, rgba(255,87,51,0.03) 0px, transparent 55%);
         }
 
-        /* Card hover effect */
+        /* Floating orbs (decorative background) */
+        .bg-orb {
+            position: fixed;
+            border-radius: 50%;
+            filter: blur(80px);
+            opacity: 0.4;
+            pointer-events: none;
+            z-index: 0;
+        }
+        .bg-orb-1 { width: 400px; height: 400px; background: rgba(51,160,101,0.12); top: -100px; right: -100px; animation: float 8s ease-in-out infinite; }
+        .bg-orb-2 { width: 300px; height: 300px; background: rgba(85,184,127,0.08); bottom: 10%; left: -80px; animation: float-slow 10s ease-in-out infinite; }
+        .bg-orb-3 { width: 250px; height: 250px; background: rgba(255,127,92,0.06); top: 40%; right: 10%; animation: float 12s ease-in-out infinite reverse; }
+
+        @keyframes float {
+            0%, 100% { transform: translateY(0px) scale(1); }
+            50% { transform: translateY(-20px) scale(1.05); }
+        }
+        @keyframes float-slow {
+            0%, 100% { transform: translateY(0px) rotate(0deg); }
+            50% { transform: translateY(-15px) rotate(5deg); }
+        }
+
+        /* Gradient text */
+        .gradient-text {
+            background: linear-gradient(135deg, #33a065 0%, #238050 50%, #55b87f 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        /* Card hover */
         .card-hover {
-            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            transition: all 0.4s cubic-bezier(0.16,1,0.3,1);
         }
         .card-hover:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 12px 40px -12px rgba(63, 153, 104, 0.15);
+            transform: translateY(-4px);
+            box-shadow: 0 20px 50px -15px rgba(51,160,101,0.2);
         }
 
-        /* Smooth number animation */
+        /* KPI card gradient borders */
+        .kpi-card {
+            position: relative;
+            overflow: hidden;
+        }
+        .kpi-card::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0;
+            height: 3px;
+            background: linear-gradient(90deg, var(--kpi-color, #33a065), transparent);
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+        .kpi-card:hover::before { opacity: 1; }
+
+        /* Number animation */
         .num-animate {
             display: inline-block;
-            animation: count-up 0.6s ease-out forwards;
+            animation: count-up 0.7s cubic-bezier(0.16,1,0.3,1) forwards;
         }
 
-        /* Staggered animation delays */
-        .stagger-1 { animation-delay: 0.05s; opacity: 0; }
-        .stagger-2 { animation-delay: 0.10s; opacity: 0; }
-        .stagger-3 { animation-delay: 0.15s; opacity: 0; }
-        .stagger-4 { animation-delay: 0.20s; opacity: 0; }
-        .stagger-5 { animation-delay: 0.25s; opacity: 0; }
+        /* Staggered animations */
+        .stagger-1 { animation-delay: 0.06s; opacity: 0; }
+        .stagger-2 { animation-delay: 0.12s; opacity: 0; }
+        .stagger-3 { animation-delay: 0.18s; opacity: 0; }
+        .stagger-4 { animation-delay: 0.24s; opacity: 0; }
+        .stagger-5 { animation-delay: 0.30s; opacity: 0; }
+        .stagger-6 { animation-delay: 0.36s; opacity: 0; }
 
-        /* Status badge pulse */
+        /* Status pulse */
         .status-active::before {
             content: '';
             display: inline-block;
-            width: 6px;
-            height: 6px;
+            width: 7px; height: 7px;
             background: #22c55e;
             border-radius: 50%;
             margin-right: 6px;
-            animation: pulse 2s infinite;
+            animation: pulse-dot 2s infinite;
+        }
+        @keyframes pulse-dot {
+            0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(34,197,94,0.5); }
+            50% { opacity: 0.7; box-shadow: 0 0 0 4px rgba(34,197,94,0); }
         }
 
-        /* Loading Animation */
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.4; }
-        }
-
-        @keyframes count-up {
-            0% { opacity: 0; transform: translateY(8px); }
-            100% { opacity: 1; transform: translateY(0); }
-        }
+        /* Loading */
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
 
         .skeleton {
-            animation: pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-            background: linear-gradient(90deg, #e2e8f0 25%, #f1f5f9 50%, #e2e8f0 75%);
+            background: linear-gradient(90deg, #e8f3ec 25%, #f0faf4 50%, #e8f3ec 75%);
             background-size: 200% 100%;
-            animation: skeleton-shimmer 1.5s infinite;
+            animation: shimmer 1.5s linear infinite;
         }
-
-        @keyframes skeleton-shimmer {
+        @keyframes shimmer {
             0% { background-position: 200% 0; }
             100% { background-position: -200% 0; }
         }
 
-        /* Table row hover */
+        /* Table hover */
         .table-row-hover {
-            transition: background-color 0.15s ease;
+            transition: all 0.2s ease;
         }
         .table-row-hover:hover {
-            background-color: rgba(63, 153, 104, 0.04);
+            background-color: rgba(51,160,101,0.04);
         }
 
-        /* Mobile optimizations */
+        /* Usage counter */
+        .usage-ring {
+            transition: stroke-dashoffset 0.6s cubic-bezier(0.16,1,0.3,1);
+        }
+
+        /* Bottom Navigation (Mobile) */
+        .bottom-nav {
+            position: fixed;
+            bottom: 0; left: 0; right: 0;
+            z-index: 50;
+            background: rgba(255,255,255,0.92);
+            backdrop-filter: blur(24px) saturate(1.8);
+            -webkit-backdrop-filter: blur(24px) saturate(1.8);
+            border-top: 1px solid rgba(51,160,101,0.1);
+            padding-bottom: env(safe-area-inset-bottom);
+        }
+        .dark .bottom-nav {
+            background: rgba(18,35,27,0.92);
+            border-color: rgba(51,160,101,0.15);
+        }
+        .bottom-nav-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 6px 0 4px;
+            font-size: 10px;
+            font-weight: 500;
+            color: #94a3b8;
+            transition: all 0.2s ease;
+            position: relative;
+            flex: 1;
+            min-height: 52px;
+        }
+        .bottom-nav-item.active {
+            color: #33a065;
+        }
+        .bottom-nav-item.active::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 50%;
+            transform: translateX(-50%);
+            width: 24px; height: 3px;
+            background: linear-gradient(90deg, #33a065, #55b87f);
+            border-radius: 0 0 4px 4px;
+        }
+
+        /* Gradient button */
+        .btn-gradient {
+            background: linear-gradient(135deg, #33a065, #238050);
+            color: white;
+            border: none;
+            box-shadow: 0 4px 16px -4px rgba(51,160,101,0.4);
+            transition: all 0.3s ease;
+        }
+        .btn-gradient:hover {
+            box-shadow: 0 8px 24px -4px rgba(51,160,101,0.5);
+            transform: translateY(-1px);
+        }
+
+        /* Mobile-first */
         @media (max-width: 768px) {
-            body {
-                font-size: 16px;
-            }
-            input, select, textarea {
-                font-size: 16px !important;
-            }
-            button, a {
-                min-height: 44px;
-            }
+            body { font-size: 16px; }
+            input, select, textarea { font-size: 16px !important; }
+            button, a { min-height: 44px; }
+            .hide-mobile { display: none !important; }
+        }
+        @media (min-width: 769px) {
+            .hide-desktop { display: none !important; }
+            .bottom-nav { display: none !important; }
         }
 
-        /* Safe Area Support */
+        /* Safe Area */
         .safe-top { padding-top: env(safe-area-inset-top); }
         .safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
+
+        /* Member avatar */
+        .member-avatar {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 40px; height: 40px;
+            border-radius: 12px;
+            font-weight: 700;
+            font-size: 14px;
+            color: white;
+            flex-shrink: 0;
+        }
+
+        /* Chart tooltip custom */
+        .recharts-tooltip-wrapper .recharts-default-tooltip {
+            border-radius: 12px !important;
+            box-shadow: 0 8px 32px -8px rgba(0,0,0,0.12) !important;
+        }
     </style>
 </head>
 <body>
     <div id="root">
-        <div id="loading-indicator" style="display: flex; justify-content: center; align-items: center; min-height: 100vh; background: linear-gradient(135deg, #f6f9f7 0%, #e8f3ec 100%);">
-            <div style="text-align: center;">
-                <div style="width: 48px; height: 48px; border: 3px solid #c1e1cf; border-top: 3px solid #3f9968; border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto 24px;"></div>
-                <p style="color: #1d422f; font-size: 18px; font-family: 'Noto Sans JP', sans-serif; font-weight: 600; letter-spacing: 0.05em;">si'se</p>
-                <p style="color: #63b185; font-size: 11px; font-family: 'Noto Sans JP', sans-serif; margin-top: 8px; letter-spacing: 0.1em;">Loading...</p>
+        <div id="loading-indicator" style="display: flex; justify-content: center; align-items: center; min-height: 100vh; background: linear-gradient(160deg, #f0faf4 0%, #e0f2e7 40%, #f4f8f5 100%); position: relative; overflow: hidden;">
+            <div style="position:absolute;width:300px;height:300px;border-radius:50%;background:rgba(51,160,101,0.08);filter:blur(60px);top:-50px;right:-50px;"></div>
+            <div style="position:absolute;width:200px;height:200px;border-radius:50%;background:rgba(85,184,127,0.06);filter:blur(50px);bottom:20%;left:-40px;"></div>
+            <div style="text-align: center; position: relative; z-index: 1;">
+                <div style="width: 56px; height: 56px; border: 3px solid #b9e5ca; border-top: 3px solid #33a065; border-radius: 50%; animation: spin 0.7s linear infinite; margin: 0 auto 28px;"></div>
+                <p style="color: #16432d; font-size: 22px; font-family: 'Noto Sans JP', sans-serif; font-weight: 700; letter-spacing: 0.08em;">si'se</p>
+                <p style="color: #88d1a8; font-size: 10px; font-family: 'Noto Sans JP', sans-serif; margin-top: 10px; letter-spacing: 0.15em; text-transform: uppercase;">Dashboard Loading...</p>
             </div>
         </div>
     </div>
@@ -387,33 +527,84 @@
             return <i data-lucide={name} width={size} height={size} stroke={color} className={className}></i>;
         };
 
+        // アバターカラー生成
+        const getAvatarColor = (name) => {
+            const colors = [
+                'from-sise-400 to-sise-600',
+                'from-emerald-400 to-emerald-600',
+                'from-teal-400 to-teal-600',
+                'from-cyan-400 to-cyan-600',
+                'from-blue-400 to-blue-600',
+                'from-violet-400 to-violet-600',
+                'from-pink-400 to-pink-600',
+                'from-rose-400 to-rose-600',
+                'from-amber-400 to-amber-600',
+                'from-orange-400 to-orange-600',
+            ];
+            let hash = 0;
+            for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
+            return colors[Math.abs(hash) % colors.length];
+        };
+
+        // アバターコンポーネント
+        const Avatar = ({ name, size = 40 }) => {
+            const initial = (name || '?').charAt(0);
+            const colorClass = getAvatarColor(name || '');
+            return (
+                <div
+                    className={`member-avatar bg-gradient-to-br ${colorClass}`}
+                    style={{ width: size, height: size, fontSize: Math.round(size * 0.38) }}
+                >
+                    {initial}
+                </div>
+            );
+        };
+
         // カードコンポーネント
         const Card = ({ children, className = "", hover = false }) => (
-            <div className={`bg-white/80 backdrop-blur-sm rounded-2xl shadow-sm border border-slate-200/60 p-6 ${hover ? 'card-hover' : ''} ${className}`}>
+            <div className={`glass-card p-5 md:p-6 shadow-sm ${hover ? 'card-hover' : ''} ${className}`}>
                 {children}
             </div>
         );
 
         // KPIカードコンポーネント
-        const KpiCard = ({ title, value, subValue, trend, icon, color = "bg-sise-500" }) => (
-            <Card hover className="group">
-                <div className="flex justify-between items-start mb-4">
-                    <div className={`rounded-xl ${color} text-white shadow-lg shadow-sise-500/20 p-3 group-hover:scale-105 transition-transform duration-300`}>
-                        <Icon name={icon} size={22} />
+        const KpiCard = ({ title, value, subValue, trend, icon, color = "bg-sise-500", gradientFrom = "from-sise-400", gradientTo = "to-sise-600" }) => (
+            <Card hover className="group kpi-card relative overflow-hidden">
+                <div className="flex justify-between items-start mb-3">
+                    <div className={`rounded-xl bg-gradient-to-br ${gradientFrom} ${gradientTo} text-white shadow-lg p-3 group-hover:scale-110 transition-transform duration-400`}>
+                        <Icon name={icon} size={20} />
                     </div>
                     {trend !== null && trend !== undefined && (
-                        <span className={`font-medium ${trend >= 0 ? 'text-emerald-600 bg-emerald-50' : 'text-red-500 bg-red-50'} flex items-center px-2.5 py-1 rounded-full text-xs`}>
+                        <span className={`font-semibold ${trend >= 0 ? 'text-emerald-600 bg-emerald-50/80' : 'text-red-500 bg-red-50/80'} flex items-center px-2.5 py-1 rounded-full text-xs backdrop-blur-sm`}>
                             {trend >= 0 ? '+' : ''}{trend}%
                             <Icon name={trend >= 0 ? 'trending-up' : 'trending-down'} size={12} className="ml-1" />
                         </span>
                     )}
                 </div>
-                <h3 className="text-slate-500 font-medium text-xs tracking-wide uppercase">{title}</h3>
-                <div className="flex items-baseline mt-1.5">
-                    <span className="text-2xl font-bold text-slate-900 num-animate">{value}</span>
+                <h3 className="text-slate-500 font-medium text-[11px] tracking-wider uppercase">{title}</h3>
+                <div className="flex items-baseline mt-1">
+                    <span className="text-2xl md:text-3xl font-extrabold text-slate-900 num-animate tracking-tight">{value}</span>
                 </div>
-                {subValue && <p className="text-xs text-slate-400 mt-1.5">{subValue}</p>}
+                {subValue && <p className="text-[11px] text-slate-400 mt-1.5">{subValue}</p>}
             </Card>
+        );
+
+        // セクションヘッダーコンポーネント
+        const SectionHeader = ({ title, subtitle, icon, children }) => (
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-1">
+                <div className="flex items-center">
+                    {icon && (
+                        <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-sise-400 to-sise-600 text-white flex items-center justify-center mr-3 shadow-lg shadow-sise-500/20">
+                            <Icon name={icon} size={18} />
+                        </div>
+                    )}
+                    <div>
+                        <h2 className="text-lg md:text-xl font-bold text-slate-800">{title}</h2>
+                        {subtitle && <p className="text-[10px] text-sise-500 tracking-widest font-semibold uppercase">{subtitle}</p>}
+                    </div>
+                </div>
+                {children}
+            </div>
         );
 
         // ========================================
@@ -954,6 +1145,96 @@
         };
 
         // ========================================
+        // 会員利用回数管理（Google Sheets連携）
+        // ========================================
+
+        const MEMBER_USAGE_GAS_URL = localStorage.getItem('sise_usage_gas_url') || 'YOUR_USAGE_GAS_URL';
+
+        const useMemberUsage = () => {
+            const [usageData, setUsageData] = useState({});
+            const [saving, setSaving] = useState(false);
+            const [lastSaved, setLastSaved] = useState(null);
+
+            const currentMonth = new Date().toISOString().slice(0, 7); // YYYY-MM
+
+            // ローカルストレージからロード
+            useEffect(() => {
+                try {
+                    const stored = JSON.parse(localStorage.getItem('sise_member_usage') || '{}');
+                    setUsageData(stored[currentMonth] || {});
+                } catch { setUsageData({}); }
+
+                // GASから読み込み
+                if (MEMBER_USAGE_GAS_URL !== 'YOUR_USAGE_GAS_URL') {
+                    fetch(MEMBER_USAGE_GAS_URL + '?action=getUsage&month=' + currentMonth)
+                        .then(r => r.json())
+                        .then(data => {
+                            if (data && data.usage) {
+                                setUsageData(prev => ({ ...prev, ...data.usage }));
+                            }
+                        })
+                        .catch(() => {});
+                }
+            }, [currentMonth]);
+
+            // 利用回数を更新
+            const updateUsage = useCallback((memberId, count) => {
+                setUsageData(prev => {
+                    const updated = { ...prev, [memberId]: Math.max(0, count) };
+                    // ローカルに保存
+                    try {
+                        const all = JSON.parse(localStorage.getItem('sise_member_usage') || '{}');
+                        all[currentMonth] = updated;
+                        localStorage.setItem('sise_member_usage', JSON.stringify(all));
+                    } catch {}
+                    return updated;
+                });
+            }, [currentMonth]);
+
+            // Google Sheetsに保存
+            const saveToSheet = useCallback(async (members) => {
+                setSaving(true);
+                try {
+                    // ローカルに確実に保存
+                    const all = JSON.parse(localStorage.getItem('sise_member_usage') || '{}');
+                    all[currentMonth] = usageData;
+                    localStorage.setItem('sise_member_usage', JSON.stringify(all));
+
+                    if (MEMBER_USAGE_GAS_URL !== 'YOUR_USAGE_GAS_URL') {
+                        const payload = Object.entries(usageData).map(([memberId, count]) => {
+                            const member = members.find(m => m.id === memberId);
+                            return {
+                                memberId,
+                                memberName: member?.name || '不明',
+                                storeName: member?.storeName || '',
+                                planName: member?.planName || '',
+                                month: currentMonth,
+                                count,
+                                updatedAt: new Date().toISOString()
+                            };
+                        });
+                        await fetch(MEMBER_USAGE_GAS_URL, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ action: 'saveUsage', data: payload })
+                        });
+                    }
+                    setLastSaved(new Date());
+                } catch (e) {
+                    console.error('Usage save error:', e);
+                } finally {
+                    setSaving(false);
+                }
+            }, [usageData, currentMonth]);
+
+            const getUsage = useCallback((memberId) => {
+                return usageData[memberId] || 0;
+            }, [usageData]);
+
+            return { usageData, updateUsage, saveToSheet, getUsage, saving, lastSaved, currentMonth };
+        };
+
+        // ========================================
         // ダッシュボードメインビュー
         // ========================================
 
@@ -1060,16 +1341,16 @@
             const CHART_COLORS = ['#3f9968', '#63b185', '#94ccac', '#c1e1cf'];
 
             return (
-                <div className="space-y-6">
+                <div className="space-y-5 md:space-y-6">
                     {/* フィルターバー */}
-                    <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4">
-                        <div className="flex flex-wrap items-center justify-between gap-4">
-                            <div className="flex items-center gap-3">
-                                <label className="text-sm font-medium text-slate-600">店舗:</label>
+                    <Card className="!p-3 md:!p-4">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                            <div className="flex items-center gap-2">
+                                <Icon name="building-2" size={16} className="text-sise-500 hide-mobile" />
                                 <select
                                     value={selectedStore}
                                     onChange={(e) => setSelectedStore(e.target.value)}
-                                    className="px-4 py-2 border border-slate-300 rounded-lg focus:border-sise-500 focus:ring-1 focus:ring-sise-500 outline-none"
+                                    className="px-3 py-2 border border-slate-200 rounded-xl text-sm focus:border-sise-500 focus:ring-2 focus:ring-sise-500/20 outline-none bg-white/80"
                                 >
                                     <option value="all">全店舗</option>
                                     {(currentAccess
@@ -1080,15 +1361,15 @@
                                     ))}
                                 </select>
                             </div>
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-1.5">
                                 {['week', 'month', 'quarter'].map(range => (
                                     <button
                                         key={range}
                                         onClick={() => setDateRange(range)}
-                                        className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                                        className={`px-3 md:px-4 py-2 rounded-xl text-xs md:text-sm font-semibold transition-all duration-300 ${
                                             dateRange === range
-                                                ? 'bg-sise-500 text-white'
-                                                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                                                ? 'btn-gradient'
+                                                : 'bg-slate-100/80 text-slate-500 hover:bg-slate-200/80 hover:text-slate-700'
                                         }`}
                                     >
                                         {range === 'week' ? '1週間' : range === 'month' ? '1ヶ月' : '3ヶ月'}
@@ -1096,53 +1377,54 @@
                                 ))}
                             </div>
                         </div>
-                    </div>
+                    </Card>
 
                     {/* Square会員データ KPIカード */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
                         <KpiCard
-                            title="アクティブ会員数"
+                            title="アクティブ会員"
                             value={formatNumber(memberData.activeMembers)}
                             subValue={`総会員: ${formatNumber(memberData.totalMembers)}人`}
                             trend={null}
                             icon="users"
-                            color="bg-sise-500"
+                            gradientFrom="from-sise-400" gradientTo="to-sise-600"
                         />
                         <KpiCard
-                            title="今月の想定売上"
+                            title="想定月間売上"
                             value={formatCurrency(memberData.expectedRevenue)}
                             subValue="サブスク収益"
                             trend={null}
                             icon="wallet"
-                            color="bg-green-500"
+                            gradientFrom="from-emerald-400" gradientTo="to-emerald-600"
                         />
                         <KpiCard
-                            title="今月の新規会員"
+                            title="新規入会"
                             value={formatNumber(memberData.newMembersThisMonth)}
-                            subValue="入会者数"
+                            subValue="今月の入会者"
                             trend={null}
                             icon="user-plus"
-                            color="bg-blue-500"
+                            gradientFrom="from-blue-400" gradientTo="to-blue-600"
                         />
                         <KpiCard
                             title="退会率"
                             value={formatPercent(memberData.churnRate)}
                             subValue={`退会者: ${memberData.churnedMembers}人`}
-                            trend={memberData.churnRate > 5 ? null : null}
+                            trend={null}
                             icon="user-minus"
-                            color={memberData.churnRate > 5 ? "bg-red-500" : "bg-slate-500"}
+                            gradientFrom={memberData.churnRate > 5 ? "from-red-400" : "from-slate-400"}
+                            gradientTo={memberData.churnRate > 5 ? "to-red-600" : "to-slate-500"}
                         />
                     </div>
 
                     {/* 日報集計 KPIカード */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
                         <KpiCard
                             title="新規来店数"
                             value={formatNumber(aggregatedData.totalNewVisits)}
                             subValue="全チャネル合計"
                             trend={null}
                             icon="user-check"
-                            color="bg-orange-500"
+                            gradientFrom="from-orange-400" gradientTo="to-orange-600"
                         />
                         <KpiCard
                             title="契約数"
@@ -1150,15 +1432,15 @@
                             subValue="新規契約"
                             trend={null}
                             icon="file-signature"
-                            color="bg-purple-500"
+                            gradientFrom="from-violet-400" gradientTo="to-violet-600"
                         />
                         <KpiCard
                             title="成約率"
                             value={formatPercent(aggregatedData.conversionRate)}
-                            subValue="新規→契約"
+                            subValue="新規 → 契約"
                             trend={null}
                             icon="target"
-                            color="bg-teal-500"
+                            gradientFrom="from-teal-400" gradientTo="to-teal-600"
                         />
                         <KpiCard
                             title="既存施術数"
@@ -1166,47 +1448,67 @@
                             subValue="リピーター対応"
                             trend={null}
                             icon="heart-handshake"
-                            color="bg-rose-500"
+                            gradientFrom="from-rose-400" gradientTo="to-rose-600"
                         />
                     </div>
 
                     {/* チャート */}
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
                         {/* チャネル別成績 */}
                         <Card>
-                            <h3 className="text-lg font-bold text-slate-900 mb-4">チャネル別新規・契約数</h3>
-                            <ResponsiveContainer width="100%" height={300}>
-                                <BarChart data={aggregatedData.byChannel}>
-                                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                                    <XAxis dataKey="name" tick={{ fontSize: 12 }} />
-                                    <YAxis tick={{ fontSize: 12 }} />
+                            <h3 className="text-base font-bold text-slate-800 mb-1">チャネル別新規・契約数</h3>
+                            <p className="text-[10px] text-sise-500 mb-4 tracking-widest font-semibold">CHANNEL PERFORMANCE</p>
+                            <ResponsiveContainer width="100%" height={280}>
+                                <BarChart data={aggregatedData.byChannel} barGap={4}>
+                                    <CartesianGrid strokeDasharray="3 3" stroke="#e8f0ec" vertical={false} />
+                                    <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
+                                    <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
                                     <Tooltip
-                                        contentStyle={{ backgroundColor: '#fff', borderColor: '#e2e8f0' }}
-                                        formatter={(value, name) => [value, name === 'new' ? '新規' : '契約']}
+                                        contentStyle={{ backgroundColor: 'rgba(255,255,255,0.95)', borderColor: '#e2e8f0', borderRadius: '12px', boxShadow: '0 8px 32px -8px rgba(0,0,0,0.1)' }}
+                                        formatter={(value, name) => [value + '人', name === 'new' ? '新規' : '契約']}
                                     />
                                     <Legend formatter={(value) => value === 'new' ? '新規数' : '契約数'} />
-                                    <Bar dataKey="new" name="new" fill="#0ea5e9" radius={[4, 4, 0, 0]} />
-                                    <Bar dataKey="contract" name="contract" fill="#22c55e" radius={[4, 4, 0, 0]} />
+                                    <Bar dataKey="new" name="new" fill="url(#barGradientBlue)" radius={[6, 6, 0, 0]} />
+                                    <Bar dataKey="contract" name="contract" fill="url(#barGradientGreen)" radius={[6, 6, 0, 0]} />
+                                    <defs>
+                                        <linearGradient id="barGradientBlue" x1="0" y1="0" x2="0" y2="1">
+                                            <stop offset="0%" stopColor="#38bdf8" />
+                                            <stop offset="100%" stopColor="#0ea5e9" />
+                                        </linearGradient>
+                                        <linearGradient id="barGradientGreen" x1="0" y1="0" x2="0" y2="1">
+                                            <stop offset="0%" stopColor="#4ade80" />
+                                            <stop offset="100%" stopColor="#22c55e" />
+                                        </linearGradient>
+                                    </defs>
                                 </BarChart>
                             </ResponsiveContainer>
                         </Card>
 
                         {/* 日別推移 */}
                         <Card>
-                            <h3 className="text-lg font-bold text-slate-900 mb-4">日別推移</h3>
-                            <ResponsiveContainer width="100%" height={300}>
-                                <LineChart data={aggregatedData.dailyTrend}>
-                                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                                    <XAxis dataKey="date" tick={{ fontSize: 10 }} />
-                                    <YAxis tick={{ fontSize: 12 }} />
-                                    <Tooltip
-                                        contentStyle={{ backgroundColor: '#fff', borderColor: '#e2e8f0' }}
-                                    />
+                            <h3 className="text-base font-bold text-slate-800 mb-1">日別推移</h3>
+                            <p className="text-[10px] text-sise-500 mb-4 tracking-widest font-semibold">DAILY TREND</p>
+                            <ResponsiveContainer width="100%" height={280}>
+                                <AreaChart data={aggregatedData.dailyTrend}>
+                                    <CartesianGrid strokeDasharray="3 3" stroke="#e8f0ec" vertical={false} />
+                                    <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
+                                    <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
+                                    <Tooltip contentStyle={{ backgroundColor: 'rgba(255,255,255,0.95)', borderColor: '#e2e8f0', borderRadius: '12px', boxShadow: '0 8px 32px -8px rgba(0,0,0,0.1)' }} />
                                     <Legend />
-                                    <Line type="monotone" dataKey="new" name="新規" stroke="#0ea5e9" strokeWidth={2} dot={{ r: 3 }} />
-                                    <Line type="monotone" dataKey="contract" name="契約" stroke="#22c55e" strokeWidth={2} dot={{ r: 3 }} />
-                                    <Line type="monotone" dataKey="treatments" name="施術" stroke="#f97316" strokeWidth={2} dot={{ r: 3 }} />
-                                </LineChart>
+                                    <defs>
+                                        <linearGradient id="areaBlue" x1="0" y1="0" x2="0" y2="1">
+                                            <stop offset="0%" stopColor="#0ea5e9" stopOpacity={0.3} />
+                                            <stop offset="100%" stopColor="#0ea5e9" stopOpacity={0} />
+                                        </linearGradient>
+                                        <linearGradient id="areaGreen" x1="0" y1="0" x2="0" y2="1">
+                                            <stop offset="0%" stopColor="#22c55e" stopOpacity={0.3} />
+                                            <stop offset="100%" stopColor="#22c55e" stopOpacity={0} />
+                                        </linearGradient>
+                                    </defs>
+                                    <Area type="monotone" dataKey="new" name="新規" stroke="#0ea5e9" strokeWidth={2.5} fill="url(#areaBlue)" dot={{ r: 3, fill: '#0ea5e9' }} />
+                                    <Area type="monotone" dataKey="contract" name="契約" stroke="#22c55e" strokeWidth={2.5} fill="url(#areaGreen)" dot={{ r: 3, fill: '#22c55e' }} />
+                                    <Line type="monotone" dataKey="treatments" name="施術" stroke="#f97316" strokeWidth={2} dot={{ r: 3, fill: '#f97316' }} strokeDasharray="5 5" />
+                                </AreaChart>
                             </ResponsiveContainer>
                         </Card>
                     </div>
@@ -1311,14 +1613,13 @@
             }, [reportData.reports, filterStore, sortOrder]);
 
             return (
-                <div className="space-y-6">
-                    <div className="flex flex-wrap items-center justify-between gap-4">
-                        <h2 className="text-xl font-bold text-slate-900">日報一覧</h2>
-                        <div className="flex items-center gap-3">
+                <div className="space-y-5 md:space-y-6 animate-fade-in">
+                    <SectionHeader title="日報一覧" subtitle="DAILY REPORTS" icon="clipboard-list">
+                        <div className="flex items-center gap-2">
                             <select
                                 value={filterStore}
                                 onChange={(e) => setFilterStore(e.target.value)}
-                                className="px-3 py-2 border border-slate-300 rounded-lg text-sm focus:border-sise-500 outline-none"
+                                className="px-3 py-2 border border-slate-200 rounded-xl text-sm focus:border-sise-500 outline-none bg-white/80"
                             >
                                 <option value="all">全店舗</option>
                                 {(currentAccess
@@ -1330,78 +1631,79 @@
                             </select>
                             <button
                                 onClick={() => setSortOrder(sortOrder === 'desc' ? 'asc' : 'desc')}
-                                className="flex items-center px-3 py-2 border border-slate-300 rounded-lg text-sm hover:bg-slate-50"
+                                className="flex items-center px-3 py-2 border border-slate-200 rounded-xl text-sm hover:bg-sise-50 transition-colors bg-white/80"
                             >
-                                <Icon name={sortOrder === 'desc' ? 'arrow-down' : 'arrow-up'} size={16} className="mr-1" />
-                                {sortOrder === 'desc' ? '新しい順' : '古い順'}
+                                <Icon name={sortOrder === 'desc' ? 'arrow-down' : 'arrow-up'} size={15} className="mr-1" />
+                                <span className="hide-mobile">{sortOrder === 'desc' ? '新しい順' : '古い順'}</span>
                             </button>
                         </div>
-                    </div>
+                    </SectionHeader>
 
-                    <Card>
+                    {/* デスクトップ: テーブル */}
+                    <Card className="hide-mobile">
                         <div className="overflow-x-auto">
                             <table className="w-full text-sm">
                                 <thead>
-                                    <tr className="border-b border-slate-200 bg-slate-50">
-                                        <th className="text-left py-3 px-3 font-semibold text-slate-600">日時</th>
-                                        <th className="text-left py-3 px-3 font-semibold text-slate-600">店舗</th>
-                                        <th className="text-center py-3 px-2 font-semibold text-slate-600">HPB<br/><span className="text-xs font-normal">新規/契約</span></th>
-                                        <th className="text-center py-3 px-2 font-semibold text-slate-600">Meta<br/><span className="text-xs font-normal">新規/契約</span></th>
-                                        <th className="text-center py-3 px-2 font-semibold text-slate-600">紹介<br/><span className="text-xs font-normal">新規/契約</span></th>
-                                        <th className="text-center py-3 px-2 font-semibold text-slate-600">割引<br/><span className="text-xs font-normal">新規/契約</span></th>
-                                        <th className="text-center py-3 px-2 font-semibold text-slate-600">既存<br/>施術</th>
-                                        <th className="text-center py-3 px-2 font-semibold text-slate-600">業務</th>
-                                        <th className="text-center py-3 px-2 font-semibold text-slate-600">準備</th>
+                                    <tr className="border-b-2 border-slate-100 bg-slate-50/50">
+                                        <th className="text-left py-3 px-3 font-semibold text-slate-500 text-xs tracking-wide">日時</th>
+                                        <th className="text-left py-3 px-3 font-semibold text-slate-500 text-xs tracking-wide">店舗</th>
+                                        <th className="text-center py-3 px-2 font-semibold text-slate-500 text-xs">HPB<br/><span className="font-normal text-slate-400">新規/契約</span></th>
+                                        <th className="text-center py-3 px-2 font-semibold text-slate-500 text-xs">Meta<br/><span className="font-normal text-slate-400">新規/契約</span></th>
+                                        <th className="text-center py-3 px-2 font-semibold text-slate-500 text-xs">紹介<br/><span className="font-normal text-slate-400">新規/契約</span></th>
+                                        <th className="text-center py-3 px-2 font-semibold text-slate-500 text-xs">割引<br/><span className="font-normal text-slate-400">新規/契約</span></th>
+                                        <th className="text-center py-3 px-2 font-semibold text-slate-500 text-xs">既存施術</th>
+                                        <th className="text-center py-3 px-2 font-semibold text-slate-500 text-xs">業務</th>
+                                        <th className="text-center py-3 px-2 font-semibold text-slate-500 text-xs">準備</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     {filteredReports.slice(0, 50).map((report, index) => (
-                                        <tr key={index} className="border-b border-slate-100/60 table-row-hover">
-                                            <td className="py-3 px-3 text-slate-700">
+                                        <tr key={index} className="border-b border-slate-100/40 table-row-hover">
+                                            <td className="py-3 px-3 text-slate-600 text-xs">
                                                 {new Date(report.timestamp).toLocaleDateString('ja-JP', {
                                                     month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
                                                 })}
                                             </td>
                                             <td className="py-3 px-3">
-                                                <span className="px-2 py-1 bg-sise-100 text-sise-700 rounded text-xs font-medium">
+                                                <span className="px-2 py-1 bg-sise-100/80 text-sise-700 rounded-lg text-[11px] font-semibold">
                                                     {report.store}
                                                 </span>
                                             </td>
                                             <td className="text-center py-3 px-2">
-                                                <span className="text-orange-600">{report.hpbNew}</span>
-                                                <span className="text-slate-400 mx-1">/</span>
-                                                <span className="text-green-600">{report.hpbContract}</span>
+                                                <span className="text-orange-600 font-semibold">{report.hpbNew}</span>
+                                                <span className="text-slate-300 mx-1">/</span>
+                                                <span className="text-green-600 font-semibold">{report.hpbContract}</span>
                                             </td>
                                             <td className="text-center py-3 px-2">
-                                                <span className="text-blue-600">{report.metaNew}</span>
-                                                <span className="text-slate-400 mx-1">/</span>
-                                                <span className="text-green-600">{report.metaContract}</span>
+                                                <span className="text-blue-600 font-semibold">{report.metaNew}</span>
+                                                <span className="text-slate-300 mx-1">/</span>
+                                                <span className="text-green-600 font-semibold">{report.metaContract}</span>
                                             </td>
                                             <td className="text-center py-3 px-2">
-                                                <span className="text-emerald-600">{report.referralNew}</span>
-                                                <span className="text-slate-400 mx-1">/</span>
-                                                <span className="text-green-600">{report.referralContract}</span>
+                                                <span className="text-emerald-600 font-semibold">{report.referralNew}</span>
+                                                <span className="text-slate-300 mx-1">/</span>
+                                                <span className="text-green-600 font-semibold">{report.referralContract}</span>
                                             </td>
                                             <td className="text-center py-3 px-2">
-                                                <span className="text-purple-600">{report.discountNew}</span>
-                                                <span className="text-slate-400 mx-1">/</span>
-                                                <span className="text-green-600">{report.discountContract}</span>
+                                                <span className="text-purple-600 font-semibold">{report.discountNew}</span>
+                                                <span className="text-slate-300 mx-1">/</span>
+                                                <span className="text-green-600 font-semibold">{report.discountContract}</span>
                                             </td>
-                                            <td className="text-center py-3 px-2 font-semibold text-slate-700">
+                                            <td className="text-center py-3 px-2 font-bold text-slate-700">
                                                 {report.existingTreatments}
                                             </td>
                                             <td className="text-center py-3 px-2">
                                                 {report.dailyTasksCompleted ? (
-                                                    <span className="text-green-500"><Icon name="check-circle" size={18} /></span>
+                                                    <span className="text-green-500"><Icon name="check-circle" size={17} /></span>
                                                 ) : (
-                                                    <span className="text-red-400"><Icon name="x-circle" size={18} /></span>
+                                                    <span className="text-red-400"><Icon name="x-circle" size={17} /></span>
                                                 )}
                                             </td>
                                             <td className="text-center py-3 px-2">
                                                 {report.tomorrowPrepCompleted ? (
-                                                    <span className="text-green-500"><Icon name="check-circle" size={18} /></span>
+                                                    <span className="text-green-500"><Icon name="check-circle" size={17} /></span>
                                                 ) : (
-                                                    <span className="text-red-400"><Icon name="x-circle" size={18} /></span>
+                                                    <span className="text-red-400"><Icon name="x-circle" size={17} /></span>
                                                 )}
                                             </td>
                                         </tr>
@@ -1410,11 +1712,60 @@
                             </table>
                         </div>
                         {filteredReports.length > 50 && (
-                            <div className="text-center py-4 text-sm text-slate-500">
-                                最新50件を表示中（全{filteredReports.length}件）
-                            </div>
+                            <div className="text-center py-4 text-sm text-slate-400">{filteredReports.length}件中50件を表示</div>
                         )}
                     </Card>
+
+                    {/* モバイル: カード表示 */}
+                    <div className="hide-desktop space-y-3">
+                        {filteredReports.slice(0, 30).map((report, index) => {
+                            const totalNew = (report.hpbNew||0) + (report.metaNew||0) + (report.referralNew||0) + (report.discountNew||0);
+                            const totalContract = (report.hpbContract||0) + (report.metaContract||0) + (report.referralContract||0) + (report.discountContract||0);
+                            return (
+                                <Card key={index} className="!p-4">
+                                    <div className="flex items-center justify-between mb-3">
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-xs font-semibold text-slate-500">
+                                                {new Date(report.timestamp).toLocaleDateString('ja-JP', { month: 'short', day: 'numeric' })}
+                                            </span>
+                                            <span className="px-2 py-0.5 bg-sise-100/80 text-sise-700 rounded-lg text-[10px] font-semibold">{report.store}</span>
+                                        </div>
+                                        <div className="flex gap-1.5">
+                                            {report.dailyTasksCompleted
+                                                ? <span className="text-green-500"><Icon name="check-circle" size={16} /></span>
+                                                : <span className="text-red-400"><Icon name="x-circle" size={16} /></span>}
+                                            {report.tomorrowPrepCompleted
+                                                ? <span className="text-green-500"><Icon name="check-circle" size={16} /></span>
+                                                : <span className="text-red-400"><Icon name="x-circle" size={16} /></span>}
+                                        </div>
+                                    </div>
+                                    <div className="grid grid-cols-3 gap-3 text-center">
+                                        <div className="bg-blue-50/60 rounded-xl py-2">
+                                            <p className="text-lg font-extrabold text-blue-600">{totalNew}</p>
+                                            <p className="text-[10px] text-slate-400 font-medium">新規</p>
+                                        </div>
+                                        <div className="bg-green-50/60 rounded-xl py-2">
+                                            <p className="text-lg font-extrabold text-green-600">{totalContract}</p>
+                                            <p className="text-[10px] text-slate-400 font-medium">契約</p>
+                                        </div>
+                                        <div className="bg-orange-50/60 rounded-xl py-2">
+                                            <p className="text-lg font-extrabold text-orange-600">{report.existingTreatments}</p>
+                                            <p className="text-[10px] text-slate-400 font-medium">施術</p>
+                                        </div>
+                                    </div>
+                                    <div className="mt-2.5 flex gap-1 flex-wrap">
+                                        {report.hpbNew > 0 && <span className="text-[10px] bg-orange-100 text-orange-600 px-1.5 py-0.5 rounded font-medium">HPB {report.hpbNew}/{report.hpbContract}</span>}
+                                        {report.metaNew > 0 && <span className="text-[10px] bg-blue-100 text-blue-600 px-1.5 py-0.5 rounded font-medium">Meta {report.metaNew}/{report.metaContract}</span>}
+                                        {report.referralNew > 0 && <span className="text-[10px] bg-green-100 text-green-600 px-1.5 py-0.5 rounded font-medium">紹介 {report.referralNew}/{report.referralContract}</span>}
+                                        {report.discountNew > 0 && <span className="text-[10px] bg-purple-100 text-purple-600 px-1.5 py-0.5 rounded font-medium">割引 {report.discountNew}/{report.discountContract}</span>}
+                                    </div>
+                                </Card>
+                            );
+                        })}
+                        {filteredReports.length > 30 && (
+                            <div className="text-center py-3 text-sm text-slate-400">{filteredReports.length}件中30件を表示</div>
+                        )}
+                    </div>
                 </div>
             );
         };
@@ -1525,24 +1876,20 @@
             };
 
             return (
-                <div className="space-y-6 animate-fade-in">
-                    <div className="flex flex-wrap items-center justify-between gap-4">
-                        <div>
-                            <h2 className="text-xl font-bold text-slate-800">会員管理</h2>
-                            <p className="text-xs text-sise-500 mt-1 tracking-wide font-medium">MEMBER MANAGEMENT</p>
-                        </div>
+                <div className="space-y-5 md:space-y-6 animate-fade-in">
+                    <SectionHeader title="会員管理" subtitle="MEMBER MANAGEMENT" icon="users">
                         <button
                             onClick={handleRefresh}
                             disabled={isRefreshing}
-                            className="flex items-center px-4 py-2.5 bg-sise-500 hover:bg-sise-600 text-white rounded-xl font-medium text-sm shadow-lg shadow-sise-500/25 transition-all disabled:opacity-50 hover:shadow-sise-500/40"
+                            className="flex items-center px-4 py-2.5 btn-gradient rounded-xl font-medium text-sm transition-all disabled:opacity-50"
                         >
                             <Icon name={isRefreshing ? "loader" : "refresh-cw"} size={16} className={`mr-2 ${isRefreshing ? 'animate-spin' : ''}`} />
                             {isRefreshing ? '更新中...' : 'データ更新'}
                         </button>
-                    </div>
+                    </SectionHeader>
 
                     {memberData.error && (
-                        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                        <div className="bg-red-50/80 backdrop-blur-sm border border-red-200 rounded-xl p-4">
                             <p className="text-red-700 text-sm">
                                 <Icon name="alert-circle" size={16} className="inline mr-2" />
                                 エラー: {memberData.error}
@@ -1551,54 +1898,36 @@
                     )}
 
                     {/* 会員サマリ */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                        <Card hover className="stagger-1 animate-fade-in-up border-sise-100">
-                            <div className="flex items-center justify-between mb-3">
-                                <span className="text-xs font-medium text-slate-500 tracking-wide uppercase">アクティブ会員</span>
-                                <div className="w-8 h-8 bg-sise-50 rounded-lg flex items-center justify-center">
-                                    <Icon name="users" size={16} className="text-sise-500" />
-                                </div>
-                            </div>
-                            <p className="text-3xl font-bold text-slate-800 num-animate">{memberData.activeMembers}</p>
-                            <p className="text-xs text-slate-400 mt-1.5">累計: {memberData.totalMembers}人</p>
-                        </Card>
-
-                        <Card hover className="stagger-2 animate-fade-in-up border-emerald-100">
-                            <div className="flex items-center justify-between mb-3">
-                                <span className="text-xs font-medium text-slate-500 tracking-wide uppercase">月間想定売上</span>
-                                <div className="w-8 h-8 bg-emerald-50 rounded-lg flex items-center justify-center">
-                                    <Icon name="trending-up" size={16} className="text-emerald-500" />
-                                </div>
-                            </div>
-                            <p className="text-3xl font-bold text-slate-800 num-animate">{formatCurrency(memberData.expectedRevenue)}</p>
-                            <p className="text-xs text-slate-400 mt-1.5">@{formatCurrency(monthlyPrice)}/月</p>
-                        </Card>
-
-                        <Card hover className="stagger-3 animate-fade-in-up border-teal-100">
-                            <div className="flex items-center justify-between mb-3">
-                                <span className="text-xs font-medium text-slate-500 tracking-wide uppercase">今月の新規入会</span>
-                                <div className="w-8 h-8 bg-teal-50 rounded-lg flex items-center justify-center">
-                                    <Icon name="user-plus" size={16} className="text-teal-500" />
-                                </div>
-                            </div>
-                            <p className="text-3xl font-bold text-slate-800 num-animate">{memberData.newMembersThisMonth}</p>
-                            <p className="text-xs text-slate-400 mt-1.5">新規獲得</p>
-                        </Card>
-
-                        <Card hover className={`stagger-4 animate-fade-in-up ${memberData.churnRate > 5 ? 'border-red-200' : 'border-slate-100'}`}>
-                            <div className="flex items-center justify-between mb-3">
-                                <span className="text-xs font-medium text-slate-500 tracking-wide uppercase">退会率</span>
-                                <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${memberData.churnRate > 5 ? 'bg-red-50' : 'bg-slate-50'}`}>
-                                    <Icon name="user-minus" size={16} className={memberData.churnRate > 5 ? 'text-red-400' : 'text-slate-400'} />
-                                </div>
-                            </div>
-                            <p className={`text-3xl font-bold num-animate ${memberData.churnRate > 5 ? 'text-red-600' : 'text-slate-800'}`}>
-                                {formatPercent(memberData.churnRate)}
-                            </p>
-                            <p className="text-xs text-slate-400 mt-1.5">
-                                退会者: {memberData.churnedMembers}人
-                            </p>
-                        </Card>
+                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
+                        <KpiCard
+                            title="アクティブ会員"
+                            value={memberData.activeMembers}
+                            subValue={`累計: ${memberData.totalMembers}人`}
+                            icon="users"
+                            gradientFrom="from-sise-400" gradientTo="to-sise-600"
+                        />
+                        <KpiCard
+                            title="月間想定売上"
+                            value={formatCurrency(memberData.expectedRevenue)}
+                            subValue={`@${formatCurrency(monthlyPrice)}/月`}
+                            icon="trending-up"
+                            gradientFrom="from-emerald-400" gradientTo="to-emerald-600"
+                        />
+                        <KpiCard
+                            title="今月の新規入会"
+                            value={memberData.newMembersThisMonth}
+                            subValue="新規獲得"
+                            icon="user-plus"
+                            gradientFrom="from-teal-400" gradientTo="to-teal-600"
+                        />
+                        <KpiCard
+                            title="退会率"
+                            value={formatPercent(memberData.churnRate)}
+                            subValue={`退会者: ${memberData.churnedMembers}人`}
+                            icon="user-minus"
+                            gradientFrom={memberData.churnRate > 5 ? "from-red-400" : "from-slate-400"}
+                            gradientTo={memberData.churnRate > 5 ? "to-red-600" : "to-slate-500"}
+                        />
                     </div>
 
                     {/* 分析カード */}
@@ -1751,92 +2080,91 @@
                         </div>
                     </Card>
 
-                    {/* 会員一覧テーブル */}
+                    {/* 会員一覧 */}
                     <Card>
-                        <div className="flex flex-wrap items-center justify-between gap-4 mb-5">
+                        <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
                             <div>
                                 <h3 className="text-base font-bold text-slate-800">会員一覧</h3>
-                                <p className="text-xs text-slate-400 tracking-wide">MEMBER LIST</p>
+                                <p className="text-[10px] text-sise-500 tracking-widest font-semibold">MEMBER LIST ({filteredMembers.length})</p>
                             </div>
-                            <div className="flex items-center gap-2">
-                                <div className="relative">
+                            <div className="flex items-center gap-2 w-full md:w-auto">
+                                <div className="relative flex-1 md:flex-initial">
                                     <Icon name="search" size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                                     <input
                                         type="text"
                                         value={searchQuery}
                                         onChange={(e) => setSearchQuery(e.target.value)}
-                                        placeholder="検索..."
-                                        className="pl-8 pr-3 py-2 border border-slate-200 rounded-xl text-sm focus:border-sise-400 focus:ring-1 focus:ring-sise-400/30 outline-none w-40 bg-slate-50/50"
+                                        placeholder="名前・メール検索..."
+                                        className="w-full md:w-44 pl-8 pr-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:border-sise-400 focus:ring-2 focus:ring-sise-400/20 outline-none bg-white/80"
                                     />
                                 </div>
                                 <select
                                     value={filterStatus}
                                     onChange={(e) => setFilterStatus(e.target.value)}
-                                    className="px-3 py-2 border border-slate-200 rounded-xl text-sm focus:border-sise-400 outline-none bg-slate-50/50"
+                                    className="px-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:border-sise-400 outline-none bg-white/80"
                                 >
                                     <option value="all">全て</option>
                                     <option value="ACTIVE">アクティブ</option>
                                     <option value="CANCELED">退会</option>
                                     <option value="PENDING">保留中</option>
+                                    <option value="PAUSED">一時停止</option>
                                 </select>
                             </div>
                         </div>
-                        <div className="overflow-x-auto">
+
+                        {/* デスクトップ: テーブル表示 */}
+                        <div className="hide-mobile overflow-x-auto">
                             <table className="w-full text-sm">
                                 <thead>
-                                    <tr className="border-b border-slate-200 bg-slate-50">
-                                        <th className="text-left py-3 px-3 font-semibold text-slate-600">会員名</th>
+                                    <tr className="border-b-2 border-slate-100 bg-slate-50/50">
+                                        <th className="text-left py-3 px-3 font-semibold text-slate-500 text-xs tracking-wide">会員名</th>
                                         {memberData.stores && memberData.stores.length > 1 && (
-                                            <th className="text-left py-3 px-3 font-semibold text-slate-600">店舗</th>
+                                            <th className="text-left py-3 px-3 font-semibold text-slate-500 text-xs tracking-wide">店舗</th>
                                         )}
-                                        <th className="text-left py-3 px-3 font-semibold text-slate-600">ステータス</th>
-                                        <th className="text-left py-3 px-3 font-semibold text-slate-600">プラン</th>
-                                        <th className="text-right py-3 px-3 font-semibold text-slate-600">金額</th>
-                                        <th className="text-center py-3 px-3 font-semibold text-slate-600">頻度</th>
-                                        <th className="text-left py-3 px-3 font-semibold text-slate-600">入会日</th>
-                                        <th className="text-left py-3 px-3 font-semibold text-slate-600">退会日</th>
-                                        <th className="text-center py-3 px-3 font-semibold text-slate-600">操作</th>
+                                        <th className="text-left py-3 px-3 font-semibold text-slate-500 text-xs tracking-wide">ステータス</th>
+                                        <th className="text-left py-3 px-3 font-semibold text-slate-500 text-xs tracking-wide">プラン</th>
+                                        <th className="text-right py-3 px-3 font-semibold text-slate-500 text-xs tracking-wide">金額</th>
+                                        <th className="text-center py-3 px-3 font-semibold text-slate-500 text-xs tracking-wide">頻度</th>
+                                        <th className="text-left py-3 px-3 font-semibold text-slate-500 text-xs tracking-wide">入会日</th>
+                                        <th className="text-center py-3 px-3 font-semibold text-slate-500 text-xs tracking-wide">操作</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {filteredMembers.slice(0, 20).map((member) => (
-                                        <tr key={member.id} className="border-b border-slate-100/60 table-row-hover">
+                                    {filteredMembers.slice(0, 30).map((member) => (
+                                        <tr key={member.id} className="border-b border-slate-100/40 table-row-hover cursor-pointer" onClick={() => setSelectedMember(member)}>
                                             <td className="py-3 px-3">
-                                                <div>
-                                                    <p className="font-medium text-slate-900">{member.name}</p>
-                                                    <p className="text-xs text-slate-500">{member.email}</p>
+                                                <div className="flex items-center">
+                                                    <Avatar name={member.name} size={34} />
+                                                    <div className="ml-3">
+                                                        <p className="font-semibold text-slate-800">{member.name}</p>
+                                                        <p className="text-[11px] text-slate-400">{member.email}</p>
+                                                    </div>
                                                 </div>
                                             </td>
                                             {memberData.stores && memberData.stores.length > 1 && (
                                                 <td className="py-3 px-3 text-xs text-slate-600">{member.storeName}</td>
                                             )}
                                             <td className="py-3 px-3">
-                                                <span className={`px-2 py-1 rounded text-xs font-medium border ${getStatusColor(member.status)}`}>
+                                                <span className={`px-2.5 py-1 rounded-lg text-xs font-semibold border ${getStatusColor(member.status)}`}>
                                                     {getStatusLabel(member.status)}
                                                 </span>
                                             </td>
-                                            <td className="py-3 px-3 text-slate-700">{member.planName}</td>
-                                            <td className="text-right py-3 px-3 font-semibold text-slate-900">
+                                            <td className="py-3 px-3 text-slate-700 text-xs">{member.planName}</td>
+                                            <td className="text-right py-3 px-3 font-bold text-slate-800">
                                                 {formatCurrency(member.monthlyPrice)}
                                             </td>
                                             <td className="text-center py-3 px-3">
-                                                <span className="px-2 py-1 bg-slate-100 text-slate-600 rounded text-xs font-medium">
+                                                <span className="px-2 py-1 bg-slate-100/80 text-slate-500 rounded-lg text-[11px] font-medium">
                                                     {getCadenceLabel(member.cadence)}
                                                 </span>
                                             </td>
-                                            <td className="py-3 px-3 text-slate-700">
+                                            <td className="py-3 px-3 text-slate-600 text-xs">
                                                 {new Date(member.startDate).toLocaleDateString('ja-JP', { year: 'numeric', month: 'short', day: 'numeric' })}
-                                            </td>
-                                            <td className="py-3 px-3 text-slate-700">
-                                                {member.canceledDate
-                                                    ? new Date(member.canceledDate).toLocaleDateString('ja-JP', { year: 'numeric', month: 'short', day: 'numeric' })
-                                                    : '-'
-                                                }
                                             </td>
                                             <td className="text-center py-3 px-3">
                                                 <button
-                                                    onClick={() => setSelectedMember(member)}
-                                                    className="text-sise-600 hover:text-sise-700 font-medium text-xs underline"
+                                                    onClick={(e) => { e.stopPropagation(); setSelectedMember(member); }}
+                                                    className="text-sise-600 hover:text-sise-700 font-semibold text-xs hover:bg-sise-50 px-2 py-1 rounded-lg transition-colors"
                                                 >
                                                     詳細
                                                 </button>
@@ -1846,15 +2174,45 @@
                                 </tbody>
                             </table>
                         </div>
-                        {filteredMembers.length > 20 && (
-                            <div className="text-center py-4 text-sm text-slate-500">
-                                最新20件を表示中（全{filteredMembers.length}件）
+
+                        {/* モバイル: カード表示 */}
+                        <div className="hide-desktop space-y-3">
+                            {filteredMembers.slice(0, 20).map((member) => (
+                                <div
+                                    key={member.id}
+                                    onClick={() => setSelectedMember(member)}
+                                    className="p-3.5 bg-white/60 rounded-xl border border-slate-100 active:bg-sise-50/50 transition-colors cursor-pointer"
+                                >
+                                    <div className="flex items-center justify-between">
+                                        <div className="flex items-center flex-1 min-w-0">
+                                            <Avatar name={member.name} size={42} />
+                                            <div className="ml-3 flex-1 min-w-0">
+                                                <p className="font-bold text-slate-800 truncate">{member.name}</p>
+                                                <p className="text-[11px] text-slate-400 truncate">{member.planName} / {getCadenceLabel(member.cadence)}</p>
+                                            </div>
+                                        </div>
+                                        <div className="text-right ml-3 flex-shrink-0">
+                                            <p className="font-bold text-slate-800 text-sm">{formatCurrency(member.monthlyPrice)}</p>
+                                            <span className={`inline-block px-2 py-0.5 rounded-lg text-[10px] font-semibold mt-0.5 ${getStatusColor(member.status)}`}>
+                                                {getStatusLabel(member.status)}
+                                            </span>
+                                        </div>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+
+                        {filteredMembers.length > 30 && (
+                            <div className="text-center py-4 text-sm text-slate-400">
+                                {filteredMembers.length}件中30件を表示
                             </div>
                         )}
                         {filteredMembers.length === 0 && (
-                            <div className="text-center py-8 text-slate-500">
-                                <Icon name="users" size={48} className="mx-auto mb-2 text-slate-300" />
-                                <p>該当する会員が見つかりませんでした</p>
+                            <div className="text-center py-10 text-slate-400">
+                                <div className="w-16 h-16 bg-slate-100 rounded-2xl flex items-center justify-center mx-auto mb-3">
+                                    <Icon name="users" size={28} className="text-slate-300" />
+                                </div>
+                                <p className="font-medium">該当する会員がありません</p>
                             </div>
                         )}
                     </Card>
@@ -2015,6 +2373,196 @@
                                 <p className="text-xs text-slate-500 mt-3">
                                     現在はデモモードで動作しています。
                                 </p>
+                            </div>
+                        </div>
+                    </Card>
+                </div>
+            );
+        };
+
+        // ========================================
+        // 利用管理ビュー（利用回数入力 + スプシ保存）
+        // ========================================
+
+        const MemberUsageView = ({ memberData, usageHook }) => {
+            const { usageData, updateUsage, saveToSheet, getUsage, saving, lastSaved, currentMonth } = usageHook;
+            const [searchQuery, setSearchQuery] = useState('');
+            const [showSaved, setShowSaved] = useState(false);
+
+            const activeMembers = useMemo(() => {
+                let members = (memberData.members || []).filter(m => m.status === 'ACTIVE');
+                if (searchQuery) {
+                    const q = searchQuery.toLowerCase();
+                    members = members.filter(m => m.name.toLowerCase().includes(q) || m.planName.toLowerCase().includes(q));
+                }
+                return members;
+            }, [memberData.members, searchQuery]);
+
+            const totalUsage = useMemo(() => {
+                return activeMembers.reduce((sum, m) => sum + getUsage(m.id), 0);
+            }, [activeMembers, getUsage]);
+
+            const avgUsage = activeMembers.length > 0 ? (totalUsage / activeMembers.length).toFixed(1) : 0;
+            const zeroUsageCount = activeMembers.filter(m => getUsage(m.id) === 0).length;
+
+            const monthLabel = (() => {
+                const [y, m] = currentMonth.split('-');
+                return `${y}年${parseInt(m)}月`;
+            })();
+
+            const handleSave = async () => {
+                await saveToSheet(memberData.members || []);
+                setShowSaved(true);
+                setTimeout(() => setShowSaved(false), 3000);
+            };
+
+            return (
+                <div className="space-y-5 md:space-y-6 animate-fade-in">
+                    <SectionHeader title="利用管理" subtitle="USAGE TRACKING" icon="clipboard-check">
+                        <button
+                            onClick={handleSave}
+                            disabled={saving}
+                            className="flex items-center px-4 py-2.5 btn-gradient rounded-xl font-medium text-sm transition-all disabled:opacity-50"
+                        >
+                            <Icon name={saving ? "loader" : "save"} size={16} className={`mr-2 ${saving ? 'animate-spin' : ''}`} />
+                            {saving ? '保存中...' : 'スプレッドシートに保存'}
+                        </button>
+                    </SectionHeader>
+
+                    {showSaved && (
+                        <div className="bg-green-50/80 backdrop-blur-sm border border-green-200 rounded-xl p-3 animate-fade-in-up flex items-center">
+                            <Icon name="check-circle" size={18} className="text-green-500 mr-2 flex-shrink-0" />
+                            <p className="text-green-700 text-sm font-medium">利用データを保存しました</p>
+                        </div>
+                    )}
+
+                    {/* サマリ */}
+                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
+                        <KpiCard
+                            title="対象月"
+                            value={monthLabel}
+                            subValue="当月分の利用回数"
+                            icon="calendar"
+                            gradientFrom="from-blue-400" gradientTo="to-blue-600"
+                        />
+                        <KpiCard
+                            title="合計利用回数"
+                            value={totalUsage}
+                            subValue={`${activeMembers.length}名のアクティブ会員`}
+                            icon="bar-chart-3"
+                            gradientFrom="from-sise-400" gradientTo="to-sise-600"
+                        />
+                        <KpiCard
+                            title="平均利用回数"
+                            value={avgUsage}
+                            subValue="1人あたり"
+                            icon="activity"
+                            gradientFrom="from-violet-400" gradientTo="to-violet-600"
+                        />
+                        <KpiCard
+                            title="未利用会員"
+                            value={zeroUsageCount}
+                            subValue={zeroUsageCount > 0 ? 'フォロー推奨' : '全員利用済み'}
+                            icon="alert-circle"
+                            gradientFrom={zeroUsageCount > 0 ? "from-amber-400" : "from-emerald-400"}
+                            gradientTo={zeroUsageCount > 0 ? "to-amber-600" : "to-emerald-600"}
+                        />
+                    </div>
+
+                    {/* 検索 */}
+                    <div className="relative">
+                        <Icon name="search" size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
+                        <input
+                            type="text"
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                            placeholder="会員名で検索..."
+                            className="w-full pl-10 pr-4 py-3 border border-slate-200 rounded-xl text-sm focus:border-sise-400 focus:ring-2 focus:ring-sise-400/20 outline-none bg-white/80 backdrop-blur-sm"
+                        />
+                    </div>
+
+                    {/* 会員利用回数入力カード */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-4">
+                        {activeMembers.map((member) => {
+                            const count = getUsage(member.id);
+                            const usageLevel = count === 0 ? 'zero' : count <= 2 ? 'low' : count <= 5 ? 'mid' : 'high';
+                            const usageBg = {
+                                zero: 'border-amber-200 bg-amber-50/30',
+                                low: 'border-blue-200 bg-blue-50/30',
+                                mid: 'border-sise-200 bg-sise-50/30',
+                                high: 'border-emerald-200 bg-emerald-50/30',
+                            }[usageLevel];
+
+                            return (
+                                <div key={member.id} className={`glass-card !rounded-2xl p-4 ${usageBg} hover:!transform-none`}>
+                                    <div className="flex items-center mb-3">
+                                        <Avatar name={member.name} size={38} />
+                                        <div className="ml-3 flex-1 min-w-0">
+                                            <p className="font-bold text-slate-800 text-sm truncate">{member.name}</p>
+                                            <p className="text-[11px] text-slate-400 truncate">{member.planName}{member.storeName ? ` / ${member.storeName}` : ''}</p>
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center justify-between">
+                                        <div className="flex items-center gap-2">
+                                            <button
+                                                onClick={() => updateUsage(member.id, count - 1)}
+                                                disabled={count <= 0}
+                                                className="w-10 h-10 rounded-xl bg-white/80 border border-slate-200 flex items-center justify-center text-slate-500 hover:bg-red-50 hover:text-red-500 hover:border-red-200 transition-all disabled:opacity-30 disabled:hover:bg-white/80 disabled:hover:text-slate-500 disabled:hover:border-slate-200 active:scale-95"
+                                            >
+                                                <Icon name="minus" size={18} />
+                                            </button>
+                                            <div className="w-16 text-center">
+                                                <span className="text-3xl font-extrabold text-slate-800 tabular-nums">{count}</span>
+                                                <p className="text-[9px] text-slate-400 -mt-0.5">回</p>
+                                            </div>
+                                            <button
+                                                onClick={() => updateUsage(member.id, count + 1)}
+                                                className="w-10 h-10 rounded-xl bg-white/80 border border-slate-200 flex items-center justify-center text-slate-500 hover:bg-sise-50 hover:text-sise-600 hover:border-sise-200 transition-all active:scale-95"
+                                            >
+                                                <Icon name="plus" size={18} />
+                                            </button>
+                                        </div>
+                                        <div className="flex items-center">
+                                            {count === 0 && (
+                                                <span className="text-[10px] font-semibold text-amber-600 bg-amber-100 px-2 py-1 rounded-lg">未利用</span>
+                                            )}
+                                            {count > 0 && count <= 2 && (
+                                                <span className="text-[10px] font-semibold text-blue-600 bg-blue-100 px-2 py-1 rounded-lg">少なめ</span>
+                                            )}
+                                            {count > 2 && count <= 5 && (
+                                                <span className="text-[10px] font-semibold text-sise-600 bg-sise-100 px-2 py-1 rounded-lg">通常</span>
+                                            )}
+                                            {count > 5 && (
+                                                <span className="text-[10px] font-semibold text-emerald-600 bg-emerald-100 px-2 py-1 rounded-lg">多い</span>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+
+                    {activeMembers.length === 0 && (
+                        <div className="text-center py-12 text-slate-400">
+                            <div className="w-16 h-16 bg-slate-100 rounded-2xl flex items-center justify-center mx-auto mb-3">
+                                <Icon name="clipboard-x" size={28} className="text-slate-300" />
+                            </div>
+                            <p className="font-medium">アクティブ会員がいません</p>
+                        </div>
+                    )}
+
+                    {/* 保存情報 */}
+                    <Card className="!bg-slate-50/60">
+                        <div className="flex items-start">
+                            <Icon name="info" size={18} className="text-sise-500 mr-3 mt-0.5 flex-shrink-0" />
+                            <div className="text-sm text-slate-600">
+                                <p className="font-semibold text-slate-700 mb-1">利用回数の記録について</p>
+                                <p>各会員の当月利用回数を入力し、「スプレッドシートに保存」ボタンで Google Sheets に送信できます。データはローカルにも自動保存されます。</p>
+                                {lastSaved && (
+                                    <p className="text-xs text-sise-500 mt-2">
+                                        最終保存: {lastSaved.toLocaleString('ja-JP')}
+                                    </p>
+                                )}
                             </div>
                         </div>
                     </Card>
@@ -2407,27 +2955,53 @@
 
                     {/* Googleフォーム連携 */}
                     <Card>
-                        <h3 className="text-lg font-semibold text-slate-900 mb-4">Googleフォーム連携</h3>
-                        <div className="space-y-4">
+                        <h3 className="text-lg font-semibold text-slate-900 mb-4">Google Sheets 連携</h3>
+                        <div className="space-y-5">
                             <div>
                                 <label className="block text-sm font-medium text-slate-700 mb-1">
-                                    Google Apps Script Web App URL
+                                    日報データ用 GAS URL
                                 </label>
                                 <div className="flex gap-2">
                                     <input
                                         type="url"
                                         value={googleFormUrl}
                                         onChange={(e) => setGoogleFormUrl(e.target.value)}
-                                        className="flex-1 px-4 py-2 border border-slate-300 rounded-lg focus:border-sise-500 focus:ring-1 focus:ring-sise-500 outline-none"
+                                        className="flex-1 px-4 py-2.5 border border-slate-200 rounded-xl focus:border-sise-500 focus:ring-2 focus:ring-sise-500/20 outline-none text-sm"
                                         placeholder="https://script.google.com/macros/s/..."
                                     />
                                     <button
                                         onClick={handleSaveGas}
-                                        className="px-4 py-2 bg-sise-500 hover:bg-sise-600 text-white rounded-lg font-medium text-sm transition-colors"
+                                        className="px-4 py-2.5 btn-gradient rounded-xl font-medium text-sm"
                                     >
                                         保存
                                     </button>
                                 </div>
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-slate-700 mb-1">
+                                    利用回数管理用 GAS URL
+                                </label>
+                                <div className="flex gap-2">
+                                    <input
+                                        type="url"
+                                        value={localStorage.getItem('sise_usage_gas_url') || ''}
+                                        onChange={(e) => {
+                                            localStorage.setItem('sise_usage_gas_url', e.target.value);
+                                        }}
+                                        className="flex-1 px-4 py-2.5 border border-slate-200 rounded-xl focus:border-sise-500 focus:ring-2 focus:ring-sise-500/20 outline-none text-sm"
+                                        placeholder="https://script.google.com/macros/s/..."
+                                    />
+                                    <button
+                                        onClick={() => {
+                                            setSaveMessage('利用回数用GAS URLを保存しました。リロードで反映されます。');
+                                            setTimeout(() => setSaveMessage(''), 5000);
+                                        }}
+                                        className="px-4 py-2.5 btn-gradient rounded-xl font-medium text-sm"
+                                    >
+                                        保存
+                                    </button>
+                                </div>
+                                <p className="text-xs text-slate-400 mt-1.5">会員の月間利用回数をスプレッドシートに保存するための URL です</p>
                             </div>
                         </div>
                     </Card>
@@ -2473,6 +3047,8 @@
             );
             // 日報データ取得
             const { reportData, refreshReportData } = useDailyReportData();
+            // 利用回数管理
+            const usageHook = useMemberUsage();
 
             // ダークモード切り替え
             useEffect(() => {
@@ -2484,10 +3060,11 @@
             }, [isDarkMode]);
 
             const navItems = [
-                { id: 'dashboard', label: 'ダッシュボード', icon: 'layout-dashboard' },
-                { id: 'reports', label: '日報一覧', icon: 'clipboard-list' },
-                { id: 'members', label: '会員管理', icon: 'users' },
-                ...(!isStaffMode ? [{ id: 'settings', label: '設定', icon: 'settings' }] : []),
+                { id: 'dashboard', label: 'ダッシュボード', icon: 'layout-dashboard', mobileLabel: 'ホーム' },
+                { id: 'reports', label: '日報一覧', icon: 'clipboard-list', mobileLabel: '日報' },
+                { id: 'members', label: '会員管理', icon: 'users', mobileLabel: '会員' },
+                { id: 'usage', label: '利用管理', icon: 'clipboard-check', mobileLabel: '利用' },
+                ...(!isStaffMode ? [{ id: 'settings', label: '設定', icon: 'settings', mobileLabel: '設定' }] : []),
             ];
 
             const renderView = () => {
@@ -2503,6 +3080,8 @@
                         return <DailyReportListView reportData={reportData} />;
                     case 'members':
                         return <MemberManagementView memberData={memberData} refreshSquareData={refreshSquareData} operateSubscription={operateSubscription} activeStoreId={activeStoreId} />;
+                    case 'usage':
+                        return <MemberUsageView memberData={memberData} usageHook={usageHook} />;
                     case 'settings':
                         return isStaffMode
                             ? <DashboardView memberData={memberData} reportData={reportData} selectedStore={selectedStore} setSelectedStore={setSelectedStore} />
@@ -2518,39 +3097,41 @@
             };
 
             return (
-                <div className="min-h-screen bg-slate-50 bg-mesh">
+                <div className="min-h-screen bg-slate-50 bg-mesh relative">
+                    {/* 背景装飾オーブ */}
+                    <div className="bg-orb bg-orb-1"></div>
+                    <div className="bg-orb bg-orb-2"></div>
+                    <div className="bg-orb bg-orb-3"></div>
+
                     {/* Header */}
                     <header className="fixed top-0 left-0 right-0 z-50 glass-panel safe-top">
-                        <div className="flex items-center justify-between px-5 h-16">
+                        <div className="flex items-center justify-between px-4 md:px-5 h-14 md:h-16">
                             <div className="flex items-center">
                                 <button
                                     onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-                                    className="lg:hidden p-2 rounded-xl hover:bg-sise-50 mr-2 transition-colors"
+                                    className="lg:hidden p-2 rounded-xl hover:bg-sise-50 mr-1 transition-colors"
                                 >
-                                    <Icon name="menu" size={22} />
+                                    <Icon name={isSidebarOpen ? "x" : "menu"} size={20} />
                                 </button>
                                 <div className="flex items-center">
-                                    <div className="w-9 h-9 bg-gradient-to-br from-sise-400 to-sise-600 rounded-xl flex items-center justify-center text-white font-bold text-sm shadow-lg shadow-sise-500/25">
+                                    <div className="w-8 h-8 md:w-9 md:h-9 bg-gradient-to-br from-sise-400 to-sise-600 rounded-xl flex items-center justify-center text-white font-extrabold text-sm shadow-lg shadow-sise-500/30 animate-glow-pulse">
                                         S
                                     </div>
-                                    <div className="ml-3">
-                                        <h1 className="text-base font-bold text-slate-800 tracking-wide">si'se</h1>
-                                        <p className="text-[10px] text-sise-500 -mt-0.5 font-medium tracking-wider">DASHBOARD</p>
+                                    <div className="ml-2.5">
+                                        <h1 className="text-sm md:text-base font-extrabold tracking-wide gradient-text">si'se</h1>
+                                        <p className="text-[9px] text-sise-400 -mt-0.5 font-semibold tracking-[0.2em]">DASHBOARD</p>
                                     </div>
                                 </div>
                             </div>
-                            <div className="flex items-center gap-1.5">
-                                {/* スタッフ表示バッジ */}
+                            <div className="flex items-center gap-1">
+                                {/* スタッフ表示 */}
                                 {isStaffMode && (
-                                    <div className="flex items-center px-3 py-1.5 bg-sise-50 border border-sise-200 rounded-xl">
-                                        <Icon name={currentAccess.role === 'manager' ? 'shield' : 'user'} size={14} className="text-sise-500 mr-1.5" />
-                                        <span className="text-xs font-medium text-sise-700">{currentAccess.name}</span>
-                                        <span className="text-[10px] text-sise-400 ml-1.5">
-                                            {currentAccess.role === 'manager' ? '責任者' : 'スタッフ'}
-                                        </span>
+                                    <div className="flex items-center px-2 md:px-3 py-1.5 bg-sise-50/80 border border-sise-200 rounded-xl hide-mobile">
+                                        <Icon name={currentAccess.role === 'manager' ? 'shield' : 'user'} size={13} className="text-sise-500 mr-1" />
+                                        <span className="text-xs font-semibold text-sise-700">{currentAccess.name}</span>
                                     </div>
                                 )}
-                                {/* 店舗セレクター（アクセス制限適用） */}
+                                {/* 店舗セレクター */}
                                 {(() => {
                                     const visibleStores = isStaffMode
                                         ? (memberData.stores || []).filter(s => currentAccess.storeIds.includes(s.id))
@@ -2559,7 +3140,7 @@
                                         <select
                                             value={activeStoreId}
                                             onChange={(e) => setActiveStoreId(e.target.value)}
-                                            className="px-3 py-1.5 border border-sise-200 rounded-xl text-xs font-medium focus:border-sise-400 focus:ring-1 focus:ring-sise-400/30 outline-none bg-sise-50/50 text-sise-700"
+                                            className="px-2 md:px-3 py-1.5 border border-sise-200 rounded-xl text-xs font-semibold focus:border-sise-400 focus:ring-2 focus:ring-sise-400/20 outline-none bg-sise-50/60 text-sise-700"
                                         >
                                             <option value="all">全店舗</option>
                                             {visibleStores.map(s => (
@@ -2570,17 +3151,17 @@
                                 })()}
                                 <button
                                     onClick={() => { refreshReportData(); refreshSquareData(); }}
-                                    className="p-2 rounded-xl hover:bg-sise-50 text-slate-500 hover:text-sise-600 transition-colors"
+                                    className="p-2 rounded-xl hover:bg-sise-50 text-slate-400 hover:text-sise-600 transition-all"
                                     title="データ更新"
                                 >
-                                    <Icon name="refresh-cw" size={18} />
+                                    <Icon name="refresh-cw" size={17} />
                                 </button>
                                 <button
                                     onClick={() => setIsDarkMode(!isDarkMode)}
-                                    className="p-2 rounded-xl hover:bg-sise-50 text-slate-500 hover:text-sise-600 transition-colors"
+                                    className="p-2 rounded-xl hover:bg-sise-50 text-slate-400 hover:text-sise-600 transition-all hide-mobile"
                                     title="ダークモード切り替え"
                                 >
-                                    <Icon name={isDarkMode ? 'sun' : 'moon'} size={18} />
+                                    <Icon name={isDarkMode ? 'sun' : 'moon'} size={17} />
                                 </button>
                             </div>
                         </div>
@@ -2589,25 +3170,25 @@
                     {/* Sidebar Overlay (Mobile) */}
                     {isSidebarOpen && (
                         <div
-                            className="fixed inset-0 bg-black/50 z-40 lg:hidden"
+                            className="fixed inset-0 bg-black/40 backdrop-blur-sm z-40 lg:hidden animate-fade-in"
                             onClick={() => setIsSidebarOpen(false)}
                         ></div>
                     )}
 
-                    {/* Sidebar */}
-                    <aside className={`fixed top-16 left-0 bottom-0 w-60 glass-panel z-40 transform transition-transform duration-300 ease-out lg:translate-x-0 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+                    {/* Sidebar (Desktop) */}
+                    <aside className={`fixed top-14 md:top-16 left-0 bottom-0 w-56 glass-panel z-40 transform transition-transform duration-300 ease-out lg:translate-x-0 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
                         <nav className="p-3 space-y-0.5 mt-2">
-                            {navItems.map((item, idx) => (
+                            {navItems.map((item) => (
                                 <button
                                     key={item.id}
                                     onClick={() => {
                                         setCurrentView(item.id);
                                         setIsSidebarOpen(false);
                                     }}
-                                    className={`w-full flex items-center px-4 py-2.5 rounded-xl text-left text-sm font-medium transition-all duration-200 ${
+                                    className={`w-full flex items-center px-4 py-2.5 rounded-xl text-left text-sm font-semibold transition-all duration-300 ${
                                         currentView === item.id
-                                            ? 'bg-sise-500 text-white shadow-md shadow-sise-500/25'
-                                            : 'text-slate-600 hover:bg-sise-50 hover:text-sise-700'
+                                            ? 'bg-gradient-to-r from-sise-500 to-sise-600 text-white shadow-lg shadow-sise-500/25'
+                                            : 'text-slate-500 hover:bg-sise-50 hover:text-sise-700'
                                     }`}
                                 >
                                     <Icon name={item.icon} size={18} className="mr-3" />
@@ -2616,22 +3197,21 @@
                             ))}
                         </nav>
 
-                        {/* データ更新時刻 / スタッフ情報 */}
-                        <div className="absolute bottom-0 left-0 right-0 p-4 border-t border-slate-200/50">
+                        <div className="absolute bottom-0 left-0 right-0 p-4 border-t border-slate-200/30">
                             {isStaffMode && (
                                 <div className="flex items-center mb-2 px-1">
                                     <div className={`w-7 h-7 rounded-lg flex items-center justify-center ${currentAccess.role === 'manager' ? 'bg-amber-50 text-amber-500' : 'bg-sise-50 text-sise-500'}`}>
                                         <Icon name={currentAccess.role === 'manager' ? 'shield' : 'user'} size={14} />
                                     </div>
                                     <div className="ml-2">
-                                        <p className="text-xs font-medium text-slate-700 leading-tight">{currentAccess.name}</p>
+                                        <p className="text-xs font-semibold text-slate-700 leading-tight">{currentAccess.name}</p>
                                         <p className="text-[10px] text-slate-400">
                                             {currentAccess.role === 'manager' ? '店舗責任者' : 'スタッフ'}
                                         </p>
                                     </div>
                                 </div>
                             )}
-                            <p className="text-[10px] text-slate-400 tracking-wide">
+                            <p className="text-[10px] text-slate-400 tracking-wider font-medium">
                                 LAST UPDATE: {reportData.lastUpdated
                                     ? reportData.lastUpdated.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })
                                     : '--:--'
@@ -2640,14 +3220,30 @@
                         </div>
                     </aside>
 
+                    {/* Bottom Navigation (Mobile) */}
+                    <nav className="bottom-nav hide-desktop">
+                        <div className="flex">
+                            {navItems.slice(0, 5).map((item) => (
+                                <button
+                                    key={item.id}
+                                    onClick={() => setCurrentView(item.id)}
+                                    className={`bottom-nav-item ${currentView === item.id ? 'active' : ''}`}
+                                >
+                                    <Icon name={item.icon} size={20} />
+                                    <span className="mt-0.5">{item.mobileLabel}</span>
+                                </button>
+                            ))}
+                        </div>
+                    </nav>
+
                     {/* Main Content */}
-                    <main className="pt-16 lg:pl-60 min-h-screen">
-                        <div className="p-4 lg:p-8 max-w-7xl mx-auto safe-bottom">
+                    <main className="pt-14 md:pt-16 lg:pl-56 min-h-screen relative z-10">
+                        <div className="p-3 md:p-4 lg:p-8 max-w-7xl mx-auto pb-24 md:pb-8">
                             {memberData.loading || reportData.loading ? (
                                 <div className="flex items-center justify-center h-64 animate-fade-in">
                                     <div className="text-center">
-                                        <div className="w-10 h-10 border-3 border-sise-200 border-t-sise-500 rounded-full animate-spin mx-auto mb-4"></div>
-                                        <p className="text-slate-400 text-sm tracking-wide">Loading...</p>
+                                        <div className="w-12 h-12 border-3 border-sise-200 border-t-sise-500 rounded-full animate-spin mx-auto mb-4"></div>
+                                        <p className="text-slate-400 text-xs tracking-widest font-semibold uppercase">Loading...</p>
                                     </div>
                                 </div>
                             ) : (
