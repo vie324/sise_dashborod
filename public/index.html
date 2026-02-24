@@ -1235,6 +1235,208 @@
         };
 
         // ========================================
+        // 回数券管理（Google Sheets連携）
+        // ========================================
+
+        const TICKET_GAS_URL = localStorage.getItem('sise_ticket_gas_url') || 'YOUR_TICKET_GAS_URL';
+        const TICKET_STORAGE_KEY = 'sise_ticket_data';
+
+        const useTicketManagement = () => {
+            // 回数券プラン（種類）
+            const [ticketPlans, setTicketPlans] = useState([]);
+            // 顧客回数券（購入記録）
+            const [customerTickets, setCustomerTickets] = useState([]);
+            const [saving, setSaving] = useState(false);
+            const [lastSaved, setLastSaved] = useState(null);
+
+            // ローカルストレージから読み込み
+            useEffect(() => {
+                try {
+                    const stored = JSON.parse(localStorage.getItem(TICKET_STORAGE_KEY) || '{}');
+                    setTicketPlans(stored.plans || [
+                        { id: 'plan_1', name: '5回券', sessions: 5, price: 45000, validityDays: 90, active: true },
+                        { id: 'plan_2', name: '10回券', sessions: 10, price: 80000, validityDays: 180, active: true },
+                        { id: 'plan_3', name: '20回券', sessions: 20, price: 140000, validityDays: 365, active: true },
+                    ]);
+                    setCustomerTickets(stored.tickets || []);
+                } catch { }
+
+                // GASから読み込み
+                if (TICKET_GAS_URL !== 'YOUR_TICKET_GAS_URL') {
+                    fetch(TICKET_GAS_URL + '?action=getTickets')
+                        .then(r => r.json())
+                        .then(data => {
+                            if (data && data.plans) setTicketPlans(data.plans);
+                            if (data && data.tickets) setCustomerTickets(data.tickets);
+                        })
+                        .catch(() => {});
+                }
+            }, []);
+
+            // ローカル保存
+            const saveLocal = useCallback((plans, tickets) => {
+                try {
+                    localStorage.setItem(TICKET_STORAGE_KEY, JSON.stringify({ plans, tickets }));
+                } catch {}
+            }, []);
+
+            // 回数券プラン管理
+            const addPlan = useCallback((plan) => {
+                const newPlan = { ...plan, id: 'plan_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6) };
+                setTicketPlans(prev => {
+                    const updated = [...prev, newPlan];
+                    saveLocal(updated, customerTickets);
+                    return updated;
+                });
+                return newPlan;
+            }, [customerTickets, saveLocal]);
+
+            const updatePlan = useCallback((planId, updates) => {
+                setTicketPlans(prev => {
+                    const updated = prev.map(p => p.id === planId ? { ...p, ...updates } : p);
+                    saveLocal(updated, customerTickets);
+                    return updated;
+                });
+            }, [customerTickets, saveLocal]);
+
+            const deletePlan = useCallback((planId) => {
+                setTicketPlans(prev => {
+                    const updated = prev.filter(p => p.id !== planId);
+                    saveLocal(updated, customerTickets);
+                    return updated;
+                });
+            }, [customerTickets, saveLocal]);
+
+            // 顧客回数券管理
+            const addCustomerTicket = useCallback((ticket) => {
+                const plan = ticketPlans.find(p => p.id === ticket.planId);
+                const purchaseDate = ticket.purchaseDate || new Date().toISOString().slice(0, 10);
+                const expirationDate = ticket.expirationDate || (() => {
+                    const d = new Date(purchaseDate);
+                    d.setDate(d.getDate() + (plan?.validityDays || 180));
+                    return d.toISOString().slice(0, 10);
+                })();
+
+                const newTicket = {
+                    id: 'tkt_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+                    customerName: ticket.customerName,
+                    customerPhone: ticket.customerPhone || '',
+                    planId: ticket.planId,
+                    planName: plan?.name || ticket.planName || '',
+                    totalSessions: plan?.sessions || ticket.totalSessions || 0,
+                    remainingSessions: plan?.sessions || ticket.totalSessions || 0,
+                    price: plan?.price || ticket.price || 0,
+                    purchaseDate,
+                    expirationDate,
+                    storeName: ticket.storeName || '',
+                    notes: ticket.notes || '',
+                    usageHistory: [],
+                    createdAt: new Date().toISOString(),
+                };
+
+                setCustomerTickets(prev => {
+                    const updated = [newTicket, ...prev];
+                    saveLocal(ticketPlans, updated);
+                    return updated;
+                });
+                return newTicket;
+            }, [ticketPlans, saveLocal]);
+
+            const updateCustomerTicket = useCallback((ticketId, updates) => {
+                setCustomerTickets(prev => {
+                    const updated = prev.map(t => t.id === ticketId ? { ...t, ...updates } : t);
+                    saveLocal(ticketPlans, updated);
+                    return updated;
+                });
+            }, [ticketPlans, saveLocal]);
+
+            const useSession = useCallback((ticketId) => {
+                setCustomerTickets(prev => {
+                    const updated = prev.map(t => {
+                        if (t.id !== ticketId || t.remainingSessions <= 0) return t;
+                        return {
+                            ...t,
+                            remainingSessions: t.remainingSessions - 1,
+                            usageHistory: [...(t.usageHistory || []), { date: new Date().toISOString(), action: 'use' }],
+                        };
+                    });
+                    saveLocal(ticketPlans, updated);
+                    return updated;
+                });
+            }, [ticketPlans, saveLocal]);
+
+            const undoSession = useCallback((ticketId) => {
+                setCustomerTickets(prev => {
+                    const updated = prev.map(t => {
+                        if (t.id !== ticketId || t.remainingSessions >= t.totalSessions) return t;
+                        return {
+                            ...t,
+                            remainingSessions: t.remainingSessions + 1,
+                            usageHistory: [...(t.usageHistory || []), { date: new Date().toISOString(), action: 'undo' }],
+                        };
+                    });
+                    saveLocal(ticketPlans, updated);
+                    return updated;
+                });
+            }, [ticketPlans, saveLocal]);
+
+            const deleteCustomerTicket = useCallback((ticketId) => {
+                setCustomerTickets(prev => {
+                    const updated = prev.filter(t => t.id !== ticketId);
+                    saveLocal(ticketPlans, updated);
+                    return updated;
+                });
+            }, [ticketPlans, saveLocal]);
+
+            // Google Sheets に保存
+            const saveToSheet = useCallback(async () => {
+                setSaving(true);
+                try {
+                    saveLocal(ticketPlans, customerTickets);
+                    if (TICKET_GAS_URL !== 'YOUR_TICKET_GAS_URL') {
+                        await fetch(TICKET_GAS_URL, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ action: 'saveTickets', plans: ticketPlans, tickets: customerTickets })
+                        });
+                    }
+                    setLastSaved(new Date());
+                } catch (e) {
+                    console.error('Ticket save error:', e);
+                } finally {
+                    setSaving(false);
+                }
+            }, [ticketPlans, customerTickets, saveLocal]);
+
+            // 集計
+            const stats = useMemo(() => {
+                const now = new Date();
+                const active = customerTickets.filter(t => {
+                    return t.remainingSessions > 0 && new Date(t.expirationDate) >= now;
+                });
+                const expiringSoon = customerTickets.filter(t => {
+                    const exp = new Date(t.expirationDate);
+                    const diff = (exp - now) / (1000 * 60 * 60 * 24);
+                    return t.remainingSessions > 0 && diff >= 0 && diff <= 30;
+                });
+                const expired = customerTickets.filter(t => {
+                    return t.remainingSessions > 0 && new Date(t.expirationDate) < now;
+                });
+                const completed = customerTickets.filter(t => t.remainingSessions <= 0);
+                const totalRevenue = customerTickets.reduce((sum, t) => sum + (t.price || 0), 0);
+                const totalRemaining = active.reduce((sum, t) => sum + t.remainingSessions, 0);
+                return { active: active.length, expiringSoon: expiringSoon.length, expired: expired.length, completed: completed.length, totalRevenue, totalRemaining, total: customerTickets.length };
+            }, [customerTickets]);
+
+            return {
+                ticketPlans, customerTickets, stats,
+                addPlan, updatePlan, deletePlan,
+                addCustomerTicket, updateCustomerTicket, useSession, undoSession, deleteCustomerTicket,
+                saveToSheet, saving, lastSaved
+            };
+        };
+
+        // ========================================
         // ダッシュボードメインビュー
         // ========================================
 
@@ -2381,6 +2583,561 @@
         };
 
         // ========================================
+        // 回数券管理ビュー
+        // ========================================
+
+        const TicketManagementView = ({ ticketHook }) => {
+            const {
+                ticketPlans, customerTickets, stats,
+                addPlan, updatePlan, deletePlan,
+                addCustomerTicket, updateCustomerTicket, useSession, undoSession, deleteCustomerTicket,
+                saveToSheet, saving, lastSaved
+            } = ticketHook;
+
+            const [activeTab, setActiveTab] = useState('tickets'); // 'tickets' | 'plans'
+            const [showAddForm, setShowAddForm] = useState(false);
+            const [showPlanForm, setShowPlanForm] = useState(false);
+            const [editingPlan, setEditingPlan] = useState(null);
+            const [selectedTicket, setSelectedTicket] = useState(null);
+            const [filterStatus, setFilterStatus] = useState('active'); // 'all' | 'active' | 'expiring' | 'expired' | 'completed'
+            const [searchQuery, setSearchQuery] = useState('');
+            const [showSaved, setShowSaved] = useState(false);
+
+            // 新規回数券フォーム
+            const [newTicket, setNewTicket] = useState({
+                customerName: '', customerPhone: '', planId: '', storeName: '', notes: '',
+                purchaseDate: new Date().toISOString().slice(0, 10), expirationDate: ''
+            });
+            // プランフォーム
+            const [planForm, setPlanForm] = useState({ name: '', sessions: '', price: '', validityDays: '' });
+
+            // 日数計算
+            const getDaysUntilExpiration = (expirationDate) => {
+                const now = new Date();
+                const exp = new Date(expirationDate);
+                return Math.ceil((exp - now) / (1000 * 60 * 60 * 24));
+            };
+
+            // ステータス判定
+            const getTicketStatus = (ticket) => {
+                const days = getDaysUntilExpiration(ticket.expirationDate);
+                if (ticket.remainingSessions <= 0) return 'completed';
+                if (days < 0) return 'expired';
+                if (days <= 30) return 'expiring';
+                return 'active';
+            };
+
+            const getTicketStatusStyle = (status) => {
+                switch (status) {
+                    case 'active': return 'bg-green-100 text-green-700 border-green-200';
+                    case 'expiring': return 'bg-amber-100 text-amber-700 border-amber-200';
+                    case 'expired': return 'bg-red-100 text-red-700 border-red-200';
+                    case 'completed': return 'bg-slate-100 text-slate-500 border-slate-200';
+                    default: return 'bg-slate-100 text-slate-500';
+                }
+            };
+
+            const getTicketStatusLabel = (status) => {
+                switch (status) {
+                    case 'active': return '有効';
+                    case 'expiring': return '期限間近';
+                    case 'expired': return '期限切れ';
+                    case 'completed': return '消化済';
+                    default: return status;
+                }
+            };
+
+            // フィルタリング
+            const filteredTickets = useMemo(() => {
+                let list = customerTickets;
+                if (filterStatus !== 'all') {
+                    list = list.filter(t => getTicketStatus(t) === filterStatus);
+                }
+                if (searchQuery) {
+                    const q = searchQuery.toLowerCase();
+                    list = list.filter(t => t.customerName.toLowerCase().includes(q) || (t.customerPhone && t.customerPhone.includes(q)));
+                }
+                return list.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+            }, [customerTickets, filterStatus, searchQuery]);
+
+            // プランが変わったら有効期限を自動計算
+            const handlePlanChange = (planId) => {
+                const plan = ticketPlans.find(p => p.id === planId);
+                const purchase = newTicket.purchaseDate || new Date().toISOString().slice(0, 10);
+                let expDate = '';
+                if (plan) {
+                    const d = new Date(purchase);
+                    d.setDate(d.getDate() + plan.validityDays);
+                    expDate = d.toISOString().slice(0, 10);
+                }
+                setNewTicket(prev => ({ ...prev, planId, expirationDate: expDate }));
+            };
+
+            // 回数券追加
+            const handleAddTicket = () => {
+                if (!newTicket.customerName.trim() || !newTicket.planId) return;
+                addCustomerTicket(newTicket);
+                setNewTicket({ customerName: '', customerPhone: '', planId: '', storeName: '', notes: '', purchaseDate: new Date().toISOString().slice(0, 10), expirationDate: '' });
+                setShowAddForm(false);
+            };
+
+            // プラン追加/更新
+            const handleSavePlan = () => {
+                if (!planForm.name.trim() || !planForm.sessions || !planForm.price) return;
+                const data = {
+                    name: planForm.name.trim(),
+                    sessions: parseInt(planForm.sessions),
+                    price: parseInt(planForm.price),
+                    validityDays: parseInt(planForm.validityDays) || 180,
+                    active: true,
+                };
+                if (editingPlan) {
+                    updatePlan(editingPlan.id, data);
+                } else {
+                    addPlan(data);
+                }
+                setPlanForm({ name: '', sessions: '', price: '', validityDays: '' });
+                setShowPlanForm(false);
+                setEditingPlan(null);
+            };
+
+            const handleSave = async () => {
+                await saveToSheet();
+                setShowSaved(true);
+                setTimeout(() => setShowSaved(false), 3000);
+            };
+
+            // 残セッションの進捗パーセンテージ
+            const getProgressPct = (ticket) => {
+                if (ticket.totalSessions <= 0) return 0;
+                return ((ticket.totalSessions - ticket.remainingSessions) / ticket.totalSessions) * 100;
+            };
+
+            return (
+                <div className="space-y-5 md:space-y-6 animate-fade-in">
+                    <SectionHeader title="回数券管理" subtitle="TICKET MANAGEMENT" icon="ticket">
+                        <button
+                            onClick={handleSave}
+                            disabled={saving}
+                            className="flex items-center px-4 py-2.5 btn-gradient rounded-xl font-medium text-sm transition-all disabled:opacity-50"
+                        >
+                            <Icon name={saving ? "loader" : "save"} size={16} className={`mr-2 ${saving ? 'animate-spin' : ''}`} />
+                            {saving ? '保存中...' : 'スプシ保存'}
+                        </button>
+                    </SectionHeader>
+
+                    {showSaved && (
+                        <div className="bg-green-50/80 backdrop-blur-sm border border-green-200 rounded-xl p-3 animate-fade-in-up flex items-center">
+                            <Icon name="check-circle" size={18} className="text-green-500 mr-2 flex-shrink-0" />
+                            <p className="text-green-700 text-sm font-medium">回数券データを保存しました</p>
+                        </div>
+                    )}
+
+                    {/* KPIサマリ */}
+                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
+                        <KpiCard title="有効回数券" value={stats.active} subValue={`全${stats.total}件`} icon="ticket" gradientFrom="from-sise-400" gradientTo="to-sise-600" />
+                        <KpiCard title="期限間近" value={stats.expiringSoon} subValue="30日以内" icon="alert-triangle" gradientFrom={stats.expiringSoon > 0 ? "from-amber-400" : "from-slate-400"} gradientTo={stats.expiringSoon > 0 ? "to-amber-600" : "to-slate-500"} />
+                        <KpiCard title="残セッション" value={stats.totalRemaining} subValue="有効分の合計" icon="hash" gradientFrom="from-blue-400" gradientTo="to-blue-600" />
+                        <KpiCard title="累計売上" value={formatCurrency(stats.totalRevenue)} subValue="回数券販売額" icon="wallet" gradientFrom="from-emerald-400" gradientTo="to-emerald-600" />
+                    </div>
+
+                    {/* タブ切り替え */}
+                    <div className="flex gap-1 bg-slate-100/80 rounded-xl p-1">
+                        <button onClick={() => setActiveTab('tickets')} className={`flex-1 py-2.5 rounded-lg text-sm font-semibold transition-all ${activeTab === 'tickets' ? 'bg-white text-sise-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+                            <Icon name="users" size={15} className="inline mr-1.5 -mt-0.5" />
+                            購入者一覧
+                        </button>
+                        <button onClick={() => setActiveTab('plans')} className={`flex-1 py-2.5 rounded-lg text-sm font-semibold transition-all ${activeTab === 'plans' ? 'bg-white text-sise-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+                            <Icon name="package" size={15} className="inline mr-1.5 -mt-0.5" />
+                            回数券プラン
+                        </button>
+                    </div>
+
+                    {/* ==================== 購入者一覧タブ ==================== */}
+                    {activeTab === 'tickets' && (
+                        <div className="space-y-4">
+                            {/* 操作バー */}
+                            <div className="flex flex-wrap items-center gap-2">
+                                <button
+                                    onClick={() => setShowAddForm(true)}
+                                    className="flex items-center px-4 py-2.5 btn-gradient rounded-xl text-sm font-medium"
+                                >
+                                    <Icon name="plus" size={16} className="mr-1.5" />新規発行
+                                </button>
+                                <div className="relative flex-1 min-w-[140px]">
+                                    <Icon name="search" size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                                    <input
+                                        type="text"
+                                        value={searchQuery}
+                                        onChange={(e) => setSearchQuery(e.target.value)}
+                                        placeholder="名前・電話番号..."
+                                        className="w-full pl-8 pr-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:border-sise-400 focus:ring-2 focus:ring-sise-400/20 outline-none bg-white/80"
+                                    />
+                                </div>
+                                <select
+                                    value={filterStatus}
+                                    onChange={(e) => setFilterStatus(e.target.value)}
+                                    className="px-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:border-sise-400 outline-none bg-white/80"
+                                >
+                                    <option value="all">全て</option>
+                                    <option value="active">有効</option>
+                                    <option value="expiring">期限間近</option>
+                                    <option value="expired">期限切れ</option>
+                                    <option value="completed">消化済</option>
+                                </select>
+                            </div>
+
+                            {/* 新規発行フォーム */}
+                            {showAddForm && (
+                                <Card className="!bg-sise-50/40 border-sise-200 animate-scale-in">
+                                    <h4 className="font-bold text-slate-800 mb-4 flex items-center">
+                                        <Icon name="plus-circle" size={18} className="text-sise-500 mr-2" />
+                                        回数券を新規発行
+                                    </h4>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                        <div>
+                                            <label className="block text-xs font-semibold text-slate-600 mb-1">購入者名 *</label>
+                                            <input
+                                                type="text" value={newTicket.customerName}
+                                                onChange={(e) => setNewTicket(prev => ({ ...prev, customerName: e.target.value }))}
+                                                placeholder="例: 田中太郎"
+                                                className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:border-sise-400 outline-none"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-semibold text-slate-600 mb-1">電話番号</label>
+                                            <input
+                                                type="tel" value={newTicket.customerPhone}
+                                                onChange={(e) => setNewTicket(prev => ({ ...prev, customerPhone: e.target.value }))}
+                                                placeholder="例: 090-1234-5678"
+                                                className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:border-sise-400 outline-none"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-semibold text-slate-600 mb-1">回数券プラン *</label>
+                                            <select
+                                                value={newTicket.planId}
+                                                onChange={(e) => handlePlanChange(e.target.value)}
+                                                className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:border-sise-400 outline-none"
+                                            >
+                                                <option value="">選択してください</option>
+                                                {ticketPlans.filter(p => p.active).map(p => (
+                                                    <option key={p.id} value={p.id}>{p.name}（{p.sessions}回 / {formatCurrency(p.price)}）</option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-semibold text-slate-600 mb-1">店舗名</label>
+                                            <input
+                                                type="text" value={newTicket.storeName}
+                                                onChange={(e) => setNewTicket(prev => ({ ...prev, storeName: e.target.value }))}
+                                                placeholder="例: 新宿店"
+                                                className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:border-sise-400 outline-none"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-semibold text-slate-600 mb-1">購入日</label>
+                                            <input
+                                                type="date" value={newTicket.purchaseDate}
+                                                onChange={(e) => {
+                                                    setNewTicket(prev => ({ ...prev, purchaseDate: e.target.value }));
+                                                    if (newTicket.planId) handlePlanChange(newTicket.planId);
+                                                }}
+                                                className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:border-sise-400 outline-none"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-semibold text-slate-600 mb-1">有効期限</label>
+                                            <input
+                                                type="date" value={newTicket.expirationDate}
+                                                onChange={(e) => setNewTicket(prev => ({ ...prev, expirationDate: e.target.value }))}
+                                                className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:border-sise-400 outline-none"
+                                            />
+                                        </div>
+                                        <div className="md:col-span-2">
+                                            <label className="block text-xs font-semibold text-slate-600 mb-1">メモ</label>
+                                            <input
+                                                type="text" value={newTicket.notes}
+                                                onChange={(e) => setNewTicket(prev => ({ ...prev, notes: e.target.value }))}
+                                                placeholder="備考..."
+                                                className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:border-sise-400 outline-none"
+                                            />
+                                        </div>
+                                    </div>
+                                    <div className="flex justify-end gap-2 mt-4">
+                                        <button onClick={() => setShowAddForm(false)} className="px-4 py-2 text-sm text-slate-500 hover:bg-slate-100 rounded-xl">キャンセル</button>
+                                        <button
+                                            onClick={handleAddTicket}
+                                            disabled={!newTicket.customerName.trim() || !newTicket.planId}
+                                            className="px-5 py-2 btn-gradient rounded-xl text-sm font-medium disabled:opacity-40"
+                                        >
+                                            発行する
+                                        </button>
+                                    </div>
+                                </Card>
+                            )}
+
+                            {/* 回数券カード一覧 */}
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-4">
+                                {filteredTickets.map((ticket) => {
+                                    const status = getTicketStatus(ticket);
+                                    const days = getDaysUntilExpiration(ticket.expirationDate);
+                                    const pct = getProgressPct(ticket);
+
+                                    return (
+                                        <Card key={ticket.id} className={`!p-4 relative overflow-hidden hover:!transform-none ${status === 'expired' ? 'opacity-70' : ''}`}>
+                                            {/* トップバー: ステータス */}
+                                            <div className="absolute top-0 left-0 right-0 h-1" style={{ background: status === 'active' ? '#22c55e' : status === 'expiring' ? '#f59e0b' : status === 'expired' ? '#ef4444' : '#94a3b8' }}></div>
+
+                                            <div className="flex items-start justify-between mt-1 mb-3">
+                                                <div className="flex items-center flex-1 min-w-0">
+                                                    <Avatar name={ticket.customerName} size={38} />
+                                                    <div className="ml-2.5 flex-1 min-w-0">
+                                                        <p className="font-bold text-slate-800 text-sm truncate">{ticket.customerName}</p>
+                                                        <p className="text-[11px] text-slate-400 truncate">{ticket.planName}{ticket.storeName ? ` / ${ticket.storeName}` : ''}</p>
+                                                    </div>
+                                                </div>
+                                                <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-lg border flex-shrink-0 ${getTicketStatusStyle(status)}`}>
+                                                    {getTicketStatusLabel(status)}
+                                                </span>
+                                            </div>
+
+                                            {/* 残回数 */}
+                                            <div className="bg-slate-50/80 rounded-xl p-3 mb-3">
+                                                <div className="flex items-center justify-between mb-2">
+                                                    <span className="text-[11px] text-slate-500 font-medium">残り回数</span>
+                                                    <span className="text-lg font-extrabold text-slate-800">
+                                                        <span className={status === 'active' ? 'text-sise-600' : status === 'expiring' ? 'text-amber-600' : 'text-slate-500'}>{ticket.remainingSessions}</span>
+                                                        <span className="text-slate-400 text-sm font-medium"> / {ticket.totalSessions}</span>
+                                                    </span>
+                                                </div>
+                                                <div className="w-full bg-slate-200 rounded-full h-2">
+                                                    <div
+                                                        className="h-2 rounded-full transition-all duration-500"
+                                                        style={{ width: `${pct}%`, background: pct >= 100 ? '#94a3b8' : pct >= 70 ? '#f59e0b' : '#33a065' }}
+                                                    ></div>
+                                                </div>
+                                            </div>
+
+                                            {/* 情報 */}
+                                            <div className="grid grid-cols-2 gap-2 text-[11px] mb-3">
+                                                <div>
+                                                    <span className="text-slate-400">購入日</span>
+                                                    <p className="font-semibold text-slate-700">{ticket.purchaseDate}</p>
+                                                </div>
+                                                <div>
+                                                    <span className="text-slate-400">有効期限</span>
+                                                    <p className={`font-semibold ${days <= 30 && days >= 0 ? 'text-amber-600' : days < 0 ? 'text-red-500' : 'text-slate-700'}`}>
+                                                        {ticket.expirationDate}
+                                                        {days >= 0 && days <= 30 && <span className="ml-1">({days}日)</span>}
+                                                        {days < 0 && <span className="ml-1">(期限切)</span>}
+                                                    </p>
+                                                </div>
+                                                <div>
+                                                    <span className="text-slate-400">金額</span>
+                                                    <p className="font-semibold text-slate-700">{formatCurrency(ticket.price)}</p>
+                                                </div>
+                                                {ticket.customerPhone && (
+                                                    <div>
+                                                        <span className="text-slate-400">電話</span>
+                                                        <p className="font-semibold text-slate-700">{ticket.customerPhone}</p>
+                                                    </div>
+                                                )}
+                                            </div>
+                                            {ticket.notes && (
+                                                <p className="text-[11px] text-slate-400 bg-slate-50 rounded-lg px-2.5 py-1.5 mb-3">{ticket.notes}</p>
+                                            )}
+
+                                            {/* アクションボタン */}
+                                            <div className="flex items-center gap-2">
+                                                {status === 'active' || status === 'expiring' ? (
+                                                    <>
+                                                        <button
+                                                            onClick={() => useSession(ticket.id)}
+                                                            disabled={ticket.remainingSessions <= 0}
+                                                            className="flex-1 flex items-center justify-center py-2.5 bg-sise-500 hover:bg-sise-600 text-white rounded-xl text-xs font-semibold transition-all disabled:opacity-40 active:scale-95"
+                                                        >
+                                                            <Icon name="minus-circle" size={14} className="mr-1" />1回消化
+                                                        </button>
+                                                        <button
+                                                            onClick={() => undoSession(ticket.id)}
+                                                            disabled={ticket.remainingSessions >= ticket.totalSessions}
+                                                            className="py-2.5 px-3 border border-slate-200 hover:bg-slate-50 rounded-xl text-xs font-medium text-slate-500 transition-all disabled:opacity-40"
+                                                        >
+                                                            <Icon name="undo-2" size={14} />
+                                                        </button>
+                                                    </>
+                                                ) : (
+                                                    <span className="flex-1 text-center text-xs text-slate-400 py-2">
+                                                        {status === 'completed' ? '全回消化済み' : '有効期限切れ'}
+                                                    </span>
+                                                )}
+                                                <button
+                                                    onClick={() => { if (confirm(`${ticket.customerName}の回数券を削除しますか？`)) deleteCustomerTicket(ticket.id); }}
+                                                    className="py-2.5 px-3 border border-slate-200 hover:bg-red-50 hover:border-red-200 hover:text-red-500 rounded-xl text-xs text-slate-400 transition-all"
+                                                >
+                                                    <Icon name="trash-2" size={14} />
+                                                </button>
+                                            </div>
+                                        </Card>
+                                    );
+                                })}
+                            </div>
+
+                            {filteredTickets.length === 0 && (
+                                <div className="text-center py-12 text-slate-400">
+                                    <div className="w-16 h-16 bg-slate-100 rounded-2xl flex items-center justify-center mx-auto mb-3">
+                                        <Icon name="ticket" size={28} className="text-slate-300" />
+                                    </div>
+                                    <p className="font-medium">回数券データがありません</p>
+                                    <p className="text-xs mt-1">「新規発行」から追加してください</p>
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {/* ==================== プラン管理タブ ==================== */}
+                    {activeTab === 'plans' && (
+                        <div className="space-y-4">
+                            <div className="flex items-center justify-between">
+                                <p className="text-sm text-slate-500">{ticketPlans.length}件のプラン</p>
+                                <button
+                                    onClick={() => { setShowPlanForm(true); setEditingPlan(null); setPlanForm({ name: '', sessions: '', price: '', validityDays: '' }); }}
+                                    className="flex items-center px-4 py-2.5 btn-gradient rounded-xl text-sm font-medium"
+                                >
+                                    <Icon name="plus" size={16} className="mr-1.5" />新規プラン
+                                </button>
+                            </div>
+
+                            {/* プラン追加/編集フォーム */}
+                            {showPlanForm && (
+                                <Card className="!bg-sise-50/40 border-sise-200 animate-scale-in">
+                                    <h4 className="font-bold text-slate-800 mb-4">
+                                        {editingPlan ? 'プラン編集' : '新規プラン作成'}
+                                    </h4>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                        <div>
+                                            <label className="block text-xs font-semibold text-slate-600 mb-1">プラン名 *</label>
+                                            <input
+                                                type="text" value={planForm.name}
+                                                onChange={(e) => setPlanForm(prev => ({ ...prev, name: e.target.value }))}
+                                                placeholder="例: 10回券"
+                                                className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:border-sise-400 outline-none"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-semibold text-slate-600 mb-1">回数 *</label>
+                                            <input
+                                                type="number" value={planForm.sessions}
+                                                onChange={(e) => setPlanForm(prev => ({ ...prev, sessions: e.target.value }))}
+                                                placeholder="例: 10"
+                                                className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:border-sise-400 outline-none"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-semibold text-slate-600 mb-1">金額（円） *</label>
+                                            <input
+                                                type="number" value={planForm.price}
+                                                onChange={(e) => setPlanForm(prev => ({ ...prev, price: e.target.value }))}
+                                                placeholder="例: 80000"
+                                                className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:border-sise-400 outline-none"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-semibold text-slate-600 mb-1">有効期間（日数）</label>
+                                            <input
+                                                type="number" value={planForm.validityDays}
+                                                onChange={(e) => setPlanForm(prev => ({ ...prev, validityDays: e.target.value }))}
+                                                placeholder="例: 180（6ヶ月）"
+                                                className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:border-sise-400 outline-none"
+                                            />
+                                        </div>
+                                    </div>
+                                    <div className="flex justify-end gap-2 mt-4">
+                                        <button onClick={() => { setShowPlanForm(false); setEditingPlan(null); }} className="px-4 py-2 text-sm text-slate-500 hover:bg-slate-100 rounded-xl">キャンセル</button>
+                                        <button
+                                            onClick={handleSavePlan}
+                                            disabled={!planForm.name.trim() || !planForm.sessions || !planForm.price}
+                                            className="px-5 py-2 btn-gradient rounded-xl text-sm font-medium disabled:opacity-40"
+                                        >
+                                            {editingPlan ? '更新' : '作成'}
+                                        </button>
+                                    </div>
+                                </Card>
+                            )}
+
+                            {/* プラン一覧 */}
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-4">
+                                {ticketPlans.map((plan) => {
+                                    const ticketsUsingPlan = customerTickets.filter(t => t.planId === plan.id).length;
+                                    const unitPrice = plan.sessions > 0 ? Math.round(plan.price / plan.sessions) : 0;
+                                    return (
+                                        <Card key={plan.id} className="!p-4 hover:!transform-none">
+                                            <div className="flex items-start justify-between mb-3">
+                                                <div className="flex items-center">
+                                                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-400 to-violet-600 text-white flex items-center justify-center font-extrabold text-sm shadow-lg">
+                                                        {plan.sessions}
+                                                    </div>
+                                                    <div className="ml-3">
+                                                        <p className="font-bold text-slate-800">{plan.name}</p>
+                                                        <p className="text-[11px] text-slate-400">{ticketsUsingPlan}件の発行済</p>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div className="grid grid-cols-3 gap-2 bg-slate-50/80 rounded-xl p-3 mb-3">
+                                                <div className="text-center">
+                                                    <p className="text-lg font-extrabold text-slate-800">{plan.sessions}</p>
+                                                    <p className="text-[10px] text-slate-400">回数</p>
+                                                </div>
+                                                <div className="text-center">
+                                                    <p className="text-lg font-extrabold text-sise-600">{formatCurrency(plan.price)}</p>
+                                                    <p className="text-[10px] text-slate-400">金額</p>
+                                                </div>
+                                                <div className="text-center">
+                                                    <p className="text-lg font-extrabold text-violet-600">{plan.validityDays}</p>
+                                                    <p className="text-[10px] text-slate-400">有効日数</p>
+                                                </div>
+                                            </div>
+                                            <p className="text-[11px] text-slate-400 mb-3">1回あたり: {formatCurrency(unitPrice)}</p>
+                                            <div className="flex gap-2">
+                                                <button
+                                                    onClick={() => { setEditingPlan(plan); setPlanForm({ name: plan.name, sessions: plan.sessions, price: plan.price, validityDays: plan.validityDays }); setShowPlanForm(true); }}
+                                                    className="flex-1 py-2 border border-slate-200 hover:bg-sise-50 rounded-xl text-xs font-medium text-slate-600 transition-all"
+                                                >
+                                                    <Icon name="pencil" size={13} className="inline mr-1" />編集
+                                                </button>
+                                                <button
+                                                    onClick={() => { if (confirm(`「${plan.name}」を削除しますか？`)) deletePlan(plan.id); }}
+                                                    className="py-2 px-3 border border-slate-200 hover:bg-red-50 hover:border-red-200 hover:text-red-500 rounded-xl text-xs text-slate-400 transition-all"
+                                                >
+                                                    <Icon name="trash-2" size={13} />
+                                                </button>
+                                            </div>
+                                        </Card>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* 保存情報 */}
+                    <Card className="!bg-slate-50/60">
+                        <div className="flex items-start">
+                            <Icon name="info" size={18} className="text-sise-500 mr-3 mt-0.5 flex-shrink-0" />
+                            <div className="text-sm text-slate-600">
+                                <p className="font-semibold text-slate-700 mb-1">回数券の管理について</p>
+                                <p>回数券プランの作成、顧客への発行、消化状況のトラッキングが行えます。「スプシ保存」で Google Sheets にデータを送信できます。データはローカルにも自動保存されます。</p>
+                                {lastSaved && (
+                                    <p className="text-xs text-sise-500 mt-2">最終保存: {lastSaved.toLocaleString('ja-JP')}</p>
+                                )}
+                            </div>
+                        </div>
+                    </Card>
+                </div>
+            );
+        };
+
+        // ========================================
         // 利用管理ビュー（利用回数入力 + スプシ保存）
         // ========================================
 
@@ -3003,6 +3760,32 @@
                                 </div>
                                 <p className="text-xs text-slate-400 mt-1.5">会員の月間利用回数をスプレッドシートに保存するための URL です</p>
                             </div>
+                            <div>
+                                <label className="block text-sm font-medium text-slate-700 mb-1">
+                                    回数券管理用 GAS URL
+                                </label>
+                                <div className="flex gap-2">
+                                    <input
+                                        type="url"
+                                        value={localStorage.getItem('sise_ticket_gas_url') || ''}
+                                        onChange={(e) => {
+                                            localStorage.setItem('sise_ticket_gas_url', e.target.value);
+                                        }}
+                                        className="flex-1 px-4 py-2.5 border border-slate-200 rounded-xl focus:border-sise-500 focus:ring-2 focus:ring-sise-500/20 outline-none text-sm"
+                                        placeholder="https://script.google.com/macros/s/..."
+                                    />
+                                    <button
+                                        onClick={() => {
+                                            setSaveMessage('回数券用GAS URLを保存しました。リロードで反映されます。');
+                                            setTimeout(() => setSaveMessage(''), 5000);
+                                        }}
+                                        className="px-4 py-2.5 btn-gradient rounded-xl font-medium text-sm"
+                                    >
+                                        保存
+                                    </button>
+                                </div>
+                                <p className="text-xs text-slate-400 mt-1.5">回数券のプラン・購入者データをスプレッドシートに保存するための URL です</p>
+                            </div>
                         </div>
                     </Card>
 
@@ -3049,6 +3832,8 @@
             const { reportData, refreshReportData } = useDailyReportData();
             // 利用回数管理
             const usageHook = useMemberUsage();
+            // 回数券管理
+            const ticketHook = useTicketManagement();
 
             // ダークモード切り替え
             useEffect(() => {
@@ -3064,6 +3849,7 @@
                 { id: 'reports', label: '日報一覧', icon: 'clipboard-list', mobileLabel: '日報' },
                 { id: 'members', label: '会員管理', icon: 'users', mobileLabel: '会員' },
                 { id: 'usage', label: '利用管理', icon: 'clipboard-check', mobileLabel: '利用' },
+                { id: 'tickets', label: '回数券', icon: 'ticket', mobileLabel: '回数券' },
                 ...(!isStaffMode ? [{ id: 'settings', label: '設定', icon: 'settings', mobileLabel: '設定' }] : []),
             ];
 
@@ -3082,6 +3868,8 @@
                         return <MemberManagementView memberData={memberData} refreshSquareData={refreshSquareData} operateSubscription={operateSubscription} activeStoreId={activeStoreId} />;
                     case 'usage':
                         return <MemberUsageView memberData={memberData} usageHook={usageHook} />;
+                    case 'tickets':
+                        return <TicketManagementView ticketHook={ticketHook} />;
                     case 'settings':
                         return isStaffMode
                             ? <DashboardView memberData={memberData} reportData={reportData} selectedStore={selectedStore} setSelectedStore={setSelectedStore} />
