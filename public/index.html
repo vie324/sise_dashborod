@@ -3011,17 +3011,25 @@
         // ========================================
 
         const App = () => {
+            // ---- すべてのフックを先頭に集約（条件分岐の前） ----
             const [authState, setAuthState] = useState(getAuthSession());
             const [authChecking, setAuthChecking] = useState(!getAuthSession());
             const [currentView, setCurrentView] = useState('dashboard');
             const [selectedStore, setSelectedStore] = useState('all');
             const [isSidebarOpen, setIsSidebarOpen] = useState(false);
             const [isDarkMode, setIsDarkMode] = useState(false);
+            const [activeStoreId, setActiveStoreId] = useState('all');
+
+            // 認証状態からロール情報を導出
+            const roleConfig = authState ? (ROLE_CONFIG[authState.role] || ROLE_CONFIG.staff) : ROLE_CONFIG.staff;
+            const canSeeAllStores = roleConfig.canSeeAllStores;
+            const canSeeSettings = roleConfig.canSeeSettings;
+            const isRestricted = !canSeeAllStores;
 
             // 認証が設定済みかチェック（初回のみ）
             useEffect(() => {
                 if (authState) { setAuthChecking(false); return; }
-                (async () => {
+                const checkAuth = async () => {
                     try {
                         const res = await fetch('/api/auth/verify', {
                             method: 'POST',
@@ -3030,97 +3038,37 @@
                         });
                         const data = await res.json();
                         if (!data.authEnabled) {
-                            // 認証未設定 → masterとして自動ログイン
                             const bypass = { role: 'master', name: '管理者', storeIds: [], _bypass: true };
                             setAuthSession(bypass);
                             currentAccess = { name: bypass.name, role: bypass.role, storeIds: [] };
                             setAuthState(bypass);
                         }
                     } catch {
-                        // APIに繋がらない → 未設定と判断してバイパス
                         const bypass = { role: 'master', name: '管理者', storeIds: [], _bypass: true };
                         setAuthSession(bypass);
                         currentAccess = { name: bypass.name, role: bypass.role, storeIds: [] };
                         setAuthState(bypass);
                     }
                     setAuthChecking(false);
-                })();
+                };
+                checkAuth();
             }, []);
 
-            // ログイン処理
-            const handleLogin = (authData) => {
-                currentAccess = {
-                    name: authData.name,
-                    role: authData.role,
-                    storeIds: authData.storeIds || [],
-                };
-                setAuthState(authData);
-            };
+            // authState変更時にactiveStoreIdを更新
+            useEffect(() => {
+                if (authState && isRestricted && authState.storeIds && authState.storeIds.length === 1) {
+                    setActiveStoreId(authState.storeIds[0]);
+                }
+            }, [authState]);
 
-            // ログアウト処理
-            const handleLogout = () => {
-                clearAuthSession();
-                currentAccess = null;
-                setAuthState(null);
-                setAuthChecking(true);
-                // 再度チェック（認証がまだ未設定ならまたバイパスされる）
-                (async () => {
-                    try {
-                        const res = await fetch('/api/auth/verify', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ action: 'check' })
-                        });
-                        const data = await res.json();
-                        if (!data.authEnabled) {
-                            const bypass = { role: 'master', name: '管理者', storeIds: [], _bypass: true };
-                            setAuthSession(bypass);
-                            currentAccess = { name: bypass.name, role: bypass.role, storeIds: [] };
-                            setAuthState(bypass);
-                        }
-                    } catch {
-                        const bypass = { role: 'master', name: '管理者', storeIds: [], _bypass: true };
-                        setAuthSession(bypass);
-                        currentAccess = { name: bypass.name, role: bypass.role, storeIds: [] };
-                        setAuthState(bypass);
-                    }
-                    setAuthChecking(false);
-                })();
-            };
-
-            // チェック中はローディング表示
-            if (authChecking) {
-                return (
-                    <div className="min-h-screen bg-slate-50 bg-mesh flex items-center justify-center">
-                        <div className="text-center">
-                            <div className="w-10 h-10 border-3 border-sise-200 border-t-sise-500 rounded-full animate-spin mx-auto mb-4"></div>
-                            <p className="text-slate-400 text-sm">読み込み中...</p>
-                        </div>
-                    </div>
-                );
-            }
-
-            // 未認証かつ認証が有効 → ログイン画面
-            if (!authState) {
-                return <LoginScreen onLogin={handleLogin} />;
-            }
-
-            const roleConfig = ROLE_CONFIG[authState.role] || ROLE_CONFIG.staff;
-            const canSeeAllStores = roleConfig.canSeeAllStores;
-            const canSeeSettings = roleConfig.canSeeSettings;
-            const isRestricted = !canSeeAllStores; // 店舗制限あり
-
-            const [activeStoreId, setActiveStoreId] = useState(
-                isRestricted && authState.storeIds.length === 1 ? authState.storeIds[0] : 'all'
-            );
-            // Square データ取得（店舗選択に連動、アクセス制限適用）
+            // Square データ取得
             const { memberData: squareMemberData, refreshSquareData, operateSubscription } = useSquareData(
                 activeStoreId,
-                isRestricted ? authState.storeIds : null
+                authState && isRestricted ? authState.storeIds : null
             );
             // 手動会員データ取得
             const { manualMembers, refreshManualMembers, addManualMember, updateManualMember, deleteManualMember } = useManualMembers(
-                isRestricted ? authState.storeIds : null
+                authState && isRestricted ? authState.storeIds : null
             );
             // Square + 手動会員をマージ
             const memberData = useMemo(() =>
@@ -3138,6 +3086,64 @@
                     document.documentElement.classList.remove('dark');
                 }
             }, [isDarkMode]);
+
+            // ---- フックここまで / 以下ハンドラーと描画 ----
+
+            const handleLogin = (authData) => {
+                currentAccess = {
+                    name: authData.name,
+                    role: authData.role,
+                    storeIds: authData.storeIds || [],
+                };
+                setAuthState(authData);
+            };
+
+            const handleLogout = () => {
+                clearAuthSession();
+                currentAccess = null;
+                setAuthState(null);
+                setAuthChecking(true);
+                const recheckAuth = async () => {
+                    try {
+                        const res = await fetch('/api/auth/verify', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ action: 'check' })
+                        });
+                        const data = await res.json();
+                        if (!data.authEnabled) {
+                            const bypass = { role: 'master', name: '管理者', storeIds: [], _bypass: true };
+                            setAuthSession(bypass);
+                            currentAccess = { name: bypass.name, role: bypass.role, storeIds: [] };
+                            setAuthState(bypass);
+                        }
+                    } catch {
+                        const bypass = { role: 'master', name: '管理者', storeIds: [], _bypass: true };
+                        setAuthSession(bypass);
+                        currentAccess = { name: bypass.name, role: bypass.role, storeIds: [] };
+                        setAuthState(bypass);
+                    }
+                    setAuthChecking(false);
+                };
+                recheckAuth();
+            };
+
+            // ---- 条件分岐による画面切り替え（フックの後） ----
+
+            if (authChecking) {
+                return (
+                    <div className="min-h-screen bg-slate-50 bg-mesh flex items-center justify-center">
+                        <div className="text-center">
+                            <div className="w-10 h-10 border-3 border-sise-200 border-t-sise-500 rounded-full animate-spin mx-auto mb-4"></div>
+                            <p className="text-slate-400 text-sm">読み込み中...</p>
+                        </div>
+                    </div>
+                );
+            }
+
+            if (!authState) {
+                return <LoginScreen onLogin={handleLogin} />;
+            }
 
             const canManageManualMembers = authState.role !== 'staff';
 
