@@ -490,7 +490,7 @@
         // localStorage管理
         const loadStaffList = () => {
             try { return JSON.parse(localStorage.getItem(STAFF_STORAGE_KEY)) || []; }
-            catch { return []; }
+            catch (e) { return []; }
         };
         const saveStaffList = (list) => localStorage.setItem(STAFF_STORAGE_KEY, JSON.stringify(list));
 
@@ -1237,7 +1237,7 @@
                 try {
                     const stored = JSON.parse(localStorage.getItem('sise_member_usage') || '{}');
                     setUsageData(stored[currentMonth] || {});
-                } catch { setUsageData({}); }
+                } catch (e) { setUsageData({}); }
 
                 // GASから読み込み
                 if (MEMBER_USAGE_GAS_URL !== 'YOUR_USAGE_GAS_URL') {
@@ -1261,7 +1261,7 @@
                         const all = JSON.parse(localStorage.getItem('sise_member_usage') || '{}');
                         all[currentMonth] = updated;
                         localStorage.setItem('sise_member_usage', JSON.stringify(all));
-                    } catch {}
+                    } catch (e) {}
                     return updated;
                 });
             }, [currentMonth]);
@@ -1337,7 +1337,7 @@
                         { id: 'plan_3', name: '20回券', sessions: 20, price: 140000, validityDays: 365, active: true },
                     ]);
                     setCustomerTickets(stored.tickets || []);
-                } catch { }
+                } catch (e) { }
 
                 // GASから読み込み
                 if (TICKET_GAS_URL !== 'YOUR_TICKET_GAS_URL') {
@@ -1355,7 +1355,7 @@
             const saveLocal = useCallback((plans, tickets) => {
                 try {
                     localStorage.setItem(TICKET_STORAGE_KEY, JSON.stringify({ plans, tickets }));
-                } catch {}
+                } catch (e) {}
             }, []);
 
             // 回数券プラン管理
@@ -1748,8 +1748,6 @@
                                         formatter={(value, name) => [value + '人', name === 'new' ? '新規' : '契約']}
                                     />
                                     <Legend formatter={(value) => value === 'new' ? '新規数' : '契約数'} />
-                                    <Bar dataKey="new" name="new" fill="url(#barGradientBlue)" radius={[6, 6, 0, 0]} />
-                                    <Bar dataKey="contract" name="contract" fill="url(#barGradientGreen)" radius={[6, 6, 0, 0]} />
                                     <defs>
                                         <linearGradient id="barGradientBlue" x1="0" y1="0" x2="0" y2="1">
                                             <stop offset="0%" stopColor="#38bdf8" />
@@ -1760,6 +1758,8 @@
                                             <stop offset="100%" stopColor="#22c55e" />
                                         </linearGradient>
                                     </defs>
+                                    <Bar dataKey="new" name="new" fill="url(#barGradientBlue)" radius={[6, 6, 0, 0]} />
+                                    <Bar dataKey="contract" name="contract" fill="url(#barGradientGreen)" radius={[6, 6, 0, 0]} />
                                 </BarChart>
                             </ResponsiveContainer>
                         </Card>
@@ -1769,7 +1769,7 @@
                             <h3 className="text-base font-bold text-slate-800 mb-1">日別推移</h3>
                             <p className="text-[10px] text-sise-500 mb-4 tracking-widest font-semibold">DAILY TREND</p>
                             <ResponsiveContainer width="100%" height={280}>
-                                <AreaChart data={aggregatedData.dailyTrend}>
+                                <ComposedChart data={aggregatedData.dailyTrend}>
                                     <CartesianGrid strokeDasharray="3 3" stroke="#e8f0ec" vertical={false} />
                                     <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
                                     <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
@@ -1788,7 +1788,7 @@
                                     <Area type="monotone" dataKey="new" name="新規" stroke="#0ea5e9" strokeWidth={2.5} fill="url(#areaBlue)" dot={{ r: 3, fill: '#0ea5e9' }} />
                                     <Area type="monotone" dataKey="contract" name="契約" stroke="#22c55e" strokeWidth={2.5} fill="url(#areaGreen)" dot={{ r: 3, fill: '#22c55e' }} />
                                     <Line type="monotone" dataKey="treatments" name="施術" stroke="#f97316" strokeWidth={2} dot={{ r: 3, fill: '#f97316' }} strokeDasharray="5 5" />
-                                </AreaChart>
+                                </ComposedChart>
                             </ResponsiveContainer>
                         </Card>
                     </div>
@@ -3244,7 +3244,7 @@
                     list = list.filter(m => m.name.toLowerCase().includes(q) || m.planName.toLowerCase().includes(q));
                 }
                 if (sortBy === 'renewal') {
-                    list = [...list].sort((a, b) => (a.billing?.daysUntilRenewal ?? 999) - (b.billing?.daysUntilRenewal ?? 999));
+                    list = [...list].sort((a, b) => ((a.billing && a.billing.daysUntilRenewal != null ? a.billing.daysUntilRenewal : 999)) - ((b.billing && b.billing.daysUntilRenewal != null ? b.billing.daysUntilRenewal : 999)));
                 } else if (sortBy === 'name') {
                     list = [...list].sort((a, b) => a.name.localeCompare(b.name, 'ja'));
                 } else if (sortBy === 'usage') {
