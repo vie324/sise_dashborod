@@ -482,23 +482,20 @@
                 // サーバーの設定を確認
                 const serverConfig = await fetchSquareConfig();
 
-                // デモモード: サーバーにAPIが設定されていない場合はサンプルデータ
+                // APIが設定されていない場合は空データ表示
                 if (!serverConfig.configured) {
-                    const sampleMembers = generateSampleMembers();
-                    const sampleMonthlyTrend = generateMonthlyTrend();
-
                     setMemberData({
-                        totalMembers: 156,
-                        activeMembers: 142,
-                        newMembersThisMonth: 12,
-                        churnedMembers: 5,
-                        churnRate: 3.2,
-                        expectedRevenue: 1420000,
-                        members: sampleMembers,
-                        monthlyTrend: sampleMonthlyTrend,
+                        totalMembers: 0,
+                        activeMembers: 0,
+                        newMembersThisMonth: 0,
+                        churnedMembers: 0,
+                        churnRate: 0,
+                        expectedRevenue: 0,
+                        members: [],
+                        monthlyTrend: [],
                         stores: [],
                         loading: false,
-                        error: null
+                        error: 'Square APIが設定されていません。Vercelの環境変数を設定してください。'
                     });
                     return;
                 }
@@ -832,15 +829,13 @@
             });
 
             const fetchReportData = useCallback(async () => {
-                // デモモード
+                // APIが設定されていない場合は空データ
                 if (GOOGLE_FORM_SHEET_URL === 'YOUR_GOOGLE_APPS_SCRIPT_URL') {
-                    // サンプルデータ
-                    const sampleData = generateSampleReportData();
                     setReportData({
-                        reports: sampleData,
+                        reports: [],
                         loading: false,
-                        error: null,
-                        lastUpdated: new Date()
+                        error: '日報データのGoogle Apps Script URLが設定されていません。',
+                        lastUpdated: null
                     });
                     return;
                 }
@@ -873,111 +868,6 @@
             }, [fetchReportData]);
 
             return { reportData, refreshReportData: fetchReportData };
-        };
-
-        // サンプル日報データ生成
-        const generateSampleReportData = () => {
-            const reports = [];
-            const storeNames = ['新宿店', '渋谷店'];
-            const now = new Date();
-
-            for (let i = 0; i < 30; i++) {
-                const date = new Date(now);
-                date.setDate(date.getDate() - i);
-
-                storeNames.forEach(store => {
-                    reports.push({
-                        timestamp: date.toISOString(),
-                        store: store,
-                        hpbNew: Math.floor(Math.random() * 5),
-                        metaNew: Math.floor(Math.random() * 4),
-                        referralNew: Math.floor(Math.random() * 3),
-                        discountNew: Math.floor(Math.random() * 2),
-                        hpbContract: Math.floor(Math.random() * 3),
-                        metaContract: Math.floor(Math.random() * 2),
-                        referralContract: Math.floor(Math.random() * 2),
-                        discountContract: Math.floor(Math.random() * 1),
-                        existingTreatments: Math.floor(Math.random() * 15) + 5,
-                        dailyTasksCompleted: Math.random() > 0.1,
-                        tomorrowPrepCompleted: Math.random() > 0.15
-                    });
-                });
-            }
-
-            return reports;
-        };
-
-        // サンプル会員データ生成
-        const generateSampleMembers = () => {
-            const names = ['田中太郎', '佐藤花子', '鈴木一郎', '高橋美咲', '伊藤健太', '渡辺さくら', '山本大輔', '中村優子', '小林誠', '加藤愛'];
-            const statuses = ['ACTIVE', 'ACTIVE', 'ACTIVE', 'ACTIVE', 'ACTIVE', 'ACTIVE', 'CANCELED', 'PENDING'];
-            const plans = ['スタンダードプラン', 'プレミアムプラン'];
-            const members = [];
-
-            for (let i = 0; i < 50; i++) {
-                const status = statuses[Math.floor(Math.random() * statuses.length)];
-                const startDate = new Date();
-                startDate.setMonth(startDate.getMonth() - Math.floor(Math.random() * 12));
-
-                let canceledDate = null;
-                if (status === 'CANCELED') {
-                    canceledDate = new Date(startDate);
-                    canceledDate.setMonth(canceledDate.getMonth() + Math.floor(Math.random() * 6) + 1);
-                }
-
-                const monthlyPrice = Math.random() > 0.7 ? 15000 : 10000;
-                const paymentCount = Math.floor(Math.random() * 5) + 1;
-                const paymentHistory = [];
-                for (let j = 0; j < paymentCount; j++) {
-                    const payDate = new Date();
-                    payDate.setMonth(payDate.getMonth() - j);
-                    paymentHistory.push({
-                        id: `inv_${i}_${j}`,
-                        date: payDate.toISOString(),
-                        amount: monthlyPrice,
-                        status: Math.random() > 0.1 ? 'PAID' : 'PENDING'
-                    });
-                }
-
-                members.push({
-                    id: `sub_${i}`,
-                    customerId: `cust_${i}`,
-                    name: names[i % names.length] + (i > 9 ? ` (${Math.floor(i / 10)})` : ''),
-                    email: `member${i}@example.com`,
-                    phone: `090-${1000 + i}-${1000 + i}`,
-                    status: status,
-                    startDate: startDate.toISOString(),
-                    canceledDate: canceledDate ? canceledDate.toISOString() : null,
-                    planName: plans[monthlyPrice === 15000 ? 1 : 0],
-                    monthlyPrice: monthlyPrice,
-                    cadence: 'MONTHLY',
-                    paymentHistory: paymentHistory
-                });
-            }
-
-            return members;
-        };
-
-        // 月間トレンドデータ生成（サンプル）
-        const generateMonthlyTrend = () => {
-            const trend = [];
-            const now = new Date();
-
-            for (let i = 11; i >= 0; i--) {
-                const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
-                trend.push({
-                    month: date.toLocaleDateString('ja-JP', { year: 'numeric', month: 'short' }),
-                    newMembers: Math.floor(Math.random() * 15) + 5,
-                    churnedMembers: Math.floor(Math.random() * 8) + 1,
-                    netGrowth: 0
-                });
-            }
-
-            trend.forEach(t => {
-                t.netGrowth = t.newMembers - t.churnedMembers;
-            });
-
-            return trend;
         };
 
         // 実データから月間トレンドを生成（累積会員数付き）
@@ -2460,7 +2350,7 @@
                                     <div className="space-y-2 font-mono text-xs">
                                         <div className="flex items-center p-2 bg-white rounded border border-slate-200">
                                             <span className="text-sise-600 font-semibold w-64">SQUARE_STORE_1_NAME</span>
-                                            <span className="text-slate-500">= 新宿店</span>
+                                            <span className="text-slate-500">= 店舗1の名前</span>
                                         </div>
                                         <div className="flex items-center p-2 bg-white rounded border border-slate-200">
                                             <span className="text-sise-600 font-semibold w-64">SQUARE_STORE_1_ACCESS_TOKEN</span>
