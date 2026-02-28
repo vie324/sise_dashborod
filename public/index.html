@@ -597,6 +597,80 @@
                         );
                         invoices.forEach(inv => { inv._storeId = storeId; inv._storeName = store.name; });
                         allInvoices = allInvoices.concat(invoices);
+
+                        // 5. Extra Sources: 別アカウントのデータを統合取得
+                        if (store.extraSources && store.extraSources.length > 0) {
+                            for (const extra of store.extraSources) {
+                                try {
+                                    // Extra: Subscriptions
+                                    const extraSubs = await fetchAllPages(
+                                        'subscriptions/search',
+                                        (cursor) => ({
+                                            query: { filter: { location_ids: [extra.locationId] } },
+                                            ...(cursor ? { cursor } : {})
+                                        }),
+                                        'subscriptions',
+                                        extra.id
+                                    );
+                                    extraSubs.forEach(s => { s._storeId = storeId; s._storeName = store.name; s._extraSource = true; });
+                                    allSubscriptions = allSubscriptions.concat(extraSubs);
+
+                                    // Extra: Catalog (for plan names/prices)
+                                    const extraPlanIds = [...new Set(extraSubs
+                                        .filter(s => s.plan_variation_id)
+                                        .map(s => s.plan_variation_id))];
+                                    if (extraPlanIds.length > 0) {
+                                        try {
+                                            const h = { 'Content-Type': 'application/json', 'X-Store-Id': extra.id };
+                                            const catRes = await fetch(`${SQUARE_PROXY_BASE}/catalog/batch-retrieve`, {
+                                                method: 'POST', headers: h,
+                                                body: JSON.stringify({ object_ids: extraPlanIds })
+                                            });
+                                            if (catRes.ok) {
+                                                const catData = await catRes.json();
+                                                (catData.objects || []).forEach(obj => {
+                                                    const subPlan = obj.subscription_plan_variation_data || obj.subscription_plan_data;
+                                                    if (!catalogMap[obj.id]) {
+                                                        catalogMap[obj.id] = { name: subPlan?.name || obj.id, phases: subPlan?.phases || [] };
+                                                    }
+                                                });
+                                            }
+                                        } catch (e) { console.warn('Extra catalog fetch failed:', e); }
+                                    }
+
+                                    // Extra: Invoices
+                                    const extraInvoices = await fetchAllPages(
+                                        'invoices/search',
+                                        (cursor) => ({
+                                            query: { filter: { location_ids: [extra.locationId] } },
+                                            limit: 200,
+                                            ...(cursor ? { cursor } : {})
+                                        }),
+                                        'invoices',
+                                        extra.id
+                                    );
+                                    extraInvoices.forEach(inv => { inv._storeId = storeId; inv._storeName = store.name; inv._extraSource = true; });
+                                    allInvoices = allInvoices.concat(extraInvoices);
+
+                                    // Extra: Customers (for matching subscriptions to names)
+                                    const extraCustomers = await fetchAllPages(
+                                        'customers/search',
+                                        (cursor) => ({ limit: 100, ...(cursor ? { cursor } : {}) }),
+                                        'customers',
+                                        extra.id
+                                    );
+                                    extraCustomers.forEach(c => { c._storeId = storeId; c._storeName = store.name; c._extraSource = true; });
+                                    // Merge without duplicating (same customer may exist in both accounts)
+                                    const existingIds = new Set(allCustomers.map(c => c.id));
+                                    const newCustomers = extraCustomers.filter(c => !existingIds.has(c.id));
+                                    allCustomers = allCustomers.concat(newCustomers);
+
+                                    console.log(`Extra source ${extra.id}: +${extraSubs.length} subs, +${extraInvoices.length} invoices, +${newCustomers.length} customers`);
+                                } catch (e) {
+                                    console.warn(`Extra source ${extra.id} fetch failed:`, e);
+                                }
+                            }
+                        }
                     }
 
                     const customers = allCustomers;
