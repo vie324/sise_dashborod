@@ -35,6 +35,7 @@ export default async function handler(req, res) {
       role: data.role,
       name: data.name,
       storeIds: data.storeIds || [],
+      password: password,
     });
   } catch (error) {
     console.error('Auth verification error:', error);
