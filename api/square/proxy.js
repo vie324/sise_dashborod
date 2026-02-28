@@ -42,6 +42,21 @@ function getStoreConfig(storeId) {
     };
   }
 
+  // Extra source IDs: e.g. "2_extra_1" → SQUARE_STORE_2_EXTRA_1_ACCESS_TOKEN
+  const extraMatch = storeId.match(/^(\d+)_extra_(\d+)$/);
+  if (extraMatch) {
+    const [, baseId, extraIdx] = extraMatch;
+    const prefix = `SQUARE_STORE_${baseId}_EXTRA_${extraIdx}`;
+    const token = process.env[`${prefix}_ACCESS_TOKEN`];
+    if (!token) return null;
+    return {
+      token,
+      locationId: process.env[`${prefix}_LOCATION_ID`] || '',
+      environment: process.env[`SQUARE_STORE_${baseId}_ENVIRONMENT`] || process.env.SQUARE_ENVIRONMENT || 'sandbox',
+      name: `Extra source ${baseId}-${extraIdx}`,
+    };
+  }
+
   const prefix = `SQUARE_STORE_${storeId}`;
   const token = process.env[`${prefix}_ACCESS_TOKEN`];
   if (!token) return null;
