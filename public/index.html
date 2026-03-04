@@ -1065,23 +1065,61 @@
         const generateMonthlyTrendFromData = (subscriptions) => {
             const trend = [];
             const now = new Date();
-            let cumulativeActive = 0;
+
+            // プラン変更検出: 同じcustomer_idで、キャンセルと新規開始が同月内（±14日以内）のペアを探す
+            const planChangeMap = {}; // monthKey -> Set of customer_ids that are plan changes
+            const customerSubs = {};
+            subscriptions.forEach(s => {
+                if (!s.customer_id) return;
+                if (!customerSubs[s.customer_id]) customerSubs[s.customer_id] = [];
+                customerSubs[s.customer_id].push(s);
+            });
+
+            // 同一顧客で複数サブスクがある場合、キャンセル→新規を「プラン変更」と判定
+            const planChangeCancelIds = new Set(); // cancel側のsubscription id
+            const planChangeNewIds = new Set(); // new側のsubscription id
+
+            Object.values(customerSubs).forEach(subs => {
+                if (subs.length < 2) return;
+                const canceled = subs.filter(s => s.canceled_date);
+                const started = subs.filter(s => s.start_date);
+                canceled.forEach(c => {
+                    const cancelDate = new Date(c.canceled_date);
+                    started.forEach(n => {
+                        if (n.id === c.id) return;
+                        const startDate = new Date(n.start_date);
+                        const diffDays = Math.abs((startDate - cancelDate) / (1000 * 60 * 60 * 24));
+                        if (diffDays <= 14) {
+                            planChangeCancelIds.add(c.id);
+                            planChangeNewIds.add(n.id);
+                        }
+                    });
+                });
+            });
 
             for (let i = 11; i >= 0; i--) {
                 const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
                 const monthStart = new Date(date.getFullYear(), date.getMonth(), 1);
                 const monthEnd = new Date(date.getFullYear(), date.getMonth() + 1, 0);
 
-                const newMembers = subscriptions.filter(s => {
+                const newThisMonth = subscriptions.filter(s => {
                     const startDate = new Date(s.start_date);
                     return startDate >= monthStart && startDate <= monthEnd;
-                }).length;
+                });
 
-                const churnedMembers = subscriptions.filter(s => {
+                const churnedThisMonth = subscriptions.filter(s => {
                     if (!s.canceled_date) return false;
                     const cancelDate = new Date(s.canceled_date);
                     return cancelDate >= monthStart && cancelDate <= monthEnd;
-                }).length;
+                });
+
+                // プラン変更の数（キャンセル側でカウント）
+                const planChangeCount = churnedThisMonth.filter(s => planChangeCancelIds.has(s.id)).length;
+
+                // 純粋な新規（プラン変更を除く）
+                const pureNewMembers = newThisMonth.filter(s => !planChangeNewIds.has(s.id)).length;
+                // 純粋な退会（プラン変更を除く）
+                const pureChurnedMembers = churnedThisMonth.filter(s => !planChangeCancelIds.has(s.id)).length;
 
                 // 各月末時点のアクティブ会員数を計算
                 const activeAtMonthEnd = subscriptions.filter(s => {
@@ -1098,9 +1136,10 @@
                 trend.push({
                     month: date.toLocaleDateString('ja-JP', { year: 'numeric', month: 'short' }),
                     monthKey: `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`,
-                    newMembers: newMembers,
-                    churnedMembers: churnedMembers,
-                    netGrowth: newMembers - churnedMembers,
+                    newMembers: pureNewMembers,
+                    churnedMembers: pureChurnedMembers,
+                    planChanges: planChangeCount,
+                    netGrowth: pureNewMembers - pureChurnedMembers,
                     activeMembers: activeAtMonthEnd
                 });
             }
@@ -1189,34 +1228,101 @@
 
         const MEMBER_USAGE_GAS_URL = localStorage.getItem('sise_usage_gas_url') || 'YOUR_USAGE_GAS_URL';
 
+        // プラン別の月間利用上限設定
+        const PLAN_LIMITS_STORAGE_KEY = 'sise_usage_plan_limits';
+        const CARRYOVER_STORAGE_KEY = 'sise_usage_carryover';
+
         const useMemberUsage = () => {
             const [usageData, setUsageData] = useState({});
             const [saving, setSaving] = useState(false);
             const [lastSaved, setLastSaved] = useState(null);
+            const [lastSynced, setLastSynced] = useState(null);
+            // プラン別の月間上限（{ planName: maxSessions }）
+            const [planLimits, setPlanLimits] = useState(() => {
+                try { return JSON.parse(localStorage.getItem(PLAN_LIMITS_STORAGE_KEY) || '{}'); } catch(e) { return {}; }
+            });
+            // 繰越データ（{ memberId__periodKey: carryoverCount }）
+            const [carryoverData, setCarryoverData] = useState(() => {
+                try { return JSON.parse(localStorage.getItem(CARRYOVER_STORAGE_KEY) || '{}'); } catch(e) { return {}; }
+            });
 
             const currentMonth = new Date().toISOString().slice(0, 7); // YYYY-MM
 
-            // ローカルストレージからロード
+            // プラン上限を設定
+            const setPlanLimit = useCallback((planName, maxSessions) => {
+                setPlanLimits(prev => {
+                    const updated = { ...prev, [planName]: maxSessions };
+                    try { localStorage.setItem(PLAN_LIMITS_STORAGE_KEY, JSON.stringify(updated)); } catch(e) {}
+                    return updated;
+                });
+            }, []);
+
+            // 繰越を手動設定
+            const setCarryover = useCallback((memberId, periodKey, count) => {
+                const key = `${memberId}__${periodKey}`;
+                setCarryoverData(prev => {
+                    const updated = { ...prev, [key]: Math.max(0, count) };
+                    try { localStorage.setItem(CARRYOVER_STORAGE_KEY, JSON.stringify(updated)); } catch(e) {}
+                    return updated;
+                });
+            }, []);
+
+            // 繰越数を取得
+            const getCarryover = useCallback((memberId, periodKey) => {
+                const key = `${memberId}__${periodKey}`;
+                return carryoverData[key] || 0;
+            }, [carryoverData]);
+
+            // プラン上限を取得
+            const getPlanLimit = useCallback((planName) => {
+                return planLimits[planName] || 0;
+            }, [planLimits]);
+
+            // GASからデータを取得する関数
+            const fetchFromGAS = useCallback(() => {
+                if (MEMBER_USAGE_GAS_URL !== 'YOUR_USAGE_GAS_URL') {
+                    return fetch(MEMBER_USAGE_GAS_URL + '?action=getUsage&month=' + currentMonth)
+                        .then(r => r.json())
+                        .then(data => {
+                            if (data && data.usage) {
+                                setUsageData(prev => {
+                                    const merged = { ...prev, ...data.usage };
+                                    // ローカルにも反映
+                                    try {
+                                        const all = JSON.parse(localStorage.getItem('sise_member_usage') || '{}');
+                                        all[currentMonth] = merged;
+                                        localStorage.setItem('sise_member_usage', JSON.stringify(all));
+                                    } catch (e) {}
+                                    return merged;
+                                });
+                                setLastSynced(new Date());
+                            }
+                        })
+                        .catch(() => {});
+                }
+                return Promise.resolve();
+            }, [currentMonth]);
+
+            // ローカルストレージからロード + GAS初回読み込み
             useEffect(() => {
                 try {
                     const stored = JSON.parse(localStorage.getItem('sise_member_usage') || '{}');
                     setUsageData(stored[currentMonth] || {});
                 } catch (e) { setUsageData({}); }
 
-                // GASから読み込み
-                if (MEMBER_USAGE_GAS_URL !== 'YOUR_USAGE_GAS_URL') {
-                    fetch(MEMBER_USAGE_GAS_URL + '?action=getUsage&month=' + currentMonth)
-                        .then(r => r.json())
-                        .then(data => {
-                            if (data && data.usage) {
-                                setUsageData(prev => ({ ...prev, ...data.usage }));
-                            }
-                        })
-                        .catch(() => {});
-                }
-            }, [currentMonth]);
+                fetchFromGAS();
+            }, [currentMonth, fetchFromGAS]);
 
-            // 利用回数を更新（期間キーに対応）
+            // 定期同期（30秒ごとにGASからデータ取得）
+            useEffect(() => {
+                if (MEMBER_USAGE_GAS_URL === 'YOUR_USAGE_GAS_URL') return;
+                const interval = setInterval(() => {
+                    fetchFromGAS();
+                }, 30000);
+                return () => clearInterval(interval);
+            }, [fetchFromGAS]);
+
+            // 利用回数を更新（期間キーに対応）+ GASへ即時同期
             const updateUsage = useCallback((memberId, count, periodKey) => {
                 const key = periodKey ? `${memberId}__${periodKey}` : memberId;
                 setUsageData(prev => {
@@ -1226,6 +1332,17 @@
                         all[currentMonth] = updated;
                         localStorage.setItem('sise_member_usage', JSON.stringify(all));
                     } catch (e) {}
+                    // GASへ即時同期（バックグラウンド）
+                    if (MEMBER_USAGE_GAS_URL !== 'YOUR_USAGE_GAS_URL') {
+                        fetch(MEMBER_USAGE_GAS_URL, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                action: 'saveUsage',
+                                data: [{ memberId, month: currentMonth, periodKey: periodKey || '', count: Math.max(0, count), updatedAt: new Date().toISOString() }]
+                            })
+                        }).catch(() => {});
+                    }
                     return updated;
                 });
             }, [currentMonth]);
@@ -1273,7 +1390,16 @@
                 return usageData[key] || 0;
             }, [usageData]);
 
-            return { usageData, updateUsage, saveToSheet, getUsage, saving, lastSaved, currentMonth };
+            // 手動同期ボタン用
+            const syncFromGAS = useCallback(async () => {
+                await fetchFromGAS();
+            }, [fetchFromGAS]);
+
+            return {
+                usageData, updateUsage, saveToSheet, getUsage, saving, lastSaved, lastSynced, syncFromGAS, currentMonth,
+                planLimits, setPlanLimit, getPlanLimit,
+                carryoverData, setCarryover, getCarryover
+            };
         };
 
         // ========================================
@@ -1290,8 +1416,37 @@
             const [customerTickets, setCustomerTickets] = useState([]);
             const [saving, setSaving] = useState(false);
             const [lastSaved, setLastSaved] = useState(null);
+            const [lastSynced, setLastSynced] = useState(null);
 
-            // ローカルストレージから読み込み
+            // GASからデータを取得する関数
+            const fetchTicketsFromGAS = useCallback(() => {
+                if (TICKET_GAS_URL !== 'YOUR_TICKET_GAS_URL') {
+                    return fetch(TICKET_GAS_URL + '?action=getTickets')
+                        .then(r => r.json())
+                        .then(data => {
+                            if (data && data.plans) {
+                                setTicketPlans(data.plans);
+                            }
+                            if (data && data.tickets) {
+                                setCustomerTickets(data.tickets);
+                            }
+                            if (data && (data.plans || data.tickets)) {
+                                // ローカルにも反映
+                                try {
+                                    localStorage.setItem(TICKET_STORAGE_KEY, JSON.stringify({
+                                        plans: data.plans || [],
+                                        tickets: data.tickets || []
+                                    }));
+                                } catch (e) {}
+                                setLastSynced(new Date());
+                            }
+                        })
+                        .catch(() => {});
+                }
+                return Promise.resolve();
+            }, []);
+
+            // ローカルストレージから読み込み + GAS初回読み込み
             useEffect(() => {
                 try {
                     const stored = JSON.parse(localStorage.getItem(TICKET_STORAGE_KEY) || '{}');
@@ -1303,17 +1458,17 @@
                     setCustomerTickets(stored.tickets || []);
                 } catch (e) { }
 
-                // GASから読み込み
-                if (TICKET_GAS_URL !== 'YOUR_TICKET_GAS_URL') {
-                    fetch(TICKET_GAS_URL + '?action=getTickets')
-                        .then(r => r.json())
-                        .then(data => {
-                            if (data && data.plans) setTicketPlans(data.plans);
-                            if (data && data.tickets) setCustomerTickets(data.tickets);
-                        })
-                        .catch(() => {});
-                }
-            }, []);
+                fetchTicketsFromGAS();
+            }, [fetchTicketsFromGAS]);
+
+            // 定期同期（30秒ごとにGASからデータ取得）
+            useEffect(() => {
+                if (TICKET_GAS_URL === 'YOUR_TICKET_GAS_URL') return;
+                const interval = setInterval(() => {
+                    fetchTicketsFromGAS();
+                }, 30000);
+                return () => clearInterval(interval);
+            }, [fetchTicketsFromGAS]);
 
             // ローカル保存
             const saveLocal = useCallback((plans, tickets) => {
@@ -1470,11 +1625,186 @@
                 return { active: active.length, expiringSoon: expiringSoon.length, expired: expired.length, completed: completed.length, totalRevenue, totalRemaining, total: customerTickets.length };
             }, [customerTickets]);
 
+            // 手動同期ボタン用
+            const syncFromGAS = useCallback(async () => {
+                await fetchTicketsFromGAS();
+            }, [fetchTicketsFromGAS]);
+
             return {
                 ticketPlans, customerTickets, stats,
                 addPlan, updatePlan, deletePlan,
                 addCustomerTicket, updateCustomerTicket, useSession, undoSession, deleteCustomerTicket,
-                saveToSheet, saving, lastSaved
+                saveToSheet, saving, lastSaved, lastSynced, syncFromGAS
+            };
+        };
+
+        // ========================================
+        // QR・現金決済会員管理（手動会員管理）
+        // ========================================
+
+        const MANUAL_MEMBERS_STORAGE_KEY = 'sise_manual_members';
+        const MANUAL_MEMBERS_GAS_URL = localStorage.getItem('sise_manual_members_gas_url') || 'YOUR_MANUAL_MEMBERS_GAS_URL';
+
+        const useManualMembers = () => {
+            const [manualMembers, setManualMembers] = useState([]);
+            const [saving, setSaving] = useState(false);
+            const [lastSynced, setLastSynced] = useState(null);
+
+            // GASから取得
+            const fetchFromGAS = useCallback(() => {
+                if (MANUAL_MEMBERS_GAS_URL !== 'YOUR_MANUAL_MEMBERS_GAS_URL') {
+                    return fetch(MANUAL_MEMBERS_GAS_URL + '?action=getManualMembers')
+                        .then(r => r.json())
+                        .then(data => {
+                            if (data && data.members) {
+                                setManualMembers(data.members);
+                                try { localStorage.setItem(MANUAL_MEMBERS_STORAGE_KEY, JSON.stringify(data.members)); } catch(e) {}
+                                setLastSynced(new Date());
+                            }
+                        })
+                        .catch(() => {});
+                }
+                return Promise.resolve();
+            }, []);
+
+            // 初回ロード
+            useEffect(() => {
+                try {
+                    const stored = JSON.parse(localStorage.getItem(MANUAL_MEMBERS_STORAGE_KEY) || '[]');
+                    setManualMembers(stored);
+                } catch (e) {}
+                fetchFromGAS();
+            }, [fetchFromGAS]);
+
+            // 定期同期
+            useEffect(() => {
+                if (MANUAL_MEMBERS_GAS_URL === 'YOUR_MANUAL_MEMBERS_GAS_URL') return;
+                const interval = setInterval(fetchFromGAS, 30000);
+                return () => clearInterval(interval);
+            }, [fetchFromGAS]);
+
+            const saveLocal = useCallback((members) => {
+                try { localStorage.setItem(MANUAL_MEMBERS_STORAGE_KEY, JSON.stringify(members)); } catch (e) {}
+            }, []);
+
+            // GASに保存
+            const saveToGAS = useCallback(async (members) => {
+                if (MANUAL_MEMBERS_GAS_URL !== 'YOUR_MANUAL_MEMBERS_GAS_URL') {
+                    await fetch(MANUAL_MEMBERS_GAS_URL, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ action: 'saveManualMembers', members })
+                    }).catch(() => {});
+                }
+            }, []);
+
+            // 会員追加（入会）
+            const addMember = useCallback((member) => {
+                const newMember = {
+                    id: 'manual_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+                    name: member.name,
+                    phone: member.phone || '',
+                    email: member.email || '',
+                    paymentMethod: member.paymentMethod || 'QR', // 'QR' | 'CASH'
+                    planName: member.planName || '',
+                    monthlyPrice: member.monthlyPrice || 0,
+                    storeName: member.storeName || '',
+                    status: 'ACTIVE',
+                    startDate: member.startDate || new Date().toISOString().slice(0, 10),
+                    canceledDate: null,
+                    notes: member.notes || '',
+                    history: [{ date: new Date().toISOString(), action: 'join', note: '入会' }],
+                    createdAt: new Date().toISOString(),
+                };
+                setManualMembers(prev => {
+                    const updated = [newMember, ...prev];
+                    saveLocal(updated);
+                    saveToGAS(updated);
+                    return updated;
+                });
+                return newMember;
+            }, [saveLocal, saveToGAS]);
+
+            // 退会処理
+            const cancelMember = useCallback((memberId, note) => {
+                setManualMembers(prev => {
+                    const updated = prev.map(m => {
+                        if (m.id !== memberId) return m;
+                        return {
+                            ...m,
+                            status: 'CANCELED',
+                            canceledDate: new Date().toISOString().slice(0, 10),
+                            history: [...(m.history || []), { date: new Date().toISOString(), action: 'cancel', note: note || '退会' }]
+                        };
+                    });
+                    saveLocal(updated);
+                    saveToGAS(updated);
+                    return updated;
+                });
+            }, [saveLocal, saveToGAS]);
+
+            // 再入会
+            const reactivateMember = useCallback((memberId) => {
+                setManualMembers(prev => {
+                    const updated = prev.map(m => {
+                        if (m.id !== memberId) return m;
+                        return {
+                            ...m,
+                            status: 'ACTIVE',
+                            canceledDate: null,
+                            history: [...(m.history || []), { date: new Date().toISOString(), action: 'rejoin', note: '再入会' }]
+                        };
+                    });
+                    saveLocal(updated);
+                    saveToGAS(updated);
+                    return updated;
+                });
+            }, [saveLocal, saveToGAS]);
+
+            // プラン変更
+            const changePlan = useCallback((memberId, newPlanName, newPrice) => {
+                setManualMembers(prev => {
+                    const updated = prev.map(m => {
+                        if (m.id !== memberId) return m;
+                        const oldPlan = m.planName;
+                        return {
+                            ...m,
+                            planName: newPlanName,
+                            monthlyPrice: newPrice != null ? newPrice : m.monthlyPrice,
+                            history: [...(m.history || []), { date: new Date().toISOString(), action: 'plan_change', note: `${oldPlan} → ${newPlanName}` }]
+                        };
+                    });
+                    saveLocal(updated);
+                    saveToGAS(updated);
+                    return updated;
+                });
+            }, [saveLocal, saveToGAS]);
+
+            // 会員情報更新
+            const updateMember = useCallback((memberId, updates) => {
+                setManualMembers(prev => {
+                    const updated = prev.map(m => m.id === memberId ? { ...m, ...updates } : m);
+                    saveLocal(updated);
+                    saveToGAS(updated);
+                    return updated;
+                });
+            }, [saveLocal, saveToGAS]);
+
+            // 会員削除
+            const deleteMember = useCallback((memberId) => {
+                setManualMembers(prev => {
+                    const updated = prev.filter(m => m.id !== memberId);
+                    saveLocal(updated);
+                    saveToGAS(updated);
+                    return updated;
+                });
+            }, [saveLocal, saveToGAS]);
+
+            const syncFromGAS = useCallback(async () => { await fetchFromGAS(); }, [fetchFromGAS]);
+
+            return {
+                manualMembers, addMember, cancelMember, reactivateMember,
+                changePlan, updateMember, deleteMember, syncFromGAS, lastSynced, saving
             };
         };
 
@@ -2018,7 +2348,222 @@
         // 会員管理ビュー（Square連携）
         // ========================================
 
-        const MemberManagementView = ({ memberData, refreshSquareData, operateSubscription, activeStoreId }) => {
+        // QR・現金決済 会員管理セクションコンポーネント
+        const ManualMembersSection = ({ manualMembersHook }) => {
+            const { manualMembers, addMember, cancelMember, reactivateMember, changePlan, deleteMember } = manualMembersHook;
+            const [showManualAddForm, setShowManualAddForm] = useState(false);
+            const [manualFilter, setManualFilter] = useState('all');
+            const [manualSearch, setManualSearch] = useState('');
+            const [planChangeForm, setPlanChangeForm] = useState(null);
+            const [newManualMember, setNewManualMember] = useState({
+                name: '', phone: '', email: '', paymentMethod: 'QR',
+                planName: '', monthlyPrice: '', storeName: '', startDate: new Date().toISOString().slice(0, 10), notes: ''
+            });
+
+            const filteredManual = useMemo(() => {
+                let list = manualMembers || [];
+                if (manualFilter !== 'all') list = list.filter(m => m.status === manualFilter);
+                if (manualSearch) {
+                    const q = manualSearch.toLowerCase();
+                    list = list.filter(m => m.name.toLowerCase().includes(q) || (m.phone && m.phone.includes(manualSearch)));
+                }
+                return list;
+            }, [manualMembers, manualFilter, manualSearch]);
+
+            const activeManualCount = (manualMembers || []).filter(m => m.status === 'ACTIVE').length;
+            const canceledManualCount = (manualMembers || []).filter(m => m.status === 'CANCELED').length;
+
+            return (
+                <Card>
+                    <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+                        <div>
+                            <h3 className="text-base font-bold text-slate-800 flex items-center">
+                                <Icon name="wallet" size={18} className="mr-2 text-violet-500" />
+                                QR・現金決済 会員管理
+                            </h3>
+                            <p className="text-[10px] text-violet-500 tracking-widest font-semibold mt-0.5">MANUAL PAYMENT MEMBERS</p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-lg font-medium">アクティブ: {activeManualCount}</span>
+                            <span className="text-xs bg-red-100 text-red-600 px-2 py-1 rounded-lg font-medium">退会: {canceledManualCount}</span>
+                            <button
+                                onClick={() => setShowManualAddForm(!showManualAddForm)}
+                                className="flex items-center px-3 py-2 bg-violet-500 hover:bg-violet-600 text-white rounded-xl text-sm font-medium shadow-lg shadow-violet-500/25 transition-all"
+                            >
+                                <Icon name="user-plus" size={16} className="mr-1.5" />
+                                入会登録
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* 新規入会フォーム */}
+                    {showManualAddForm && (
+                        <div className="mb-4 p-4 bg-violet-50/50 rounded-xl border border-violet-200 animate-scale-in">
+                            <h4 className="font-semibold text-slate-800 mb-3">新規会員登録</h4>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                <div>
+                                    <label className="block text-xs font-medium text-slate-600 mb-1">会員名 *</label>
+                                    <input type="text" value={newManualMember.name} onChange={e => setNewManualMember(p => ({...p, name: e.target.value}))}
+                                        placeholder="例: 山田太郎" className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:border-violet-400 outline-none" />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-medium text-slate-600 mb-1">電話番号</label>
+                                    <input type="tel" value={newManualMember.phone} onChange={e => setNewManualMember(p => ({...p, phone: e.target.value}))}
+                                        placeholder="090-xxxx-xxxx" className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:border-violet-400 outline-none" />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-medium text-slate-600 mb-1">決済方法 *</label>
+                                    <div className="flex gap-2">
+                                        {['QR', 'CASH'].map(method => (
+                                            <label key={method} className={`flex-1 text-center px-3 py-2 rounded-xl border cursor-pointer transition-all text-sm ${newManualMember.paymentMethod === method ? 'bg-violet-100 border-violet-300 text-violet-700 font-medium' : 'bg-white border-slate-200 text-slate-600'}`}>
+                                                <input type="radio" name="payMethod" value={method} checked={newManualMember.paymentMethod === method}
+                                                    onChange={() => setNewManualMember(p => ({...p, paymentMethod: method}))} className="sr-only" />
+                                                {method === 'QR' ? 'QR決済' : '現金'}
+                                            </label>
+                                        ))}
+                                    </div>
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-medium text-slate-600 mb-1">プラン名</label>
+                                    <input type="text" value={newManualMember.planName} onChange={e => setNewManualMember(p => ({...p, planName: e.target.value}))}
+                                        placeholder="例: 月4回プラン" className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:border-violet-400 outline-none" />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-medium text-slate-600 mb-1">月額料金（円）</label>
+                                    <input type="number" value={newManualMember.monthlyPrice} onChange={e => setNewManualMember(p => ({...p, monthlyPrice: e.target.value}))}
+                                        placeholder="10000" className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:border-violet-400 outline-none" />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-medium text-slate-600 mb-1">入会日</label>
+                                    <input type="date" value={newManualMember.startDate} onChange={e => setNewManualMember(p => ({...p, startDate: e.target.value}))}
+                                        className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:border-violet-400 outline-none" />
+                                </div>
+                                <div className="md:col-span-2">
+                                    <label className="block text-xs font-medium text-slate-600 mb-1">備考</label>
+                                    <input type="text" value={newManualMember.notes} onChange={e => setNewManualMember(p => ({...p, notes: e.target.value}))}
+                                        placeholder="メモ" className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:border-violet-400 outline-none" />
+                                </div>
+                            </div>
+                            <div className="flex justify-end gap-2 mt-3">
+                                <button onClick={() => setShowManualAddForm(false)}
+                                    className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-xl transition-colors">キャンセル</button>
+                                <button
+                                    onClick={() => {
+                                        if (!newManualMember.name.trim()) return;
+                                        addMember({ ...newManualMember, monthlyPrice: parseInt(newManualMember.monthlyPrice) || 0 });
+                                        setNewManualMember({ name: '', phone: '', email: '', paymentMethod: 'QR', planName: '', monthlyPrice: '', storeName: '', startDate: new Date().toISOString().slice(0, 10), notes: '' });
+                                        setShowManualAddForm(false);
+                                    }}
+                                    disabled={!newManualMember.name.trim()}
+                                    className="px-4 py-2 bg-violet-500 hover:bg-violet-600 text-white rounded-xl text-sm font-medium transition-colors disabled:opacity-50"
+                                >入会登録</button>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* フィルタ */}
+                    <div className="flex flex-wrap items-center gap-2 mb-3">
+                        <div className="relative flex-1 min-w-[140px]">
+                            <Icon name="search" size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                            <input type="text" value={manualSearch} onChange={e => setManualSearch(e.target.value)}
+                                placeholder="名前・電話番号で検索..." className="w-full pl-8 pr-3 py-2 border border-slate-200 rounded-xl text-sm focus:border-violet-400 outline-none bg-white/80" />
+                        </div>
+                        <select value={manualFilter} onChange={e => setManualFilter(e.target.value)}
+                            className="px-3 py-2 border border-slate-200 rounded-xl text-sm focus:border-violet-400 outline-none bg-white/80">
+                            <option value="all">全て</option>
+                            <option value="ACTIVE">アクティブ</option>
+                            <option value="CANCELED">退会済み</option>
+                        </select>
+                    </div>
+
+                    {/* 会員リスト */}
+                    <div className="space-y-2">
+                        {filteredManual.map(member => (
+                            <div key={member.id} className={`p-3 rounded-xl border transition-colors ${member.status === 'ACTIVE' ? 'bg-white/60 border-slate-100 hover:border-violet-200' : 'bg-slate-50/60 border-slate-100'}`}>
+                                <div className="flex items-center justify-between">
+                                    <div className="flex items-center flex-1 min-w-0">
+                                        <Avatar name={member.name} size={38} />
+                                        <div className="ml-3 flex-1 min-w-0">
+                                            <p className="font-bold text-slate-800 text-sm truncate">{member.name}</p>
+                                            <div className="flex items-center gap-2 mt-0.5">
+                                                <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${member.paymentMethod === 'QR' ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'}`}>
+                                                    {member.paymentMethod === 'QR' ? 'QR決済' : '現金'}
+                                                </span>
+                                                <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${member.status === 'ACTIVE' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'}`}>
+                                                    {member.status === 'ACTIVE' ? 'アクティブ' : '退会'}
+                                                </span>
+                                                {member.planName && <span className="text-[10px] text-slate-400">{member.planName}</span>}
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center gap-1 ml-2">
+                                        {member.monthlyPrice > 0 && (
+                                            <span className="text-xs font-bold text-slate-700 mr-2">{formatCurrency(member.monthlyPrice)}</span>
+                                        )}
+                                        {member.status === 'ACTIVE' && (
+                                            <>
+                                                <button onClick={() => setPlanChangeForm(planChangeForm === member.id ? null : member.id)}
+                                                    className="p-1.5 rounded-lg hover:bg-violet-50 text-slate-400 hover:text-violet-600 transition-colors" title="プラン変更">
+                                                    <Icon name="repeat" size={14} />
+                                                </button>
+                                                <button onClick={() => { if(confirm(`${member.name}を退会処理しますか？`)) cancelMember(member.id); }}
+                                                    className="p-1.5 rounded-lg hover:bg-red-50 text-slate-400 hover:text-red-500 transition-colors" title="退会">
+                                                    <Icon name="user-minus" size={14} />
+                                                </button>
+                                            </>
+                                        )}
+                                        {member.status === 'CANCELED' && (
+                                            <button onClick={() => { if(confirm(`${member.name}を再入会しますか？`)) reactivateMember(member.id); }}
+                                                className="px-2 py-1 rounded-lg bg-green-50 hover:bg-green-100 text-green-700 text-xs font-medium transition-colors">
+                                                再入会
+                                            </button>
+                                        )}
+                                        <button onClick={() => { if(confirm('この会員データを削除しますか？')) deleteMember(member.id); }}
+                                            className="p-1.5 rounded-lg hover:bg-red-50 text-slate-300 hover:text-red-400 transition-colors" title="削除">
+                                            <Icon name="trash-2" size={12} />
+                                        </button>
+                                    </div>
+                                </div>
+                                {/* プラン変更フォーム */}
+                                {planChangeForm === member.id && (
+                                    <div className="mt-2 p-2.5 bg-violet-50 rounded-lg border border-violet-200 animate-scale-in">
+                                        <p className="text-xs font-medium text-violet-700 mb-2">プラン変更</p>
+                                        <div className="flex gap-2">
+                                            <input type="text" id={`plan_${member.id}`} defaultValue={member.planName}
+                                                placeholder="新プラン名" className="flex-1 px-2 py-1.5 border border-violet-200 rounded-lg text-sm outline-none" />
+                                            <input type="number" id={`price_${member.id}`} defaultValue={member.monthlyPrice}
+                                                placeholder="金額" className="w-24 px-2 py-1.5 border border-violet-200 rounded-lg text-sm outline-none" />
+                                            <button onClick={() => {
+                                                const plan = document.getElementById(`plan_${member.id}`).value;
+                                                const price = parseInt(document.getElementById(`price_${member.id}`).value) || member.monthlyPrice;
+                                                changePlan(member.id, plan, price);
+                                                setPlanChangeForm(null);
+                                            }} className="px-3 py-1.5 bg-violet-500 text-white rounded-lg text-sm font-medium">変更</button>
+                                        </div>
+                                    </div>
+                                )}
+                                {/* 入会日・退会日 */}
+                                <div className="mt-1.5 flex items-center gap-3 text-[10px] text-slate-400">
+                                    <span>入会: {member.startDate}</span>
+                                    {member.canceledDate && <span className="text-red-400">退会: {member.canceledDate}</span>}
+                                    {member.phone && <span>{member.phone}</span>}
+                                    {member.notes && <span className="italic">{member.notes}</span>}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                    {filteredManual.length === 0 && (
+                        <div className="text-center py-6 text-slate-400">
+                            <Icon name="wallet" size={24} className="mx-auto mb-2 text-slate-300" />
+                            <p className="text-sm">QR・現金決済の会員がいません</p>
+                            <p className="text-xs mt-1">「入会登録」から追加してください</p>
+                        </div>
+                    )}
+                </Card>
+            );
+        };
+
+        const MemberManagementView = ({ memberData, refreshSquareData, operateSubscription, activeStoreId, manualMembersHook }) => {
             const [isRefreshing, setIsRefreshing] = useState(false);
             const [filterStatus, setFilterStatus] = useState('all'); // all, ACTIVE, CANCELED, PENDING
             const [searchQuery, setSearchQuery] = useState('');
@@ -2248,6 +2793,7 @@
                                         formatter={(value, name) => {
                                             if (name === 'newMembers') return [value + '人', '新規入会'];
                                             if (name === 'churnedMembers') return [value + '人', '退会'];
+                                            if (name === 'planChanges') return [value + '人', 'プラン変更'];
                                             if (name === 'netGrowth') return [value + '人', '純増減'];
                                             if (name === 'activeMembers') return [value + '人', 'アクティブ会員'];
                                             return [value, name];
@@ -2257,6 +2803,7 @@
                                         formatter={(value) => {
                                             if (value === 'newMembers') return '新規入会';
                                             if (value === 'churnedMembers') return '退会';
+                                            if (value === 'planChanges') return 'プラン変更';
                                             if (value === 'netGrowth') return '純増減';
                                             if (value === 'activeMembers') return 'アクティブ会員';
                                             return value;
@@ -2264,6 +2811,7 @@
                                     />
                                     <Bar yAxisId="left" dataKey="newMembers" name="newMembers" fill="#63b185" radius={[6, 6, 0, 0]} />
                                     <Bar yAxisId="left" dataKey="churnedMembers" name="churnedMembers" fill="#fda4af" radius={[6, 6, 0, 0]} />
+                                    <Bar yAxisId="left" dataKey="planChanges" name="planChanges" fill="#a78bfa" radius={[6, 6, 0, 0]} />
                                     <Line yAxisId="left" type="monotone" dataKey="netGrowth" name="netGrowth" stroke="#eab308" strokeWidth={2} strokeDasharray="5 5" dot={{ r: 3 }} />
                                     <Line yAxisId="right" type="monotone" dataKey="activeMembers" name="activeMembers" stroke="#3f9968" strokeWidth={3} dot={{ r: 4, fill: '#3f9968' }} />
                                 </ComposedChart>
@@ -2282,6 +2830,7 @@
                                         <th className="text-left py-3 px-3 font-semibold text-slate-600">月</th>
                                         <th className="text-right py-3 px-3 font-semibold text-green-600">入会</th>
                                         <th className="text-right py-3 px-3 font-semibold text-red-600">退会</th>
+                                        <th className="text-right py-3 px-3 font-semibold text-violet-600">プラン変更</th>
                                         <th className="text-right py-3 px-3 font-semibold text-sise-600">純増減</th>
                                         <th className="text-right py-3 px-3 font-semibold text-slate-600">アクティブ</th>
                                         <th className="text-left py-3 px-3 font-semibold text-slate-600">推移</th>
@@ -2301,6 +2850,11 @@
                                                 </td>
                                                 <td className="text-right py-3 px-3">
                                                     <span className="font-bold text-red-500">-{m.churnedMembers}</span>
+                                                </td>
+                                                <td className="text-right py-3 px-3">
+                                                    <span className={`font-bold ${m.planChanges > 0 ? 'text-violet-600 bg-violet-50 px-2 py-1 rounded' : 'text-slate-400'}`}>
+                                                        {m.planChanges || 0}
+                                                    </span>
                                                 </td>
                                                 <td className="text-right py-3 px-3">
                                                     <span className={`font-bold px-2 py-1 rounded ${m.netGrowth >= 0 ? 'text-green-700 bg-green-50' : 'text-red-700 bg-red-50'}`}>
@@ -2598,6 +3152,9 @@
                             </div>
                         </div>
                     )}
+
+                    {/* QR・現金決済会員管理セクション */}
+                    {manualMembersHook && <ManualMembersSection manualMembersHook={manualMembersHook} />}
 
                     {/* 設定情報 */}
                     <Card className="bg-slate-50 border-slate-300">
@@ -3184,21 +3741,32 @@
         // ========================================
 
         const MemberUsageView = ({ memberData, usageHook }) => {
-            const { usageData, updateUsage, saveToSheet, getUsage, saving, lastSaved, currentMonth } = usageHook;
+            const {
+                usageData, updateUsage, saveToSheet, getUsage, saving, lastSaved, lastSynced, syncFromGAS, currentMonth,
+                planLimits, setPlanLimit, getPlanLimit,
+                carryoverData, setCarryover, getCarryover
+            } = usageHook;
             const [searchQuery, setSearchQuery] = useState('');
             const [showSaved, setShowSaved] = useState(false);
             const [sortBy, setSortBy] = useState('renewal'); // 'renewal' | 'name' | 'usage'
+            const [showPlanLimitForm, setShowPlanLimitForm] = useState(false);
+            const [editingCarryover, setEditingCarryover] = useState(null); // memberId for inline edit
+            const [editingUsageCount, setEditingUsageCount] = useState(null); // memberId for direct input
 
-            // 会員に請求期間情報を付与
+            // 会員に請求期間情報を付与（残回数・繰越含む）
             const membersWithBilling = useMemo(() => {
                 let members = (memberData.members || []).filter(m => m.status === 'ACTIVE');
                 return members.map(m => {
                     const billing = getCurrentBillingPeriod(m.startDate);
                     const periodKey = billing ? billing.periodKey : null;
                     const count = getUsage(m.id, periodKey);
-                    return { ...m, billing, periodKey, count };
+                    const planLimit = getPlanLimit(m.planName);
+                    const carryover = periodKey ? getCarryover(m.id, periodKey) : 0;
+                    const totalAllowed = planLimit + carryover; // 上限 + 繰越
+                    const remaining = planLimit > 0 ? Math.max(0, totalAllowed - count) : null; // null = 上限未設定
+                    return { ...m, billing, periodKey, count, planLimit, carryover, totalAllowed, remaining };
                 });
-            }, [memberData.members, getUsage]);
+            }, [memberData.members, getUsage, getPlanLimit, getCarryover]);
 
             // フィルタ & ソート
             const activeMembers = useMemo(() => {
@@ -3232,14 +3800,24 @@
             return (
                 <div className="space-y-5 md:space-y-6 animate-fade-in">
                     <SectionHeader title="利用管理" subtitle="USAGE TRACKING" icon="clipboard-check">
-                        <button
-                            onClick={handleSave}
-                            disabled={saving}
-                            className="flex items-center px-4 py-2.5 btn-gradient rounded-xl font-medium text-sm transition-all disabled:opacity-50"
-                        >
-                            <Icon name={saving ? "loader" : "save"} size={16} className={`mr-2 ${saving ? 'animate-spin' : ''}`} />
-                            {saving ? '保存中...' : 'スプシ保存'}
-                        </button>
+                        <div className="flex items-center gap-2">
+                            <button
+                                onClick={syncFromGAS}
+                                className="flex items-center px-3 py-2.5 bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-700 rounded-xl font-medium text-sm transition-all"
+                                title="他のデバイスの変更を取得"
+                            >
+                                <Icon name="refresh-cw" size={16} className="mr-1.5" />
+                                同期
+                            </button>
+                            <button
+                                onClick={handleSave}
+                                disabled={saving}
+                                className="flex items-center px-4 py-2.5 btn-gradient rounded-xl font-medium text-sm transition-all disabled:opacity-50"
+                            >
+                                <Icon name={saving ? "loader" : "save"} size={16} className={`mr-2 ${saving ? 'animate-spin' : ''}`} />
+                                {saving ? '保存中...' : 'スプシ保存'}
+                            </button>
+                        </div>
                     </SectionHeader>
 
                     {showSaved && (
@@ -3306,6 +3884,39 @@
                         </select>
                     </div>
 
+                    {/* プラン別利用上限設定 */}
+                    <div className="flex items-center justify-between">
+                        <button onClick={() => setShowPlanLimitForm(!showPlanLimitForm)}
+                            className="flex items-center px-3 py-2 bg-violet-50 hover:bg-violet-100 border border-violet-200 text-violet-700 rounded-xl text-sm font-medium transition-all">
+                            <Icon name="sliders" size={14} className="mr-1.5" />
+                            プラン別上限設定 {Object.keys(planLimits).filter(k => planLimits[k] > 0).length > 0 ? `(${Object.keys(planLimits).filter(k => planLimits[k] > 0).length}プラン)` : ''}
+                        </button>
+                    </div>
+                    {showPlanLimitForm && (() => {
+                        // 現在のアクティブなプラン名を収集
+                        const planNames = [...new Set(membersWithBilling.map(m => m.planName).filter(Boolean))];
+                        return (
+                            <Card className="!bg-violet-50/40 border-violet-200 animate-scale-in">
+                                <h4 className="font-semibold text-slate-800 mb-2 text-sm">プラン別 月間利用上限</h4>
+                                <p className="text-xs text-slate-500 mb-3">各プランの月間利用回数上限を設定すると、残回数が表示されます。0=無制限</p>
+                                <div className="space-y-2">
+                                    {planNames.map(name => (
+                                        <div key={name} className="flex items-center gap-3 p-2 bg-white/80 rounded-lg border border-slate-200">
+                                            <span className="text-sm font-medium text-slate-700 flex-1 truncate">{name}</span>
+                                            <div className="flex items-center gap-1">
+                                                <input type="number" min="0" value={planLimits[name] || ''} placeholder="0"
+                                                    onChange={(e) => setPlanLimit(name, parseInt(e.target.value) || 0)}
+                                                    className="w-16 px-2 py-1.5 border border-slate-200 rounded-lg text-sm text-center outline-none focus:border-violet-400" />
+                                                <span className="text-xs text-slate-400">回/月</span>
+                                            </div>
+                                        </div>
+                                    ))}
+                                    {planNames.length === 0 && <p className="text-xs text-slate-400 py-2">アクティブな会員のプランがありません</p>}
+                                </div>
+                            </Card>
+                        );
+                    })()}
+
                     {/* 更新日ルール説明 */}
                     <div className="bg-blue-50/60 border border-blue-200/60 rounded-xl px-4 py-3 flex items-start">
                         <Icon name="info" size={16} className="text-blue-500 mr-2.5 mt-0.5 flex-shrink-0" />
@@ -3313,6 +3924,7 @@
                             各会員の<span className="font-bold">サブスク登録日</span>が毎月の更新日（課金日）になります。
                             31日登録の場合、28日/30日までの月は月末に課金されます。
                             利用回数は更新日ごとにリセットされます。
+                            <br /><span className="font-bold">繰越:</span> 当月使い切れなかった回数は翌月まで繰り越し可能です（各カードの「繰越」から手動設定）。
                         </p>
                     </div>
 
@@ -3379,6 +3991,34 @@
                                         </div>
                                     )}
 
+                                    {/* 残回数表示（上限設定がある場合） */}
+                                    {member.remaining !== null && (
+                                        <div className="bg-gradient-to-r from-violet-50 to-blue-50 rounded-xl p-2.5 mb-3 border border-violet-100">
+                                            <div className="flex items-center justify-between mb-1">
+                                                <span className="text-[10px] text-violet-600 font-semibold">残回数</span>
+                                                <span className="text-[10px] text-slate-400">
+                                                    上限: {member.planLimit}回{member.carryover > 0 ? ` + 繰越${member.carryover}回` : ''}
+                                                </span>
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                <div className="flex-1">
+                                                    <div className="w-full bg-violet-200/50 rounded-full h-2">
+                                                        <div className="h-2 rounded-full transition-all duration-500"
+                                                            style={{
+                                                                width: `${member.totalAllowed > 0 ? Math.min(100, (count / member.totalAllowed) * 100) : 0}%`,
+                                                                background: member.remaining <= 0 ? '#ef4444' : member.remaining <= 2 ? '#f59e0b' : '#8b5cf6'
+                                                            }}
+                                                        ></div>
+                                                    </div>
+                                                </div>
+                                                <span className={`text-lg font-extrabold tabular-nums ${member.remaining <= 0 ? 'text-red-500' : member.remaining <= 2 ? 'text-amber-500' : 'text-violet-600'}`}>
+                                                    {member.remaining}
+                                                </span>
+                                                <span className="text-[10px] text-slate-400">回</span>
+                                            </div>
+                                        </div>
+                                    )}
+
                                     {/* 利用回数入力 */}
                                     <div className="flex items-center justify-between">
                                         <div className="flex items-center gap-2">
@@ -3389,10 +4029,18 @@
                                             >
                                                 <Icon name="minus" size={18} />
                                             </button>
-                                            <div className="w-16 text-center">
-                                                <span className="text-3xl font-extrabold text-slate-800 tabular-nums">{count}</span>
-                                                <p className="text-[9px] text-slate-400 -mt-0.5">回</p>
-                                            </div>
+                                            {editingUsageCount === member.id ? (
+                                                <input type="number" min="0" autoFocus
+                                                    defaultValue={count}
+                                                    onBlur={(e) => { updateUsage(member.id, parseInt(e.target.value) || 0, periodKey); setEditingUsageCount(null); }}
+                                                    onKeyDown={(e) => { if (e.key === 'Enter') { updateUsage(member.id, parseInt(e.target.value) || 0, periodKey); setEditingUsageCount(null); } }}
+                                                    className="w-16 text-center text-2xl font-extrabold text-slate-800 border-2 border-sise-400 rounded-lg py-1 outline-none" />
+                                            ) : (
+                                                <div className="w-16 text-center cursor-pointer" onClick={() => setEditingUsageCount(member.id)} title="クリックで直接入力">
+                                                    <span className="text-3xl font-extrabold text-slate-800 tabular-nums">{count}</span>
+                                                    <p className="text-[9px] text-slate-400 -mt-0.5">回（タップで編集）</p>
+                                                </div>
+                                            )}
                                             <button
                                                 onClick={() => updateUsage(member.id, count + 1, periodKey)}
                                                 className="w-10 h-10 rounded-xl bg-white/80 border border-slate-200 flex items-center justify-center text-slate-500 hover:bg-sise-50 hover:text-sise-600 hover:border-sise-200 transition-all active:scale-95"
@@ -3401,16 +4049,19 @@
                                             </button>
                                         </div>
                                         <div className="flex flex-col items-end gap-1">
+                                            {member.remaining !== null && member.remaining <= 0 && count > 0 && (
+                                                <span className="text-[10px] font-semibold text-red-600 bg-red-100 px-2 py-0.5 rounded-lg">上限到達</span>
+                                            )}
                                             {count === 0 && (
                                                 <span className="text-[10px] font-semibold text-amber-600 bg-amber-100 px-2 py-0.5 rounded-lg">未利用</span>
                                             )}
-                                            {count > 0 && count <= 2 && (
+                                            {count > 0 && (member.remaining === null || member.remaining > 0) && count <= 2 && (
                                                 <span className="text-[10px] font-semibold text-blue-600 bg-blue-100 px-2 py-0.5 rounded-lg">少なめ</span>
                                             )}
-                                            {count > 2 && count <= 5 && (
+                                            {count > 2 && count <= 5 && (member.remaining === null || member.remaining > 0) && (
                                                 <span className="text-[10px] font-semibold text-sise-600 bg-sise-100 px-2 py-0.5 rounded-lg">通常</span>
                                             )}
-                                            {count > 5 && (
+                                            {count > 5 && (member.remaining === null || member.remaining > 0) && (
                                                 <span className="text-[10px] font-semibold text-emerald-600 bg-emerald-100 px-2 py-0.5 rounded-lg">多い</span>
                                             )}
                                             {isRenewingSoon && (
@@ -3419,6 +4070,26 @@
                                                 </span>
                                             )}
                                         </div>
+                                    </div>
+
+                                    {/* 繰越設定 */}
+                                    <div className="mt-2 flex items-center justify-between">
+                                        {editingCarryover === member.id ? (
+                                            <div className="flex items-center gap-2 animate-scale-in">
+                                                <span className="text-[10px] text-violet-600 font-medium">繰越回数:</span>
+                                                <input type="number" min="0" autoFocus defaultValue={member.carryover}
+                                                    onBlur={(e) => { setCarryover(member.id, periodKey, parseInt(e.target.value) || 0); setEditingCarryover(null); }}
+                                                    onKeyDown={(e) => { if (e.key === 'Enter') { setCarryover(member.id, periodKey, parseInt(e.target.value) || 0); setEditingCarryover(null); } }}
+                                                    className="w-14 px-2 py-1 border border-violet-300 rounded-lg text-sm text-center outline-none focus:border-violet-500" />
+                                                <span className="text-[10px] text-slate-400">回</span>
+                                            </div>
+                                        ) : (
+                                            <button onClick={() => setEditingCarryover(member.id)}
+                                                className="text-[10px] text-violet-500 hover:text-violet-700 font-medium flex items-center transition-colors">
+                                                <Icon name="arrow-right-left" size={10} className="mr-0.5" />
+                                                繰越: {member.carryover > 0 ? `${member.carryover}回` : '設定'}
+                                            </button>
+                                        )}
                                     </div>
                                 </div>
                             );
@@ -3443,9 +4114,15 @@
                                 <p>各会員の利用回数はサブスク更新日ごとの請求期間で管理されます。更新日を迎えると自動的に新しい期間にリセットされます。</p>
                                 <p className="mt-1.5">例: 15日登録の会員 → 毎月15日〜翌月14日が1期間</p>
                                 <p className="mt-1">31日登録の会員 → 2月は28日(29日)、4月は30日が更新日になります</p>
-                                {lastSaved && (
-                                    <p className="text-xs text-sise-500 mt-2">最終保存: {lastSaved.toLocaleString('ja-JP')}</p>
-                                )}
+                                <p className="mt-1.5 text-sise-600 font-medium">データは30秒ごとに自動同期されます。どのデバイスから操作しても即時反映されます。</p>
+                                <div className="flex flex-wrap gap-3 mt-2">
+                                    {lastSaved && (
+                                        <p className="text-xs text-sise-500">最終保存: {lastSaved.toLocaleString('ja-JP')}</p>
+                                    )}
+                                    {lastSynced && (
+                                        <p className="text-xs text-blue-500">最終同期: {lastSynced.toLocaleString('ja-JP')}</p>
+                                    )}
+                                </div>
                             </div>
                         </div>
                     </Card>
@@ -3912,6 +4589,32 @@
                                 </div>
                                 <p className="text-xs text-slate-400 mt-1.5">回数券のプラン・購入者データをスプレッドシートに保存するための URL です</p>
                             </div>
+                            <div>
+                                <label className="block text-sm font-medium text-slate-700 mb-1">
+                                    QR・現金会員管理用 GAS URL
+                                </label>
+                                <div className="flex gap-2">
+                                    <input
+                                        type="url"
+                                        value={localStorage.getItem('sise_manual_members_gas_url') || ''}
+                                        onChange={(e) => {
+                                            localStorage.setItem('sise_manual_members_gas_url', e.target.value);
+                                        }}
+                                        className="flex-1 px-4 py-2.5 border border-slate-200 rounded-xl focus:border-sise-500 focus:ring-2 focus:ring-sise-500/20 outline-none text-sm"
+                                        placeholder="https://script.google.com/macros/s/..."
+                                    />
+                                    <button
+                                        onClick={() => {
+                                            setSaveMessage('QR・現金会員管理用GAS URLを保存しました。リロードで反映されます。');
+                                            setTimeout(() => setSaveMessage(''), 5000);
+                                        }}
+                                        className="px-4 py-2.5 btn-gradient rounded-xl font-medium text-sm"
+                                    >
+                                        保存
+                                    </button>
+                                </div>
+                                <p className="text-xs text-slate-400 mt-1.5">QR決済・現金決済の会員データをスプレッドシートで同期するための URL です</p>
+                            </div>
                         </div>
                     </Card>
 
@@ -3960,6 +4663,8 @@
             const usageHook = useMemberUsage();
             // 回数券管理
             const ticketHook = useTicketManagement();
+            // QR・現金決済会員管理
+            const manualMembersHook = useManualMembers();
 
             // ダークモード切り替え
             useEffect(() => {
@@ -3991,7 +4696,7 @@
                     case 'reports':
                         return <DailyReportListView reportData={reportData} />;
                     case 'members':
-                        return <MemberManagementView memberData={memberData} refreshSquareData={refreshSquareData} operateSubscription={operateSubscription} activeStoreId={activeStoreId} />;
+                        return <MemberManagementView memberData={memberData} refreshSquareData={refreshSquareData} operateSubscription={operateSubscription} activeStoreId={activeStoreId} manualMembersHook={manualMembersHook} />;
                     case 'usage':
                         return <MemberUsageView memberData={memberData} usageHook={usageHook} />;
                     case 'tickets':
