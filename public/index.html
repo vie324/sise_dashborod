@@ -611,6 +611,10 @@
         // Square API連携
         // ========================================
 
+        // セッションキャッシュ（ページ内でのデータ再利用、5分間有効）
+        const squareDataCache = { data: null, storeKey: null, timestamp: 0 };
+        const CACHE_TTL = 5 * 60 * 1000; // 5分
+
         const useSquareData = (activeStoreId, allowedStoreIds) => {
             const [memberData, setMemberData] = useState({
                 totalMembers: 0,
@@ -669,7 +673,15 @@
                 return await response.json();
             };
 
-            const fetchSquareData = useCallback(async () => {
+            const fetchSquareData = useCallback(async (forceRefresh) => {
+                // キャッシュチェック（強制更新でない場合）
+                const cacheKey = `${activeStoreId}_${(allowedStoreIds || []).join(',')}`;
+                if (!forceRefresh && squareDataCache.data && squareDataCache.storeKey === cacheKey
+                    && (Date.now() - squareDataCache.timestamp) < CACHE_TTL) {
+                    setMemberData(squareDataCache.data);
+                    return;
+                }
+
                 // サーバーの設定を確認
                 const serverConfig = await fetchSquareConfig();
 
@@ -714,36 +726,48 @@
                     let allInvoices = [];
                     let catalogMap = {};
 
-                    // 各店舗のデータを取得
-                    for (const store of targetStores) {
+                    // ==========================================
+                    // 高速化: 店舗間を並列処理 + 店舗内API呼び出しも並列化
+                    // ==========================================
+
+                    // 1店舗分のデータを並列取得する関数
+                    const fetchStoreData = async (store) => {
                         const storeId = store.id;
                         const locationId = store.locationId;
 
-                        // 1. Customers API
-                        const customers = await fetchAllPages(
-                            'customers/search',
-                            (cursor) => ({ limit: 100, ...(cursor ? { cursor } : {}) }),
-                            'customers',
-                            storeId
-                        );
+                        // Customers, Subscriptions, Invoices を並列取得
+                        const [customers, subscriptions, invoices] = await Promise.all([
+                            fetchAllPages(
+                                'customers/search',
+                                (cursor) => ({ limit: 100, ...(cursor ? { cursor } : {}) }),
+                                'customers', storeId
+                            ),
+                            fetchAllPages(
+                                'subscriptions/search',
+                                (cursor) => ({
+                                    query: { filter: { location_ids: [locationId] } },
+                                    ...(cursor ? { cursor } : {})
+                                }),
+                                'subscriptions', storeId
+                            ),
+                            fetchAllPages(
+                                'invoices/search',
+                                (cursor) => ({
+                                    query: { filter: { location_ids: [locationId] } },
+                                    limit: 200,
+                                    ...(cursor ? { cursor } : {})
+                                }),
+                                'invoices', storeId
+                            )
+                        ]);
+
                         // 店舗情報をタグ付け
                         customers.forEach(c => { c._storeId = storeId; c._storeName = store.name; });
-                        allCustomers = allCustomers.concat(customers);
-
-                        // 2. Subscriptions API
-                        const subscriptions = await fetchAllPages(
-                            'subscriptions/search',
-                            (cursor) => ({
-                                query: { filter: { location_ids: [locationId] } },
-                                ...(cursor ? { cursor } : {})
-                            }),
-                            'subscriptions',
-                            storeId
-                        );
                         subscriptions.forEach(s => { s._storeId = storeId; s._storeName = store.name; });
-                        allSubscriptions = allSubscriptions.concat(subscriptions);
+                        invoices.forEach(inv => { inv._storeId = storeId; inv._storeName = store.name; });
 
-                        // 3. Catalog API
+                        // Catalog API（サブスクのプラン情報取得 - サブスク取得後に実行）
+                        const localCatalogMap = {};
                         const planIds = [...new Set(subscriptions
                             .filter(s => s.plan_variation_id)
                             .map(s => s.plan_variation_id))];
@@ -753,110 +777,124 @@
                                 const headers = { 'Content-Type': 'application/json' };
                                 if (storeId) headers['X-Store-Id'] = storeId;
                                 const catalogResponse = await fetch(`${SQUARE_PROXY_BASE}/catalog/batch-retrieve`, {
-                                    method: 'POST',
-                                    headers,
+                                    method: 'POST', headers,
                                     body: JSON.stringify({ object_ids: planIds })
                                 });
                                 if (catalogResponse.ok) {
                                     const catalogData = await catalogResponse.json();
                                     (catalogData.objects || []).forEach(obj => {
                                         const subPlan = obj.subscription_plan_variation_data || obj.subscription_plan_data;
-                                        catalogMap[obj.id] = {
+                                        localCatalogMap[obj.id] = {
                                             name: subPlan?.name || obj.id,
                                             phases: subPlan?.phases || []
                                         };
                                     });
                                 }
-                            } catch (e) {
-                                console.warn('Catalog API fetch failed:', e);
-                            }
+                            } catch (e) { console.warn('Catalog API fetch failed:', e); }
                         }
 
-                        // 4. Invoices API
-                        const invoices = await fetchAllPages(
-                            'invoices/search',
-                            (cursor) => ({
-                                query: { filter: { location_ids: [locationId] } },
-                                limit: 200,
-                                ...(cursor ? { cursor } : {})
-                            }),
-                            'invoices',
-                            storeId
-                        );
-                        invoices.forEach(inv => { inv._storeId = storeId; inv._storeName = store.name; });
-                        allInvoices = allInvoices.concat(invoices);
+                        return { customers, subscriptions, invoices, catalogMap: localCatalogMap };
+                    };
 
-                        // 5. Extra Sources: 別アカウントのデータを統合取得
+                    // Extra Sourceのデータを並列取得する関数
+                    const fetchExtraSourceData = async (store, extra) => {
+                        const storeId = store.id;
+                        // Subscriptions, Invoices, Customers を並列取得
+                        const [extraSubs, extraInvoices, extraCustomers] = await Promise.all([
+                            fetchAllPages(
+                                'subscriptions/search',
+                                (cursor) => ({
+                                    query: { filter: { location_ids: [extra.locationId] } },
+                                    ...(cursor ? { cursor } : {})
+                                }),
+                                'subscriptions', extra.id
+                            ),
+                            fetchAllPages(
+                                'invoices/search',
+                                (cursor) => ({
+                                    query: { filter: { location_ids: [extra.locationId] } },
+                                    limit: 200,
+                                    ...(cursor ? { cursor } : {})
+                                }),
+                                'invoices', extra.id
+                            ),
+                            fetchAllPages(
+                                'customers/search',
+                                (cursor) => ({ limit: 100, ...(cursor ? { cursor } : {}) }),
+                                'customers', extra.id
+                            )
+                        ]);
+
+                        extraSubs.forEach(s => { s._storeId = storeId; s._storeName = store.name; s._extraSource = true; });
+                        extraInvoices.forEach(inv => { inv._storeId = storeId; inv._storeName = store.name; inv._extraSource = true; });
+                        extraCustomers.forEach(c => { c._storeId = storeId; c._storeName = store.name; c._extraSource = true; });
+
+                        // Extra: Catalog
+                        const localCatalogMap = {};
+                        const extraPlanIds = [...new Set(extraSubs
+                            .filter(s => s.plan_variation_id)
+                            .map(s => s.plan_variation_id))];
+                        if (extraPlanIds.length > 0) {
+                            try {
+                                const h = { 'Content-Type': 'application/json', 'X-Store-Id': extra.id };
+                                const catRes = await fetch(`${SQUARE_PROXY_BASE}/catalog/batch-retrieve`, {
+                                    method: 'POST', headers: h,
+                                    body: JSON.stringify({ object_ids: extraPlanIds })
+                                });
+                                if (catRes.ok) {
+                                    const catData = await catRes.json();
+                                    (catData.objects || []).forEach(obj => {
+                                        const subPlan = obj.subscription_plan_variation_data || obj.subscription_plan_data;
+                                        localCatalogMap[obj.id] = { name: subPlan?.name || obj.id, phases: subPlan?.phases || [] };
+                                    });
+                                }
+                            } catch (e) { console.warn('Extra catalog fetch failed:', e); }
+                        }
+
+                        console.log(`Extra source ${extra.id}: +${extraSubs.length} subs, +${extraInvoices.length} invoices, +${extraCustomers.length} customers`);
+                        return { customers: extraCustomers, subscriptions: extraSubs, invoices: extraInvoices, catalogMap: localCatalogMap };
+                    };
+
+                    // 全店舗を並列で取得
+                    const storeResults = await Promise.all(targetStores.map(store => fetchStoreData(store)));
+
+                    // 結果をマージ
+                    for (const result of storeResults) {
+                        allCustomers = allCustomers.concat(result.customers);
+                        allSubscriptions = allSubscriptions.concat(result.subscriptions);
+                        allInvoices = allInvoices.concat(result.invoices);
+                        Object.assign(catalogMap, result.catalogMap);
+                    }
+
+                    // Extra Sources も全店舗分を並列で取得
+                    const extraPromises = [];
+                    for (const store of targetStores) {
                         if (store.extraSources && store.extraSources.length > 0) {
                             for (const extra of store.extraSources) {
-                                try {
-                                    // Extra: Subscriptions
-                                    const extraSubs = await fetchAllPages(
-                                        'subscriptions/search',
-                                        (cursor) => ({
-                                            query: { filter: { location_ids: [extra.locationId] } },
-                                            ...(cursor ? { cursor } : {})
-                                        }),
-                                        'subscriptions',
-                                        extra.id
-                                    );
-                                    extraSubs.forEach(s => { s._storeId = storeId; s._storeName = store.name; s._extraSource = true; });
-                                    allSubscriptions = allSubscriptions.concat(extraSubs);
+                                extraPromises.push(
+                                    fetchExtraSourceData(store, extra).catch(e => {
+                                        console.warn(`Extra source fetch failed:`, e);
+                                        return null;
+                                    })
+                                );
+                            }
+                        }
+                    }
 
-                                    // Extra: Catalog (for plan names/prices)
-                                    const extraPlanIds = [...new Set(extraSubs
-                                        .filter(s => s.plan_variation_id)
-                                        .map(s => s.plan_variation_id))];
-                                    if (extraPlanIds.length > 0) {
-                                        try {
-                                            const h = { 'Content-Type': 'application/json', 'X-Store-Id': extra.id };
-                                            const catRes = await fetch(`${SQUARE_PROXY_BASE}/catalog/batch-retrieve`, {
-                                                method: 'POST', headers: h,
-                                                body: JSON.stringify({ object_ids: extraPlanIds })
-                                            });
-                                            if (catRes.ok) {
-                                                const catData = await catRes.json();
-                                                (catData.objects || []).forEach(obj => {
-                                                    const subPlan = obj.subscription_plan_variation_data || obj.subscription_plan_data;
-                                                    if (!catalogMap[obj.id]) {
-                                                        catalogMap[obj.id] = { name: subPlan?.name || obj.id, phases: subPlan?.phases || [] };
-                                                    }
-                                                });
-                                            }
-                                        } catch (e) { console.warn('Extra catalog fetch failed:', e); }
-                                    }
-
-                                    // Extra: Invoices
-                                    const extraInvoices = await fetchAllPages(
-                                        'invoices/search',
-                                        (cursor) => ({
-                                            query: { filter: { location_ids: [extra.locationId] } },
-                                            limit: 200,
-                                            ...(cursor ? { cursor } : {})
-                                        }),
-                                        'invoices',
-                                        extra.id
-                                    );
-                                    extraInvoices.forEach(inv => { inv._storeId = storeId; inv._storeName = store.name; inv._extraSource = true; });
-                                    allInvoices = allInvoices.concat(extraInvoices);
-
-                                    // Extra: Customers (for matching subscriptions to names)
-                                    const extraCustomers = await fetchAllPages(
-                                        'customers/search',
-                                        (cursor) => ({ limit: 100, ...(cursor ? { cursor } : {}) }),
-                                        'customers',
-                                        extra.id
-                                    );
-                                    extraCustomers.forEach(c => { c._storeId = storeId; c._storeName = store.name; c._extraSource = true; });
-                                    // Merge without duplicating (same customer may exist in both accounts)
-                                    const existingIds = new Set(allCustomers.map(c => c.id));
-                                    const newCustomers = extraCustomers.filter(c => !existingIds.has(c.id));
-                                    allCustomers = allCustomers.concat(newCustomers);
-
-                                    console.log(`Extra source ${extra.id}: +${extraSubs.length} subs, +${extraInvoices.length} invoices, +${newCustomers.length} customers`);
-                                } catch (e) {
-                                    console.warn(`Extra source ${extra.id} fetch failed:`, e);
-                                }
+                    if (extraPromises.length > 0) {
+                        const extraResults = await Promise.all(extraPromises);
+                        const existingCustomerIds = new Set(allCustomers.map(c => c.id));
+                        for (const result of extraResults) {
+                            if (!result) continue;
+                            allSubscriptions = allSubscriptions.concat(result.subscriptions);
+                            allInvoices = allInvoices.concat(result.invoices);
+                            // 顧客は重複除外
+                            const newCustomers = result.customers.filter(c => !existingCustomerIds.has(c.id));
+                            newCustomers.forEach(c => existingCustomerIds.add(c.id));
+                            allCustomers = allCustomers.concat(newCustomers);
+                            // catalogMapにマージ（既存を上書きしない）
+                            for (const [id, val] of Object.entries(result.catalogMap)) {
+                                if (!catalogMap[id]) catalogMap[id] = val;
                             }
                         }
                     }
@@ -865,12 +903,20 @@
                     const subscriptions = allSubscriptions;
                     const invoices = allInvoices;
 
-                    // 5. 会員詳細データの構築
+                    // 5. 会員詳細データの構築（Mapで高速検索）
+                    const customerMap = new Map(customers.map(c => [c.id, c]));
+                    const invoicesByCustomer = {};
+                    invoices.forEach(inv => {
+                        const cid = inv.primary_recipient?.customer_id;
+                        if (cid) {
+                            if (!invoicesByCustomer[cid]) invoicesByCustomer[cid] = [];
+                            invoicesByCustomer[cid].push(inv);
+                        }
+                    });
+
                     const membersList = subscriptions.map(sub => {
-                        const customer = customers.find(c => c.id === sub.customer_id);
-                        const memberInvoices = invoices.filter(inv =>
-                            inv.primary_recipient?.customer_id === sub.customer_id
-                        );
+                        const customer = customerMap.get(sub.customer_id);
+                        const memberInvoices = invoicesByCustomer[sub.customer_id] || [];
 
                         // プラン金額をphasesから取得
                         let monthlyPrice = defaultMonthlyPrice;
@@ -971,7 +1017,7 @@
                         .filter(m => m.status === 'ACTIVE')
                         .reduce((sum, m) => sum + m.monthlyPrice, 0);
 
-                    setMemberData({
+                    const finalData = {
                         totalMembers: subscriptions.length,
                         activeMembers: activeSubscriptions.length,
                         newMembersThisMonth: newThisMonth.length,
@@ -985,7 +1031,14 @@
                         stores: stores,
                         loading: false,
                         error: null
-                    });
+                    };
+
+                    // キャッシュに保存
+                    squareDataCache.data = finalData;
+                    squareDataCache.storeKey = cacheKey;
+                    squareDataCache.timestamp = Date.now();
+
+                    setMemberData(finalData);
 
                 } catch (error) {
                     console.error('Square API Error:', error);
@@ -1004,7 +1057,10 @@
                 return () => clearInterval(interval);
             }, [fetchSquareData]);
 
-            return { memberData, refreshSquareData: fetchSquareData, operateSubscription };
+            // 手動更新は常にキャッシュを無視
+            const refreshSquareData = useCallback(() => fetchSquareData(true), [fetchSquareData]);
+
+            return { memberData, refreshSquareData, operateSubscription };
         };
 
         // ========================================
