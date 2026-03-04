@@ -156,12 +156,42 @@
         .dark .border-sise-200 { border-color: #1d6641 !important; }
         .dark .glass-panel { background: rgba(18,35,27,0.9); border-color: rgba(51,160,101,0.15); }
         .dark .glass-card { background: rgba(18,35,27,0.7); border-color: rgba(51,160,101,0.12); }
+        /* Dark mode: form inputs */
+        .dark input, .dark select, .dark textarea {
+            background-color: #12231b !important;
+            color: #e2e8f0 !important;
+            border-color: #1e3a2c !important;
+        }
+        .dark input::placeholder, .dark textarea::placeholder {
+            color: #4a6b58 !important;
+        }
+        .dark input:focus, .dark select:focus, .dark textarea:focus {
+            border-color: #33a065 !important;
+        }
+        /* Dark mode: status badges */
+        .dark .bg-green-50, .dark .bg-green-100 { background-color: rgba(34,197,94,0.12) !important; }
+        .dark .bg-red-50, .dark .bg-red-100 { background-color: rgba(239,68,68,0.12) !important; }
+        .dark .bg-blue-50, .dark .bg-blue-100 { background-color: rgba(59,130,246,0.12) !important; }
+        .dark .bg-amber-50, .dark .bg-amber-100 { background-color: rgba(245,158,11,0.12) !important; }
+        .dark .bg-orange-50, .dark .bg-orange-100 { background-color: rgba(249,115,22,0.12) !important; }
+        .dark .bg-purple-50, .dark .bg-purple-100 { background-color: rgba(168,85,247,0.12) !important; }
+        .dark .bg-violet-50, .dark .bg-violet-100, .dark .bg-violet-50\/50, .dark .bg-violet-50\/40 { background-color: rgba(139,92,246,0.12) !important; }
+        .dark .bg-sise-50 { background-color: rgba(51,160,101,0.08) !important; }
+        .dark .bg-slate-100 { background-color: rgba(148,163,184,0.08) !important; }
+        /* Dark mode: chart tooltip */
+        .dark .recharts-tooltip-wrapper .recharts-default-tooltip {
+            background: #12231b !important;
+            border-color: #1e3a2c !important;
+            color: #e2e8f0 !important;
+        }
 
         /* Scrollbar */
-        ::-webkit-scrollbar { width: 5px; }
+        ::-webkit-scrollbar { width: 5px; height: 5px; }
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: #b9e5ca; border-radius: 10px; }
         ::-webkit-scrollbar-thumb:hover { background: #88d1a8; }
+        .dark ::-webkit-scrollbar-thumb { background: #1d6641; }
+        .dark ::-webkit-scrollbar-thumb:hover { background: #238050; }
 
         /* Glass Panel */
         .glass-panel {
@@ -286,18 +316,31 @@
         .skeleton {
             background: linear-gradient(90deg, #e8f3ec 25%, #f0faf4 50%, #e8f3ec 75%);
             background-size: 200% 100%;
-            animation: shimmer 1.5s linear infinite;
+            animation: shimmer 1.8s ease-in-out infinite;
+        }
+        .dark .skeleton {
+            background: linear-gradient(90deg, #12231b 25%, #1e3a2c 50%, #12231b 75%);
+            background-size: 200% 100%;
         }
         @keyframes shimmer {
             0% { background-position: 200% 0; }
             100% { background-position: -200% 0; }
         }
 
-        /* Table hover */
+        /* Table hover & alternating rows */
         .table-row-hover {
-            transition: all 0.2s ease;
+            transition: background-color 0.2s ease;
         }
         .table-row-hover:hover {
+            background-color: rgba(51,160,101,0.06);
+        }
+        .table-row-hover:nth-child(even) {
+            background-color: rgba(51,160,101,0.02);
+        }
+        .table-row-hover:nth-child(even):hover {
+            background-color: rgba(51,160,101,0.06);
+        }
+        .dark .table-row-hover:nth-child(even) {
             background-color: rgba(51,160,101,0.04);
         }
 
@@ -326,14 +369,19 @@
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            padding: 6px 0 4px;
+            padding: 8px 2px 6px;
             font-size: 10px;
             font-weight: 500;
             color: #94a3b8;
-            transition: all 0.2s ease;
+            transition: color 0.2s ease, transform 0.15s ease;
             position: relative;
             flex: 1;
-            min-height: 52px;
+            min-width: 0;
+            min-height: 56px;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .bottom-nav-item:active {
+            transform: scale(0.92);
         }
         .bottom-nav-item.active {
             color: #33a065;
@@ -354,11 +402,23 @@
             color: white;
             border: none;
             box-shadow: 0 4px 16px -4px rgba(51,160,101,0.4);
-            transition: all 0.3s ease;
+            transition: all 0.3s cubic-bezier(0.16,1,0.3,1);
         }
         .btn-gradient:hover {
             box-shadow: 0 8px 24px -4px rgba(51,160,101,0.5);
             transform: translateY(-1px);
+        }
+        .btn-gradient:active {
+            transform: translateY(0) scale(0.97);
+        }
+
+        /* Consistent button active/disabled states */
+        button:not(:disabled):active {
+            transition-duration: 0.1s;
+        }
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
         }
 
         /* Mobile-first */
@@ -394,6 +454,19 @@
         .recharts-tooltip-wrapper .recharts-default-tooltip {
             border-radius: 12px !important;
             box-shadow: 0 8px 32px -8px rgba(0,0,0,0.12) !important;
+            border: 1px solid rgba(51,160,101,0.1) !important;
+        }
+
+        /* Smooth view transitions */
+        .view-transition {
+            animation: fade-in-up 0.4s cubic-bezier(0.16,1,0.3,1) forwards;
+        }
+
+        /* Focus ring consistency for all inputs */
+        input:focus, select:focus, textarea:focus {
+            outline: none;
+            border-color: #33a065 !important;
+            box-shadow: 0 0 0 3px rgba(51,160,101,0.12);
         }
     </style>
 </head>
@@ -583,11 +656,11 @@
                         </span>
                     )}
                 </div>
-                <h3 className="text-slate-500 font-medium text-[11px] tracking-wider uppercase">{title}</h3>
+                <h3 className="text-slate-500 font-medium text-[11px] md:text-xs tracking-wider uppercase">{title}</h3>
                 <div className="flex items-baseline mt-1">
                     <span className="text-2xl md:text-3xl font-extrabold text-slate-900 num-animate tracking-tight">{value}</span>
                 </div>
-                {subValue && <p className="text-[11px] text-slate-400 mt-1.5">{subValue}</p>}
+                {subValue && <p className="text-[11px] md:text-xs text-slate-400 mt-1.5">{subValue}</p>}
             </Card>
         );
 
@@ -602,7 +675,7 @@
                     )}
                     <div>
                         <h2 className="text-lg md:text-xl font-bold text-slate-800">{title}</h2>
-                        {subtitle && <p className="text-[10px] text-sise-500 tracking-widest font-semibold uppercase">{subtitle}</p>}
+                        {subtitle && <p className="text-[10px] md:text-[11px] text-sise-500 tracking-widest font-semibold uppercase">{subtitle}</p>}
                     </div>
                 </div>
                 {children}
@@ -2462,12 +2535,12 @@
                                 <div>
                                     <label className="block text-xs font-medium text-slate-600 mb-1">会員名 *</label>
                                     <input type="text" value={newManualMember.name} onChange={e => setNewManualMember(p => ({...p, name: e.target.value}))}
-                                        placeholder="例: 山田太郎" className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:border-violet-400 outline-none" />
+                                        placeholder="例: 山田太郎" className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm outline-none" />
                                 </div>
                                 <div>
                                     <label className="block text-xs font-medium text-slate-600 mb-1">電話番号</label>
                                     <input type="tel" value={newManualMember.phone} onChange={e => setNewManualMember(p => ({...p, phone: e.target.value}))}
-                                        placeholder="090-xxxx-xxxx" className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:border-violet-400 outline-none" />
+                                        placeholder="090-xxxx-xxxx" className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm outline-none" />
                                 </div>
                                 <div>
                                     <label className="block text-xs font-medium text-slate-600 mb-1">決済方法 *</label>
@@ -2484,22 +2557,22 @@
                                 <div>
                                     <label className="block text-xs font-medium text-slate-600 mb-1">プラン名</label>
                                     <input type="text" value={newManualMember.planName} onChange={e => setNewManualMember(p => ({...p, planName: e.target.value}))}
-                                        placeholder="例: 月4回プラン" className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:border-violet-400 outline-none" />
+                                        placeholder="例: 月4回プラン" className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm outline-none" />
                                 </div>
                                 <div>
                                     <label className="block text-xs font-medium text-slate-600 mb-1">月額料金（円）</label>
                                     <input type="number" value={newManualMember.monthlyPrice} onChange={e => setNewManualMember(p => ({...p, monthlyPrice: e.target.value}))}
-                                        placeholder="10000" className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:border-violet-400 outline-none" />
+                                        placeholder="10000" className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm outline-none" />
                                 </div>
                                 <div>
                                     <label className="block text-xs font-medium text-slate-600 mb-1">入会日</label>
                                     <input type="date" value={newManualMember.startDate} onChange={e => setNewManualMember(p => ({...p, startDate: e.target.value}))}
-                                        className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:border-violet-400 outline-none" />
+                                        className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm outline-none" />
                                 </div>
                                 <div className="md:col-span-2">
                                     <label className="block text-xs font-medium text-slate-600 mb-1">備考</label>
                                     <input type="text" value={newManualMember.notes} onChange={e => setNewManualMember(p => ({...p, notes: e.target.value}))}
-                                        placeholder="メモ" className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:border-violet-400 outline-none" />
+                                        placeholder="メモ" className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm outline-none" />
                                 </div>
                             </div>
                             <div className="flex justify-end gap-2 mt-3">
@@ -2524,10 +2597,10 @@
                         <div className="relative flex-1 min-w-[140px]">
                             <Icon name="search" size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                             <input type="text" value={manualSearch} onChange={e => setManualSearch(e.target.value)}
-                                placeholder="名前・電話番号で検索..." className="w-full pl-8 pr-3 py-2 border border-slate-200 rounded-xl text-sm focus:border-violet-400 outline-none bg-white/80" />
+                                placeholder="名前・電話番号で検索..." className="w-full pl-8 pr-3 py-2 border border-slate-200 rounded-xl text-sm outline-none bg-white/80" />
                         </div>
                         <select value={manualFilter} onChange={e => setManualFilter(e.target.value)}
-                            className="px-3 py-2 border border-slate-200 rounded-xl text-sm focus:border-violet-400 outline-none bg-white/80">
+                            className="px-3 py-2 border border-slate-200 rounded-xl text-sm outline-none bg-white/80">
                             <option value="all">全て</option>
                             <option value="ACTIVE">アクティブ</option>
                             <option value="CANCELED">退会済み</option>
@@ -3399,13 +3472,13 @@
                     </div>
 
                     {/* タブ切り替え */}
-                    <div className="flex gap-1 bg-slate-100/80 rounded-xl p-1">
-                        <button onClick={() => setActiveTab('tickets')} className={`flex-1 py-2.5 rounded-lg text-sm font-semibold transition-all ${activeTab === 'tickets' ? 'bg-white text-sise-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
-                            <Icon name="users" size={15} className="inline mr-1.5 -mt-0.5" />
+                    <div className="flex gap-1 bg-slate-100 dark:bg-slate-800/60 rounded-2xl p-1.5">
+                        <button onClick={() => setActiveTab('tickets')} className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 ${activeTab === 'tickets' ? 'bg-white dark:bg-sise-900/60 text-sise-700 dark:text-sise-400 shadow-md shadow-sise-500/10' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 hover:bg-white/50 active:scale-95'}`}>
+                            <Icon name="users" size={15} />
                             購入者一覧
                         </button>
-                        <button onClick={() => setActiveTab('plans')} className={`flex-1 py-2.5 rounded-lg text-sm font-semibold transition-all ${activeTab === 'plans' ? 'bg-white text-sise-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
-                            <Icon name="package" size={15} className="inline mr-1.5 -mt-0.5" />
+                        <button onClick={() => setActiveTab('plans')} className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 ${activeTab === 'plans' ? 'bg-white dark:bg-sise-900/60 text-sise-700 dark:text-sise-400 shadow-md shadow-sise-500/10' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 hover:bg-white/50 active:scale-95'}`}>
+                            <Icon name="package" size={15} />
                             回数券プラン
                         </button>
                     </div>
@@ -4138,7 +4211,7 @@
                                                 <input type="number" min="0" autoFocus defaultValue={member.carryover}
                                                     onBlur={(e) => { setCarryover(member.id, periodKey, parseInt(e.target.value) || 0); setEditingCarryover(null); }}
                                                     onKeyDown={(e) => { if (e.key === 'Enter') { setCarryover(member.id, periodKey, parseInt(e.target.value) || 0); setEditingCarryover(null); } }}
-                                                    className="w-14 px-2 py-1 border border-violet-300 rounded-lg text-sm text-center outline-none focus:border-violet-500" />
+                                                    className="w-14 px-2 py-1 border border-violet-300 rounded-lg text-sm text-center outline-none" />
                                                 <span className="text-[10px] text-slate-400">回</span>
                                             </div>
                                         ) : (
@@ -4688,28 +4761,28 @@
                             <KpiCard
                                 title="月間PV数"
                                 value={latestMonth ? latestMonth.pageViews.toLocaleString() : '-'}
-                                sub={latestMonth ? `業界平均比 ${viewsDiff >= 0 ? '+' : ''}${viewsDiff}` : ''}
+                                subValue={latestMonth ? `業界平均比 ${viewsDiff >= 0 ? '+' : ''}${viewsDiff}` : ''}
                                 icon="eye"
                                 trend={viewsDiff >= 0 ? 'up' : 'down'}
                             />
                             <KpiCard
                                 title="予約獲得数"
                                 value={latestMonth ? latestMonth.bookings.toLocaleString() : '-'}
-                                sub={prevMonth ? `前月: ${prevMonth.bookings}件` : ''}
+                                subValue={prevMonth ? `前月: ${prevMonth.bookings}件` : ''}
                                 icon="calendar-check"
                                 trend={latestMonth && prevMonth && latestMonth.bookings >= prevMonth.bookings ? 'up' : 'down'}
                             />
                             <KpiCard
                                 title="予約率"
                                 value={latestMonth ? `${bookingRate.toFixed(1)}%` : '-'}
-                                sub={`業界平均: ${settings.avgBookingRate}%（差: ${rateDiff >= 0 ? '+' : ''}${rateDiff.toFixed(1)}%）`}
+                                subValue={`業界平均: ${settings.avgBookingRate}%（差: ${rateDiff >= 0 ? '+' : ''}${rateDiff.toFixed(1)}%）`}
                                 icon="target"
                                 trend={rateDiff >= 0 ? 'up' : 'down'}
                             />
                             <KpiCard
                                 title="口コミ数"
                                 value={latestMonth ? latestMonth.reviews?.toLocaleString() || '0' : '-'}
-                                sub={prevMonth ? `前月: ${prevMonth.reviews || 0}件` : ''}
+                                subValue={prevMonth ? `前月: ${prevMonth.reviews || 0}件` : ''}
                                 icon="message-circle"
                                 trend={latestMonth && prevMonth && (latestMonth.reviews || 0) >= (prevMonth.reviews || 0) ? 'up' : 'down'}
                             />
@@ -4836,7 +4909,7 @@
                                                 const rateColor = rate >= settings.avgBookingRate ? 'text-green-600' : 'text-red-500';
                                                 const pvColor = m.pageViews >= settings.avgViews ? 'text-green-600' : 'text-red-500';
                                                 return (
-                                                    <tr key={m.yearMonth} className="border-b dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800">
+                                                    <tr key={m.yearMonth} className="border-b dark:border-gray-700 table-row-hover">
                                                         <td className="py-2 px-3 font-medium">{m.yearMonth}</td>
                                                         <td className={`text-right py-2 px-3 font-mono ${pvColor}`}>{m.pageViews?.toLocaleString()}</td>
                                                         <td className="text-right py-2 px-3 font-mono">{m.bookings?.toLocaleString()}</td>
@@ -4960,10 +5033,10 @@
                             <>
                                 {/* KPIカード */}
                                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                                    <KpiCard title="広告費" value={`¥${Math.round(spend).toLocaleString()}`} icon="credit-card" sub="合計費用" />
-                                    <KpiCard title="インプレッション" value={impressions.toLocaleString()} icon="eye" sub={`リーチ: ${parseInt(insights.reach || 0).toLocaleString()}`} />
-                                    <KpiCard title="クリック数" value={clicks.toLocaleString()} icon="mouse-pointer-click" sub={`CTR: ${ctr.toFixed(2)}%`} trend={ctr >= 1.0 ? 'up' : 'down'} />
-                                    <KpiCard title="CPA" value={cpa > 0 ? `¥${Math.round(cpa).toLocaleString()}` : '-'} icon="target" sub={`CV数: ${conversions}`} />
+                                    <KpiCard title="広告費" value={`¥${Math.round(spend).toLocaleString()}`} icon="credit-card" subValue="合計費用" />
+                                    <KpiCard title="インプレッション" value={impressions.toLocaleString()} icon="eye" subValue={`リーチ: ${parseInt(insights.reach || 0).toLocaleString()}`} />
+                                    <KpiCard title="クリック数" value={clicks.toLocaleString()} icon="mouse-pointer-click" subValue={`CTR: ${ctr.toFixed(2)}%`} trend={ctr >= 1.0 ? 'up' : 'down'} />
+                                    <KpiCard title="CPA" value={cpa > 0 ? `¥${Math.round(cpa).toLocaleString()}` : '-'} icon="target" subValue={`CV数: ${conversions}`} />
                                 </div>
 
                                 {/* 詳細メトリクス */}
@@ -5002,7 +5075,7 @@
                                                 </thead>
                                                 <tbody>
                                                     {metaData.campaignInsights.map((ci, idx) => (
-                                                        <tr key={idx} className="border-b dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800">
+                                                        <tr key={idx} className="border-b dark:border-gray-700 table-row-hover">
                                                             <td className="py-2 px-3">{ci.campaign_name}</td>
                                                             <td className="text-right py-2 px-3 font-mono">¥{Math.round(parseFloat(ci.spend || 0)).toLocaleString()}</td>
                                                             <td className="text-right py-2 px-3 font-mono">{parseInt(ci.impressions || 0).toLocaleString()}</td>
@@ -5108,10 +5181,10 @@
                         ) : dailyInsights.length > 0 ? (
                             <>
                                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                                    <KpiCard title="広告費" value={`¥${Math.round(totals.spend).toLocaleString()}`} icon="credit-card" sub="合計費用" />
-                                    <KpiCard title="インプレッション" value={totals.impressions.toLocaleString()} icon="eye" sub={`リーチ: ${totals.reach.toLocaleString()}`} />
-                                    <KpiCard title="クリック数" value={totals.clicks.toLocaleString()} icon="mouse-pointer-click" sub={`CTR: ${ctr.toFixed(2)}%`} trend={ctr >= 0.8 ? 'up' : 'down'} />
-                                    <KpiCard title="動画再生数" value={totals.videoViews.toLocaleString()} icon="play-circle" sub={`6秒視聴率: ${videoRetention.toFixed(1)}%`} trend={videoRetention >= 20 ? 'up' : 'down'} />
+                                    <KpiCard title="広告費" value={`¥${Math.round(totals.spend).toLocaleString()}`} icon="credit-card" subValue="合計費用" />
+                                    <KpiCard title="インプレッション" value={totals.impressions.toLocaleString()} icon="eye" subValue={`リーチ: ${totals.reach.toLocaleString()}`} />
+                                    <KpiCard title="クリック数" value={totals.clicks.toLocaleString()} icon="mouse-pointer-click" subValue={`CTR: ${ctr.toFixed(2)}%`} trend={ctr >= 0.8 ? 'up' : 'down'} />
+                                    <KpiCard title="動画再生数" value={totals.videoViews.toLocaleString()} icon="play-circle" subValue={`6秒視聴率: ${videoRetention.toFixed(1)}%`} trend={videoRetention >= 20 ? 'up' : 'down'} />
                                 </div>
 
                                 {/* CPA / コンバージョン */}
@@ -5164,7 +5237,7 @@
                                                     const m = day.metrics || {};
                                                     const dim = day.dimensions || {};
                                                     return (
-                                                        <tr key={idx} className="border-b dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800">
+                                                        <tr key={idx} className="border-b dark:border-gray-700 table-row-hover">
                                                             <td className="py-2 px-3">{dim.stat_time_day || '-'}</td>
                                                             <td className="text-right py-2 px-3 font-mono">¥{Math.round(parseFloat(m.spend || 0)).toLocaleString()}</td>
                                                             <td className="text-right py-2 px-3 font-mono">{parseInt(m.impressions || 0).toLocaleString()}</td>
@@ -5219,7 +5292,7 @@
                                         </thead>
                                         <tbody>
                                             {tiktokData.campaigns.map((camp, idx) => (
-                                                <tr key={idx} className="border-b dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800">
+                                                <tr key={idx} className="border-b dark:border-gray-700 table-row-hover">
                                                     <td className="py-2 px-3">{camp.campaign_name}</td>
                                                     <td className="text-center py-2 px-3">
                                                         <span className={`px-2 py-0.5 rounded text-xs ${camp.operation_status === 'ENABLE' ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400' : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400'}`}>
@@ -5247,17 +5320,17 @@
                     />
 
                     {/* タブ切替 */}
-                    <div className="flex gap-1 bg-gray-100 dark:bg-gray-800 rounded-lg p-1">
+                    <div className="flex gap-1 bg-slate-100 dark:bg-slate-800/60 rounded-2xl p-1.5">
                         {tabs.map(tab => (
                             <button key={tab.id}
                                 onClick={() => setActiveTab(tab.id)}
-                                className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-md text-sm font-medium transition-colors ${
+                                className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl text-sm font-semibold transition-all duration-200 ${
                                     activeTab === tab.id
-                                        ? 'bg-white dark:bg-gray-700 text-sise-700 dark:text-sise-400 shadow-sm'
-                                        : 'text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200'
+                                        ? 'bg-white dark:bg-sise-900/60 text-sise-700 dark:text-sise-400 shadow-md shadow-sise-500/10'
+                                        : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-white/50 dark:hover:bg-slate-700/50 active:scale-95'
                                 }`}
                             >
-                                <Icon name={tab.icon} size={14} />
+                                <Icon name={tab.icon} size={15} />
                                 {tab.label}
                             </button>
                         ))}
@@ -5667,15 +5740,19 @@
                                     ) : null;
                                 })()}
                                 <button
-                                    onClick={() => { refreshReportData(); refreshSquareData(); }}
-                                    className="p-2 rounded-xl hover:bg-sise-50 text-slate-400 hover:text-sise-600 transition-all"
+                                    onClick={(e) => {
+                                        const icon = e.currentTarget.querySelector('svg');
+                                        if (icon) { icon.style.animation = 'spin 0.6s ease'; setTimeout(() => icon.style.animation = '', 600); }
+                                        refreshReportData(); refreshSquareData();
+                                    }}
+                                    className="p-2 rounded-xl hover:bg-sise-50 text-slate-400 hover:text-sise-600 transition-all active:scale-90"
                                     title="データ更新"
                                 >
                                     <Icon name="refresh-cw" size={17} />
                                 </button>
                                 <button
                                     onClick={() => setIsDarkMode(!isDarkMode)}
-                                    className="p-2 rounded-xl hover:bg-sise-50 text-slate-400 hover:text-sise-600 transition-all hide-mobile"
+                                    className="p-2 rounded-xl hover:bg-sise-50 text-slate-400 hover:text-sise-600 transition-all active:scale-90 hide-mobile"
                                     title="ダークモード切り替え"
                                 >
                                     <Icon name={isDarkMode ? 'sun' : 'moon'} size={17} />
@@ -5702,10 +5779,10 @@
                                         setCurrentView(item.id);
                                         setIsSidebarOpen(false);
                                     }}
-                                    className={`w-full flex items-center px-4 py-2.5 rounded-xl text-left text-sm font-semibold transition-all duration-300 ${
+                                    className={`w-full flex items-center px-4 py-2.5 rounded-xl text-left text-sm font-semibold transition-all duration-200 ${
                                         currentView === item.id
-                                            ? 'bg-gradient-to-r from-sise-500 to-sise-600 text-white shadow-lg shadow-sise-500/25'
-                                            : 'text-slate-500 hover:bg-sise-50 hover:text-sise-700'
+                                            ? 'bg-gradient-to-r from-sise-500 to-sise-600 text-white shadow-lg shadow-sise-500/25 scale-[1.02]'
+                                            : 'text-slate-500 hover:bg-sise-50 hover:text-sise-700 active:scale-[0.97]'
                                     }`}
                                 >
                                     <Icon name={item.icon} size={18} className="mr-3" />
@@ -5755,16 +5832,18 @@
 
                     {/* Main Content */}
                     <main className="pt-14 md:pt-16 lg:pl-56 min-h-screen relative z-10">
-                        <div className="p-3 md:p-4 lg:p-8 max-w-7xl mx-auto pb-24 md:pb-8">
+                        <div className="p-3 md:p-5 lg:p-8 max-w-7xl mx-auto pb-24 md:pb-8">
                             {memberData.loading || reportData.loading ? (
                                 <div className="flex items-center justify-center h-64 animate-fade-in">
                                     <div className="text-center">
-                                        <div className="w-12 h-12 border-3 border-sise-200 border-t-sise-500 rounded-full animate-spin mx-auto mb-4"></div>
-                                        <p className="text-slate-400 text-xs tracking-widest font-semibold uppercase">Loading...</p>
+                                        <div className="w-12 h-12 border-3 border-sise-200 dark:border-sise-900 border-t-sise-500 rounded-full animate-spin mx-auto mb-4"></div>
+                                        <p className="text-slate-400 dark:text-slate-500 text-xs tracking-widest font-semibold uppercase">Loading...</p>
                                     </div>
                                 </div>
                             ) : (
-                                renderView()
+                                <div key={currentView} className="view-transition">
+                                    {renderView()}
+                                </div>
                             )}
                         </div>
                     </main>
