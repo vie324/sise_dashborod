@@ -113,6 +113,27 @@
                             '0%, 100%': { boxShadow: '0 0 20px rgba(51,160,101,0.15)' },
                             '50%': { boxShadow: '0 0 40px rgba(51,160,101,0.3)' },
                         },
+                        'progress-fill': {
+                            '0%': { width: '0%' },
+                            '100%': { width: 'var(--progress-width, 0%)' },
+                        },
+                        'ring-fill': {
+                            '0%': { strokeDashoffset: 'var(--ring-circumference, 283)' },
+                            '100%': { strokeDashoffset: 'var(--ring-offset, 0)' },
+                        },
+                        'sparkline-draw': {
+                            '0%': { strokeDashoffset: '500' },
+                            '100%': { strokeDashoffset: '0' },
+                        },
+                        'slide-up-fade': {
+                            '0%': { opacity: '0', transform: 'translateY(12px) scale(0.97)' },
+                            '100%': { opacity: '1', transform: 'translateY(0) scale(1)' },
+                        },
+                        'number-roll': {
+                            '0%': { opacity: '0', transform: 'translateY(100%)' },
+                            '60%': { opacity: '1', transform: 'translateY(-8%)' },
+                            '100%': { opacity: '1', transform: 'translateY(0)' },
+                        },
                     },
                     animation: {
                         'fade-in-up': 'fade-in-up 0.6s cubic-bezier(0.16,1,0.3,1) forwards',
@@ -125,6 +146,11 @@
                         'gradient-shift': 'gradient-shift 8s ease infinite',
                         'shimmer': 'shimmer 2s linear infinite',
                         'glow-pulse': 'glow-pulse 3s ease-in-out infinite',
+                        'progress-fill': 'progress-fill 1s cubic-bezier(0.16,1,0.3,1) forwards',
+                        'ring-fill': 'ring-fill 1.2s cubic-bezier(0.16,1,0.3,1) forwards',
+                        'sparkline-draw': 'sparkline-draw 1.5s cubic-bezier(0.16,1,0.3,1) forwards',
+                        'slide-up-fade': 'slide-up-fade 0.5s cubic-bezier(0.16,1,0.3,1) forwards',
+                        'number-roll': 'number-roll 0.8s cubic-bezier(0.16,1,0.3,1) forwards',
                     },
                 }
             }
@@ -206,18 +232,38 @@
 
         /* Glass Card */
         .glass-card {
-            background: rgba(255,255,255,0.7);
-            backdrop-filter: blur(16px) saturate(1.4);
-            -webkit-backdrop-filter: blur(16px) saturate(1.4);
+            background: rgba(255,255,255,0.72);
+            backdrop-filter: blur(20px) saturate(1.5);
+            -webkit-backdrop-filter: blur(20px) saturate(1.5);
             border: 1px solid rgba(51,160,101,0.08);
             border-radius: 20px;
             transition: all 0.4s cubic-bezier(0.16,1,0.3,1);
+            position: relative;
         }
         .glass-card:hover {
             transform: translateY(-3px);
             box-shadow: 0 16px 48px -12px rgba(51,160,101,0.18);
             border-color: rgba(51,160,101,0.2);
         }
+        .glass-card-glow {
+            background: rgba(255,255,255,0.8);
+            backdrop-filter: blur(20px) saturate(1.6);
+            -webkit-backdrop-filter: blur(20px) saturate(1.6);
+            border: 1px solid rgba(51,160,101,0.12);
+            border-radius: 20px;
+            transition: all 0.5s cubic-bezier(0.16,1,0.3,1);
+            position: relative;
+            overflow: hidden;
+        }
+        .glass-card-glow::before {
+            content: '';
+            position: absolute;
+            top: 0; left: -100%; right: -100%;
+            height: 2px;
+            background: linear-gradient(90deg, transparent, rgba(51,160,101,0.5), transparent);
+            animation: shimmer 3s ease-in-out infinite;
+        }
+        .dark .glass-card-glow { background: rgba(18,35,27,0.8); border-color: rgba(51,160,101,0.18); }
 
         /* Animated mesh background */
         .bg-mesh {
@@ -282,6 +328,84 @@
             transition: opacity 0.3s ease;
         }
         .kpi-card:hover::before { opacity: 1; }
+        .kpi-card::after {
+            content: '';
+            position: absolute;
+            bottom: -50%; right: -20%;
+            width: 120px; height: 120px;
+            border-radius: 50%;
+            background: var(--kpi-color, rgba(51,160,101,0.04));
+            opacity: 0;
+            transition: opacity 0.5s ease;
+            pointer-events: none;
+        }
+        .kpi-card:hover::after { opacity: 1; }
+
+        /* Animated progress bar */
+        .progress-bar-animated {
+            height: 6px;
+            border-radius: 3px;
+            background: rgba(51,160,101,0.1);
+            overflow: hidden;
+            position: relative;
+        }
+        .progress-bar-animated .bar {
+            height: 100%;
+            border-radius: 3px;
+            animation: progress-fill 1s cubic-bezier(0.16,1,0.3,1) forwards;
+            position: relative;
+        }
+        .progress-bar-animated .bar::after {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent);
+            animation: shimmer 2s ease-in-out infinite;
+        }
+
+        /* Today highlight card */
+        .today-card {
+            background: linear-gradient(135deg, rgba(51,160,101,0.06) 0%, rgba(85,184,127,0.04) 50%, rgba(136,209,168,0.02) 100%);
+            border: 1px solid rgba(51,160,101,0.12);
+            border-radius: 20px;
+            position: relative;
+            overflow: hidden;
+        }
+        .today-card::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0;
+            width: 4px; height: 100%;
+            background: linear-gradient(180deg, #33a065, #55b87f, #88d1a8);
+            border-radius: 4px 0 0 4px;
+        }
+        .dark .today-card {
+            background: linear-gradient(135deg, rgba(51,160,101,0.08) 0%, rgba(18,35,27,0.6) 100%);
+            border-color: rgba(51,160,101,0.18);
+        }
+
+        /* Store comparison bar */
+        .store-bar {
+            position: relative;
+            height: 32px;
+            border-radius: 8px;
+            overflow: hidden;
+            background: rgba(51,160,101,0.06);
+            transition: all 0.3s ease;
+        }
+        .store-bar:hover { transform: scaleX(1.01); }
+        .store-bar .fill {
+            height: 100%;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            padding: 0 12px;
+            font-size: 12px;
+            font-weight: 600;
+            color: white;
+            transition: width 1s cubic-bezier(0.16,1,0.3,1);
+            min-width: fit-content;
+        }
 
         /* Number animation */
         .num-animate {
@@ -394,9 +518,15 @@
             position: absolute;
             top: 0; left: 50%;
             transform: translateX(-50%);
-            width: 24px; height: 3px;
+            width: 32px; height: 3px;
             background: linear-gradient(90deg, #33a065, #55b87f);
-            border-radius: 0 0 4px 4px;
+            border-radius: 0 0 6px 6px;
+            box-shadow: 0 2px 8px rgba(51,160,101,0.3);
+        }
+        .bottom-nav-item.active .nav-icon-wrap {
+            background: linear-gradient(135deg, rgba(51,160,101,0.12), rgba(85,184,127,0.08));
+            border-radius: 12px;
+            padding: 4px 10px;
         }
 
         /* Gradient button */
@@ -711,25 +841,80 @@
             </div>
         );
 
+        // アニメーション付き数値カウンター
+        const AnimatedNumber = ({ value, prefix = "", suffix = "", duration = 800 }) => {
+            const [displayValue, setDisplayValue] = useState(0);
+            const numericValue = parseFloat(String(value).replace(/[^0-9.-]/g, '')) || 0;
+            const isFloat = String(value).includes('.');
+
+            useEffect(() => {
+                if (numericValue === 0) { setDisplayValue(0); return; }
+                const startTime = performance.now();
+                const animate = (currentTime) => {
+                    const elapsed = currentTime - startTime;
+                    const progress = Math.min(elapsed / duration, 1);
+                    const eased = 1 - Math.pow(1 - progress, 4);
+                    setDisplayValue(numericValue * eased);
+                    if (progress < 1) requestAnimationFrame(animate);
+                };
+                requestAnimationFrame(animate);
+            }, [numericValue, duration]);
+
+            const formatted = isFloat ? displayValue.toFixed(1) : Math.round(displayValue).toLocaleString();
+            return <span>{prefix}{formatted}{suffix}</span>;
+        };
+
+        // ミニスパークライン（SVG）
+        const MiniSparkline = ({ data = [], color = "#33a065", height = 32, width = 80 }) => {
+            if (!data || data.length < 2) return null;
+            const max = Math.max(...data);
+            const min = Math.min(...data);
+            const range = max - min || 1;
+            const points = data.map((v, i) => {
+                const x = (i / (data.length - 1)) * width;
+                const y = height - ((v - min) / range) * (height - 4) - 2;
+                return `${x},${y}`;
+            }).join(' ');
+            const areaPoints = points + ` ${width},${height} 0,${height}`;
+            return (
+                <svg width={width} height={height} className="overflow-visible">
+                    <defs>
+                        <linearGradient id={`spark-${color.replace('#','')}`} x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor={color} stopOpacity="0.2" />
+                            <stop offset="100%" stopColor={color} stopOpacity="0" />
+                        </linearGradient>
+                    </defs>
+                    <polygon points={areaPoints} fill={`url(#spark-${color.replace('#','')})`} />
+                    <polyline points={points} fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{strokeDasharray: 500, animation: 'sparkline-draw 1.5s cubic-bezier(0.16,1,0.3,1) forwards'}} />
+                    <circle cx={data.length > 0 ? ((data.length-1) / (data.length-1)) * width : 0} cy={data.length > 0 ? height - ((data[data.length-1] - min) / range) * (height-4) - 2 : 0} r="3" fill={color} style={{animation: 'scale-in 0.4s 1s cubic-bezier(0.16,1,0.3,1) forwards', opacity: 0}} />
+                </svg>
+            );
+        };
+
         // KPIカードコンポーネント
-        const KpiCard = ({ title, value, subValue, trend, icon, color = "bg-sise-500", gradientFrom = "from-sise-400", gradientTo = "to-sise-600" }) => (
-            <Card hover className="group kpi-card relative overflow-hidden">
-                <div className="flex justify-between items-start mb-3">
-                    <div className={`rounded-xl bg-gradient-to-br ${gradientFrom} ${gradientTo} text-white shadow-lg p-3 group-hover:scale-110 transition-transform duration-400`}>
-                        <Icon name={icon} size={20} />
+        const KpiCard = ({ title, value, subValue, trend, icon, color = "bg-sise-500", gradientFrom = "from-sise-400", gradientTo = "to-sise-600", sparkData, accentColor }) => (
+            <Card hover className="group kpi-card relative overflow-hidden" style={{'--kpi-color': accentColor || 'rgba(51,160,101,0.04)'}}>
+                <div className="flex justify-between items-start mb-2">
+                    <div className={`rounded-xl bg-gradient-to-br ${gradientFrom} ${gradientTo} text-white shadow-lg p-2.5 md:p-3 group-hover:scale-110 group-hover:rotate-3 transition-all duration-500`}>
+                        <Icon name={icon} size={18} />
                     </div>
-                    {trend !== null && trend !== undefined && (
-                        <span className={`font-semibold ${trend >= 0 ? 'text-emerald-600 bg-emerald-50/80' : 'text-red-500 bg-red-50/80'} flex items-center px-2.5 py-1 rounded-full text-xs backdrop-blur-sm`}>
-                            {trend >= 0 ? '+' : ''}{trend}%
-                            <Icon name={trend >= 0 ? 'trending-up' : 'trending-down'} size={12} className="ml-1" />
-                        </span>
-                    )}
+                    <div className="flex items-center gap-2">
+                        {sparkData && sparkData.length > 1 && (
+                            <MiniSparkline data={sparkData} color={accentColor || '#33a065'} height={28} width={60} />
+                        )}
+                        {trend !== null && trend !== undefined && (
+                            <span className={`font-semibold ${trend >= 0 ? 'text-emerald-600 bg-emerald-50/80' : 'text-red-500 bg-red-50/80'} flex items-center px-2 py-0.5 rounded-full text-[11px] backdrop-blur-sm`}>
+                                {trend >= 0 ? '+' : ''}{trend}%
+                                <Icon name={trend >= 0 ? 'trending-up' : 'trending-down'} size={11} className="ml-0.5" />
+                            </span>
+                        )}
+                    </div>
                 </div>
                 <h3 className="text-slate-500 font-medium text-[11px] md:text-xs tracking-wider uppercase">{title}</h3>
-                <div className="flex items-baseline mt-1">
-                    <span className="text-2xl md:text-3xl font-extrabold text-slate-900 num-animate tracking-tight">{value}</span>
+                <div className="flex items-baseline mt-1 overflow-hidden">
+                    <span className="text-2xl md:text-3xl font-extrabold text-slate-900 tracking-tight animate-number-roll">{value}</span>
                 </div>
-                {subValue && <p className="text-[11px] md:text-xs text-slate-400 mt-1.5">{subValue}</p>}
+                {subValue && <p className="text-[11px] md:text-xs text-slate-400 mt-1">{subValue}</p>}
             </Card>
         );
 
@@ -2147,8 +2332,31 @@
         // ダッシュボードメインビュー
         // ========================================
 
+        // 目標プログレスリング
+        const GoalRing = ({ value, max, size = 80, strokeWidth = 6, color = "#33a065", label, sublabel }) => {
+            const radius = (size - strokeWidth) / 2;
+            const circumference = 2 * Math.PI * radius;
+            const progress = Math.min(value / (max || 1), 1);
+            const offset = circumference * (1 - progress);
+            return (
+                <div className="flex flex-col items-center">
+                    <svg width={size} height={size} className="transform -rotate-90">
+                        <circle cx={size/2} cy={size/2} r={radius} fill="none" stroke="rgba(51,160,101,0.08)" strokeWidth={strokeWidth} />
+                        <circle cx={size/2} cy={size/2} r={radius} fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round"
+                            strokeDasharray={circumference} strokeDashoffset={offset}
+                            className="usage-ring" style={{transition: 'stroke-dashoffset 1.2s cubic-bezier(0.16,1,0.3,1)'}} />
+                    </svg>
+                    <div className="absolute flex flex-col items-center justify-center" style={{width: size, height: size}}>
+                        <span className="text-lg font-extrabold text-slate-900">{Math.round(progress * 100)}%</span>
+                    </div>
+                    {label && <p className="text-xs font-semibold text-slate-700 mt-1.5">{label}</p>}
+                    {sublabel && <p className="text-[10px] text-slate-400">{sublabel}</p>}
+                </div>
+            );
+        };
+
         const DashboardView = ({ memberData, reportData, selectedStore, setSelectedStore }) => {
-            const [dateRange, setDateRange] = useState('month'); // 'week', 'month', 'quarter'
+            const [dateRange, setDateRange] = useState('month');
 
             if (!window.Recharts) return <div className="p-8 text-center">チャートを読み込み中...</div>;
 
@@ -2156,13 +2364,11 @@
             const aggregatedData = useMemo(() => {
                 if (!reportData.reports || reportData.reports.length === 0) {
                     return {
-                        totalNewVisits: 0,
-                        totalContracts: 0,
-                        totalTreatments: 0,
-                        conversionRate: 0,
-                        byChannel: [],
-                        byStore: [],
-                        dailyTrend: []
+                        totalNewVisits: 0, totalContracts: 0, totalTreatments: 0, conversionRate: 0,
+                        byChannel: [], byStore: [], dailyTrend: [],
+                        todayReports: [], todayNew: 0, todayContract: 0, todayTreatments: 0,
+                        dailyNewTrend: [], dailyContractTrend: [], dailyTreatmentTrend: [],
+                        bestChannel: null, topStore: null
                     };
                 }
 
@@ -2171,116 +2377,104 @@
                     filtered = filtered.filter(r => r.store === selectedStore);
                 }
 
-                // 期間フィルタ
                 const now = new Date();
                 const startDate = new Date();
                 switch (dateRange) {
-                    case 'week':
-                        startDate.setDate(now.getDate() - 7);
-                        break;
-                    case 'month':
-                        startDate.setMonth(now.getMonth() - 1);
-                        break;
-                    case 'quarter':
-                        startDate.setMonth(now.getMonth() - 3);
-                        break;
+                    case 'week': startDate.setDate(now.getDate() - 7); break;
+                    case 'month': startDate.setMonth(now.getMonth() - 1); break;
+                    case 'quarter': startDate.setMonth(now.getMonth() - 3); break;
                 }
                 filtered = filtered.filter(r => new Date(r.timestamp) >= startDate);
 
+                // 本日のレポート
+                const todayStr = now.toISOString().slice(0, 10);
+                const todayReports = reportData.reports.filter(r => r.timestamp && r.timestamp.startsWith(todayStr));
+                const todayNew = todayReports.reduce((s, r) => s + (r.hpbNew||0) + (r.metaNew||0) + (r.referralNew||0) + (r.discountNew||0), 0);
+                const todayContract = todayReports.reduce((s, r) => s + (r.hpbContract||0) + (r.metaContract||0) + (r.referralContract||0) + (r.discountContract||0), 0);
+                const todayTreatments = todayReports.reduce((s, r) => s + (r.existingTreatments||0), 0);
+
                 // チャネル別集計
                 const channels = [
-                    { name: 'HPB', newKey: 'hpbNew', contractKey: 'hpbContract', color: '#f97316' },
-                    { name: 'Meta', newKey: 'metaNew', contractKey: 'metaContract', color: '#3b82f6' },
-                    { name: '紹介', newKey: 'referralNew', contractKey: 'referralContract', color: '#22c55e' },
-                    { name: '割引集客', newKey: 'discountNew', contractKey: 'discountContract', color: '#a855f7' }
+                    { name: 'HPB', newKey: 'hpbNew', contractKey: 'hpbContract', color: '#f97316', icon: 'globe' },
+                    { name: 'Meta', newKey: 'metaNew', contractKey: 'metaContract', color: '#3b82f6', icon: 'facebook' },
+                    { name: '紹介', newKey: 'referralNew', contractKey: 'referralContract', color: '#22c55e', icon: 'heart-handshake' },
+                    { name: '割引集客', newKey: 'discountNew', contractKey: 'discountContract', color: '#a855f7', icon: 'tag' }
                 ];
-
                 const byChannel = channels.map(ch => {
                     const newCount = filtered.reduce((sum, r) => sum + (r[ch.newKey] || 0), 0);
                     const contractCount = filtered.reduce((sum, r) => sum + (r[ch.contractKey] || 0), 0);
-                    return {
-                        name: ch.name,
-                        new: newCount,
-                        contract: contractCount,
+                    return { name: ch.name, new: newCount, contract: contractCount,
                         rate: newCount > 0 ? (contractCount / newCount * 100).toFixed(1) : 0,
-                        color: ch.color
-                    };
+                        color: ch.color, icon: ch.icon };
                 });
 
                 // 店舗別集計
                 const storeMap = {};
                 filtered.forEach(r => {
-                    if (!storeMap[r.store]) {
-                        storeMap[r.store] = { store: r.store, new: 0, contract: 0, treatments: 0 };
-                    }
-                    storeMap[r.store].new += (r.hpbNew || 0) + (r.metaNew || 0) + (r.referralNew || 0) + (r.discountNew || 0);
-                    storeMap[r.store].contract += (r.hpbContract || 0) + (r.metaContract || 0) + (r.referralContract || 0) + (r.discountContract || 0);
+                    if (!storeMap[r.store]) storeMap[r.store] = { store: r.store, new: 0, contract: 0, treatments: 0, reports: 0 };
+                    storeMap[r.store].new += (r.hpbNew||0) + (r.metaNew||0) + (r.referralNew||0) + (r.discountNew||0);
+                    storeMap[r.store].contract += (r.hpbContract||0) + (r.metaContract||0) + (r.referralContract||0) + (r.discountContract||0);
                     storeMap[r.store].treatments += r.existingTreatments || 0;
+                    storeMap[r.store].reports++;
                 });
-                const byStore = Object.values(storeMap);
+                const byStore = Object.values(storeMap).sort((a, b) => (b.new + b.contract) - (a.new + a.contract));
 
                 // 日別推移
                 const dailyMap = {};
                 filtered.forEach(r => {
                     const dateKey = new Date(r.timestamp).toLocaleDateString('ja-JP', { month: 'short', day: 'numeric' });
-                    if (!dailyMap[dateKey]) {
-                        dailyMap[dateKey] = { date: dateKey, new: 0, contract: 0, treatments: 0 };
-                    }
-                    dailyMap[dateKey].new += (r.hpbNew || 0) + (r.metaNew || 0) + (r.referralNew || 0) + (r.discountNew || 0);
-                    dailyMap[dateKey].contract += (r.hpbContract || 0) + (r.metaContract || 0) + (r.referralContract || 0) + (r.discountContract || 0);
+                    if (!dailyMap[dateKey]) dailyMap[dateKey] = { date: dateKey, new: 0, contract: 0, treatments: 0 };
+                    dailyMap[dateKey].new += (r.hpbNew||0) + (r.metaNew||0) + (r.referralNew||0) + (r.discountNew||0);
+                    dailyMap[dateKey].contract += (r.hpbContract||0) + (r.metaContract||0) + (r.referralContract||0) + (r.discountContract||0);
                     dailyMap[dateKey].treatments += r.existingTreatments || 0;
                 });
                 const dailyTrend = Object.values(dailyMap).slice(-14);
 
+                // スパークライン用データ
+                const dailyNewTrend = dailyTrend.map(d => d.new);
+                const dailyContractTrend = dailyTrend.map(d => d.contract);
+                const dailyTreatmentTrend = dailyTrend.map(d => d.treatments);
+
                 const totalNew = byChannel.reduce((sum, ch) => sum + ch.new, 0);
                 const totalContract = byChannel.reduce((sum, ch) => sum + ch.contract, 0);
                 const totalTreatments = filtered.reduce((sum, r) => sum + (r.existingTreatments || 0), 0);
+                const bestChannel = [...byChannel].sort((a, b) => parseFloat(b.rate) - parseFloat(a.rate))[0];
+                const topStore = byStore[0] || null;
 
                 return {
-                    totalNewVisits: totalNew,
-                    totalContracts: totalContract,
-                    totalTreatments: totalTreatments,
+                    totalNewVisits: totalNew, totalContracts: totalContract, totalTreatments: totalTreatments,
                     conversionRate: totalNew > 0 ? (totalContract / totalNew * 100) : 0,
-                    byChannel,
-                    byStore,
-                    dailyTrend
+                    byChannel, byStore, dailyTrend,
+                    todayReports, todayNew, todayContract, todayTreatments,
+                    dailyNewTrend, dailyContractTrend, dailyTreatmentTrend,
+                    bestChannel, topStore
                 };
             }, [reportData.reports, selectedStore, dateRange]);
 
-            const CHART_COLORS = ['#3f9968', '#63b185', '#94ccac', '#c1e1cf'];
+            const storeColors = ['#33a065', '#3b82f6', '#f97316', '#a855f7', '#ec4899'];
+            const tooltipStyle = { backgroundColor: 'rgba(255,255,255,0.95)', borderColor: '#e2e8f0', borderRadius: '16px', boxShadow: '0 12px 40px -8px rgba(0,0,0,0.1)', padding: '12px 16px' };
 
             return (
-                <div className="space-y-5 md:space-y-6">
+                <div className="space-y-4 md:space-y-5">
                     {/* フィルターバー */}
                     <Card className="!p-3 md:!p-4">
                         <div className="flex flex-wrap items-center justify-between gap-3">
                             <div className="flex items-center gap-2">
                                 <Icon name="building-2" size={16} className="text-sise-500 hide-mobile" />
-                                <select
-                                    value={selectedStore}
-                                    onChange={(e) => setSelectedStore(e.target.value)}
-                                    className="px-3 py-2 border border-slate-200 rounded-xl text-sm focus:border-sise-500 focus:ring-2 focus:ring-sise-500/20 outline-none bg-white/80"
-                                >
+                                <select value={selectedStore} onChange={(e) => setSelectedStore(e.target.value)}
+                                    className="px-3 py-2 border border-slate-200 rounded-xl text-sm focus:border-sise-500 focus:ring-2 focus:ring-sise-500/20 outline-none bg-white/80">
                                     <option value="all">全店舗</option>
-                                    {(currentAccess
-                                        ? serverStores.filter(s => currentAccess.storeIds.includes(s.id))
-                                        : serverStores
-                                    ).map(s => (
+                                    {(currentAccess ? serverStores.filter(s => currentAccess.storeIds.includes(s.id)) : serverStores).map(s =>
                                         <option key={s.id} value={s.name}>{s.name}</option>
-                                    ))}
+                                    )}
                                 </select>
                             </div>
                             <div className="flex items-center gap-1.5">
                                 {['week', 'month', 'quarter'].map(range => (
-                                    <button
-                                        key={range}
-                                        onClick={() => setDateRange(range)}
+                                    <button key={range} onClick={() => setDateRange(range)}
                                         className={`px-3 md:px-4 py-2 rounded-xl text-xs md:text-sm font-semibold transition-all duration-300 ${
-                                            dateRange === range
-                                                ? 'btn-gradient'
-                                                : 'bg-slate-100/80 text-slate-500 hover:bg-slate-200/80 hover:text-slate-700'
-                                        }`}
-                                    >
+                                            dateRange === range ? 'btn-gradient' : 'bg-slate-100/80 text-slate-500 hover:bg-slate-200/80 hover:text-slate-700'
+                                        }`}>
                                         {range === 'week' ? '1週間' : range === 'month' ? '1ヶ月' : '3ヶ月'}
                                     </button>
                                 ))}
@@ -2288,103 +2482,176 @@
                         </div>
                     </Card>
 
+                    {/* 本日のハイライト */}
+                    {aggregatedData.todayReports.length > 0 && (
+                        <div className="today-card p-4 md:p-5 animate-slide-up-fade">
+                            <div className="flex flex-wrap items-center justify-between gap-3 ml-3">
+                                <div className="flex items-center gap-3">
+                                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-400 to-orange-500 text-white flex items-center justify-center shadow-lg">
+                                        <Icon name="sun" size={20} />
+                                    </div>
+                                    <div>
+                                        <h3 className="text-base font-bold text-slate-900">本日のサマリー</h3>
+                                        <p className="text-[10px] text-slate-500">{new Date().toLocaleDateString('ja-JP', { month: 'long', day: 'numeric', weekday: 'short' })} ・ {aggregatedData.todayReports.length}件の日報</p>
+                                    </div>
+                                </div>
+                                <div className="flex items-center gap-4 md:gap-6 ml-3">
+                                    <div className="text-center">
+                                        <p className="text-xl md:text-2xl font-extrabold text-blue-600">{aggregatedData.todayNew}</p>
+                                        <p className="text-[10px] text-slate-500 font-medium">新規</p>
+                                    </div>
+                                    <div className="text-center">
+                                        <p className="text-xl md:text-2xl font-extrabold text-emerald-600">{aggregatedData.todayContract}</p>
+                                        <p className="text-[10px] text-slate-500 font-medium">契約</p>
+                                    </div>
+                                    <div className="text-center">
+                                        <p className="text-xl md:text-2xl font-extrabold text-orange-600">{aggregatedData.todayTreatments}</p>
+                                        <p className="text-[10px] text-slate-500 font-medium">施術</p>
+                                    </div>
+                                    {aggregatedData.todayNew > 0 && (
+                                        <div className="text-center hide-mobile">
+                                            <p className="text-xl md:text-2xl font-extrabold text-teal-600">{(aggregatedData.todayContract / aggregatedData.todayNew * 100).toFixed(0)}%</p>
+                                            <p className="text-[10px] text-slate-500 font-medium">成約率</p>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
                     {/* Square会員データ KPIカード */}
                     <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
-                        <KpiCard
-                            title="アクティブ会員"
-                            value={formatNumber(memberData.activeMembers)}
-                            subValue={`総会員: ${formatNumber(memberData.totalMembers)}人`}
-                            trend={null}
-                            icon="users"
-                            gradientFrom="from-sise-400" gradientTo="to-sise-600"
-                        />
-                        <KpiCard
-                            title="想定月間売上"
-                            value={formatCurrency(memberData.expectedRevenue)}
-                            subValue="サブスク収益"
-                            trend={null}
-                            icon="wallet"
-                            gradientFrom="from-emerald-400" gradientTo="to-emerald-600"
-                        />
-                        <KpiCard
-                            title="新規入会"
-                            value={formatNumber(memberData.newMembersThisMonth)}
-                            subValue="今月の入会者"
-                            trend={null}
-                            icon="user-plus"
-                            gradientFrom="from-blue-400" gradientTo="to-blue-600"
-                        />
-                        <KpiCard
-                            title="退会率"
-                            value={formatPercent(memberData.churnRate)}
-                            subValue={`退会者: ${memberData.churnedMembers}人`}
-                            trend={null}
-                            icon="user-minus"
+                        <KpiCard title="アクティブ会員" value={formatNumber(memberData.activeMembers)}
+                            subValue={`総会員: ${formatNumber(memberData.totalMembers)}人`} trend={null} icon="users"
+                            gradientFrom="from-sise-400" gradientTo="to-sise-600" accentColor="#33a065" />
+                        <KpiCard title="想定月間売上" value={formatCurrency(memberData.expectedRevenue)}
+                            subValue="サブスク収益" trend={null} icon="wallet"
+                            gradientFrom="from-emerald-400" gradientTo="to-emerald-600" accentColor="#059669" />
+                        <KpiCard title="新規入会" value={formatNumber(memberData.newMembersThisMonth)}
+                            subValue="今月の入会者" trend={null} icon="user-plus"
+                            gradientFrom="from-blue-400" gradientTo="to-blue-600" accentColor="#3b82f6" />
+                        <KpiCard title="退会率" value={formatPercent(memberData.churnRate)}
+                            subValue={`退会者: ${memberData.churnedMembers}人`} trend={null} icon="user-minus"
                             gradientFrom={memberData.churnRate > 5 ? "from-red-400" : "from-slate-400"}
                             gradientTo={memberData.churnRate > 5 ? "to-red-600" : "to-slate-500"}
-                        />
+                            accentColor={memberData.churnRate > 5 ? "#ef4444" : "#64748b"} />
                     </div>
 
-                    {/* 日報集計 KPIカード */}
+                    {/* 日報集計 KPIカード（スパークライン付き） */}
                     <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
-                        <KpiCard
-                            title="新規来店数"
-                            value={formatNumber(aggregatedData.totalNewVisits)}
-                            subValue="全チャネル合計"
-                            trend={null}
-                            icon="user-check"
+                        <KpiCard title="新規来店数" value={formatNumber(aggregatedData.totalNewVisits)}
+                            subValue="全チャネル合計" trend={null} icon="user-check"
                             gradientFrom="from-orange-400" gradientTo="to-orange-600"
-                        />
-                        <KpiCard
-                            title="契約数"
-                            value={formatNumber(aggregatedData.totalContracts)}
-                            subValue="新規契約"
-                            trend={null}
-                            icon="file-signature"
+                            sparkData={aggregatedData.dailyNewTrend} accentColor="#f97316" />
+                        <KpiCard title="契約数" value={formatNumber(aggregatedData.totalContracts)}
+                            subValue="新規契約" trend={null} icon="file-signature"
                             gradientFrom="from-violet-400" gradientTo="to-violet-600"
-                        />
-                        <KpiCard
-                            title="成約率"
-                            value={formatPercent(aggregatedData.conversionRate)}
-                            subValue="新規 → 契約"
-                            trend={null}
-                            icon="target"
-                            gradientFrom="from-teal-400" gradientTo="to-teal-600"
-                        />
-                        <KpiCard
-                            title="既存施術数"
-                            value={formatNumber(aggregatedData.totalTreatments)}
-                            subValue="リピーター対応"
-                            trend={null}
-                            icon="heart-handshake"
+                            sparkData={aggregatedData.dailyContractTrend} accentColor="#8b5cf6" />
+                        <KpiCard title="成約率" value={formatPercent(aggregatedData.conversionRate)}
+                            subValue="新規 → 契約" trend={null} icon="target"
+                            gradientFrom="from-teal-400" gradientTo="to-teal-600" accentColor="#14b8a6" />
+                        <KpiCard title="既存施術数" value={formatNumber(aggregatedData.totalTreatments)}
+                            subValue="リピーター対応" trend={null} icon="heart-handshake"
                             gradientFrom="from-rose-400" gradientTo="to-rose-600"
-                        />
+                            sparkData={aggregatedData.dailyTreatmentTrend} accentColor="#f43f5e" />
                     </div>
 
-                    {/* チャート */}
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
-                        {/* チャネル別成績 */}
+                    {/* チャート + チャネルカード */}
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-5">
+                        {/* 日別推移チャート */}
                         <Card>
-                            <h3 className="text-base font-bold text-slate-800 mb-1">チャネル別新規・契約数</h3>
-                            <p className="text-[10px] text-sise-500 mb-4 tracking-widest font-semibold">CHANNEL PERFORMANCE</p>
-                            <ResponsiveContainer width="100%" height={280}>
-                                <BarChart data={aggregatedData.byChannel} barGap={4}>
+                            <div className="flex items-center justify-between mb-4">
+                                <div>
+                                    <h3 className="text-base font-bold text-slate-800">日別推移</h3>
+                                    <p className="text-[10px] text-sise-500 tracking-widest font-semibold">DAILY TREND</p>
+                                </div>
+                                <div className="flex items-center gap-3 text-[10px]">
+                                    <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-sky-500"></span>新規</span>
+                                    <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-green-500"></span>契約</span>
+                                    <span className="flex items-center gap-1"><span className="w-2.5 h-0.5 bg-orange-500" style={{borderTop:'2px dashed #f97316',width:12}}></span>施術</span>
+                                </div>
+                            </div>
+                            <ResponsiveContainer width="100%" height={260}>
+                                <ComposedChart data={aggregatedData.dailyTrend}>
+                                    <CartesianGrid strokeDasharray="3 3" stroke="#e8f0ec" vertical={false} />
+                                    <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
+                                    <YAxis tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} width={30} />
+                                    <Tooltip contentStyle={tooltipStyle} />
+                                    <defs>
+                                        <linearGradient id="areaBlue" x1="0" y1="0" x2="0" y2="1">
+                                            <stop offset="0%" stopColor="#0ea5e9" stopOpacity={0.25} />
+                                            <stop offset="100%" stopColor="#0ea5e9" stopOpacity={0} />
+                                        </linearGradient>
+                                        <linearGradient id="areaGreen" x1="0" y1="0" x2="0" y2="1">
+                                            <stop offset="0%" stopColor="#22c55e" stopOpacity={0.25} />
+                                            <stop offset="100%" stopColor="#22c55e" stopOpacity={0} />
+                                        </linearGradient>
+                                    </defs>
+                                    <Area type="monotone" dataKey="new" name="新規" stroke="#0ea5e9" strokeWidth={2.5} fill="url(#areaBlue)" dot={{ r: 3, fill: '#0ea5e9', strokeWidth: 0 }} activeDot={{ r: 5, fill: '#0ea5e9', stroke: '#fff', strokeWidth: 2 }} />
+                                    <Area type="monotone" dataKey="contract" name="契約" stroke="#22c55e" strokeWidth={2.5} fill="url(#areaGreen)" dot={{ r: 3, fill: '#22c55e', strokeWidth: 0 }} activeDot={{ r: 5, fill: '#22c55e', stroke: '#fff', strokeWidth: 2 }} />
+                                    <Line type="monotone" dataKey="treatments" name="施術" stroke="#f97316" strokeWidth={2} dot={false} strokeDasharray="6 4" />
+                                </ComposedChart>
+                            </ResponsiveContainer>
+                        </Card>
+
+                        {/* チャネル別カード */}
+                        <Card>
+                            <h3 className="text-base font-bold text-slate-800 mb-1">チャネル別パフォーマンス</h3>
+                            <p className="text-[10px] text-sise-500 mb-4 tracking-widest font-semibold">CHANNEL BREAKDOWN</p>
+                            <div className="space-y-3">
+                                {aggregatedData.byChannel.map((ch) => {
+                                    const rate = parseFloat(ch.rate) || 0;
+                                    return (
+                                        <div key={ch.name} className="group/ch rounded-xl p-3 hover:bg-slate-50/80 transition-all duration-300">
+                                            <div className="flex items-center justify-between mb-2">
+                                                <div className="flex items-center gap-2.5">
+                                                    <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{backgroundColor: ch.color + '18'}}>
+                                                        <Icon name={ch.icon} size={15} color={ch.color} />
+                                                    </div>
+                                                    <div>
+                                                        <span className="font-semibold text-sm text-slate-800">{ch.name}</span>
+                                                        <div className="flex items-center gap-2 text-[10px] text-slate-400">
+                                                            <span>新規 {ch.new}</span>
+                                                            <span>契約 {ch.contract}</span>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <span className={`text-lg font-extrabold ${rate >= 50 ? 'text-emerald-600' : rate >= 30 ? 'text-amber-600' : 'text-slate-400'}`}>
+                                                    {ch.rate}%
+                                                </span>
+                                            </div>
+                                            <div className="progress-bar-animated">
+                                                <div className="bar" style={{width: `${Math.min(rate, 100)}%`, background: `linear-gradient(90deg, ${ch.color}, ${ch.color}cc)`}}></div>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </Card>
+                    </div>
+
+                    {/* チャネル別棒グラフ + 店舗ランキング */}
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-5">
+                        {/* チャネル別棒グラフ */}
+                        <Card>
+                            <div className="flex items-center justify-between mb-4">
+                                <div>
+                                    <h3 className="text-base font-bold text-slate-800">新規 vs 契約</h3>
+                                    <p className="text-[10px] text-sise-500 tracking-widest font-semibold">NEW vs CONTRACT</p>
+                                </div>
+                            </div>
+                            <ResponsiveContainer width="100%" height={240}>
+                                <BarChart data={aggregatedData.byChannel} barGap={6} barCategoryGap="20%">
                                     <CartesianGrid strokeDasharray="3 3" stroke="#e8f0ec" vertical={false} />
                                     <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
-                                    <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
-                                    <Tooltip
-                                        contentStyle={{ backgroundColor: 'rgba(255,255,255,0.95)', borderColor: '#e2e8f0', borderRadius: '12px', boxShadow: '0 8px 32px -8px rgba(0,0,0,0.1)' }}
-                                        formatter={(value, name) => [value + '人', name === 'new' ? '新規' : '契約']}
-                                    />
-                                    <Legend formatter={(value) => value === 'new' ? '新規数' : '契約数'} />
+                                    <YAxis tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} width={25} />
+                                    <Tooltip contentStyle={tooltipStyle} formatter={(v, n) => [v + '人', n === 'new' ? '新規' : '契約']} />
                                     <defs>
                                         <linearGradient id="barGradientBlue" x1="0" y1="0" x2="0" y2="1">
-                                            <stop offset="0%" stopColor="#38bdf8" />
-                                            <stop offset="100%" stopColor="#0ea5e9" />
+                                            <stop offset="0%" stopColor="#38bdf8" /><stop offset="100%" stopColor="#0ea5e9" />
                                         </linearGradient>
                                         <linearGradient id="barGradientGreen" x1="0" y1="0" x2="0" y2="1">
-                                            <stop offset="0%" stopColor="#4ade80" />
-                                            <stop offset="100%" stopColor="#22c55e" />
+                                            <stop offset="0%" stopColor="#4ade80" /><stop offset="100%" stopColor="#22c55e" />
                                         </linearGradient>
                                     </defs>
                                     <Bar dataKey="new" name="new" fill="url(#barGradientBlue)" radius={[6, 6, 0, 0]} />
@@ -2393,110 +2660,113 @@
                             </ResponsiveContainer>
                         </Card>
 
-                        {/* 日別推移 */}
-                        <Card>
-                            <h3 className="text-base font-bold text-slate-800 mb-1">日別推移</h3>
-                            <p className="text-[10px] text-sise-500 mb-4 tracking-widest font-semibold">DAILY TREND</p>
-                            <ResponsiveContainer width="100%" height={280}>
-                                <ComposedChart data={aggregatedData.dailyTrend}>
-                                    <CartesianGrid strokeDasharray="3 3" stroke="#e8f0ec" vertical={false} />
-                                    <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
-                                    <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
-                                    <Tooltip contentStyle={{ backgroundColor: 'rgba(255,255,255,0.95)', borderColor: '#e2e8f0', borderRadius: '12px', boxShadow: '0 8px 32px -8px rgba(0,0,0,0.1)' }} />
-                                    <Legend />
-                                    <defs>
-                                        <linearGradient id="areaBlue" x1="0" y1="0" x2="0" y2="1">
-                                            <stop offset="0%" stopColor="#0ea5e9" stopOpacity={0.3} />
-                                            <stop offset="100%" stopColor="#0ea5e9" stopOpacity={0} />
-                                        </linearGradient>
-                                        <linearGradient id="areaGreen" x1="0" y1="0" x2="0" y2="1">
-                                            <stop offset="0%" stopColor="#22c55e" stopOpacity={0.3} />
-                                            <stop offset="100%" stopColor="#22c55e" stopOpacity={0} />
-                                        </linearGradient>
-                                    </defs>
-                                    <Area type="monotone" dataKey="new" name="新規" stroke="#0ea5e9" strokeWidth={2.5} fill="url(#areaBlue)" dot={{ r: 3, fill: '#0ea5e9' }} />
-                                    <Area type="monotone" dataKey="contract" name="契約" stroke="#22c55e" strokeWidth={2.5} fill="url(#areaGreen)" dot={{ r: 3, fill: '#22c55e' }} />
-                                    <Line type="monotone" dataKey="treatments" name="施術" stroke="#f97316" strokeWidth={2} dot={{ r: 3, fill: '#f97316' }} strokeDasharray="5 5" />
-                                </ComposedChart>
-                            </ResponsiveContainer>
-                        </Card>
+                        {/* 店舗ランキング */}
+                        {aggregatedData.byStore.length > 0 && (
+                            <Card>
+                                <div className="flex items-center justify-between mb-4">
+                                    <div>
+                                        <h3 className="text-base font-bold text-slate-800">店舗ランキング</h3>
+                                        <p className="text-[10px] text-sise-500 tracking-widest font-semibold">STORE RANKING</p>
+                                    </div>
+                                    {aggregatedData.topStore && (
+                                        <span className="flex items-center gap-1 text-xs font-semibold text-amber-600 bg-amber-50 px-2.5 py-1 rounded-full">
+                                            <Icon name="trophy" size={12} /> {aggregatedData.topStore.store}
+                                        </span>
+                                    )}
+                                </div>
+                                <div className="space-y-3">
+                                    {aggregatedData.byStore.map((store, i) => {
+                                        const maxTotal = Math.max(...aggregatedData.byStore.map(s => s.new + s.contract + s.treatments));
+                                        const total = store.new + store.contract + store.treatments;
+                                        const pct = maxTotal > 0 ? (total / maxTotal * 100) : 0;
+                                        return (
+                                            <div key={store.store} className="group/store">
+                                                <div className="flex items-center justify-between mb-1.5">
+                                                    <div className="flex items-center gap-2">
+                                                        <span className={`w-6 h-6 rounded-lg flex items-center justify-center text-[10px] font-bold text-white ${i === 0 ? 'bg-gradient-to-br from-amber-400 to-orange-500' : i === 1 ? 'bg-gradient-to-br from-slate-300 to-slate-400' : i === 2 ? 'bg-gradient-to-br from-amber-600 to-amber-700' : 'bg-slate-200 text-slate-500'}`}>
+                                                            {i + 1}
+                                                        </span>
+                                                        <span className="font-semibold text-sm text-slate-800">{store.store}</span>
+                                                    </div>
+                                                    <div className="flex items-center gap-3 text-xs">
+                                                        <span className="text-blue-600 font-semibold">{store.new}<span className="text-slate-400 ml-0.5">新規</span></span>
+                                                        <span className="text-green-600 font-semibold">{store.contract}<span className="text-slate-400 ml-0.5">契約</span></span>
+                                                        <span className="text-orange-600 font-semibold">{store.treatments}<span className="text-slate-400 ml-0.5">施術</span></span>
+                                                    </div>
+                                                </div>
+                                                <div className="store-bar">
+                                                    <div className="fill" style={{
+                                                        width: `${pct}%`,
+                                                        background: `linear-gradient(90deg, ${storeColors[i % storeColors.length]}, ${storeColors[i % storeColors.length]}bb)`,
+                                                        transition: 'width 1s cubic-bezier(0.16,1,0.3,1)'
+                                                    }}></div>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </Card>
+                        )}
                     </div>
 
-                    {/* チャネル別成約率テーブル */}
-                    <Card>
-                        <h3 className="text-lg font-bold text-slate-900 mb-4">チャネル別パフォーマンス</h3>
-                        <div className="overflow-x-auto">
-                            <table className="w-full">
-                                <thead>
-                                    <tr className="border-b border-slate-200">
-                                        <th className="text-left py-3 px-4 text-sm font-semibold text-slate-600">チャネル</th>
-                                        <th className="text-right py-3 px-4 text-sm font-semibold text-slate-600">新規数</th>
-                                        <th className="text-right py-3 px-4 text-sm font-semibold text-slate-600">契約数</th>
-                                        <th className="text-right py-3 px-4 text-sm font-semibold text-slate-600">成約率</th>
-                                        <th className="text-left py-3 px-4 text-sm font-semibold text-slate-600">進捗</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {aggregatedData.byChannel.map((ch, index) => (
-                                        <tr key={ch.name} className="border-b border-slate-100/60 table-row-hover">
-                                            <td className="py-3 px-4">
-                                                <div className="flex items-center">
-                                                    <div className="w-3 h-3 rounded-full mr-2" style={{ backgroundColor: ch.color }}></div>
-                                                    <span className="font-medium text-slate-900">{ch.name}</span>
-                                                </div>
-                                            </td>
-                                            <td className="text-right py-3 px-4 text-slate-700">{ch.new}人</td>
-                                            <td className="text-right py-3 px-4 text-slate-700">{ch.contract}人</td>
-                                            <td className="text-right py-3 px-4">
-                                                <span className={`font-semibold ${parseFloat(ch.rate) >= 50 ? 'text-green-600' : parseFloat(ch.rate) >= 30 ? 'text-yellow-600' : 'text-red-500'}`}>
-                                                    {ch.rate}%
-                                                </span>
-                                            </td>
-                                            <td className="py-3 px-4">
-                                                <div className="w-full bg-slate-200 rounded-full h-2">
-                                                    <div
-                                                        className="h-2 rounded-full transition-all"
-                                                        style={{ width: `${Math.min(parseFloat(ch.rate), 100)}%`, backgroundColor: ch.color }}
-                                                    ></div>
-                                                </div>
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
-                    </Card>
-
-                    {/* 店舗別サマリ */}
-                    {aggregatedData.byStore.length > 1 && (
-                        <Card>
-                            <h3 className="text-lg font-bold text-slate-900 mb-4">店舗別サマリ</h3>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                {aggregatedData.byStore.map((store, index) => (
-                                    <div key={store.store} className="bg-slate-50 rounded-lg p-4 border border-slate-200">
-                                        <h4 className="font-semibold text-slate-900 mb-3 flex items-center">
-                                            <Icon name="building-2" size={18} className="mr-2 text-sise-500" />
-                                            {store.store}
-                                        </h4>
-                                        <div className="grid grid-cols-3 gap-4 text-center">
-                                            <div>
-                                                <p className="text-2xl font-bold text-sise-600">{store.new}</p>
-                                                <p className="text-xs text-slate-500">新規</p>
-                                            </div>
-                                            <div>
-                                                <p className="text-2xl font-bold text-green-600">{store.contract}</p>
-                                                <p className="text-xs text-slate-500">契約</p>
-                                            </div>
-                                            <div>
-                                                <p className="text-2xl font-bold text-orange-600">{store.treatments}</p>
-                                                <p className="text-xs text-slate-500">施術</p>
-                                            </div>
-                                        </div>
+                    {/* ベストチャネル + 目標プログレス */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-5">
+                        {aggregatedData.bestChannel && aggregatedData.bestChannel.new > 0 && (
+                            <div className="glass-card-glow p-5">
+                                <div className="flex items-center gap-2 mb-3">
+                                    <Icon name="award" size={16} className="text-amber-500" />
+                                    <h3 className="text-sm font-bold text-slate-800">ベストチャネル</h3>
+                                </div>
+                                <div className="flex items-center gap-3">
+                                    <div className="w-12 h-12 rounded-xl flex items-center justify-center" style={{backgroundColor: aggregatedData.bestChannel.color + '18'}}>
+                                        <Icon name={aggregatedData.bestChannel.icon} size={22} color={aggregatedData.bestChannel.color} />
                                     </div>
-                                ))}
+                                    <div>
+                                        <p className="text-lg font-extrabold text-slate-900">{aggregatedData.bestChannel.name}</p>
+                                        <p className="text-xs text-slate-500">成約率 <span className="font-bold text-emerald-600">{aggregatedData.bestChannel.rate}%</span></p>
+                                    </div>
+                                </div>
                             </div>
-                        </Card>
-                    )}
+                        )}
+                        <div className="glass-card-glow p-5 flex items-center gap-5">
+                            <div className="relative">
+                                <GoalRing value={aggregatedData.totalContracts} max={Math.max(aggregatedData.totalNewVisits, 1)} size={72} color="#22c55e" />
+                            </div>
+                            <div>
+                                <h3 className="text-sm font-bold text-slate-800">全体成約率</h3>
+                                <p className="text-2xl font-extrabold text-slate-900">{formatPercent(aggregatedData.conversionRate)}</p>
+                                <p className="text-[10px] text-slate-400">{aggregatedData.totalContracts} / {aggregatedData.totalNewVisits} 件</p>
+                            </div>
+                        </div>
+                        <div className="glass-card-glow p-5">
+                            <div className="flex items-center gap-2 mb-3">
+                                <Icon name="activity" size={16} className="text-sise-500" />
+                                <h3 className="text-sm font-bold text-slate-800">期間サマリー</h3>
+                            </div>
+                            <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                    <p className="text-xs text-slate-500">日報件数</p>
+                                    <p className="text-lg font-extrabold text-slate-900">{reportData.reports ? reportData.reports.length : 0}</p>
+                                </div>
+                                <div>
+                                    <p className="text-xs text-slate-500">稼働店舗</p>
+                                    <p className="text-lg font-extrabold text-slate-900">{aggregatedData.byStore.length}</p>
+                                </div>
+                                <div>
+                                    <p className="text-xs text-slate-500">1日平均新規</p>
+                                    <p className="text-lg font-extrabold text-blue-600">
+                                        {aggregatedData.dailyTrend.length > 0 ? (aggregatedData.totalNewVisits / aggregatedData.dailyTrend.length).toFixed(1) : '0'}
+                                    </p>
+                                </div>
+                                <div>
+                                    <p className="text-xs text-slate-500">1日平均施術</p>
+                                    <p className="text-lg font-extrabold text-orange-600">
+                                        {aggregatedData.dailyTrend.length > 0 ? (aggregatedData.totalTreatments / aggregatedData.dailyTrend.length).toFixed(1) : '0'}
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             );
         };
@@ -2521,32 +2791,56 @@
                 });
             }, [reportData.reports, filterStore, sortOrder]);
 
+            // 日報サマリー統計
+            const reportStats = useMemo(() => {
+                const reports = filteredReports;
+                const totalNew = reports.reduce((s, r) => s + (r.hpbNew||0) + (r.metaNew||0) + (r.referralNew||0) + (r.discountNew||0), 0);
+                const totalContract = reports.reduce((s, r) => s + (r.hpbContract||0) + (r.metaContract||0) + (r.referralContract||0) + (r.discountContract||0), 0);
+                const totalTreatments = reports.reduce((s, r) => s + (r.existingTreatments||0), 0);
+                // 店舗別の日報数
+                const storeCount = {};
+                reports.forEach(r => { storeCount[r.store] = (storeCount[r.store] || 0) + 1; });
+                return { totalNew, totalContract, totalTreatments, storeCount, total: reports.length };
+            }, [filteredReports]);
+
             return (
-                <div className="space-y-5 md:space-y-6 animate-fade-in">
+                <div className="space-y-4 md:space-y-5 animate-fade-in">
                     <SectionHeader title="日報一覧" subtitle="DAILY REPORTS" icon="clipboard-list">
                         <div className="flex items-center gap-2">
-                            <select
-                                value={filterStore}
-                                onChange={(e) => setFilterStore(e.target.value)}
-                                className="px-3 py-2 border border-slate-200 rounded-xl text-sm focus:border-sise-500 outline-none bg-white/80"
-                            >
+                            <select value={filterStore} onChange={(e) => setFilterStore(e.target.value)}
+                                className="px-3 py-2 border border-slate-200 rounded-xl text-sm focus:border-sise-500 outline-none bg-white/80">
                                 <option value="all">全店舗</option>
-                                {(currentAccess
-                                    ? serverStores.filter(s => currentAccess.storeIds.includes(s.id))
-                                    : serverStores
-                                ).map(s => (
+                                {(currentAccess ? serverStores.filter(s => currentAccess.storeIds.includes(s.id)) : serverStores).map(s =>
                                     <option key={s.id} value={s.name}>{s.name}</option>
-                                ))}
+                                )}
                             </select>
-                            <button
-                                onClick={() => setSortOrder(sortOrder === 'desc' ? 'asc' : 'desc')}
-                                className="flex items-center px-3 py-2 border border-slate-200 rounded-xl text-sm hover:bg-sise-50 transition-colors bg-white/80"
-                            >
+                            <button onClick={() => setSortOrder(sortOrder === 'desc' ? 'asc' : 'desc')}
+                                className="flex items-center px-3 py-2 border border-slate-200 rounded-xl text-sm hover:bg-sise-50 transition-colors bg-white/80">
                                 <Icon name={sortOrder === 'desc' ? 'arrow-down' : 'arrow-up'} size={15} className="mr-1" />
                                 <span className="hide-mobile">{sortOrder === 'desc' ? '新しい順' : '古い順'}</span>
                             </button>
                         </div>
                     </SectionHeader>
+
+                    {/* サマリーカード */}
+                    <div className="grid grid-cols-4 gap-2 md:gap-3">
+                        <div className="glass-card p-3 md:p-4 text-center">
+                            <p className="text-[10px] text-slate-500 font-medium mb-1">日報数</p>
+                            <p className="text-xl md:text-2xl font-extrabold text-slate-900">{reportStats.total}</p>
+                        </div>
+                        <div className="glass-card p-3 md:p-4 text-center">
+                            <p className="text-[10px] text-slate-500 font-medium mb-1">新規合計</p>
+                            <p className="text-xl md:text-2xl font-extrabold text-blue-600">{reportStats.totalNew}</p>
+                        </div>
+                        <div className="glass-card p-3 md:p-4 text-center">
+                            <p className="text-[10px] text-slate-500 font-medium mb-1">契約合計</p>
+                            <p className="text-xl md:text-2xl font-extrabold text-emerald-600">{reportStats.totalContract}</p>
+                        </div>
+                        <div className="glass-card p-3 md:p-4 text-center">
+                            <p className="text-[10px] text-slate-500 font-medium mb-1">施術合計</p>
+                            <p className="text-xl md:text-2xl font-extrabold text-orange-600">{reportStats.totalTreatments}</p>
+                        </div>
+                    </div>
 
                     {/* デスクトップ: テーブル */}
                     <Card className="hide-mobile">
@@ -2962,9 +3256,35 @@
                                                 <div className="grid grid-cols-2 md:grid-cols-4 gap-2 py-3 text-xs">
                                                     <div><span className="text-slate-400">入会日:</span> <span className="font-medium text-slate-700">{member.startDate}</span></div>
                                                     {member.canceledDate && <div><span className="text-slate-400">退会日:</span> <span className="font-medium text-red-500">{member.canceledDate}</span></div>}
-                                                    {member.phone && <div><span className="text-slate-400">電話:</span> <span className="font-medium text-slate-700">{member.phone}</span></div>}
+                                                    {member.phone && member.phone !== '-' && (
+                                                        <div className="flex items-center gap-1">
+                                                            <Icon name="phone" size={11} className="text-slate-400" />
+                                                            <span className="font-medium text-slate-700">{member.phone}</span>
+                                                        </div>
+                                                    )}
+                                                    {member.email && member.email !== '-' && (
+                                                        <div className="flex items-center gap-1">
+                                                            <Icon name="mail" size={11} className="text-slate-400" />
+                                                            <span className="font-medium text-slate-700 truncate">{member.email}</span>
+                                                        </div>
+                                                    )}
                                                     {member.notes && <div className="col-span-2"><span className="text-slate-400">備考:</span> <span className="font-medium text-slate-600 italic">{member.notes}</span></div>}
                                                 </div>
+                                                {/* 直近の支払い履歴 */}
+                                                {member.paymentHistory && member.paymentHistory.length > 0 && (
+                                                    <div className="pt-2 pb-1 border-t border-slate-100/60">
+                                                        <p className="text-[10px] text-slate-400 font-semibold tracking-wider mb-1.5">直近の支払い</p>
+                                                        <div className="flex gap-2 overflow-x-auto pb-1">
+                                                            {member.paymentHistory.slice(0, 3).map((ph) => (
+                                                                <div key={ph.invoiceId} className={`flex-shrink-0 px-2.5 py-1.5 rounded-lg text-[10px] ${ph.status === 'PAID' ? 'bg-green-50 text-green-700' : ph.status === 'UNPAID' ? 'bg-amber-50 text-amber-700' : 'bg-slate-50 text-slate-500'}`}>
+                                                                    <span className="font-semibold">{ph.date}</span>
+                                                                    <span className="ml-1.5">{formatCurrency(ph.amount)}</span>
+                                                                    <span className="ml-1 opacity-60">{ph.status === 'PAID' ? '済' : ph.status === 'UNPAID' ? '未' : ph.status}</span>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                )}
 
                                                 {/* アクションボタン */}
                                                 <div className="flex flex-wrap gap-2 mb-3">
@@ -6711,8 +7031,10 @@
                                     onClick={() => setCurrentView(item.id)}
                                     className={`bottom-nav-item ${currentView === item.id ? 'active' : ''}`}
                                 >
-                                    <Icon name={item.icon} size={20} />
-                                    <span className="mt-0.5">{item.mobileLabel}</span>
+                                    <span className="nav-icon-wrap transition-all duration-300">
+                                        <Icon name={item.icon} size={19} />
+                                    </span>
+                                    <span className="mt-0.5 transition-all duration-200" style={{fontSize: currentView === item.id ? '10px' : '9px', fontWeight: currentView === item.id ? 700 : 500}}>{item.mobileLabel}</span>
                                 </button>
                             ))}
                         </div>
