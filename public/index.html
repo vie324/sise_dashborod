@@ -496,19 +496,20 @@
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            padding: 8px 2px 6px;
+            padding: 8px 4px 6px;
             font-size: 10px;
             font-weight: 500;
             color: #94a3b8;
-            transition: color 0.2s ease, transform 0.15s ease;
+            transition: color 0.25s ease, transform 0.15s ease;
             position: relative;
-            flex: 1;
-            min-width: 0;
+            flex: 0 0 auto;
+            min-width: 56px;
             min-height: 56px;
             -webkit-tap-highlight-color: transparent;
+            scroll-snap-align: center;
         }
         .bottom-nav-item:active {
-            transform: scale(0.92);
+            transform: scale(0.88);
         }
         .bottom-nav-item.active {
             color: #33a065;
@@ -560,10 +561,72 @@
             input, select, textarea { font-size: 16px !important; }
             button, a { min-height: 44px; }
             .hide-mobile { display: none !important; }
+
+            /* フォントサイズ最低保証 - 10px/11pxを11px以上に強制 */
+            [class*="text-\[9px\]"] { font-size: 11px !important; }
+            [class*="text-\[10px\]"] { font-size: 11px !important; }
+            [class*="text-\[11px\]"] { font-size: 11.5px !important; }
+
+            /* スマホ用カードの密度調整 */
+            .glass-card { border-radius: 16px; }
+            .glass-card-glow { border-radius: 16px; }
+
+            /* KPIカードのモバイル最適化 */
+            .kpi-card { min-height: 110px; }
+
+            /* チャートのモバイル最適化 */
+            .recharts-wrapper { touch-action: pan-x pan-y; }
+
+            /* スワイプ可能ヒント */
+            .swipe-hint {
+                position: relative;
+                overflow: hidden;
+            }
+            .swipe-hint::after {
+                content: '';
+                position: absolute;
+                top: 0; right: 0; bottom: 0;
+                width: 24px;
+                background: linear-gradient(90deg, transparent, rgba(255,255,255,0.8));
+                pointer-events: none;
+                z-index: 1;
+            }
+            .dark .swipe-hint::after {
+                background: linear-gradient(90deg, transparent, rgba(18,35,27,0.8));
+            }
+
+            /* プルリフレッシュインジケーター */
+            .pull-indicator {
+                position: fixed;
+                top: 56px;
+                left: 50%;
+                transform: translateX(-50%) translateY(-40px);
+                z-index: 45;
+                transition: transform 0.3s cubic-bezier(0.16,1,0.3,1), opacity 0.3s;
+                opacity: 0;
+                pointer-events: none;
+            }
+            .pull-indicator.visible {
+                transform: translateX(-50%) translateY(8px);
+                opacity: 1;
+            }
+            .pull-indicator.refreshing {
+                transform: translateX(-50%) translateY(8px);
+                opacity: 1;
+            }
         }
         @media (min-width: 769px) {
             .hide-desktop { display: none !important; }
             .bottom-nav { display: none !important; }
+        }
+
+        /* 小さいスマホ (375px以下) 専用 */
+        @media (max-width: 380px) {
+            .bottom-nav-item {
+                padding: 6px 1px 4px;
+                min-height: 52px;
+            }
+            .kpi-card { min-height: 100px; }
         }
 
         /* Safe Area */
@@ -2453,6 +2516,9 @@
 
             const storeColors = ['#33a065', '#3b82f6', '#f97316', '#a855f7', '#ec4899'];
             const tooltipStyle = { backgroundColor: 'rgba(255,255,255,0.95)', borderColor: '#e2e8f0', borderRadius: '16px', boxShadow: '0 12px 40px -8px rgba(0,0,0,0.1)', padding: '12px 16px' };
+            const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
+            const chartHeight = isMobile ? 200 : 260;
+            const barChartHeight = isMobile ? 190 : 240;
 
             return (
                 <div className="space-y-4 md:space-y-5">
@@ -2520,7 +2586,7 @@
                     )}
 
                     {/* Square会員データ KPIカード */}
-                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
+                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 md:gap-4">
                         <KpiCard title="アクティブ会員" value={formatNumber(memberData.activeMembers)}
                             subValue={`総会員: ${formatNumber(memberData.totalMembers)}人`} trend={null} icon="users"
                             gradientFrom="from-sise-400" gradientTo="to-sise-600" accentColor="#33a065" />
@@ -2538,7 +2604,7 @@
                     </div>
 
                     {/* 日報集計 KPIカード（スパークライン付き） */}
-                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
+                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 md:gap-4">
                         <KpiCard title="新規来店数" value={formatNumber(aggregatedData.totalNewVisits)}
                             subValue="全チャネル合計" trend={null} icon="user-check"
                             gradientFrom="from-orange-400" gradientTo="to-orange-600"
@@ -2571,7 +2637,7 @@
                                     <span className="flex items-center gap-1"><span className="w-2.5 h-0.5 bg-orange-500" style={{borderTop:'2px dashed #f97316',width:12}}></span>施術</span>
                                 </div>
                             </div>
-                            <ResponsiveContainer width="100%" height={260}>
+                            <ResponsiveContainer width="100%" height={chartHeight}>
                                 <ComposedChart data={aggregatedData.dailyTrend}>
                                     <CartesianGrid strokeDasharray="3 3" stroke="#e8f0ec" vertical={false} />
                                     <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
@@ -2640,7 +2706,7 @@
                                     <p className="text-[10px] text-sise-500 tracking-widest font-semibold">NEW vs CONTRACT</p>
                                 </div>
                             </div>
-                            <ResponsiveContainer width="100%" height={240}>
+                            <ResponsiveContainer width="100%" height={barChartHeight}>
                                 <BarChart data={aggregatedData.byChannel} barGap={6} barCategoryGap="20%">
                                     <CartesianGrid strokeDasharray="3 3" stroke="#e8f0ec" vertical={false} />
                                     <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
@@ -2920,48 +2986,50 @@
                     </Card>
 
                     {/* モバイル: カード表示 */}
-                    <div className="hide-desktop space-y-3">
+                    <div className="hide-desktop space-y-2.5">
                         {filteredReports.slice(0, 30).map((report) => {
                             const totalNew = (report.hpbNew||0) + (report.metaNew||0) + (report.referralNew||0) + (report.discountNew||0);
                             const totalContract = (report.hpbContract||0) + (report.metaContract||0) + (report.referralContract||0) + (report.discountContract||0);
                             return (
-                                <Card key={report.timestamp + '_' + report.store} className="!p-4">
-                                    <div className="flex items-center justify-between mb-3">
+                                <Card key={report.timestamp + '_' + report.store} className="!p-3.5">
+                                    <div className="flex items-center justify-between mb-2.5">
                                         <div className="flex items-center gap-2">
-                                            <span className="text-xs font-semibold text-slate-500">
+                                            <span className="text-xs font-bold text-slate-600">
                                                 {new Date(report.timestamp).toLocaleDateString('ja-JP', { month: 'short', day: 'numeric' })}
                                             </span>
-                                            <span className="px-2 py-0.5 bg-sise-100/80 text-sise-700 rounded-lg text-[10px] font-semibold">{report.store}</span>
+                                            <span className="px-2 py-0.5 bg-sise-100/80 text-sise-700 rounded-lg text-[11px] font-bold">{report.store}</span>
                                         </div>
-                                        <div className="flex gap-1.5">
+                                        <div className="flex gap-2">
                                             {report.dailyTasksCompleted
-                                                ? <span className="text-green-500"><Icon name="check-circle" size={16} /></span>
-                                                : <span className="text-red-400"><Icon name="x-circle" size={16} /></span>}
+                                                ? <span className="text-green-500"><Icon name="check-circle" size={18} /></span>
+                                                : <span className="text-red-400"><Icon name="x-circle" size={18} /></span>}
                                             {report.tomorrowPrepCompleted
-                                                ? <span className="text-green-500"><Icon name="check-circle" size={16} /></span>
-                                                : <span className="text-red-400"><Icon name="x-circle" size={16} /></span>}
+                                                ? <span className="text-green-500"><Icon name="check-circle" size={18} /></span>
+                                                : <span className="text-red-400"><Icon name="x-circle" size={18} /></span>}
                                         </div>
                                     </div>
-                                    <div className="grid grid-cols-3 gap-3 text-center">
-                                        <div className="bg-blue-50/60 rounded-xl py-2">
-                                            <p className="text-lg font-extrabold text-blue-600">{totalNew}</p>
-                                            <p className="text-[10px] text-slate-400 font-medium">新規</p>
+                                    <div className="grid grid-cols-3 gap-2 text-center">
+                                        <div className="bg-blue-50/60 rounded-xl py-2.5">
+                                            <p className="text-xl font-extrabold text-blue-600">{totalNew}</p>
+                                            <p className="text-[11px] text-slate-500 font-semibold">新規</p>
                                         </div>
-                                        <div className="bg-green-50/60 rounded-xl py-2">
-                                            <p className="text-lg font-extrabold text-green-600">{totalContract}</p>
-                                            <p className="text-[10px] text-slate-400 font-medium">契約</p>
+                                        <div className="bg-green-50/60 rounded-xl py-2.5">
+                                            <p className="text-xl font-extrabold text-green-600">{totalContract}</p>
+                                            <p className="text-[11px] text-slate-500 font-semibold">契約</p>
                                         </div>
-                                        <div className="bg-orange-50/60 rounded-xl py-2">
-                                            <p className="text-lg font-extrabold text-orange-600">{report.existingTreatments}</p>
-                                            <p className="text-[10px] text-slate-400 font-medium">施術</p>
+                                        <div className="bg-orange-50/60 rounded-xl py-2.5">
+                                            <p className="text-xl font-extrabold text-orange-600">{report.existingTreatments}</p>
+                                            <p className="text-[11px] text-slate-500 font-semibold">施術</p>
                                         </div>
                                     </div>
-                                    <div className="mt-2.5 flex gap-1 flex-wrap">
-                                        {report.hpbNew > 0 && <span className="text-[10px] bg-orange-100 text-orange-600 px-1.5 py-0.5 rounded font-medium">HPB {report.hpbNew}/{report.hpbContract}</span>}
-                                        {report.metaNew > 0 && <span className="text-[10px] bg-blue-100 text-blue-600 px-1.5 py-0.5 rounded font-medium">Meta {report.metaNew}/{report.metaContract}</span>}
-                                        {report.referralNew > 0 && <span className="text-[10px] bg-green-100 text-green-600 px-1.5 py-0.5 rounded font-medium">紹介 {report.referralNew}/{report.referralContract}</span>}
-                                        {report.discountNew > 0 && <span className="text-[10px] bg-purple-100 text-purple-600 px-1.5 py-0.5 rounded font-medium">割引 {report.discountNew}/{report.discountContract}</span>}
-                                    </div>
+                                    {(report.hpbNew > 0 || report.metaNew > 0 || report.referralNew > 0 || report.discountNew > 0) && (
+                                        <div className="mt-2 flex gap-1.5 overflow-x-auto pb-0.5" style={{scrollbarWidth:'none', WebkitOverflowScrolling:'touch'}}>
+                                            {report.hpbNew > 0 && <span className="text-[11px] bg-orange-100 text-orange-700 px-2 py-1 rounded-lg font-semibold whitespace-nowrap">HPB {report.hpbNew}/{report.hpbContract}</span>}
+                                            {report.metaNew > 0 && <span className="text-[11px] bg-blue-100 text-blue-700 px-2 py-1 rounded-lg font-semibold whitespace-nowrap">Meta {report.metaNew}/{report.metaContract}</span>}
+                                            {report.referralNew > 0 && <span className="text-[11px] bg-green-100 text-green-700 px-2 py-1 rounded-lg font-semibold whitespace-nowrap">紹介 {report.referralNew}/{report.referralContract}</span>}
+                                            {report.discountNew > 0 && <span className="text-[11px] bg-purple-100 text-purple-700 px-2 py-1 rounded-lg font-semibold whitespace-nowrap">割引 {report.discountNew}/{report.discountContract}</span>}
+                                        </div>
+                                    )}
                                 </Card>
                             );
                         })}
@@ -3291,22 +3359,22 @@
                                                     {member.status === 'ACTIVE' && (
                                                         <>
                                                             <button onClick={(e) => { e.stopPropagation(); setShowPaymentForm(showPaymentForm === member.id ? null : member.id); setPaymentInput({ amount: String(member.monthlyPrice || ''), date: new Date().toISOString().slice(0, 10), method: member.paymentMethod || 'CASH', note: '' }); }}
-                                                                className="flex items-center px-3 py-2 bg-sise-50 hover:bg-sise-100 border border-sise-200 text-sise-700 rounded-xl text-xs font-semibold transition-all active:scale-95">
+                                                                className="flex items-center px-3.5 py-2.5 bg-sise-50 hover:bg-sise-100 border border-sise-200 text-sise-700 rounded-xl text-xs font-semibold transition-all active:scale-95">
                                                                 <Icon name="plus-circle" size={14} className="mr-1" /> 入金記録
                                                             </button>
                                                             <button onClick={(e) => { e.stopPropagation(); setPlanChangeForm(planChangeForm === member.id ? null : member.id); }}
-                                                                className="flex items-center px-3 py-2 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-600 rounded-xl text-xs font-semibold transition-all active:scale-95">
+                                                                className="flex items-center px-3.5 py-2.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-600 rounded-xl text-xs font-semibold transition-all active:scale-95">
                                                                 <Icon name="repeat" size={14} className="mr-1" /> プラン変更
                                                             </button>
                                                             <button onClick={(e) => { e.stopPropagation(); if(confirm(`${member.name}を退会処理しますか？`)) cancelMember(member.id); }}
-                                                                className="flex items-center px-3 py-2 bg-red-50 hover:bg-red-100 border border-red-200 text-red-600 rounded-xl text-xs font-semibold transition-all active:scale-95">
+                                                                className="flex items-center px-3.5 py-2.5 bg-red-50 hover:bg-red-100 border border-red-200 text-red-600 rounded-xl text-xs font-semibold transition-all active:scale-95">
                                                                 <Icon name="user-minus" size={14} className="mr-1" /> 退会
                                                             </button>
                                                         </>
                                                     )}
                                                     {member.status === 'CANCELED' && (
                                                         <button onClick={(e) => { e.stopPropagation(); if(confirm(`${member.name}を再入会しますか？`)) reactivateMember(member.id); }}
-                                                            className="flex items-center px-3 py-2 bg-sise-50 hover:bg-sise-100 border border-sise-200 text-sise-700 rounded-xl text-xs font-semibold transition-all active:scale-95">
+                                                            className="flex items-center px-3.5 py-2.5 bg-sise-50 hover:bg-sise-100 border border-sise-200 text-sise-700 rounded-xl text-xs font-semibold transition-all active:scale-95">
                                                             <Icon name="user-plus" size={14} className="mr-1" /> 再入会
                                                         </button>
                                                     )}
@@ -3381,8 +3449,8 @@
                                                                     <div className="flex items-center gap-2">
                                                                         <span className="font-bold text-slate-800">{formatCurrency(payment.amount)}</span>
                                                                         <button onClick={(e) => { e.stopPropagation(); if(confirm('この支払記録を削除しますか？')) removePayment(member.id, payment.id); }}
-                                                                            className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-red-50 text-slate-300 hover:text-red-400 transition-all">
-                                                                            <Icon name="x" size={12} />
+                                                                            className="md:opacity-0 md:group-hover:opacity-100 p-1.5 rounded-lg hover:bg-red-50 text-slate-300 hover:text-red-400 transition-all">
+                                                                            <Icon name="x" size={14} />
                                                                         </button>
                                                                     </div>
                                                                 </div>
@@ -3547,7 +3615,7 @@
                     )}
 
                     {/* 会員サマリ */}
-                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
+                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 md:gap-4">
                         <KpiCard
                             title="アクティブ会員"
                             value={memberData.activeMembers}
@@ -3878,7 +3946,7 @@
                     {/* 会員詳細モーダル */}
                     {selectedMember && (
                         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in" onClick={() => { setSelectedMember(null); setActionMessage(null); }}>
-                            <div className="bg-white/95 backdrop-blur-xl rounded-2xl shadow-2xl max-w-2xl w-full p-6 max-h-[90vh] overflow-y-auto animate-scale-in border border-slate-200/50" onClick={(e) => e.stopPropagation()}>
+                            <div className="bg-white/95 backdrop-blur-xl rounded-2xl shadow-2xl max-w-2xl w-full p-4 md:p-6 max-h-[90vh] overflow-y-auto animate-scale-in border border-slate-200/50 mx-2 md:mx-0" onClick={(e) => e.stopPropagation()}>
                                 <div className="flex items-center justify-between mb-4">
                                     <h3 className="text-lg font-bold text-slate-900">{selectedMember.name}</h3>
                                     <button onClick={() => { setSelectedMember(null); setActionMessage(null); }} className="p-2 hover:bg-slate-100 rounded-lg">
@@ -4193,7 +4261,7 @@
                     )}
 
                     {/* KPIサマリ */}
-                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
+                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 md:gap-4">
                         <KpiCard title="有効回数券" value={stats.active} subValue={`全${stats.total}件`} icon="ticket" gradientFrom="from-sise-400" gradientTo="to-sise-600" />
                         <KpiCard title="期限間近" value={stats.expiringSoon} subValue="30日以内" icon="alert-triangle" gradientFrom={stats.expiringSoon > 0 ? "from-amber-400" : "from-slate-400"} gradientTo={stats.expiringSoon > 0 ? "to-amber-600" : "to-slate-500"} />
                         <KpiCard title="残セッション" value={stats.totalRemaining} subValue="有効分の合計" icon="hash" gradientFrom="from-blue-400" gradientTo="to-blue-600" />
@@ -4324,11 +4392,11 @@
                                         </div>
                                     </div>
                                     <div className="flex justify-end gap-2 mt-4">
-                                        <button onClick={() => setShowAddForm(false)} className="px-4 py-2 text-sm text-slate-500 hover:bg-slate-100 rounded-xl">キャンセル</button>
+                                        <button onClick={() => setShowAddForm(false)} className="px-4 py-2.5 text-sm text-slate-500 hover:bg-slate-100 rounded-xl">キャンセル</button>
                                         <button
                                             onClick={handleAddTicket}
                                             disabled={!newTicket.customerName.trim() || !newTicket.planId}
-                                            className="px-5 py-2 btn-gradient rounded-xl text-sm font-medium disabled:opacity-40"
+                                            className="px-5 py-2.5 btn-gradient rounded-xl text-sm font-medium disabled:opacity-40"
                                         >
                                             発行する
                                         </button>
@@ -4353,10 +4421,10 @@
                                                     <Avatar name={ticket.customerName} size={38} />
                                                     <div className="ml-2.5 flex-1 min-w-0">
                                                         <p className="font-bold text-slate-800 text-sm truncate">{ticket.customerName}</p>
-                                                        <p className="text-[11px] text-slate-400 truncate">{ticket.planName}{ticket.storeName ? ` / ${ticket.storeName}` : ''}</p>
+                                                        <p className="text-xs text-slate-400 truncate">{ticket.planName}{ticket.storeName ? ` / ${ticket.storeName}` : ''}</p>
                                                     </div>
                                                 </div>
-                                                <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-lg border flex-shrink-0 ${getTicketStatusStyle(status)}`}>
+                                                <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-lg border flex-shrink-0 ${getTicketStatusStyle(status)}`}>
                                                     {getTicketStatusLabel(status)}
                                                 </span>
                                             </div>
@@ -4364,7 +4432,7 @@
                                             {/* 残回数 */}
                                             <div className="bg-slate-50/80 rounded-xl p-3 mb-3">
                                                 <div className="flex items-center justify-between mb-2">
-                                                    <span className="text-[11px] text-slate-500 font-medium">残り回数</span>
+                                                    <span className="text-xs text-slate-500 font-medium">残り回数</span>
                                                     <span className="text-lg font-extrabold text-slate-800">
                                                         <span className={status === 'active' ? 'text-sise-600' : status === 'expiring' ? 'text-amber-600' : 'text-slate-500'}>{ticket.remainingSessions}</span>
                                                         <span className="text-slate-400 text-sm font-medium"> / {ticket.totalSessions}</span>
@@ -4379,7 +4447,7 @@
                                             </div>
 
                                             {/* 情報 */}
-                                            <div className="grid grid-cols-2 gap-2 text-[11px] mb-3">
+                                            <div className="grid grid-cols-2 gap-2 text-xs mb-3">
                                                 <div>
                                                     <span className="text-slate-400">購入日</span>
                                                     <p className="font-semibold text-slate-700">{ticket.purchaseDate}</p>
@@ -4404,7 +4472,7 @@
                                                 )}
                                             </div>
                                             {ticket.notes && (
-                                                <p className="text-[11px] text-slate-400 bg-slate-50 rounded-lg px-2.5 py-1.5 mb-3">{ticket.notes}</p>
+                                                <p className="text-xs text-slate-400 bg-slate-50 rounded-lg px-2.5 py-1.5 mb-3">{ticket.notes}</p>
                                             )}
 
                                             {/* アクションボタン */}
@@ -4513,11 +4581,11 @@
                                         </div>
                                     </div>
                                     <div className="flex justify-end gap-2 mt-4">
-                                        <button onClick={() => { setShowPlanForm(false); setEditingPlan(null); }} className="px-4 py-2 text-sm text-slate-500 hover:bg-slate-100 rounded-xl">キャンセル</button>
+                                        <button onClick={() => { setShowPlanForm(false); setEditingPlan(null); }} className="px-4 py-2.5 text-sm text-slate-500 hover:bg-slate-100 rounded-xl">キャンセル</button>
                                         <button
                                             onClick={handleSavePlan}
                                             disabled={!planForm.name.trim() || !planForm.sessions || !planForm.price}
-                                            className="px-5 py-2 btn-gradient rounded-xl text-sm font-medium disabled:opacity-40"
+                                            className="px-5 py-2.5 btn-gradient rounded-xl text-sm font-medium disabled:opacity-40"
                                         >
                                             {editingPlan ? '更新' : '作成'}
                                         </button>
@@ -4561,13 +4629,13 @@
                                             <div className="flex gap-2">
                                                 <button
                                                     onClick={() => { setEditingPlan(plan); setPlanForm({ name: plan.name, sessions: plan.sessions, price: plan.price, validityDays: plan.validityDays }); setShowPlanForm(true); }}
-                                                    className="flex-1 py-2 border border-slate-200 hover:bg-sise-50 rounded-xl text-xs font-medium text-slate-600 transition-all"
+                                                    className="flex-1 py-2.5 border border-slate-200 hover:bg-sise-50 rounded-xl text-xs font-medium text-slate-600 transition-all active:scale-95"
                                                 >
-                                                    <Icon name="pencil" size={13} className="inline mr-1" />編集
+                                                    <Icon name="pencil" size={14} className="inline mr-1" />編集
                                                 </button>
                                                 <button
                                                     onClick={() => { if (confirm(`「${plan.name}」を削除しますか？`)) deletePlan(plan.id); }}
-                                                    className="py-2 px-3 border border-slate-200 hover:bg-red-50 hover:border-red-200 hover:text-red-500 rounded-xl text-xs text-slate-400 transition-all"
+                                                    className="py-2.5 px-3 border border-slate-200 hover:bg-red-50 hover:border-red-200 hover:text-red-500 rounded-xl text-xs text-slate-400 transition-all active:scale-95"
                                                 >
                                                     <Icon name="trash-2" size={13} />
                                                 </button>
@@ -4688,7 +4756,7 @@
                     )}
 
                     {/* KPIサマリ */}
-                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
+                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 md:gap-4">
                         <KpiCard
                             title="合計利用回数"
                             value={totalUsage}
@@ -5543,7 +5611,7 @@
                     </SectionHeader>
 
                     {/* 月間サマリ KPI */}
-                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
+                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 md:gap-4">
                         <KpiCard title="売上（収入）" value={formatCurrency(monthSummary.income)} icon="trending-up"
                             gradientFrom="from-sise-400" gradientTo="to-sise-600"
                             subValue={`${Object.keys(monthSummary.byCategory).filter(c => incomeCategories.includes(c)).length}カテゴリ`} />
@@ -5679,7 +5747,7 @@
                                 <p className={`text-sm font-extrabold ${monthSummary.profit >= 0 ? 'text-sise-600' : 'text-red-600'}`}>
                                     {monthSummary.profit >= 0 ? '+' : ''}{formatCurrency(monthSummary.profit)}
                                 </p>
-                                <p className="text-[10px] text-slate-400">利益</p>
+                                <p className="text-[11px] text-slate-400">利益</p>
                             </div>
                             <div className="flex-1">
                                 <div className="flex justify-between text-xs mb-1">
@@ -5713,7 +5781,7 @@
                                             <div className="flex items-center gap-2">
                                                 <span className="text-sm font-bold text-slate-700">{dayLabel}</span>
                                                 {daySummary.treatments > 0 && (
-                                                    <span className="text-[10px] bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full font-semibold">
+                                                    <span className="text-[11px] bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full font-semibold">
                                                         施術 {daySummary.treatments}回
                                                     </span>
                                                 )}
@@ -5746,13 +5814,13 @@
                                                         <div className="flex items-center gap-1.5">
                                                             <span className="text-sm font-semibold text-slate-800 truncate">{entry.category}</span>
                                                             {entry.customerName && (
-                                                                <span className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-medium truncate">{entry.customerName}</span>
+                                                                <span className="text-[11px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-medium truncate">{entry.customerName}</span>
                                                             )}
                                                             {entry.treatmentCount > 0 && (
-                                                                <span className="text-[10px] bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded font-semibold">{entry.treatmentCount}回</span>
+                                                                <span className="text-[11px] bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded font-semibold">{entry.treatmentCount}回</span>
                                                             )}
                                                         </div>
-                                                        {entry.description && <p className="text-[10px] text-slate-400 truncate mt-0.5">{entry.description}</p>}
+                                                        {entry.description && <p className="text-[11px] text-slate-400 truncate mt-0.5">{entry.description}</p>}
                                                     </div>
 
                                                     {/* 金額 */}
@@ -5760,7 +5828,7 @@
                                                         <span className={`text-sm font-bold ${entry.type === 'income' ? 'text-sise-700' : 'text-red-600'}`}>
                                                             {entry.type === 'income' ? '+' : '-'}{formatCurrency(entry.amount)}
                                                         </span>
-                                                        <span className={`text-[9px] px-1.5 py-0.5 rounded font-semibold ${
+                                                        <span className={`text-[11px] px-1.5 py-0.5 rounded font-semibold ${
                                                             entry.paymentMethod === 'QR' ? 'bg-blue-50 text-blue-600' :
                                                             entry.paymentMethod === 'CARD' || entry.paymentMethod === 'SQUARE' ? 'bg-purple-50 text-purple-600' :
                                                             entry.paymentMethod === 'TRANSFER' ? 'bg-indigo-50 text-indigo-600' :
@@ -5770,14 +5838,14 @@
                                                         </span>
 
                                                         {/* 編集・削除 */}
-                                                        <div className="opacity-0 group-hover:opacity-100 flex gap-0.5 transition-opacity">
+                                                        <div className="md:opacity-0 md:group-hover:opacity-100 flex gap-0.5 transition-opacity">
                                                             <button onClick={() => handleEdit(entry)}
-                                                                className="p-1 rounded hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors">
-                                                                <Icon name="edit-2" size={12} />
+                                                                className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors">
+                                                                <Icon name="edit-2" size={14} />
                                                             </button>
                                                             <button onClick={() => { if(confirm('この記録を削除しますか？')) deleteEntry(entry.id); }}
-                                                                className="p-1 rounded hover:bg-red-50 text-slate-300 hover:text-red-400 transition-colors">
-                                                                <Icon name="trash-2" size={12} />
+                                                                className="p-1.5 rounded-lg hover:bg-red-50 text-slate-300 hover:text-red-400 transition-colors">
+                                                                <Icon name="trash-2" size={14} />
                                                             </button>
                                                         </div>
                                                     </div>
@@ -6847,6 +6915,52 @@
                 }
             }, [isDarkMode]);
 
+            // プルトゥリフレッシュ
+            const [pullState, setPullState] = useState({ pulling: false, refreshing: false, distance: 0 });
+            const pullStartY = React.useRef(0);
+            const isPulling = React.useRef(false);
+
+            useEffect(() => {
+                const THRESHOLD = 60;
+                let startY = 0;
+
+                const onTouchStart = (e) => {
+                    if (window.scrollY === 0) {
+                        startY = e.touches[0].clientY;
+                        isPulling.current = true;
+                    }
+                };
+                const onTouchMove = (e) => {
+                    if (!isPulling.current || window.scrollY > 0) return;
+                    const dist = Math.max(0, e.touches[0].clientY - startY);
+                    if (dist > 10) {
+                        setPullState(prev => ({ ...prev, pulling: true, distance: Math.min(dist, THRESHOLD * 1.5) }));
+                    }
+                };
+                const onTouchEnd = () => {
+                    if (!isPulling.current) return;
+                    isPulling.current = false;
+                    if (pullState.distance >= THRESHOLD) {
+                        setPullState({ pulling: false, refreshing: true, distance: 0 });
+                        Promise.all([refreshReportData(), refreshSquareData()])
+                            .finally(() => {
+                                setTimeout(() => setPullState({ pulling: false, refreshing: false, distance: 0 }), 600);
+                            });
+                    } else {
+                        setPullState({ pulling: false, refreshing: false, distance: 0 });
+                    }
+                };
+
+                document.addEventListener('touchstart', onTouchStart, { passive: true });
+                document.addEventListener('touchmove', onTouchMove, { passive: true });
+                document.addEventListener('touchend', onTouchEnd, { passive: true });
+                return () => {
+                    document.removeEventListener('touchstart', onTouchStart);
+                    document.removeEventListener('touchmove', onTouchMove);
+                    document.removeEventListener('touchend', onTouchEnd);
+                };
+            }, [pullState.distance, refreshReportData, refreshSquareData]);
+
             const navItems = [
                 { id: 'dashboard', label: 'ダッシュボード', icon: 'layout-dashboard', mobileLabel: 'ホーム' },
                 { id: 'reports', label: '日報一覧', icon: 'clipboard-list', mobileLabel: '日報' },
@@ -6906,7 +7020,7 @@
                             <div className="flex items-center">
                                 <button
                                     onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-                                    className="lg:hidden p-2 rounded-xl hover:bg-sise-50 mr-1 transition-colors"
+                                    className="lg:hidden p-2.5 rounded-xl hover:bg-sise-50 mr-1 transition-colors active:scale-90"
                                 >
                                     <Icon name={isSidebarOpen ? "x" : "menu"} size={20} />
                                 </button>
@@ -6952,21 +7066,30 @@
                                         if (icon) { icon.style.animation = 'spin 0.6s ease'; setTimeout(() => icon.style.animation = '', 600); }
                                         refreshReportData(); refreshSquareData();
                                     }}
-                                    className="p-2 rounded-xl hover:bg-sise-50 text-slate-400 hover:text-sise-600 transition-all active:scale-90"
+                                    className="p-2.5 rounded-xl hover:bg-sise-50 text-slate-400 hover:text-sise-600 transition-all active:scale-90"
                                     title="データ更新"
                                 >
-                                    <Icon name="refresh-cw" size={17} />
+                                    <Icon name="refresh-cw" size={18} />
                                 </button>
                                 <button
                                     onClick={() => setIsDarkMode(!isDarkMode)}
-                                    className="p-2 rounded-xl hover:bg-sise-50 text-slate-400 hover:text-sise-600 transition-all active:scale-90 hide-mobile"
+                                    className="p-2.5 rounded-xl hover:bg-sise-50 text-slate-400 hover:text-sise-600 transition-all active:scale-90 hide-mobile"
                                     title="ダークモード切り替え"
                                 >
-                                    <Icon name={isDarkMode ? 'sun' : 'moon'} size={17} />
+                                    <Icon name={isDarkMode ? 'sun' : 'moon'} size={18} />
                                 </button>
                             </div>
                         </div>
                     </header>
+
+                    {/* プルトゥリフレッシュ インジケーター */}
+                    <div className={`pull-indicator ${pullState.pulling ? 'visible' : ''} ${pullState.refreshing ? 'refreshing' : ''}`}
+                        style={pullState.pulling ? {transform: `translateX(-50%) translateY(${Math.min(pullState.distance * 0.3, 18)}px)`, opacity: Math.min(pullState.distance / 60, 1)} : undefined}>
+                        <div className={`w-9 h-9 rounded-full bg-white shadow-lg border border-sise-200 flex items-center justify-center ${pullState.refreshing ? 'animate-spin' : ''}`}>
+                            <Icon name={pullState.refreshing ? 'loader' : 'arrow-down'} size={16} className="text-sise-500"
+                                style={!pullState.refreshing ? {transform: `rotate(${Math.min(pullState.distance / 60 * 180, 180)}deg)`, transition: 'transform 0.1s'} : undefined} />
+                        </div>
+                    </div>
 
                     {/* Sidebar Overlay (Mobile) */}
                     {isSidebarOpen && (
@@ -7023,7 +7146,19 @@
 
                     {/* Bottom Navigation (Mobile) */}
                     <nav className="bottom-nav hide-desktop">
-                        <div className="flex overflow-x-auto" style={{scrollbarWidth: 'none', msOverflowStyle: 'none', WebkitOverflowScrolling: 'touch'}}>
+                        <div
+                            ref={(el) => {
+                                if (el) {
+                                    const active = el.querySelector('.bottom-nav-item.active');
+                                    if (active) {
+                                        const scrollLeft = active.offsetLeft - (el.offsetWidth / 2) + (active.offsetWidth / 2);
+                                        el.scrollTo({ left: scrollLeft, behavior: 'smooth' });
+                                    }
+                                }
+                            }}
+                            className="flex overflow-x-auto"
+                            style={{scrollbarWidth: 'none', msOverflowStyle: 'none', WebkitOverflowScrolling: 'touch', scrollSnapType: 'x proximity'}}
+                        >
                             <style>{`.bottom-nav div::-webkit-scrollbar { display: none; }`}</style>
                             {navItems.map((item) => (
                                 <button
@@ -7032,9 +7167,9 @@
                                     className={`bottom-nav-item ${currentView === item.id ? 'active' : ''}`}
                                 >
                                     <span className="nav-icon-wrap transition-all duration-300">
-                                        <Icon name={item.icon} size={19} />
+                                        <Icon name={item.icon} size={20} />
                                     </span>
-                                    <span className="mt-0.5 transition-all duration-200" style={{fontSize: currentView === item.id ? '10px' : '9px', fontWeight: currentView === item.id ? 700 : 500}}>{item.mobileLabel}</span>
+                                    <span className="mt-0.5 transition-all duration-200" style={{fontSize: '10px', fontWeight: currentView === item.id ? 700 : 500, letterSpacing: currentView === item.id ? '0.02em' : '0'}}>{item.mobileLabel}</span>
                                 </button>
                             ))}
                         </div>
@@ -7042,7 +7177,7 @@
 
                     {/* Main Content */}
                     <main className="pt-14 md:pt-16 lg:pl-56 min-h-screen relative z-10">
-                        <div className="p-3 md:p-5 lg:p-8 max-w-7xl mx-auto pb-24 md:pb-8">
+                        <div className="px-3 py-2 md:p-5 lg:p-8 max-w-7xl mx-auto pb-24 md:pb-8">
                             {memberData.loading || reportData.loading ? (
                                 <div className="flex items-center justify-center h-64 animate-fade-in">
                                     <div className="text-center">
