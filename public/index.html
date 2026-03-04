@@ -156,12 +156,42 @@
         .dark .border-sise-200 { border-color: #1d6641 !important; }
         .dark .glass-panel { background: rgba(18,35,27,0.9); border-color: rgba(51,160,101,0.15); }
         .dark .glass-card { background: rgba(18,35,27,0.7); border-color: rgba(51,160,101,0.12); }
+        /* Dark mode: form inputs */
+        .dark input, .dark select, .dark textarea {
+            background-color: #12231b !important;
+            color: #e2e8f0 !important;
+            border-color: #1e3a2c !important;
+        }
+        .dark input::placeholder, .dark textarea::placeholder {
+            color: #4a6b58 !important;
+        }
+        .dark input:focus, .dark select:focus, .dark textarea:focus {
+            border-color: #33a065 !important;
+        }
+        /* Dark mode: status badges */
+        .dark .bg-green-50, .dark .bg-green-100 { background-color: rgba(34,197,94,0.12) !important; }
+        .dark .bg-red-50, .dark .bg-red-100 { background-color: rgba(239,68,68,0.12) !important; }
+        .dark .bg-blue-50, .dark .bg-blue-100 { background-color: rgba(59,130,246,0.12) !important; }
+        .dark .bg-amber-50, .dark .bg-amber-100 { background-color: rgba(245,158,11,0.12) !important; }
+        .dark .bg-orange-50, .dark .bg-orange-100 { background-color: rgba(249,115,22,0.12) !important; }
+        .dark .bg-purple-50, .dark .bg-purple-100 { background-color: rgba(168,85,247,0.12) !important; }
+        .dark .bg-violet-50, .dark .bg-violet-100, .dark .bg-violet-50\/50, .dark .bg-violet-50\/40 { background-color: rgba(139,92,246,0.12) !important; }
+        .dark .bg-sise-50 { background-color: rgba(51,160,101,0.08) !important; }
+        .dark .bg-slate-100 { background-color: rgba(148,163,184,0.08) !important; }
+        /* Dark mode: chart tooltip */
+        .dark .recharts-tooltip-wrapper .recharts-default-tooltip {
+            background: #12231b !important;
+            border-color: #1e3a2c !important;
+            color: #e2e8f0 !important;
+        }
 
         /* Scrollbar */
-        ::-webkit-scrollbar { width: 5px; }
+        ::-webkit-scrollbar { width: 5px; height: 5px; }
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: #b9e5ca; border-radius: 10px; }
         ::-webkit-scrollbar-thumb:hover { background: #88d1a8; }
+        .dark ::-webkit-scrollbar-thumb { background: #1d6641; }
+        .dark ::-webkit-scrollbar-thumb:hover { background: #238050; }
 
         /* Glass Panel */
         .glass-panel {
@@ -286,18 +316,31 @@
         .skeleton {
             background: linear-gradient(90deg, #e8f3ec 25%, #f0faf4 50%, #e8f3ec 75%);
             background-size: 200% 100%;
-            animation: shimmer 1.5s linear infinite;
+            animation: shimmer 1.8s ease-in-out infinite;
+        }
+        .dark .skeleton {
+            background: linear-gradient(90deg, #12231b 25%, #1e3a2c 50%, #12231b 75%);
+            background-size: 200% 100%;
         }
         @keyframes shimmer {
             0% { background-position: 200% 0; }
             100% { background-position: -200% 0; }
         }
 
-        /* Table hover */
+        /* Table hover & alternating rows */
         .table-row-hover {
-            transition: all 0.2s ease;
+            transition: background-color 0.2s ease;
         }
         .table-row-hover:hover {
+            background-color: rgba(51,160,101,0.06);
+        }
+        .table-row-hover:nth-child(even) {
+            background-color: rgba(51,160,101,0.02);
+        }
+        .table-row-hover:nth-child(even):hover {
+            background-color: rgba(51,160,101,0.06);
+        }
+        .dark .table-row-hover:nth-child(even) {
             background-color: rgba(51,160,101,0.04);
         }
 
@@ -326,14 +369,19 @@
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            padding: 6px 0 4px;
+            padding: 8px 2px 6px;
             font-size: 10px;
             font-weight: 500;
             color: #94a3b8;
-            transition: all 0.2s ease;
+            transition: color 0.2s ease, transform 0.15s ease;
             position: relative;
             flex: 1;
-            min-height: 52px;
+            min-width: 0;
+            min-height: 56px;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .bottom-nav-item:active {
+            transform: scale(0.92);
         }
         .bottom-nav-item.active {
             color: #33a065;
@@ -354,11 +402,23 @@
             color: white;
             border: none;
             box-shadow: 0 4px 16px -4px rgba(51,160,101,0.4);
-            transition: all 0.3s ease;
+            transition: all 0.3s cubic-bezier(0.16,1,0.3,1);
         }
         .btn-gradient:hover {
             box-shadow: 0 8px 24px -4px rgba(51,160,101,0.5);
             transform: translateY(-1px);
+        }
+        .btn-gradient:active {
+            transform: translateY(0) scale(0.97);
+        }
+
+        /* Consistent button active/disabled states */
+        button:not(:disabled):active {
+            transition-duration: 0.1s;
+        }
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
         }
 
         /* Mobile-first */
@@ -394,6 +454,19 @@
         .recharts-tooltip-wrapper .recharts-default-tooltip {
             border-radius: 12px !important;
             box-shadow: 0 8px 32px -8px rgba(0,0,0,0.12) !important;
+            border: 1px solid rgba(51,160,101,0.1) !important;
+        }
+
+        /* Smooth view transitions */
+        .view-transition {
+            animation: fade-in-up 0.4s cubic-bezier(0.16,1,0.3,1) forwards;
+        }
+
+        /* Focus ring consistency for all inputs */
+        input:focus, select:focus, textarea:focus {
+            outline: none;
+            border-color: #33a065 !important;
+            box-shadow: 0 0 0 3px rgba(51,160,101,0.12);
         }
     </style>
 </head>
@@ -426,9 +499,11 @@
         // ※実際のデプロイ後URLに置き換えてください
         const GOOGLE_FORM_SHEET_URL = 'YOUR_GOOGLE_APPS_SCRIPT_URL';
 
-        // Square API設定（サーバーサイドプロキシ経由）
+        // API設定（サーバーサイドプロキシ経由）
         // APIキーはVercel環境変数で管理、フロントエンドには露出しない
         const SQUARE_PROXY_BASE = '/api/square';
+        const META_PROXY_BASE = '/api/meta';
+        const TIKTOK_PROXY_BASE = '/api/tiktok';
 
         // サーバーから設定を取得（店舗一覧含む）
         const fetchSquareConfig = async () => {
@@ -581,11 +656,11 @@
                         </span>
                     )}
                 </div>
-                <h3 className="text-slate-500 font-medium text-[11px] tracking-wider uppercase">{title}</h3>
+                <h3 className="text-slate-500 font-medium text-[11px] md:text-xs tracking-wider uppercase">{title}</h3>
                 <div className="flex items-baseline mt-1">
                     <span className="text-2xl md:text-3xl font-extrabold text-slate-900 num-animate tracking-tight">{value}</span>
                 </div>
-                {subValue && <p className="text-[11px] text-slate-400 mt-1.5">{subValue}</p>}
+                {subValue && <p className="text-[11px] md:text-xs text-slate-400 mt-1.5">{subValue}</p>}
             </Card>
         );
 
@@ -600,7 +675,7 @@
                     )}
                     <div>
                         <h2 className="text-lg md:text-xl font-bold text-slate-800">{title}</h2>
-                        {subtitle && <p className="text-[10px] text-sise-500 tracking-widest font-semibold uppercase">{subtitle}</p>}
+                        {subtitle && <p className="text-[10px] md:text-[11px] text-sise-500 tracking-widest font-semibold uppercase">{subtitle}</p>}
                     </div>
                 </div>
                 {children}
@@ -2460,12 +2535,12 @@
                                 <div>
                                     <label className="block text-xs font-medium text-slate-600 mb-1">会員名 *</label>
                                     <input type="text" value={newManualMember.name} onChange={e => setNewManualMember(p => ({...p, name: e.target.value}))}
-                                        placeholder="例: 山田太郎" className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:border-violet-400 outline-none" />
+                                        placeholder="例: 山田太郎" className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm outline-none" />
                                 </div>
                                 <div>
                                     <label className="block text-xs font-medium text-slate-600 mb-1">電話番号</label>
                                     <input type="tel" value={newManualMember.phone} onChange={e => setNewManualMember(p => ({...p, phone: e.target.value}))}
-                                        placeholder="090-xxxx-xxxx" className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:border-violet-400 outline-none" />
+                                        placeholder="090-xxxx-xxxx" className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm outline-none" />
                                 </div>
                                 <div>
                                     <label className="block text-xs font-medium text-slate-600 mb-1">決済方法 *</label>
@@ -2482,22 +2557,22 @@
                                 <div>
                                     <label className="block text-xs font-medium text-slate-600 mb-1">プラン名</label>
                                     <input type="text" value={newManualMember.planName} onChange={e => setNewManualMember(p => ({...p, planName: e.target.value}))}
-                                        placeholder="例: 月4回プラン" className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:border-violet-400 outline-none" />
+                                        placeholder="例: 月4回プラン" className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm outline-none" />
                                 </div>
                                 <div>
                                     <label className="block text-xs font-medium text-slate-600 mb-1">月額料金（円）</label>
                                     <input type="number" value={newManualMember.monthlyPrice} onChange={e => setNewManualMember(p => ({...p, monthlyPrice: e.target.value}))}
-                                        placeholder="10000" className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:border-violet-400 outline-none" />
+                                        placeholder="10000" className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm outline-none" />
                                 </div>
                                 <div>
                                     <label className="block text-xs font-medium text-slate-600 mb-1">入会日</label>
                                     <input type="date" value={newManualMember.startDate} onChange={e => setNewManualMember(p => ({...p, startDate: e.target.value}))}
-                                        className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:border-violet-400 outline-none" />
+                                        className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm outline-none" />
                                 </div>
                                 <div className="md:col-span-2">
                                     <label className="block text-xs font-medium text-slate-600 mb-1">備考</label>
                                     <input type="text" value={newManualMember.notes} onChange={e => setNewManualMember(p => ({...p, notes: e.target.value}))}
-                                        placeholder="メモ" className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:border-violet-400 outline-none" />
+                                        placeholder="メモ" className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm outline-none" />
                                 </div>
                             </div>
                             <div className="flex justify-end gap-2 mt-3">
@@ -2522,10 +2597,10 @@
                         <div className="relative flex-1 min-w-[140px]">
                             <Icon name="search" size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                             <input type="text" value={manualSearch} onChange={e => setManualSearch(e.target.value)}
-                                placeholder="名前・電話番号で検索..." className="w-full pl-8 pr-3 py-2 border border-slate-200 rounded-xl text-sm focus:border-violet-400 outline-none bg-white/80" />
+                                placeholder="名前・電話番号で検索..." className="w-full pl-8 pr-3 py-2 border border-slate-200 rounded-xl text-sm outline-none bg-white/80" />
                         </div>
                         <select value={manualFilter} onChange={e => setManualFilter(e.target.value)}
-                            className="px-3 py-2 border border-slate-200 rounded-xl text-sm focus:border-violet-400 outline-none bg-white/80">
+                            className="px-3 py-2 border border-slate-200 rounded-xl text-sm outline-none bg-white/80">
                             <option value="all">全て</option>
                             <option value="ACTIVE">アクティブ</option>
                             <option value="CANCELED">退会済み</option>
@@ -3397,13 +3472,13 @@
                     </div>
 
                     {/* タブ切り替え */}
-                    <div className="flex gap-1 bg-slate-100/80 rounded-xl p-1">
-                        <button onClick={() => setActiveTab('tickets')} className={`flex-1 py-2.5 rounded-lg text-sm font-semibold transition-all ${activeTab === 'tickets' ? 'bg-white text-sise-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
-                            <Icon name="users" size={15} className="inline mr-1.5 -mt-0.5" />
+                    <div className="flex gap-1 bg-slate-100 dark:bg-slate-800/60 rounded-2xl p-1.5">
+                        <button onClick={() => setActiveTab('tickets')} className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 ${activeTab === 'tickets' ? 'bg-white dark:bg-sise-900/60 text-sise-700 dark:text-sise-400 shadow-md shadow-sise-500/10' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 hover:bg-white/50 active:scale-95'}`}>
+                            <Icon name="users" size={15} />
                             購入者一覧
                         </button>
-                        <button onClick={() => setActiveTab('plans')} className={`flex-1 py-2.5 rounded-lg text-sm font-semibold transition-all ${activeTab === 'plans' ? 'bg-white text-sise-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
-                            <Icon name="package" size={15} className="inline mr-1.5 -mt-0.5" />
+                        <button onClick={() => setActiveTab('plans')} className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 ${activeTab === 'plans' ? 'bg-white dark:bg-sise-900/60 text-sise-700 dark:text-sise-400 shadow-md shadow-sise-500/10' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 hover:bg-white/50 active:scale-95'}`}>
+                            <Icon name="package" size={15} />
                             回数券プラン
                         </button>
                     </div>
@@ -4136,7 +4211,7 @@
                                                 <input type="number" min="0" autoFocus defaultValue={member.carryover}
                                                     onBlur={(e) => { setCarryover(member.id, periodKey, parseInt(e.target.value) || 0); setEditingCarryover(null); }}
                                                     onKeyDown={(e) => { if (e.key === 'Enter') { setCarryover(member.id, periodKey, parseInt(e.target.value) || 0); setEditingCarryover(null); } }}
-                                                    className="w-14 px-2 py-1 border border-violet-300 rounded-lg text-sm text-center outline-none focus:border-violet-500" />
+                                                    className="w-14 px-2 py-1 border border-violet-300 rounded-lg text-sm text-center outline-none" />
                                                 <span className="text-[10px] text-slate-400">回</span>
                                             </div>
                                         ) : (
@@ -4435,6 +4510,841 @@
         };
 
         // ========================================
+        // マーケティングデータ連携
+        // ========================================
+
+        // HPBデータのlocalStorage管理
+        const HPB_STORAGE_KEY = 'sise_hpb_data';
+
+        const useMarketingData = () => {
+            const [metaConfig, setMetaConfig] = useState({ configured: false, loading: true });
+            const [tiktokConfig, setTiktokConfig] = useState({ configured: false, loading: true });
+            const [metaData, setMetaData] = useState({ campaigns: [], insights: null, loading: false, error: null });
+            const [tiktokData, setTiktokData] = useState({ campaigns: [], insights: null, loading: false, error: null });
+            const [hpbData, setHpbData] = useState(() => {
+                try {
+                    const saved = localStorage.getItem(HPB_STORAGE_KEY);
+                    return saved ? JSON.parse(saved) : { monthly: [], settings: { avgViews: 300, avgBookingRate: 2.5 } };
+                } catch { return { monthly: [], settings: { avgViews: 300, avgBookingRate: 2.5 } }; }
+            });
+
+            // HPBデータの保存
+            const saveHpbData = useCallback((data) => {
+                setHpbData(data);
+                localStorage.setItem(HPB_STORAGE_KEY, JSON.stringify(data));
+            }, []);
+
+            // HPB月次データ追加/更新
+            const upsertHpbMonth = useCallback((entry) => {
+                setHpbData(prev => {
+                    const existing = prev.monthly.findIndex(m => m.yearMonth === entry.yearMonth);
+                    const updated = { ...prev };
+                    if (existing >= 0) {
+                        updated.monthly = [...prev.monthly];
+                        updated.monthly[existing] = { ...prev.monthly[existing], ...entry };
+                    } else {
+                        updated.monthly = [...prev.monthly, entry].sort((a, b) => a.yearMonth.localeCompare(b.yearMonth));
+                    }
+                    localStorage.setItem(HPB_STORAGE_KEY, JSON.stringify(updated));
+                    return updated;
+                });
+            }, []);
+
+            // HPB設定更新
+            const updateHpbSettings = useCallback((settings) => {
+                setHpbData(prev => {
+                    const updated = { ...prev, settings: { ...prev.settings, ...settings } };
+                    localStorage.setItem(HPB_STORAGE_KEY, JSON.stringify(updated));
+                    return updated;
+                });
+            }, []);
+
+            // HPBデータ削除
+            const deleteHpbMonth = useCallback((yearMonth) => {
+                setHpbData(prev => {
+                    const updated = { ...prev, monthly: prev.monthly.filter(m => m.yearMonth !== yearMonth) };
+                    localStorage.setItem(HPB_STORAGE_KEY, JSON.stringify(updated));
+                    return updated;
+                });
+            }, []);
+
+            // Meta / TikTok設定取得
+            useEffect(() => {
+                (async () => {
+                    try {
+                        const res = await fetch(`${META_PROXY_BASE}/config`);
+                        if (res.ok) setMetaConfig({ ...(await res.json()), loading: false });
+                        else setMetaConfig({ configured: false, loading: false });
+                    } catch { setMetaConfig({ configured: false, loading: false }); }
+                })();
+                (async () => {
+                    try {
+                        const res = await fetch(`${TIKTOK_PROXY_BASE}/config`);
+                        if (res.ok) setTiktokConfig({ ...(await res.json()), loading: false });
+                        else setTiktokConfig({ configured: false, loading: false });
+                    } catch { setTiktokConfig({ configured: false, loading: false }); }
+                })();
+            }, []);
+
+            // Meta広告データ取得
+            const fetchMetaInsights = useCallback(async (datePreset = 'last_30d') => {
+                if (!metaConfig.configured) return;
+                setMetaData(prev => ({ ...prev, loading: true, error: null }));
+                try {
+                    // キャンペーン一覧
+                    const campRes = await fetch(`${META_PROXY_BASE}/campaigns?fields=name,status,objective,daily_budget,lifetime_budget&limit=50`);
+                    const campData = campRes.ok ? await campRes.json() : { data: [] };
+
+                    // インサイト取得
+                    const insightRes = await fetch(
+                        `${META_PROXY_BASE}/insights?fields=impressions,clicks,ctr,spend,actions,cost_per_action_type,cpc,cpm,reach,frequency&date_preset=${datePreset}&level=account`
+                    );
+                    const insightData = insightRes.ok ? await insightRes.json() : { data: [] };
+
+                    // キャンペーン別インサイト
+                    const campInsightRes = await fetch(
+                        `${META_PROXY_BASE}/insights?fields=campaign_name,impressions,clicks,ctr,spend,actions,cost_per_action_type&date_preset=${datePreset}&level=campaign&limit=50`
+                    );
+                    const campInsightData = campInsightRes.ok ? await campInsightRes.json() : { data: [] };
+
+                    setMetaData({
+                        campaigns: campData.data || [],
+                        insights: (insightData.data || [])[0] || null,
+                        campaignInsights: campInsightData.data || [],
+                        loading: false,
+                        error: null
+                    });
+                } catch (error) {
+                    setMetaData(prev => ({ ...prev, loading: false, error: error.message }));
+                }
+            }, [metaConfig.configured]);
+
+            // TikTok広告データ取得
+            const fetchTiktokInsights = useCallback(async (startDate, endDate) => {
+                if (!tiktokConfig.configured) return;
+                setTiktokData(prev => ({ ...prev, loading: true, error: null }));
+                try {
+                    const now = new Date();
+                    const start = startDate || new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
+                    const end = endDate || now.toISOString().split('T')[0];
+
+                    // キャンペーン一覧
+                    const campRes = await fetch(`${TIKTOK_PROXY_BASE}/campaign/get`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ page_size: 100 })
+                    });
+                    const campData = campRes.ok ? await campRes.json() : { data: { list: [] } };
+
+                    // レポート取得
+                    const reportRes = await fetch(`${TIKTOK_PROXY_BASE}/report/integrated/get`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            report_type: 'BASIC',
+                            data_level: 'AUCTION_ADVERTISER',
+                            dimensions: ['stat_time_day'],
+                            metrics: ['spend', 'impressions', 'clicks', 'ctr', 'cpc', 'cpm', 'reach', 'conversion', 'cost_per_conversion', 'video_play_actions', 'video_watched_2s', 'video_watched_6s'],
+                            start_date: start,
+                            end_date: end
+                        })
+                    });
+                    const reportData = reportRes.ok ? await reportRes.json() : { data: { list: [] } };
+
+                    setTiktokData({
+                        campaigns: campData.data?.list || [],
+                        insights: reportData.data?.list || [],
+                        loading: false,
+                        error: null
+                    });
+                } catch (error) {
+                    setTiktokData(prev => ({ ...prev, loading: false, error: error.message }));
+                }
+            }, [tiktokConfig.configured]);
+
+            return {
+                metaConfig, tiktokConfig,
+                metaData, tiktokData, hpbData,
+                fetchMetaInsights, fetchTiktokInsights,
+                upsertHpbMonth, updateHpbSettings, deleteHpbMonth, saveHpbData
+            };
+        };
+
+        // ========================================
+        // マーケティングビュー
+        // ========================================
+
+        const MarketingView = ({ marketingHook }) => {
+            const {
+                metaConfig, tiktokConfig,
+                metaData, tiktokData, hpbData,
+                fetchMetaInsights, fetchTiktokInsights,
+                upsertHpbMonth, updateHpbSettings, deleteHpbMonth
+            } = marketingHook;
+
+            const [activeTab, setActiveTab] = useState('hpb');
+            const [metaDatePreset, setMetaDatePreset] = useState('last_30d');
+
+            // HPBフォーム
+            const [hpbForm, setHpbForm] = useState({
+                yearMonth: new Date().toISOString().slice(0, 7),
+                pageViews: '', bookings: '', reviews: '', favorites: '', blogViews: '', coupons: ''
+            });
+            const [hpbEditingMonth, setHpbEditingMonth] = useState(null);
+
+            // Meta/TikTokデータ自動取得
+            useEffect(() => {
+                if (activeTab === 'meta' && metaConfig.configured && !metaData.insights && !metaData.loading) {
+                    fetchMetaInsights(metaDatePreset);
+                }
+            }, [activeTab, metaConfig.configured]);
+
+            useEffect(() => {
+                if (activeTab === 'tiktok' && tiktokConfig.configured && !tiktokData.insights && !tiktokData.loading) {
+                    fetchTiktokInsights();
+                }
+            }, [activeTab, tiktokConfig.configured]);
+
+            const tabs = [
+                { id: 'hpb', label: 'ホットペッパー', icon: 'globe' },
+                { id: 'meta', label: 'Meta広告', icon: 'facebook' },
+                { id: 'tiktok', label: 'TikTok広告', icon: 'video' },
+            ];
+
+            // ====== HPBセクション ======
+            const renderHpbSection = () => {
+                const settings = hpbData.settings || { avgViews: 300, avgBookingRate: 2.5 };
+                const monthlyData = hpbData.monthly || [];
+
+                // 最新月のデータ
+                const latestMonth = monthlyData.length > 0 ? monthlyData[monthlyData.length - 1] : null;
+                const prevMonth = monthlyData.length > 1 ? monthlyData[monthlyData.length - 2] : null;
+
+                const bookingRate = latestMonth && latestMonth.pageViews > 0
+                    ? (latestMonth.bookings / latestMonth.pageViews * 100)
+                    : 0;
+                const viewsDiff = latestMonth ? latestMonth.pageViews - settings.avgViews : 0;
+                const rateDiff = bookingRate - settings.avgBookingRate;
+
+                const handleHpbSubmit = () => {
+                    if (!hpbForm.yearMonth) return;
+                    upsertHpbMonth({
+                        yearMonth: hpbForm.yearMonth,
+                        pageViews: parseInt(hpbForm.pageViews) || 0,
+                        bookings: parseInt(hpbForm.bookings) || 0,
+                        reviews: parseInt(hpbForm.reviews) || 0,
+                        favorites: parseInt(hpbForm.favorites) || 0,
+                        blogViews: parseInt(hpbForm.blogViews) || 0,
+                        coupons: parseInt(hpbForm.coupons) || 0,
+                    });
+                    setHpbForm({ yearMonth: hpbForm.yearMonth, pageViews: '', bookings: '', reviews: '', favorites: '', blogViews: '', coupons: '' });
+                    setHpbEditingMonth(null);
+                };
+
+                const startEdit = (m) => {
+                    setHpbEditingMonth(m.yearMonth);
+                    setHpbForm({
+                        yearMonth: m.yearMonth,
+                        pageViews: m.pageViews?.toString() || '',
+                        bookings: m.bookings?.toString() || '',
+                        reviews: m.reviews?.toString() || '',
+                        favorites: m.favorites?.toString() || '',
+                        blogViews: m.blogViews?.toString() || '',
+                        coupons: m.coupons?.toString() || '',
+                    });
+                };
+
+                return (
+                    <div className="space-y-6">
+                        {/* KPI概要 */}
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                            <KpiCard
+                                title="月間PV数"
+                                value={latestMonth ? latestMonth.pageViews.toLocaleString() : '-'}
+                                subValue={latestMonth ? `業界平均比 ${viewsDiff >= 0 ? '+' : ''}${viewsDiff}` : ''}
+                                icon="eye"
+                                trend={viewsDiff >= 0 ? 'up' : 'down'}
+                            />
+                            <KpiCard
+                                title="予約獲得数"
+                                value={latestMonth ? latestMonth.bookings.toLocaleString() : '-'}
+                                subValue={prevMonth ? `前月: ${prevMonth.bookings}件` : ''}
+                                icon="calendar-check"
+                                trend={latestMonth && prevMonth && latestMonth.bookings >= prevMonth.bookings ? 'up' : 'down'}
+                            />
+                            <KpiCard
+                                title="予約率"
+                                value={latestMonth ? `${bookingRate.toFixed(1)}%` : '-'}
+                                subValue={`業界平均: ${settings.avgBookingRate}%（差: ${rateDiff >= 0 ? '+' : ''}${rateDiff.toFixed(1)}%）`}
+                                icon="target"
+                                trend={rateDiff >= 0 ? 'up' : 'down'}
+                            />
+                            <KpiCard
+                                title="口コミ数"
+                                value={latestMonth ? latestMonth.reviews?.toLocaleString() || '0' : '-'}
+                                subValue={prevMonth ? `前月: ${prevMonth.reviews || 0}件` : ''}
+                                icon="message-circle"
+                                trend={latestMonth && prevMonth && (latestMonth.reviews || 0) >= (prevMonth.reviews || 0) ? 'up' : 'down'}
+                            />
+                        </div>
+
+                        {/* 業界平均設定 */}
+                        <Card>
+                            <div className="flex items-center gap-2 mb-3">
+                                <Icon name="settings" size={16} />
+                                <h3 className="font-semibold text-sm">比較基準設定（業界平均）</h3>
+                            </div>
+                            <div className="flex flex-wrap gap-4">
+                                <label className="flex items-center gap-2 text-sm">
+                                    平均PV数:
+                                    <input type="number" value={settings.avgViews}
+                                        onChange={(e) => updateHpbSettings({ avgViews: parseInt(e.target.value) || 0 })}
+                                        className="w-24 px-2 py-1 border rounded text-sm dark:bg-gray-700 dark:border-gray-600"
+                                    />
+                                </label>
+                                <label className="flex items-center gap-2 text-sm">
+                                    平均予約率(%):
+                                    <input type="number" step="0.1" value={settings.avgBookingRate}
+                                        onChange={(e) => updateHpbSettings({ avgBookingRate: parseFloat(e.target.value) || 0 })}
+                                        className="w-24 px-2 py-1 border rounded text-sm dark:bg-gray-700 dark:border-gray-600"
+                                    />
+                                </label>
+                            </div>
+                        </Card>
+
+                        {/* データ入力フォーム */}
+                        <Card>
+                            <div className="flex items-center gap-2 mb-4">
+                                <Icon name="plus-circle" size={16} />
+                                <h3 className="font-semibold text-sm">{hpbEditingMonth ? `${hpbEditingMonth} を編集` : '月次データ入力'}</h3>
+                            </div>
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+                                <div>
+                                    <label className="text-xs text-gray-500 dark:text-gray-400">対象月</label>
+                                    <input type="month" value={hpbForm.yearMonth}
+                                        onChange={(e) => setHpbForm(prev => ({ ...prev, yearMonth: e.target.value }))}
+                                        className="w-full px-2 py-1.5 border rounded text-sm dark:bg-gray-700 dark:border-gray-600"
+                                        disabled={!!hpbEditingMonth}
+                                    />
+                                </div>
+                                <div>
+                                    <label className="text-xs text-gray-500 dark:text-gray-400">PV数</label>
+                                    <input type="number" placeholder="例: 350" value={hpbForm.pageViews}
+                                        onChange={(e) => setHpbForm(prev => ({ ...prev, pageViews: e.target.value }))}
+                                        className="w-full px-2 py-1.5 border rounded text-sm dark:bg-gray-700 dark:border-gray-600"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="text-xs text-gray-500 dark:text-gray-400">予約数</label>
+                                    <input type="number" placeholder="例: 12" value={hpbForm.bookings}
+                                        onChange={(e) => setHpbForm(prev => ({ ...prev, bookings: e.target.value }))}
+                                        className="w-full px-2 py-1.5 border rounded text-sm dark:bg-gray-700 dark:border-gray-600"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="text-xs text-gray-500 dark:text-gray-400">口コミ数</label>
+                                    <input type="number" placeholder="例: 5" value={hpbForm.reviews}
+                                        onChange={(e) => setHpbForm(prev => ({ ...prev, reviews: e.target.value }))}
+                                        className="w-full px-2 py-1.5 border rounded text-sm dark:bg-gray-700 dark:border-gray-600"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="text-xs text-gray-500 dark:text-gray-400">お気に入り登録数</label>
+                                    <input type="number" placeholder="例: 20" value={hpbForm.favorites}
+                                        onChange={(e) => setHpbForm(prev => ({ ...prev, favorites: e.target.value }))}
+                                        className="w-full px-2 py-1.5 border rounded text-sm dark:bg-gray-700 dark:border-gray-600"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="text-xs text-gray-500 dark:text-gray-400">ブログPV</label>
+                                    <input type="number" placeholder="例: 100" value={hpbForm.blogViews}
+                                        onChange={(e) => setHpbForm(prev => ({ ...prev, blogViews: e.target.value }))}
+                                        className="w-full px-2 py-1.5 border rounded text-sm dark:bg-gray-700 dark:border-gray-600"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="text-xs text-gray-500 dark:text-gray-400">クーポン利用数</label>
+                                    <input type="number" placeholder="例: 8" value={hpbForm.coupons}
+                                        onChange={(e) => setHpbForm(prev => ({ ...prev, coupons: e.target.value }))}
+                                        className="w-full px-2 py-1.5 border rounded text-sm dark:bg-gray-700 dark:border-gray-600"
+                                    />
+                                </div>
+                                <div className="flex items-end gap-2">
+                                    <button onClick={handleHpbSubmit}
+                                        className="px-4 py-1.5 bg-sise-600 text-white rounded text-sm hover:bg-sise-700 transition-colors">
+                                        {hpbEditingMonth ? '更新' : '登録'}
+                                    </button>
+                                    {hpbEditingMonth && (
+                                        <button onClick={() => { setHpbEditingMonth(null); setHpbForm({ yearMonth: new Date().toISOString().slice(0, 7), pageViews: '', bookings: '', reviews: '', favorites: '', blogViews: '', coupons: '' }); }}
+                                            className="px-4 py-1.5 border rounded text-sm hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+                                            キャンセル
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+                        </Card>
+
+                        {/* トレンドテーブル */}
+                        {monthlyData.length > 0 && (
+                            <Card>
+                                <SectionHeader icon="bar-chart-3" title="月次推移" subtitle="ホットペッパービューティー" />
+                                <div className="overflow-x-auto">
+                                    <table className="w-full text-sm">
+                                        <thead>
+                                            <tr className="border-b dark:border-gray-700">
+                                                <th className="text-left py-2 px-3">月</th>
+                                                <th className="text-right py-2 px-3">PV数</th>
+                                                <th className="text-right py-2 px-3">予約数</th>
+                                                <th className="text-right py-2 px-3">予約率</th>
+                                                <th className="text-right py-2 px-3">口コミ</th>
+                                                <th className="text-right py-2 px-3">お気に入り</th>
+                                                <th className="text-right py-2 px-3">ブログPV</th>
+                                                <th className="text-right py-2 px-3">クーポン</th>
+                                                <th className="text-center py-2 px-3">操作</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {[...monthlyData].reverse().map((m) => {
+                                                const rate = m.pageViews > 0 ? (m.bookings / m.pageViews * 100) : 0;
+                                                const rateColor = rate >= settings.avgBookingRate ? 'text-green-600' : 'text-red-500';
+                                                const pvColor = m.pageViews >= settings.avgViews ? 'text-green-600' : 'text-red-500';
+                                                return (
+                                                    <tr key={m.yearMonth} className="border-b dark:border-gray-700 table-row-hover">
+                                                        <td className="py-2 px-3 font-medium">{m.yearMonth}</td>
+                                                        <td className={`text-right py-2 px-3 font-mono ${pvColor}`}>{m.pageViews?.toLocaleString()}</td>
+                                                        <td className="text-right py-2 px-3 font-mono">{m.bookings?.toLocaleString()}</td>
+                                                        <td className={`text-right py-2 px-3 font-mono ${rateColor}`}>{rate.toFixed(1)}%</td>
+                                                        <td className="text-right py-2 px-3 font-mono">{m.reviews || 0}</td>
+                                                        <td className="text-right py-2 px-3 font-mono">{m.favorites || 0}</td>
+                                                        <td className="text-right py-2 px-3 font-mono">{m.blogViews || 0}</td>
+                                                        <td className="text-right py-2 px-3 font-mono">{m.coupons || 0}</td>
+                                                        <td className="text-center py-2 px-3">
+                                                            <div className="flex gap-1 justify-center">
+                                                                <button onClick={() => startEdit(m)} className="p-1 text-sise-600 hover:bg-sise-50 rounded dark:hover:bg-gray-700" title="編集">
+                                                                    <Icon name="pencil" size={14} />
+                                                                </button>
+                                                                <button onClick={() => { if (confirm(`${m.yearMonth}のデータを削除しますか？`)) deleteHpbMonth(m.yearMonth); }}
+                                                                    className="p-1 text-red-500 hover:bg-red-50 rounded dark:hover:bg-gray-700" title="削除">
+                                                                    <Icon name="trash-2" size={14} />
+                                                                </button>
+                                                            </div>
+                                                        </td>
+                                                    </tr>
+                                                );
+                                            })}
+                                        </tbody>
+                                    </table>
+                                </div>
+
+                                {/* 最適化提案 */}
+                                {latestMonth && (
+                                    <div className="mt-4 p-4 bg-sise-50 dark:bg-gray-800 rounded-lg">
+                                        <h4 className="font-semibold text-sm mb-2 flex items-center gap-1">
+                                            <Icon name="lightbulb" size={14} /> 最適化提案
+                                        </h4>
+                                        <ul className="text-sm space-y-1 text-gray-700 dark:text-gray-300">
+                                            {bookingRate < settings.avgBookingRate && (
+                                                <li>• 予約率が平均を下回っています → メニュー・クーポン構成の見直し、写真の品質向上を検討</li>
+                                            )}
+                                            {latestMonth.pageViews < settings.avgViews && (
+                                                <li>• PV数が平均を下回っています → ブログ更新頻度UP、口コミ返信の充実を検討</li>
+                                            )}
+                                            {(latestMonth.reviews || 0) < 3 && (
+                                                <li>• 口コミ数が少なめです → 来店後の口コミ依頼フローを強化しましょう</li>
+                                            )}
+                                            {bookingRate >= settings.avgBookingRate && latestMonth.pageViews >= settings.avgViews && (
+                                                <li>• 良好なパフォーマンスです！現在の施策を継続しつつ、単価UPメニューの検討を</li>
+                                            )}
+                                        </ul>
+                                    </div>
+                                )}
+                            </Card>
+                        )}
+                    </div>
+                );
+            };
+
+            // ====== Meta広告セクション ======
+            const renderMetaSection = () => {
+                if (!metaConfig.configured) {
+                    return (
+                        <Card>
+                            <div className="text-center py-8">
+                                <Icon name="alert-circle" size={48} className="mx-auto text-gray-400 mb-4" />
+                                <h3 className="text-lg font-semibold mb-2">Meta広告APIが未設定です</h3>
+                                <p className="text-sm text-gray-500 mb-4">
+                                    Vercelの環境変数に以下を設定してください:
+                                </p>
+                                <div className="bg-gray-100 dark:bg-gray-800 rounded p-3 inline-block text-left text-sm font-mono">
+                                    <div>META_ACCESS_TOKEN=xxxxx</div>
+                                    <div>META_AD_ACCOUNT_ID=xxxxx</div>
+                                </div>
+                            </div>
+                        </Card>
+                    );
+                }
+
+                const insights = metaData.insights;
+                const spend = insights ? parseFloat(insights.spend || 0) : 0;
+                const impressions = insights ? parseInt(insights.impressions || 0) : 0;
+                const clicks = insights ? parseInt(insights.clicks || 0) : 0;
+                const ctr = insights ? parseFloat(insights.ctr || 0) : 0;
+                const conversions = insights?.actions?.find(a => a.action_type === 'offsite_conversion.fb_pixel_purchase' || a.action_type === 'lead')?.value || 0;
+                const cpa = conversions > 0 ? spend / conversions : 0;
+                const roas = insights?.actions?.find(a => a.action_type === 'offsite_conversion.fb_pixel_purchase')?.value
+                    ? (parseFloat(insights.actions.find(a => a.action_type === 'offsite_conversion.fb_pixel_purchase').value) / spend * 100)
+                    : 0;
+
+                return (
+                    <div className="space-y-6">
+                        {/* 期間選択 */}
+                        <div className="flex items-center gap-3">
+                            <select value={metaDatePreset} onChange={(e) => { setMetaDatePreset(e.target.value); fetchMetaInsights(e.target.value); }}
+                                className="px-3 py-1.5 border rounded text-sm dark:bg-gray-700 dark:border-gray-600">
+                                <option value="today">今日</option>
+                                <option value="yesterday">昨日</option>
+                                <option value="last_7d">過去7日</option>
+                                <option value="last_14d">過去14日</option>
+                                <option value="last_30d">過去30日</option>
+                                <option value="this_month">今月</option>
+                                <option value="last_month">先月</option>
+                                <option value="last_90d">過去90日</option>
+                            </select>
+                            <button onClick={() => fetchMetaInsights(metaDatePreset)}
+                                className="px-3 py-1.5 bg-sise-600 text-white rounded text-sm hover:bg-sise-700 transition-colors flex items-center gap-1"
+                                disabled={metaData.loading}>
+                                <Icon name="refresh-cw" size={14} className={metaData.loading ? 'animate-spin' : ''} />
+                                更新
+                            </button>
+                        </div>
+
+                        {metaData.error && (
+                            <div className="bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 p-3 rounded text-sm">
+                                {metaData.error}
+                            </div>
+                        )}
+
+                        {metaData.loading ? (
+                            <div className="text-center py-8 text-gray-500">
+                                <Icon name="loader" size={24} className="animate-spin mx-auto mb-2" />
+                                データ取得中...
+                            </div>
+                        ) : insights ? (
+                            <>
+                                {/* KPIカード */}
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                    <KpiCard title="広告費" value={`¥${Math.round(spend).toLocaleString()}`} icon="credit-card" subValue="合計費用" />
+                                    <KpiCard title="インプレッション" value={impressions.toLocaleString()} icon="eye" subValue={`リーチ: ${parseInt(insights.reach || 0).toLocaleString()}`} />
+                                    <KpiCard title="クリック数" value={clicks.toLocaleString()} icon="mouse-pointer-click" subValue={`CTR: ${ctr.toFixed(2)}%`} trend={ctr >= 1.0 ? 'up' : 'down'} />
+                                    <KpiCard title="CPA" value={cpa > 0 ? `¥${Math.round(cpa).toLocaleString()}` : '-'} icon="target" subValue={`CV数: ${conversions}`} />
+                                </div>
+
+                                {/* 詳細メトリクス */}
+                                <Card>
+                                    <SectionHeader icon="bar-chart-3" title="詳細指標" subtitle="Meta広告パフォーマンス" />
+                                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
+                                        <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded">
+                                            <div className="text-gray-500 text-xs">CPC (クリック単価)</div>
+                                            <div className="text-lg font-bold">¥{Math.round(parseFloat(insights.cpc || 0)).toLocaleString()}</div>
+                                        </div>
+                                        <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded">
+                                            <div className="text-gray-500 text-xs">CPM (千回表示単価)</div>
+                                            <div className="text-lg font-bold">¥{Math.round(parseFloat(insights.cpm || 0)).toLocaleString()}</div>
+                                        </div>
+                                        <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded">
+                                            <div className="text-gray-500 text-xs">フリクエンシー</div>
+                                            <div className="text-lg font-bold">{parseFloat(insights.frequency || 0).toFixed(1)}</div>
+                                        </div>
+                                    </div>
+                                </Card>
+
+                                {/* キャンペーン別パフォーマンス */}
+                                {metaData.campaignInsights && metaData.campaignInsights.length > 0 && (
+                                    <Card>
+                                        <SectionHeader icon="layers" title="キャンペーン別パフォーマンス" />
+                                        <div className="overflow-x-auto">
+                                            <table className="w-full text-sm">
+                                                <thead>
+                                                    <tr className="border-b dark:border-gray-700">
+                                                        <th className="text-left py-2 px-3">キャンペーン</th>
+                                                        <th className="text-right py-2 px-3">費用</th>
+                                                        <th className="text-right py-2 px-3">表示回数</th>
+                                                        <th className="text-right py-2 px-3">クリック</th>
+                                                        <th className="text-right py-2 px-3">CTR</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {metaData.campaignInsights.map((ci, idx) => (
+                                                        <tr key={idx} className="border-b dark:border-gray-700 table-row-hover">
+                                                            <td className="py-2 px-3">{ci.campaign_name}</td>
+                                                            <td className="text-right py-2 px-3 font-mono">¥{Math.round(parseFloat(ci.spend || 0)).toLocaleString()}</td>
+                                                            <td className="text-right py-2 px-3 font-mono">{parseInt(ci.impressions || 0).toLocaleString()}</td>
+                                                            <td className="text-right py-2 px-3 font-mono">{parseInt(ci.clicks || 0).toLocaleString()}</td>
+                                                            <td className="text-right py-2 px-3 font-mono">{parseFloat(ci.ctr || 0).toFixed(2)}%</td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </Card>
+                                )}
+
+                                {/* 最適化提案 */}
+                                <Card>
+                                    <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+                                        <h4 className="font-semibold text-sm mb-2 flex items-center gap-1">
+                                            <Icon name="lightbulb" size={14} /> Meta広告 最適化提案
+                                        </h4>
+                                        <ul className="text-sm space-y-1 text-gray-700 dark:text-gray-300">
+                                            {ctr < 1.0 && <li>• CTRが1%未満です → クリエイティブの見直し（画像/動画の品質、コピー文）を検討</li>}
+                                            {parseFloat(insights.frequency || 0) > 3 && <li>• フリクエンシーが高いです → オーディエンスの拡大またはクリエイティブのローテーションを検討</li>}
+                                            {cpa > 5000 && <li>• CPAが¥5,000を超えています → ターゲティングの絞り込みまたはLPの最適化を検討</li>}
+                                            {ctr >= 1.0 && parseFloat(insights.frequency || 0) <= 3 && <li>• 良好なパフォーマンスです！予算増額でスケールできる可能性があります</li>}
+                                        </ul>
+                                    </div>
+                                </Card>
+                            </>
+                        ) : (
+                            <Card>
+                                <div className="text-center py-8 text-gray-500">
+                                    <Icon name="bar-chart-3" size={48} className="mx-auto mb-4 text-gray-300" />
+                                    <p>「更新」ボタンでデータを取得してください</p>
+                                </div>
+                            </Card>
+                        )}
+                    </div>
+                );
+            };
+
+            // ====== TikTok広告セクション ======
+            const renderTiktokSection = () => {
+                if (!tiktokConfig.configured) {
+                    return (
+                        <Card>
+                            <div className="text-center py-8">
+                                <Icon name="alert-circle" size={48} className="mx-auto text-gray-400 mb-4" />
+                                <h3 className="text-lg font-semibold mb-2">TikTok広告APIが未設定です</h3>
+                                <p className="text-sm text-gray-500 mb-4">
+                                    Vercelの環境変数に以下を設定してください:
+                                </p>
+                                <div className="bg-gray-100 dark:bg-gray-800 rounded p-3 inline-block text-left text-sm font-mono">
+                                    <div>TIKTOK_ACCESS_TOKEN=xxxxx</div>
+                                    <div>TIKTOK_ADVERTISER_ID=xxxxx</div>
+                                </div>
+                            </div>
+                        </Card>
+                    );
+                }
+
+                const dailyInsights = tiktokData.insights || [];
+                // 集計
+                const totals = dailyInsights.reduce((acc, day) => {
+                    const m = day.metrics || {};
+                    acc.spend += parseFloat(m.spend || 0);
+                    acc.impressions += parseInt(m.impressions || 0);
+                    acc.clicks += parseInt(m.clicks || 0);
+                    acc.conversions += parseInt(m.conversion || 0);
+                    acc.videoViews += parseInt(m.video_play_actions || 0);
+                    acc.video2s += parseInt(m.video_watched_2s || 0);
+                    acc.video6s += parseInt(m.video_watched_6s || 0);
+                    acc.reach += parseInt(m.reach || 0);
+                    return acc;
+                }, { spend: 0, impressions: 0, clicks: 0, conversions: 0, videoViews: 0, video2s: 0, video6s: 0, reach: 0 });
+
+                const ctr = totals.impressions > 0 ? (totals.clicks / totals.impressions * 100) : 0;
+                const cpa = totals.conversions > 0 ? totals.spend / totals.conversions : 0;
+                const videoRetention = totals.videoViews > 0 ? (totals.video6s / totals.videoViews * 100) : 0;
+
+                return (
+                    <div className="space-y-6">
+                        {/* 操作バー */}
+                        <div className="flex items-center gap-3">
+                            <button onClick={() => fetchTiktokInsights()}
+                                className="px-3 py-1.5 bg-sise-600 text-white rounded text-sm hover:bg-sise-700 transition-colors flex items-center gap-1"
+                                disabled={tiktokData.loading}>
+                                <Icon name="refresh-cw" size={14} className={tiktokData.loading ? 'animate-spin' : ''} />
+                                今月のデータ取得
+                            </button>
+                        </div>
+
+                        {tiktokData.error && (
+                            <div className="bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 p-3 rounded text-sm">
+                                {tiktokData.error}
+                            </div>
+                        )}
+
+                        {tiktokData.loading ? (
+                            <div className="text-center py-8 text-gray-500">
+                                <Icon name="loader" size={24} className="animate-spin mx-auto mb-2" />
+                                データ取得中...
+                            </div>
+                        ) : dailyInsights.length > 0 ? (
+                            <>
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                    <KpiCard title="広告費" value={`¥${Math.round(totals.spend).toLocaleString()}`} icon="credit-card" subValue="合計費用" />
+                                    <KpiCard title="インプレッション" value={totals.impressions.toLocaleString()} icon="eye" subValue={`リーチ: ${totals.reach.toLocaleString()}`} />
+                                    <KpiCard title="クリック数" value={totals.clicks.toLocaleString()} icon="mouse-pointer-click" subValue={`CTR: ${ctr.toFixed(2)}%`} trend={ctr >= 0.8 ? 'up' : 'down'} />
+                                    <KpiCard title="動画再生数" value={totals.videoViews.toLocaleString()} icon="play-circle" subValue={`6秒視聴率: ${videoRetention.toFixed(1)}%`} trend={videoRetention >= 20 ? 'up' : 'down'} />
+                                </div>
+
+                                {/* CPA / コンバージョン */}
+                                <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                                    <Card>
+                                        <div className="p-3">
+                                            <div className="text-gray-500 text-xs">CPA (獲得単価)</div>
+                                            <div className="text-lg font-bold">{cpa > 0 ? `¥${Math.round(cpa).toLocaleString()}` : '-'}</div>
+                                            <div className="text-xs text-gray-400">CV数: {totals.conversions}</div>
+                                        </div>
+                                    </Card>
+                                    <Card>
+                                        <div className="p-3">
+                                            <div className="text-gray-500 text-xs">2秒視聴数</div>
+                                            <div className="text-lg font-bold">{totals.video2s.toLocaleString()}</div>
+                                            <div className="text-xs text-gray-400">
+                                                率: {totals.videoViews > 0 ? (totals.video2s / totals.videoViews * 100).toFixed(1) : 0}%
+                                            </div>
+                                        </div>
+                                    </Card>
+                                    <Card>
+                                        <div className="p-3">
+                                            <div className="text-gray-500 text-xs">6秒視聴数</div>
+                                            <div className="text-lg font-bold">{totals.video6s.toLocaleString()}</div>
+                                            <div className="text-xs text-gray-400">
+                                                率: {videoRetention.toFixed(1)}%
+                                            </div>
+                                        </div>
+                                    </Card>
+                                </div>
+
+                                {/* 日別推移テーブル */}
+                                <Card>
+                                    <SectionHeader icon="calendar" title="日別推移" subtitle="TikTok広告" />
+                                    <div className="overflow-x-auto max-h-96 overflow-y-auto">
+                                        <table className="w-full text-sm">
+                                            <thead className="sticky top-0 bg-white dark:bg-gray-900">
+                                                <tr className="border-b dark:border-gray-700">
+                                                    <th className="text-left py-2 px-3">日付</th>
+                                                    <th className="text-right py-2 px-3">費用</th>
+                                                    <th className="text-right py-2 px-3">表示</th>
+                                                    <th className="text-right py-2 px-3">クリック</th>
+                                                    <th className="text-right py-2 px-3">CTR</th>
+                                                    <th className="text-right py-2 px-3">動画再生</th>
+                                                    <th className="text-right py-2 px-3">CV</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {[...dailyInsights].reverse().map((day, idx) => {
+                                                    const m = day.metrics || {};
+                                                    const dim = day.dimensions || {};
+                                                    return (
+                                                        <tr key={idx} className="border-b dark:border-gray-700 table-row-hover">
+                                                            <td className="py-2 px-3">{dim.stat_time_day || '-'}</td>
+                                                            <td className="text-right py-2 px-3 font-mono">¥{Math.round(parseFloat(m.spend || 0)).toLocaleString()}</td>
+                                                            <td className="text-right py-2 px-3 font-mono">{parseInt(m.impressions || 0).toLocaleString()}</td>
+                                                            <td className="text-right py-2 px-3 font-mono">{parseInt(m.clicks || 0).toLocaleString()}</td>
+                                                            <td className="text-right py-2 px-3 font-mono">{parseFloat(m.ctr || 0).toFixed(2)}%</td>
+                                                            <td className="text-right py-2 px-3 font-mono">{parseInt(m.video_play_actions || 0).toLocaleString()}</td>
+                                                            <td className="text-right py-2 px-3 font-mono">{parseInt(m.conversion || 0)}</td>
+                                                        </tr>
+                                                    );
+                                                })}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </Card>
+
+                                {/* 最適化提案 */}
+                                <Card>
+                                    <div className="p-4 bg-purple-50 dark:bg-purple-900/20 rounded-lg">
+                                        <h4 className="font-semibold text-sm mb-2 flex items-center gap-1">
+                                            <Icon name="lightbulb" size={14} /> TikTok広告 最適化提案
+                                        </h4>
+                                        <ul className="text-sm space-y-1 text-gray-700 dark:text-gray-300">
+                                            {videoRetention < 20 && <li>• 6秒視聴率が20%未満です → 動画冒頭3秒のインパクトを強化しましょう（フック改善）</li>}
+                                            {ctr < 0.8 && <li>• CTRが0.8%未満です → サムネイル/テキストオーバーレイの最適化を検討</li>}
+                                            {cpa > 3000 && totals.conversions > 0 && <li>• CPAが¥3,000を超えています → ターゲティングの見直し、類似オーディエンスの活用を検討</li>}
+                                            {videoRetention >= 20 && ctr >= 0.8 && <li>• 動画パフォーマンスは良好です！Spark Adsの活用でさらなるスケールが期待できます</li>}
+                                        </ul>
+                                    </div>
+                                </Card>
+                            </>
+                        ) : (
+                            <Card>
+                                <div className="text-center py-8 text-gray-500">
+                                    <Icon name="video" size={48} className="mx-auto mb-4 text-gray-300" />
+                                    <p>「今月のデータ取得」ボタンでデータを取得してください</p>
+                                </div>
+                            </Card>
+                        )}
+
+                        {/* キャンペーン一覧 */}
+                        {tiktokData.campaigns && tiktokData.campaigns.length > 0 && (
+                            <Card>
+                                <SectionHeader icon="layers" title="キャンペーン一覧" />
+                                <div className="overflow-x-auto">
+                                    <table className="w-full text-sm">
+                                        <thead>
+                                            <tr className="border-b dark:border-gray-700">
+                                                <th className="text-left py-2 px-3">キャンペーン名</th>
+                                                <th className="text-center py-2 px-3">ステータス</th>
+                                                <th className="text-right py-2 px-3">予算</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {tiktokData.campaigns.map((camp, idx) => (
+                                                <tr key={idx} className="border-b dark:border-gray-700 table-row-hover">
+                                                    <td className="py-2 px-3">{camp.campaign_name}</td>
+                                                    <td className="text-center py-2 px-3">
+                                                        <span className={`px-2 py-0.5 rounded text-xs ${camp.operation_status === 'ENABLE' ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400' : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400'}`}>
+                                                            {camp.operation_status === 'ENABLE' ? '配信中' : camp.operation_status || '-'}
+                                                        </span>
+                                                    </td>
+                                                    <td className="text-right py-2 px-3 font-mono">¥{parseFloat(camp.budget || 0).toLocaleString()}</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </Card>
+                        )}
+                    </div>
+                );
+            };
+
+            return (
+                <div className="space-y-6">
+                    <SectionHeader
+                        icon="megaphone"
+                        title="マーケティング分析"
+                        subtitle="HPB・Meta広告・TikTok広告を一元管理"
+                    />
+
+                    {/* タブ切替 */}
+                    <div className="flex gap-1 bg-slate-100 dark:bg-slate-800/60 rounded-2xl p-1.5">
+                        {tabs.map(tab => (
+                            <button key={tab.id}
+                                onClick={() => setActiveTab(tab.id)}
+                                className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl text-sm font-semibold transition-all duration-200 ${
+                                    activeTab === tab.id
+                                        ? 'bg-white dark:bg-sise-900/60 text-sise-700 dark:text-sise-400 shadow-md shadow-sise-500/10'
+                                        : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-white/50 dark:hover:bg-slate-700/50 active:scale-95'
+                                }`}
+                            >
+                                <Icon name={tab.icon} size={15} />
+                                {tab.label}
+                            </button>
+                        ))}
+                    </div>
+
+                    {/* タブ内容 */}
+                    {activeTab === 'hpb' && renderHpbSection()}
+                    {activeTab === 'meta' && renderMetaSection()}
+                    {activeTab === 'tiktok' && renderTiktokSection()}
+                </div>
+            );
+        };
+
+        // ========================================
         // 設定ビュー
         // ========================================
 
@@ -4721,6 +5631,8 @@
             const ticketHook = useTicketManagement();
             // QR・現金決済会員管理
             const manualMembersHook = useManualMembers();
+            // マーケティング管理
+            const marketingHook = useMarketingData();
 
             // ダークモード切り替え
             useEffect(() => {
@@ -4737,6 +5649,7 @@
                 { id: 'members', label: '会員管理', icon: 'users', mobileLabel: '会員' },
                 { id: 'usage', label: '利用管理', icon: 'clipboard-check', mobileLabel: '利用' },
                 { id: 'tickets', label: '回数券', icon: 'ticket', mobileLabel: '回数券' },
+                { id: 'marketing', label: 'マーケティング', icon: 'megaphone', mobileLabel: '広告' },
                 ...(!isStaffMode ? [{ id: 'settings', label: '設定', icon: 'settings', mobileLabel: '設定' }] : []),
             ];
 
@@ -4757,6 +5670,8 @@
                         return <MemberUsageView memberData={memberData} usageHook={usageHook} />;
                     case 'tickets':
                         return <TicketManagementView ticketHook={ticketHook} />;
+                    case 'marketing':
+                        return <MarketingView marketingHook={marketingHook} />;
                     case 'settings':
                         return isStaffMode
                             ? <DashboardView memberData={memberData} reportData={reportData} selectedStore={selectedStore} setSelectedStore={setSelectedStore} />
@@ -4825,15 +5740,19 @@
                                     ) : null;
                                 })()}
                                 <button
-                                    onClick={() => { refreshReportData(); refreshSquareData(); }}
-                                    className="p-2 rounded-xl hover:bg-sise-50 text-slate-400 hover:text-sise-600 transition-all"
+                                    onClick={(e) => {
+                                        const icon = e.currentTarget.querySelector('svg');
+                                        if (icon) { icon.style.animation = 'spin 0.6s ease'; setTimeout(() => icon.style.animation = '', 600); }
+                                        refreshReportData(); refreshSquareData();
+                                    }}
+                                    className="p-2 rounded-xl hover:bg-sise-50 text-slate-400 hover:text-sise-600 transition-all active:scale-90"
                                     title="データ更新"
                                 >
                                     <Icon name="refresh-cw" size={17} />
                                 </button>
                                 <button
                                     onClick={() => setIsDarkMode(!isDarkMode)}
-                                    className="p-2 rounded-xl hover:bg-sise-50 text-slate-400 hover:text-sise-600 transition-all hide-mobile"
+                                    className="p-2 rounded-xl hover:bg-sise-50 text-slate-400 hover:text-sise-600 transition-all active:scale-90 hide-mobile"
                                     title="ダークモード切り替え"
                                 >
                                     <Icon name={isDarkMode ? 'sun' : 'moon'} size={17} />
@@ -4860,10 +5779,10 @@
                                         setCurrentView(item.id);
                                         setIsSidebarOpen(false);
                                     }}
-                                    className={`w-full flex items-center px-4 py-2.5 rounded-xl text-left text-sm font-semibold transition-all duration-300 ${
+                                    className={`w-full flex items-center px-4 py-2.5 rounded-xl text-left text-sm font-semibold transition-all duration-200 ${
                                         currentView === item.id
-                                            ? 'bg-gradient-to-r from-sise-500 to-sise-600 text-white shadow-lg shadow-sise-500/25'
-                                            : 'text-slate-500 hover:bg-sise-50 hover:text-sise-700'
+                                            ? 'bg-gradient-to-r from-sise-500 to-sise-600 text-white shadow-lg shadow-sise-500/25 scale-[1.02]'
+                                            : 'text-slate-500 hover:bg-sise-50 hover:text-sise-700 active:scale-[0.97]'
                                     }`}
                                 >
                                     <Icon name={item.icon} size={18} className="mr-3" />
@@ -4898,7 +5817,7 @@
                     {/* Bottom Navigation (Mobile) */}
                     <nav className="bottom-nav hide-desktop">
                         <div className="flex">
-                            {navItems.slice(0, 5).map((item) => (
+                            {navItems.slice(0, 6).map((item) => (
                                 <button
                                     key={item.id}
                                     onClick={() => setCurrentView(item.id)}
@@ -4913,16 +5832,18 @@
 
                     {/* Main Content */}
                     <main className="pt-14 md:pt-16 lg:pl-56 min-h-screen relative z-10">
-                        <div className="p-3 md:p-4 lg:p-8 max-w-7xl mx-auto pb-24 md:pb-8">
+                        <div className="p-3 md:p-5 lg:p-8 max-w-7xl mx-auto pb-24 md:pb-8">
                             {memberData.loading || reportData.loading ? (
                                 <div className="flex items-center justify-center h-64 animate-fade-in">
                                     <div className="text-center">
-                                        <div className="w-12 h-12 border-3 border-sise-200 border-t-sise-500 rounded-full animate-spin mx-auto mb-4"></div>
-                                        <p className="text-slate-400 text-xs tracking-widest font-semibold uppercase">Loading...</p>
+                                        <div className="w-12 h-12 border-3 border-sise-200 dark:border-sise-900 border-t-sise-500 rounded-full animate-spin mx-auto mb-4"></div>
+                                        <p className="text-slate-400 dark:text-slate-500 text-xs tracking-widest font-semibold uppercase">Loading...</p>
                                     </div>
                                 </div>
                             ) : (
-                                renderView()
+                                <div key={currentView} className="view-transition">
+                                    {renderView()}
+                                </div>
                             )}
                         </div>
                     </main>

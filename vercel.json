@@ -3,7 +3,11 @@
   "outputDirectory": "public",
   "rewrites": [
     { "source": "/api/square/config", "destination": "/api/square/config" },
-    { "source": "/api/square/:path*", "destination": "/api/square/proxy?path=:path*" }
+    { "source": "/api/square/:path*", "destination": "/api/square/proxy?path=:path*" },
+    { "source": "/api/meta/config", "destination": "/api/meta/config" },
+    { "source": "/api/meta/:path*", "destination": "/api/meta/proxy?path=:path*" },
+    { "source": "/api/tiktok/config", "destination": "/api/tiktok/config" },
+    { "source": "/api/tiktok/:path*", "destination": "/api/tiktok/proxy?path=:path*" }
   ],
   "headers": [
     {
