@@ -1220,23 +1220,31 @@
             });
 
             const fetchReportData = useCallback(async () => {
+                // localStorageの設定値を優先、なければデフォルト定数
+                const gasUrl = localStorage.getItem('sise_gas_url') || GOOGLE_FORM_SHEET_URL;
+
                 // APIが設定されていない場合は空データ
-                if (GOOGLE_FORM_SHEET_URL === 'YOUR_GOOGLE_APPS_SCRIPT_URL') {
+                if (!gasUrl || gasUrl === 'YOUR_GOOGLE_APPS_SCRIPT_URL') {
                     setReportData({
                         reports: [],
                         loading: false,
-                        error: '日報データのGoogle Apps Script URLが設定されていません。',
+                        error: '日報データのGoogle Apps Script URLが設定されていません。設定画面からURLを入力してください。',
                         lastUpdated: null
                     });
                     return;
                 }
 
                 try {
-                    const response = await fetch(GOOGLE_FORM_SHEET_URL);
+                    // 当月+先月のデータを取得（月間トレンド比較用）
+                    const response = await fetch(gasUrl + '?months=2');
                     if (!response.ok) {
-                        throw new Error('Failed to fetch report data');
+                        throw new Error('日報データの取得に失敗しました (HTTP ' + response.status + ')');
                     }
                     const data = await response.json();
+
+                    if (data.error) {
+                        throw new Error(data.error);
+                    }
 
                     setReportData({
                         reports: data.reports || [],
@@ -6193,9 +6201,10 @@
 
         const SettingsView = ({ onSettingsSaved }) => {
             const [squareStatus, setSquareStatus] = useState({ loading: true });
-            const [googleFormUrl, setGoogleFormUrl] = useState(
-                localStorage.getItem('sise_gas_url') || GOOGLE_FORM_SHEET_URL
-            );
+            const [googleFormUrl, setGoogleFormUrl] = useState(() => {
+                const stored = localStorage.getItem('sise_gas_url');
+                return (stored && stored !== 'YOUR_GOOGLE_APPS_SCRIPT_URL') ? stored : '';
+            });
             const [saveMessage, setSaveMessage] = useState('');
 
             // サーバーの接続状態を取得
@@ -6207,8 +6216,9 @@
 
             const handleSaveGas = () => {
                 localStorage.setItem('sise_gas_url', googleFormUrl);
-                setSaveMessage('GAS URLを保存しました。リロードで反映されます。');
-                setTimeout(() => setSaveMessage(''), 5000);
+                setSaveMessage('GAS URLを保存しました。データを再取得します...');
+                if (onSettingsSaved) onSettingsSaved();
+                setTimeout(() => setSaveMessage(''), 3000);
             };
 
             return (
@@ -6552,7 +6562,7 @@
                     case 'settings':
                         return isStaffMode
                             ? <DashboardView memberData={memberData} reportData={reportData} selectedStore={selectedStore} setSelectedStore={setSelectedStore} />
-                            : <SettingsView onSettingsSaved={() => {}} />;
+                            : <SettingsView onSettingsSaved={() => { refreshReportData(); }} />;
                     default:
                         return <DashboardView
                             memberData={memberData}
