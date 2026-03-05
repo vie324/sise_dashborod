@@ -673,24 +673,31 @@
             <div style="position:absolute;width:250px;height:250px;border-radius:50%;background:rgba(85,184,127,0.06);filter:blur(60px);bottom:15%;left:-60px;animation:float-slow 8s ease-in-out infinite;"></div>
             <div style="position:absolute;width:180px;height:180px;border-radius:50%;background:rgba(255,127,92,0.04);filter:blur(50px);top:40%;right:20%;animation:float 10s ease-in-out infinite reverse;"></div>
             <div style="text-align: center; position: relative; z-index: 1;">
-                <!-- Animated Logo -->
-                <div style="position:relative;width:80px;height:80px;margin:0 auto 32px;">
+                <!-- Logo Image (place your logo at /images/logo.png) -->
+                <div style="position:relative;width:120px;height:120px;margin:0 auto 24px;">
                     <!-- Outer ring pulse -->
-                    <div style="position:absolute;inset:-8px;border-radius:24px;border:2px solid rgba(51,160,101,0.15);animation:logo-ring-pulse 2s ease-in-out infinite;"></div>
-                    <!-- Main logo box -->
-                    <div style="width:80px;height:80px;background:linear-gradient(135deg,#33a065 0%,#238050 60%,#55b87f 100%);border-radius:20px;display:flex;align-items:center;justify-content:center;box-shadow:0 20px 60px -12px rgba(51,160,101,0.45),0 0 0 1px rgba(255,255,255,0.1) inset;animation:logo-float 3s ease-in-out infinite;">
-                        <span style="color:white;font-family:'Noto Sans JP',sans-serif;font-weight:800;font-size:28px;letter-spacing:0.02em;text-shadow:0 2px 8px rgba(0,0,0,0.15);">S</span>
+                    <div style="position:absolute;inset:-10px;border-radius:50%;border:2px solid rgba(51,160,101,0.15);animation:logo-ring-pulse 2s ease-in-out infinite;"></div>
+                    <!-- Logo image with fallback -->
+                    <img
+                        src="./images/logo.png"
+                        alt="si'se logo"
+                        style="width:120px;height:120px;object-fit:contain;border-radius:28px;animation:logo-float 3s ease-in-out infinite;filter:drop-shadow(0 20px 40px rgba(51,160,101,0.3));"
+                        onerror="this.style.display='none';this.nextElementSibling.style.display='flex';"
+                    />
+                    <!-- Fallback: text logo (shown if image fails to load) -->
+                    <div style="display:none;width:120px;height:120px;background:linear-gradient(135deg,#33a065 0%,#238050 60%,#55b87f 100%);border-radius:28px;align-items:center;justify-content:center;box-shadow:0 20px 60px -12px rgba(51,160,101,0.45),0 0 0 1px rgba(255,255,255,0.1) inset;animation:logo-float 3s ease-in-out infinite;">
+                        <span style="color:white;font-family:'Noto Sans JP',sans-serif;font-weight:800;font-size:36px;letter-spacing:0.02em;text-shadow:0 2px 8px rgba(0,0,0,0.15);">S</span>
                     </div>
-                    <!-- Dots orbiting -->
-                    <div style="position:absolute;top:50%;left:50%;width:100px;height:100px;margin:-50px 0 0 -50px;animation:logo-orbit 3s linear infinite;">
+                    <!-- Orbiting dots -->
+                    <div style="position:absolute;top:50%;left:50%;width:140px;height:140px;margin:-70px 0 0 -70px;animation:logo-orbit 3s linear infinite;">
                         <div style="position:absolute;top:0;left:50%;width:6px;height:6px;margin-left:-3px;border-radius:50%;background:#55b87f;box-shadow:0 0 8px rgba(85,184,127,0.6);"></div>
                     </div>
-                    <div style="position:absolute;top:50%;left:50%;width:110px;height:110px;margin:-55px 0 0 -55px;animation:logo-orbit 4.5s linear infinite reverse;">
+                    <div style="position:absolute;top:50%;left:50%;width:155px;height:155px;margin:-77.5px 0 0 -77.5px;animation:logo-orbit 4.5s linear infinite reverse;">
                         <div style="position:absolute;top:0;left:50%;width:4px;height:4px;margin-left:-2px;border-radius:50%;background:#b9e5ca;box-shadow:0 0 6px rgba(185,229,202,0.5);"></div>
                     </div>
                 </div>
                 <!-- Brand text -->
-                <p style="color:#16432d;font-size:26px;font-family:'Noto Sans JP',sans-serif;font-weight:800;letter-spacing:0.1em;animation:logo-text-in 0.8s cubic-bezier(0.16,1,0.3,1) 0.2s both;">si'se</p>
+                <p style="color:#16432d;font-size:28px;font-family:'Noto Sans JP',sans-serif;font-weight:800;letter-spacing:0.1em;animation:logo-text-in 0.8s cubic-bezier(0.16,1,0.3,1) 0.2s both;">si'se</p>
                 <p style="color:#33a065;font-size:11px;font-family:'Noto Sans JP',sans-serif;margin-top:6px;letter-spacing:0.2em;text-transform:uppercase;font-weight:600;animation:logo-text-in 0.8s cubic-bezier(0.16,1,0.3,1) 0.4s both;">Management Dashboard</p>
                 <!-- Progress bar -->
                 <div style="width:120px;height:3px;background:rgba(51,160,101,0.12);border-radius:4px;margin:24px auto 0;overflow:hidden;animation:logo-text-in 0.6s ease 0.6s both;">
@@ -7025,8 +7032,17 @@
                                     <Icon name={isSidebarOpen ? "x" : "menu"} size={20} />
                                 </button>
                                 <div className="flex items-center">
-                                    <div className="w-8 h-8 md:w-9 md:h-9 bg-gradient-to-br from-sise-400 to-sise-600 rounded-xl flex items-center justify-center text-white font-extrabold text-sm shadow-lg shadow-sise-500/30 animate-glow-pulse">
-                                        S
+                                    <div className="w-8 h-8 md:w-9 md:h-9 rounded-xl overflow-hidden shadow-lg shadow-sise-500/30 animate-glow-pulse flex-shrink-0">
+                                        <img
+                                            src="./images/logo.png"
+                                            alt="si'se"
+                                            className="w-full h-full object-contain"
+                                            onError={(e) => {
+                                                e.target.style.display = 'none';
+                                                e.target.parentElement.classList.add('bg-gradient-to-br', 'from-sise-400', 'to-sise-600', 'flex', 'items-center', 'justify-center');
+                                                e.target.parentElement.innerHTML = '<span class="text-white font-extrabold text-sm">S</span>';
+                                            }}
+                                        />
                                     </div>
                                     <div className="ml-2.5">
                                         <h1 className="text-sm md:text-base font-extrabold tracking-wide gradient-text">si'se</h1>
