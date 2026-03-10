@@ -756,24 +756,36 @@
         const META_PROXY_BASE = '/api/meta';
         const TIKTOK_PROXY_BASE = '/api/tiktok';
 
-        // サーバーから設定を取得（店舗一覧含む）
+        // サーバーから設定を取得（店舗一覧含む）- キャッシュ付き
+        let _squareConfigCache = null;
+        let _squareConfigPromise = null;
         const fetchSquareConfig = async () => {
-            try {
-                const res = await fetch(`${SQUARE_PROXY_BASE}/config`);
-                if (res.ok) {
-                    const config = await res.json();
-                    serverStores = config.stores || [];
-                    return config;
-                }
-            } catch (e) {}
-            return {
-                configured: false,
-                stores: [],
-                environment: 'sandbox',
-                locationId: '',
-                defaultMonthlyPrice: 10000
-            };
+            if (_squareConfigCache) return _squareConfigCache;
+            if (_squareConfigPromise) return _squareConfigPromise;
+            _squareConfigPromise = (async () => {
+                try {
+                    const res = await fetch(`${SQUARE_PROXY_BASE}/config`);
+                    if (res.ok) {
+                        const config = await res.json();
+                        serverStores = config.stores || [];
+                        _squareConfigCache = config;
+                        return config;
+                    }
+                } catch (e) {}
+                const fallback = {
+                    configured: false,
+                    stores: [],
+                    environment: 'sandbox',
+                    locationId: '',
+                    defaultMonthlyPrice: 10000
+                };
+                _squareConfigCache = fallback;
+                return fallback;
+            })();
+            return _squareConfigPromise;
         };
+        // ページロード時にconfig取得を先行開始
+        fetchSquareConfig();
 
         // ========================================
         // スタッフ・アクセス管理
@@ -965,7 +977,22 @@
         };
 
         // KPIカードコンポーネント
-        const KpiCard = ({ title, value, subValue, trend, icon, color = "bg-sise-500", gradientFrom = "from-sise-400", gradientTo = "to-sise-600", sparkData, accentColor }) => (
+        const KpiCard = ({ title, value, subValue, trend, icon, color = "bg-sise-500", gradientFrom = "from-sise-400", gradientTo = "to-sise-600", sparkData, accentColor, loading }) => {
+            if (loading) {
+                return (
+                    <Card hover className="group kpi-card relative overflow-hidden">
+                        <div className="flex justify-between items-start mb-2">
+                            <div className={`rounded-xl bg-gradient-to-br ${gradientFrom} ${gradientTo} text-white shadow-lg p-2.5 md:p-3 opacity-60`}>
+                                <Icon name={icon} size={18} />
+                            </div>
+                        </div>
+                        <div className="skeleton h-3 w-20 rounded mb-2 mt-1"></div>
+                        <div className="skeleton h-7 w-24 rounded mb-2"></div>
+                        <div className="skeleton h-3 w-16 rounded"></div>
+                    </Card>
+                );
+            }
+            return (
             <Card hover className="group kpi-card relative overflow-hidden" style={{'--kpi-color': accentColor || 'rgba(51,160,101,0.04)'}}>
                 <div className="flex justify-between items-start mb-2">
                     <div className={`rounded-xl bg-gradient-to-br ${gradientFrom} ${gradientTo} text-white shadow-lg p-2.5 md:p-3 group-hover:scale-110 group-hover:rotate-3 transition-all duration-500`}>
@@ -989,7 +1016,8 @@
                 </div>
                 {subValue && <p className="text-[11px] md:text-xs text-slate-400 mt-1">{subValue}</p>}
             </Card>
-        );
+            );
+        };
 
         // セクションヘッダーコンポーネント
         const SectionHeader = ({ title, subtitle, icon, children }) => (
@@ -1132,7 +1160,7 @@
                     // 高速化: 店舗間を並列処理 + 店舗内API呼び出しも並列化
                     // ==========================================
 
-                    // 1店舗分のデータを並列取得する関数
+                    // 1店舗分のデータを並列取得する関数（catalog fetchは分離）
                     const fetchStoreData = async (store) => {
                         const storeId = store.id;
                         const locationId = store.locationId;
@@ -1168,16 +1196,30 @@
                         subscriptions.forEach(s => { s._storeId = storeId; s._storeName = store.name; });
                         invoices.forEach(inv => { inv._storeId = storeId; inv._storeName = store.name; });
 
-                        // Catalog API（サブスクのプラン情報取得 - サブスク取得後に実行）
-                        const localCatalogMap = {};
-                        const planIds = [...new Set(subscriptions
-                            .filter(s => s.plan_variation_id)
-                            .map(s => s.plan_variation_id))];
+                        // Catalog fetchはここでは行わない（後で非同期で実行）
+                        return { customers, subscriptions, invoices, catalogMap: {} };
+                    };
 
-                        if (planIds.length > 0) {
+                    // Catalog情報を非同期で取得し、memberDataを後から更新する関数
+                    const fetchCatalogAsync = async (subscriptions, stores, targetStoresList) => {
+                        const catalogMap = {};
+                        // 全店舗のplanIdsを収集し、店舗IDごとにグループ化
+                        const planIdsByStore = {};
+                        subscriptions.forEach(s => {
+                            if (s.plan_variation_id) {
+                                const sid = s._storeId || 'default';
+                                if (!planIdsByStore[sid]) planIdsByStore[sid] = new Set();
+                                planIdsByStore[sid].add(s.plan_variation_id);
+                            }
+                        });
+
+                        // 全店舗のcatalog fetchを並列実行
+                        const catalogPromises = Object.entries(planIdsByStore).map(async ([sid, planIdSet]) => {
+                            const planIds = [...planIdSet];
+                            if (planIds.length === 0) return;
                             try {
                                 const headers = { 'Content-Type': 'application/json' };
-                                if (storeId) headers['X-Store-Id'] = storeId;
+                                if (sid && sid !== 'default') headers['X-Store-Id'] = sid;
                                 const catalogResponse = await fetch(`${SQUARE_PROXY_BASE}/catalog/batch-retrieve`, {
                                     method: 'POST', headers,
                                     body: JSON.stringify({ object_ids: planIds })
@@ -1186,16 +1228,16 @@
                                     const catalogData = await catalogResponse.json();
                                     (catalogData.objects || []).forEach(obj => {
                                         const subPlan = obj.subscription_plan_variation_data || obj.subscription_plan_data;
-                                        localCatalogMap[obj.id] = {
+                                        catalogMap[obj.id] = {
                                             name: subPlan?.name || obj.id,
                                             phases: subPlan?.phases || []
                                         };
                                     });
                                 }
                             } catch (e) { console.warn('Catalog API fetch failed:', e); }
-                        }
-
-                        return { customers, subscriptions, invoices, catalogMap: localCatalogMap };
+                        });
+                        await Promise.all(catalogPromises);
+                        return catalogMap;
                     };
 
                     // Extra Sourceのデータを並列取得する関数
@@ -1231,30 +1273,9 @@
                         extraInvoices.forEach(inv => { inv._storeId = storeId; inv._storeName = store.name; inv._extraSource = true; });
                         extraCustomers.forEach(c => { c._storeId = storeId; c._storeName = store.name; c._extraSource = true; });
 
-                        // Extra: Catalog
-                        const localCatalogMap = {};
-                        const extraPlanIds = [...new Set(extraSubs
-                            .filter(s => s.plan_variation_id)
-                            .map(s => s.plan_variation_id))];
-                        if (extraPlanIds.length > 0) {
-                            try {
-                                const h = { 'Content-Type': 'application/json', 'X-Store-Id': extra.id };
-                                const catRes = await fetch(`${SQUARE_PROXY_BASE}/catalog/batch-retrieve`, {
-                                    method: 'POST', headers: h,
-                                    body: JSON.stringify({ object_ids: extraPlanIds })
-                                });
-                                if (catRes.ok) {
-                                    const catData = await catRes.json();
-                                    (catData.objects || []).forEach(obj => {
-                                        const subPlan = obj.subscription_plan_variation_data || obj.subscription_plan_data;
-                                        localCatalogMap[obj.id] = { name: subPlan?.name || obj.id, phases: subPlan?.phases || [] };
-                                    });
-                                }
-                            } catch (e) { console.warn('Extra catalog fetch failed:', e); }
-                        }
-
+                        // Catalog fetchは後で非同期実行するため、ここではスキップ
                         console.log(`Extra source ${extra.id}: +${extraSubs.length} subs, +${extraInvoices.length} invoices, +${extraCustomers.length} customers`);
-                        return { customers: extraCustomers, subscriptions: extraSubs, invoices: extraInvoices, catalogMap: localCatalogMap };
+                        return { customers: extraCustomers, subscriptions: extraSubs, invoices: extraInvoices, catalogMap: {} };
                     };
 
                     // 全店舗を並列で取得
@@ -1305,142 +1326,159 @@
                     const subscriptions = allSubscriptions;
                     const invoices = allInvoices;
 
-                    // 5. 会員詳細データの構築（Mapで高速検索）
-                    const customerMap = new Map(customers.map(c => [c.id, c]));
-                    const invoicesByCustomer = {};
-                    invoices.forEach(inv => {
-                        const cid = inv.primary_recipient?.customer_id;
-                        if (cid) {
-                            if (!invoicesByCustomer[cid]) invoicesByCustomer[cid] = [];
-                            invoicesByCustomer[cid].push(inv);
-                        }
-                    });
+                    // 会員データ構築ヘルパー（catalogMapは任意 - 段階的読み込み対応）
+                    const buildFinalData = (catMap) => {
+                        const customerMap = new Map(customers.map(c => [c.id, c]));
+                        const invoicesByCustomer = {};
+                        invoices.forEach(inv => {
+                            const cid = inv.primary_recipient?.customer_id;
+                            if (cid) {
+                                if (!invoicesByCustomer[cid]) invoicesByCustomer[cid] = [];
+                                invoicesByCustomer[cid].push(inv);
+                            }
+                        });
 
-                    const membersList = subscriptions.map(sub => {
-                        const customer = customerMap.get(sub.customer_id);
-                        const memberInvoices = invoicesByCustomer[sub.customer_id] || [];
+                        const membersList = subscriptions.map(sub => {
+                            const customer = customerMap.get(sub.customer_id);
+                            const memberInvoices = invoicesByCustomer[sub.customer_id] || [];
 
-                        // プラン金額をphasesから取得
-                        let monthlyPrice = defaultMonthlyPrice;
-                        let planName = 'スタンダードプラン';
-                        let cadence = 'MONTHLY';
+                            let monthlyPrice = defaultMonthlyPrice;
+                            let planName = 'スタンダードプラン';
+                            let cadence = 'MONTHLY';
 
-                        // Catalog APIからプラン情報取得
-                        if (sub.plan_variation_id && catalogMap[sub.plan_variation_id]) {
-                            const plan = catalogMap[sub.plan_variation_id];
-                            planName = plan.name;
-                            if (plan.phases && plan.phases.length > 0) {
-                                const phase = plan.phases[0];
-                                cadence = phase.cadence || 'MONTHLY';
-                                if (phase.pricing && phase.pricing.price_money) {
-                                    monthlyPrice = phase.pricing.price_money.amount || monthlyPrice;
-                                } else if (phase.recurring_price_money) {
-                                    monthlyPrice = phase.recurring_price_money.amount || monthlyPrice;
+                            // Catalog APIからプラン情報取得
+                            if (sub.plan_variation_id && catMap[sub.plan_variation_id]) {
+                                const plan = catMap[sub.plan_variation_id];
+                                planName = plan.name;
+                                if (plan.phases && plan.phases.length > 0) {
+                                    const phase = plan.phases[0];
+                                    cadence = phase.cadence || 'MONTHLY';
+                                    if (phase.pricing && phase.pricing.price_money) {
+                                        monthlyPrice = phase.pricing.price_money.amount || monthlyPrice;
+                                    } else if (phase.recurring_price_money) {
+                                        monthlyPrice = phase.recurring_price_money.amount || monthlyPrice;
+                                    }
                                 }
                             }
-                        }
 
-                        // Subscription phasesから直接取得（フォールバック）
-                        if (sub.phases && sub.phases.length > 0) {
-                            const activePhase = sub.phases.find(p => !p.uid || p) || sub.phases[0];
-                            if (activePhase.pricing && activePhase.pricing.price_money) {
-                                monthlyPrice = activePhase.pricing.price_money.amount || monthlyPrice;
-                            } else if (activePhase.recurring_price_money) {
-                                monthlyPrice = activePhase.recurring_price_money.amount || monthlyPrice;
-                            }
-                            if (activePhase.cadence) {
-                                cadence = activePhase.cadence;
-                            }
-                        }
-
-                        // Invoice金額の正しい取得
-                        const paymentHistory = memberInvoices
-                            .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
-                            .slice(0, 10)
-                            .map(inv => {
-                                let amount = 0;
-                                if (inv.payment_requests && inv.payment_requests.length > 0) {
-                                    const req = inv.payment_requests[0];
-                                    amount = req.computed_amount_money?.amount
-                                        || req.fixed_amount_requested_money?.amount
-                                        || 0;
+                            // Subscription phasesから直接取得（フォールバック）
+                            if (sub.phases && sub.phases.length > 0) {
+                                const activePhase = sub.phases.find(p => !p.uid || p) || sub.phases[0];
+                                if (activePhase.pricing && activePhase.pricing.price_money) {
+                                    monthlyPrice = activePhase.pricing.price_money.amount || monthlyPrice;
+                                } else if (activePhase.recurring_price_money) {
+                                    monthlyPrice = activePhase.recurring_price_money.amount || monthlyPrice;
                                 }
-                                return {
-                                    id: inv.id,
-                                    date: inv.created_at,
-                                    amount: amount,
-                                    status: inv.status, // DRAFT, UNPAID, PAID, CANCELED等
-                                    invoiceNumber: inv.invoice_number || '-'
-                                };
-                            });
+                                if (activePhase.cadence) {
+                                    cadence = activePhase.cadence;
+                                }
+                            }
+
+                            const paymentHistory = memberInvoices
+                                .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+                                .slice(0, 10)
+                                .map(inv => {
+                                    let amount = 0;
+                                    if (inv.payment_requests && inv.payment_requests.length > 0) {
+                                        const req = inv.payment_requests[0];
+                                        amount = req.computed_amount_money?.amount
+                                            || req.fixed_amount_requested_money?.amount
+                                            || 0;
+                                    }
+                                    return {
+                                        id: inv.id,
+                                        date: inv.created_at,
+                                        amount: amount,
+                                        status: inv.status,
+                                        invoiceNumber: inv.invoice_number || '-'
+                                    };
+                                });
+
+                            return {
+                                id: sub.id,
+                                customerId: sub.customer_id,
+                                name: customer ? `${customer.family_name || ''}${customer.given_name || ''}`.trim() || '未登録' : '未登録',
+                                email: customer?.email_address || '-',
+                                phone: customer?.phone_number || '-',
+                                status: sub.status,
+                                startDate: sub.start_date,
+                                canceledDate: sub.canceled_date || null,
+                                createdAt: sub.created_at,
+                                planName: planName,
+                                planVariationId: sub.plan_variation_id,
+                                monthlyPrice: monthlyPrice,
+                                cadence: cadence,
+                                paymentHistory: paymentHistory,
+                                storeId: sub._storeId || 'default',
+                                storeName: sub._storeName || '',
+                            };
+                        });
+
+                        const activeSubscriptions = subscriptions.filter(s => s.status === 'ACTIVE');
+                        const now = new Date();
+                        const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+                        const thisMonthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+
+                        const canceledThisMonth = subscriptions.filter(s => {
+                            if (s.status !== 'CANCELED' || !s.canceled_date) return false;
+                            const cancelDate = new Date(s.canceled_date);
+                            return cancelDate >= thisMonthStart && cancelDate <= thisMonthEnd;
+                        });
+
+                        const newThisMonth = subscriptions.filter(s => {
+                            const startDate = new Date(s.start_date);
+                            return startDate >= thisMonthStart && startDate <= thisMonthEnd;
+                        });
+
+                        const monthlyTrend = generateMonthlyTrendFromData(subscriptions);
+
+                        const totalExpectedRevenue = membersList
+                            .filter(m => m.status === 'ACTIVE')
+                            .reduce((sum, m) => sum + m.monthlyPrice, 0);
 
                         return {
-                            id: sub.id,
-                            customerId: sub.customer_id,
-                            name: customer ? `${customer.family_name || ''}${customer.given_name || ''}`.trim() || '未登録' : '未登録',
-                            email: customer?.email_address || '-',
-                            phone: customer?.phone_number || '-',
-                            status: sub.status,
-                            startDate: sub.start_date,
-                            canceledDate: sub.canceled_date || null,
-                            createdAt: sub.created_at,
-                            planName: planName,
-                            planVariationId: sub.plan_variation_id,
-                            monthlyPrice: monthlyPrice,
-                            cadence: cadence,
-                            paymentHistory: paymentHistory,
-                            storeId: sub._storeId || 'default',
-                            storeName: sub._storeName || '',
+                            totalMembers: subscriptions.length,
+                            activeMembers: activeSubscriptions.length,
+                            newMembersThisMonth: newThisMonth.length,
+                            churnedMembers: canceledThisMonth.length,
+                            churnRate: activeSubscriptions.length > 0
+                                ? (canceledThisMonth.length / activeSubscriptions.length * 100)
+                                : 0,
+                            expectedRevenue: totalExpectedRevenue,
+                            members: membersList,
+                            monthlyTrend: monthlyTrend,
+                            stores: stores,
+                            loading: false,
+                            error: null
                         };
-                    });
-
-                    // 6. 集計
-                    const activeSubscriptions = subscriptions.filter(s => s.status === 'ACTIVE');
-                    const now = new Date();
-                    const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-                    const thisMonthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-
-                    const canceledThisMonth = subscriptions.filter(s => {
-                        if (s.status !== 'CANCELED' || !s.canceled_date) return false;
-                        const cancelDate = new Date(s.canceled_date);
-                        return cancelDate >= thisMonthStart && cancelDate <= thisMonthEnd;
-                    });
-
-                    const newThisMonth = subscriptions.filter(s => {
-                        const startDate = new Date(s.start_date);
-                        return startDate >= thisMonthStart && startDate <= thisMonthEnd;
-                    });
-
-                    // 月間トレンドデータを生成
-                    const monthlyTrend = generateMonthlyTrendFromData(subscriptions);
-
-                    // 実際の売上を計算（会員ごとの金額を合計）
-                    const totalExpectedRevenue = membersList
-                        .filter(m => m.status === 'ACTIVE')
-                        .reduce((sum, m) => sum + m.monthlyPrice, 0);
-
-                    const finalData = {
-                        totalMembers: subscriptions.length,
-                        activeMembers: activeSubscriptions.length,
-                        newMembersThisMonth: newThisMonth.length,
-                        churnedMembers: canceledThisMonth.length,
-                        churnRate: activeSubscriptions.length > 0
-                            ? (canceledThisMonth.length / activeSubscriptions.length * 100)
-                            : 0,
-                        expectedRevenue: totalExpectedRevenue,
-                        members: membersList,
-                        monthlyTrend: monthlyTrend,
-                        stores: stores,
-                        loading: false,
-                        error: null
                     };
 
-                    // キャッシュに保存
-                    squareDataCache.data = finalData;
-                    squareDataCache.storeKey = cacheKey;
-                    squareDataCache.timestamp = Date.now();
+                    // ========================================
+                    // Phase 1: subscription phasesのデータだけで即時表示
+                    // （金額はsub.phasesから取得可能、プラン名はデフォルト）
+                    // ========================================
+                    const phase1Data = buildFinalData(catalogMap);
+                    setMemberData(phase1Data);
 
-                    setMemberData(finalData);
+                    // ========================================
+                    // Phase 2: Catalog情報を非同期で取得し、プラン名を更新
+                    // ========================================
+                    fetchCatalogAsync(subscriptions, stores, targetStores).then(fullCatalogMap => {
+                        if (Object.keys(fullCatalogMap).length > 0) {
+                            Object.assign(catalogMap, fullCatalogMap);
+                            const enrichedData = buildFinalData(catalogMap);
+                            // キャッシュに保存（enriched版）
+                            squareDataCache.data = enrichedData;
+                            squareDataCache.storeKey = cacheKey;
+                            squareDataCache.timestamp = Date.now();
+                            setMemberData(enrichedData);
+                        } else {
+                            // catalogが空でもキャッシュに保存
+                            squareDataCache.data = phase1Data;
+                            squareDataCache.storeKey = cacheKey;
+                            squareDataCache.timestamp = Date.now();
+                        }
+                    }).catch(e => console.warn('Catalog enrichment failed:', e));
 
                 } catch (error) {
                     console.error('Square API Error:', error);
@@ -2599,18 +2637,18 @@
                     <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 md:gap-4">
                         <KpiCard title="アクティブ会員" value={formatNumber(memberData.activeMembers)}
                             subValue={`総会員: ${formatNumber(memberData.totalMembers)}人`} trend={null} icon="users"
-                            gradientFrom="from-sise-400" gradientTo="to-sise-600" accentColor="#33a065" />
+                            gradientFrom="from-sise-400" gradientTo="to-sise-600" accentColor="#33a065" loading={memberData.loading} />
                         <KpiCard title="想定月間売上" value={formatCurrency(memberData.expectedRevenue)}
                             subValue="サブスク収益" trend={null} icon="wallet"
-                            gradientFrom="from-emerald-400" gradientTo="to-emerald-600" accentColor="#059669" />
+                            gradientFrom="from-emerald-400" gradientTo="to-emerald-600" accentColor="#059669" loading={memberData.loading} />
                         <KpiCard title="新規入会" value={formatNumber(memberData.newMembersThisMonth)}
                             subValue="今月の入会者" trend={null} icon="user-plus"
-                            gradientFrom="from-blue-400" gradientTo="to-blue-600" accentColor="#3b82f6" />
+                            gradientFrom="from-blue-400" gradientTo="to-blue-600" accentColor="#3b82f6" loading={memberData.loading} />
                         <KpiCard title="退会率" value={formatPercent(memberData.churnRate)}
                             subValue={`退会者: ${memberData.churnedMembers}人`} trend={null} icon="user-minus"
                             gradientFrom={memberData.churnRate > 5 ? "from-red-400" : "from-slate-400"}
                             gradientTo={memberData.churnRate > 5 ? "to-red-600" : "to-slate-500"}
-                            accentColor={memberData.churnRate > 5 ? "#ef4444" : "#64748b"} />
+                            accentColor={memberData.churnRate > 5 ? "#ef4444" : "#64748b"} loading={memberData.loading} />
                     </div>
 
                     {/* 日報集計 KPIカード（スパークライン付き） */}
@@ -2618,18 +2656,18 @@
                         <KpiCard title="新規来店数" value={formatNumber(aggregatedData.totalNewVisits)}
                             subValue="全チャネル合計" trend={null} icon="user-check"
                             gradientFrom="from-orange-400" gradientTo="to-orange-600"
-                            sparkData={aggregatedData.dailyNewTrend} accentColor="#f97316" />
+                            sparkData={aggregatedData.dailyNewTrend} accentColor="#f97316" loading={reportData.loading} />
                         <KpiCard title="契約数" value={formatNumber(aggregatedData.totalContracts)}
                             subValue="新規契約" trend={null} icon="file-signature"
                             gradientFrom="from-violet-400" gradientTo="to-violet-600"
-                            sparkData={aggregatedData.dailyContractTrend} accentColor="#8b5cf6" />
+                            sparkData={aggregatedData.dailyContractTrend} accentColor="#8b5cf6" loading={reportData.loading} />
                         <KpiCard title="成約率" value={formatPercent(aggregatedData.conversionRate)}
                             subValue="新規 → 契約" trend={null} icon="target"
-                            gradientFrom="from-teal-400" gradientTo="to-teal-600" accentColor="#14b8a6" />
+                            gradientFrom="from-teal-400" gradientTo="to-teal-600" accentColor="#14b8a6" loading={reportData.loading} />
                         <KpiCard title="既存施術数" value={formatNumber(aggregatedData.totalTreatments)}
                             subValue="リピーター対応" trend={null} icon="heart-handshake"
                             gradientFrom="from-rose-400" gradientTo="to-rose-600"
-                            sparkData={aggregatedData.dailyTreatmentTrend} accentColor="#f43f5e" />
+                            sparkData={aggregatedData.dailyTreatmentTrend} accentColor="#f43f5e" loading={reportData.loading} />
                     </div>
 
                     {/* チャート + チャネルカード */}
@@ -4035,6 +4073,7 @@
                             subValue={`累計: ${memberData.totalMembers}人`}
                             icon="users"
                             gradientFrom="from-sise-400" gradientTo="to-sise-600"
+                            loading={memberData.loading}
                         />
                         <KpiCard
                             title="月間想定売上"
@@ -4042,6 +4081,7 @@
                             subValue={`@${formatCurrency(monthlyPrice)}/月`}
                             icon="trending-up"
                             gradientFrom="from-emerald-400" gradientTo="to-emerald-600"
+                            loading={memberData.loading}
                         />
                         <KpiCard
                             title="今月の新規入会"
@@ -4049,6 +4089,7 @@
                             subValue="新規獲得"
                             icon="user-plus"
                             gradientFrom="from-teal-400" gradientTo="to-teal-600"
+                            loading={memberData.loading}
                         />
                         <KpiCard
                             title="退会率"
@@ -4057,6 +4098,7 @@
                             icon="user-minus"
                             gradientFrom={memberData.churnRate > 5 ? "from-red-400" : "from-slate-400"}
                             gradientTo={memberData.churnRate > 5 ? "to-red-600" : "to-slate-500"}
+                            loading={memberData.loading}
                         />
                     </div>
 
@@ -4251,8 +4293,24 @@
                             </div>
                         </div>
 
+                        {/* ローディング中スケルトン */}
+                        {memberData.loading && (
+                            <div className="space-y-3 py-4">
+                                {[1,2,3,4,5].map(i => (
+                                    <div key={i} className="flex items-center gap-3 p-3 bg-white/60 rounded-xl border border-slate-100">
+                                        <div className="skeleton w-9 h-9 rounded-full flex-shrink-0"></div>
+                                        <div className="flex-1 space-y-2">
+                                            <div className="skeleton h-4 w-32 rounded"></div>
+                                            <div className="skeleton h-3 w-48 rounded"></div>
+                                        </div>
+                                        <div className="skeleton h-6 w-16 rounded-lg"></div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+
                         {/* デスクトップ: テーブル表示 */}
-                        <div className="hide-mobile overflow-x-auto">
+                        {!memberData.loading && <div className="hide-mobile overflow-x-auto">
                             <table className="w-full text-sm">
                                 <thead>
                                     <tr className="border-b-2 border-slate-100 bg-slate-50/50">
@@ -4312,10 +4370,10 @@
                                     ))}
                                 </tbody>
                             </table>
-                        </div>
+                        </div>}
 
                         {/* モバイル: カード表示 */}
-                        <div className="hide-desktop space-y-3">
+                        {!memberData.loading && <div className="hide-desktop space-y-3">
                             {filteredMembers.slice(0, 20).map((member) => (
                                 <div
                                     key={member.id}
@@ -4339,14 +4397,14 @@
                                     </div>
                                 </div>
                             ))}
-                        </div>
+                        </div>}
 
-                        {filteredMembers.length > 30 && (
+                        {!memberData.loading && filteredMembers.length > 30 && (
                             <div className="text-center py-4 text-sm text-slate-400">
                                 {filteredMembers.length}件中30件を表示
                             </div>
                         )}
-                        {filteredMembers.length === 0 && (
+                        {!memberData.loading && filteredMembers.length === 0 && (
                             <div className="text-center py-10 text-slate-400">
                                 <div className="w-16 h-16 bg-slate-100 rounded-2xl flex items-center justify-center mx-auto mb-3">
                                     <Icon name="users" size={28} className="text-slate-300" />
@@ -7600,18 +7658,9 @@
                     {/* Main Content */}
                     <main className="pt-14 md:pt-16 lg:pl-56 min-h-screen relative z-10">
                         <div className="px-3 py-2 md:p-5 lg:p-8 max-w-7xl mx-auto pb-24 md:pb-8">
-                            {memberData.loading || reportData.loading ? (
-                                <div className="flex items-center justify-center h-64 animate-fade-in">
-                                    <div className="text-center">
-                                        <div className="w-12 h-12 border-3 border-sise-200 dark:border-sise-900 border-t-sise-500 rounded-full animate-spin mx-auto mb-4"></div>
-                                        <p className="text-slate-400 dark:text-slate-500 text-xs tracking-widest font-semibold uppercase">Loading...</p>
-                                    </div>
-                                </div>
-                            ) : (
-                                <div key={currentView} className="view-transition">
-                                    {renderView()}
-                                </div>
-                            )}
+                            <div key={currentView} className="view-transition">
+                                {renderView()}
+                            </div>
                         </div>
                     </main>
                 </div>
