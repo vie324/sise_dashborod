@@ -30,6 +30,9 @@
     <!-- Lucide Icons -->
     <script src="https://unpkg.com/lucide@latest"></script>
 
+    <!-- QR Code Generator -->
+    <script src="https://unpkg.com/qrcode@1.5.4/build/qrcode.min.js"></script>
+
     <!-- Custom Config for Tailwind (si'se Theme - Enhanced) -->
     <script>
         tailwind.config = {
@@ -3498,6 +3501,389 @@
             );
         };
 
+        // ========================================
+        // サブスク契約リンク生成モーダル
+        // ========================================
+        const SubscriptionLinkModal = ({ isOpen, onClose, activeStoreId, memberData }) => {
+            const [plans, setPlans] = useState([]);
+            const [selectedPlanId, setSelectedPlanId] = useState('');
+            const [loading, setLoading] = useState(false);
+            const [fetchingPlans, setFetchingPlans] = useState(false);
+            const [generatedLink, setGeneratedLink] = useState(null);
+            const [qrDataUrl, setQrDataUrl] = useState(null);
+            const [error, setError] = useState(null);
+            const [copied, setCopied] = useState(false);
+
+            // プラン一覧を取得
+            useEffect(() => {
+                if (!isOpen) return;
+                setGeneratedLink(null);
+                setQrDataUrl(null);
+                setError(null);
+                setSelectedPlanId('');
+
+                const fetchPlans = async () => {
+                    setFetchingPlans(true);
+                    try {
+                        const headers = { 'Content-Type': 'application/json' };
+                        if (activeStoreId && activeStoreId !== 'all') headers['X-Store-Id'] = activeStoreId;
+                        const res = await fetch(`${SQUARE_PROXY_BASE}/catalog/list`, {
+                            method: 'POST',
+                            headers,
+                            body: JSON.stringify({ types: ['SUBSCRIPTION_PLAN'] })
+                        });
+                        if (!res.ok) throw new Error('プラン取得に失敗しました');
+                        const data = await res.json();
+                        const objects = data.objects || [];
+
+                        // プランとバリエーションを抽出
+                        const planList = [];
+                        objects.forEach(obj => {
+                            if (obj.type === 'SUBSCRIPTION_PLAN' && obj.subscription_plan_data) {
+                                const planData = obj.subscription_plan_data;
+                                // バリエーションを取得
+                                const variations = planData.subscription_plan_variations || [];
+                                if (variations.length > 0) {
+                                    variations.forEach(v => {
+                                        const varData = v.subscription_plan_variation_data;
+                                        const phases = varData?.phases || [];
+                                        let price = 0;
+                                        let cadence = 'MONTHLY';
+                                        if (phases.length > 0) {
+                                            const paidPhase = phases.find(p => p.pricing?.price_money?.amount > 0) || phases[0];
+                                            price = paidPhase.pricing?.price_money?.amount || paidPhase.recurring_price_money?.amount || 0;
+                                            cadence = paidPhase.cadence || 'MONTHLY';
+                                        }
+                                        planList.push({
+                                            id: v.id,
+                                            name: `${planData.name} - ${varData?.name || 'デフォルト'}`,
+                                            price,
+                                            cadence,
+                                        });
+                                    });
+                                } else {
+                                    // バリエーションが直接ない場合（別オブジェクトとして返る場合）
+                                    planList.push({
+                                        id: obj.id,
+                                        name: planData.name,
+                                        price: 0,
+                                        cadence: 'MONTHLY',
+                                    });
+                                }
+                            }
+                            // SUBSCRIPTION_PLAN_VARIATIONが直接返る場合
+                            if (obj.type === 'SUBSCRIPTION_PLAN_VARIATION' && obj.subscription_plan_variation_data) {
+                                const varData = obj.subscription_plan_variation_data;
+                                const phases = varData.phases || [];
+                                let price = 0;
+                                let cadence = 'MONTHLY';
+                                if (phases.length > 0) {
+                                    const paidPhase = phases.find(p => p.pricing?.price_money?.amount > 0) || phases[0];
+                                    price = paidPhase.pricing?.price_money?.amount || paidPhase.recurring_price_money?.amount || 0;
+                                    cadence = paidPhase.cadence || 'MONTHLY';
+                                }
+                                planList.push({
+                                    id: obj.id,
+                                    name: varData.name || obj.id,
+                                    price,
+                                    cadence,
+                                });
+                            }
+                        });
+
+                        // batch-retrieveでバリエーション取得（catalog/listで取れない場合のフォールバック）
+                        if (planList.length === 0 && objects.length > 0) {
+                            objects.forEach(obj => {
+                                if (obj.subscription_plan_data) {
+                                    planList.push({
+                                        id: obj.id,
+                                        name: obj.subscription_plan_data.name || obj.id,
+                                        price: 0,
+                                        cadence: 'MONTHLY',
+                                    });
+                                }
+                            });
+                        }
+
+                        // memberDataからプランバリエーションIDを使ってフォールバック
+                        if (planList.length === 0 && memberData && memberData.members) {
+                            const planMap = new Map();
+                            memberData.members.forEach(m => {
+                                if (m.planVariationId && !planMap.has(m.planVariationId)) {
+                                    planMap.set(m.planVariationId, {
+                                        id: m.planVariationId,
+                                        name: m.planName || 'プラン',
+                                        price: m.monthlyPrice || 0,
+                                        cadence: m.cadence || 'MONTHLY',
+                                    });
+                                }
+                            });
+                            planList.push(...planMap.values());
+                        }
+
+                        setPlans(planList);
+                        if (planList.length > 0) setSelectedPlanId(planList[0].id);
+                    } catch (e) {
+                        setError(e.message);
+                    } finally {
+                        setFetchingPlans(false);
+                    }
+                };
+                fetchPlans();
+            }, [isOpen, activeStoreId]);
+
+            // 契約リンク生成
+            const generateLink = async () => {
+                if (!selectedPlanId) return;
+                setLoading(true);
+                setError(null);
+                setGeneratedLink(null);
+                setQrDataUrl(null);
+
+                try {
+                    const headers = { 'Content-Type': 'application/json' };
+                    if (activeStoreId && activeStoreId !== 'all') headers['X-Store-Id'] = activeStoreId;
+
+                    const res = await fetch(`${SQUARE_PROXY_BASE}/online-checkout/payment-links`, {
+                        method: 'POST',
+                        headers,
+                        body: JSON.stringify({
+                            idempotency_key: crypto.randomUUID(),
+                            subscription_plan_id: selectedPlanId,
+                        })
+                    });
+
+                    if (!res.ok) {
+                        const errData = await res.json().catch(() => ({}));
+                        const detail = errData.errors
+                            ? errData.errors.map(e => e.detail || e.code).join(', ')
+                            : JSON.stringify(errData);
+                        throw new Error(detail);
+                    }
+
+                    const data = await res.json();
+                    const link = data.payment_link;
+                    if (!link || !link.url) throw new Error('リンクの生成に失敗しました');
+
+                    setGeneratedLink({
+                        url: link.url,
+                        longUrl: link.long_url || link.url,
+                        id: link.id,
+                        createdAt: link.created_at,
+                    });
+
+                    // QRコード生成
+                    if (window.QRCode) {
+                        const qrUrl = await window.QRCode.toDataURL(link.url, {
+                            width: 280,
+                            margin: 2,
+                            color: { dark: '#1a5136', light: '#ffffff' },
+                            errorCorrectionLevel: 'M',
+                        });
+                        setQrDataUrl(qrUrl);
+                    }
+                } catch (e) {
+                    setError(e.message);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            // URLコピー
+            const copyUrl = async () => {
+                if (!generatedLink) return;
+                try {
+                    await navigator.clipboard.writeText(generatedLink.url);
+                    setCopied(true);
+                    setTimeout(() => setCopied(false), 2000);
+                } catch (e) {
+                    // フォールバック
+                    const ta = document.createElement('textarea');
+                    ta.value = generatedLink.url;
+                    document.body.appendChild(ta);
+                    ta.select();
+                    document.execCommand('copy');
+                    document.body.removeChild(ta);
+                    setCopied(true);
+                    setTimeout(() => setCopied(false), 2000);
+                }
+            };
+
+            // 頻度ラベル
+            const cadenceLabel = (c) => {
+                const map = { DAILY: '日次', WEEKLY: '週次', MONTHLY: '月額', QUARTERLY: '四半期', ANNUAL: '年額' };
+                return map[c] || c || '月額';
+            };
+
+            if (!isOpen) return null;
+
+            return (
+                <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in" onClick={onClose}>
+                    <div className="bg-white/95 backdrop-blur-xl rounded-2xl shadow-2xl max-w-lg w-full p-5 md:p-6 max-h-[90vh] overflow-y-auto animate-scale-in border border-slate-200/50" onClick={(e) => e.stopPropagation()}>
+                        {/* ヘッダー */}
+                        <div className="flex items-center justify-between mb-5">
+                            <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 bg-gradient-to-br from-sise-400 to-sise-600 rounded-xl flex items-center justify-center">
+                                    <Icon name="link" size={20} className="text-white" />
+                                </div>
+                                <div>
+                                    <h3 className="text-lg font-bold text-slate-900">サブスク契約リンク生成</h3>
+                                    <p className="text-xs text-slate-400">契約用URL・QRコードを発行</p>
+                                </div>
+                            </div>
+                            <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-lg transition-colors">
+                                <Icon name="x" size={20} />
+                            </button>
+                        </div>
+
+                        {/* プラン選択 */}
+                        {fetchingPlans ? (
+                            <div className="flex items-center justify-center py-8">
+                                <Icon name="loader" size={24} className="animate-spin text-sise-500 mr-2" />
+                                <span className="text-sm text-slate-500">プランを読み込み中...</span>
+                            </div>
+                        ) : plans.length === 0 ? (
+                            <div className="text-center py-8">
+                                <div className="w-14 h-14 bg-slate-100 rounded-2xl flex items-center justify-center mx-auto mb-3">
+                                    <Icon name="alert-circle" size={24} className="text-slate-400" />
+                                </div>
+                                <p className="text-sm font-medium text-slate-600 mb-1">サブスクリプションプランが見つかりません</p>
+                                <p className="text-xs text-slate-400">Squareダッシュボードでプランを作成してください</p>
+                            </div>
+                        ) : (
+                            <>
+                                {!generatedLink && (
+                                    <div className="mb-5">
+                                        <label className="block text-sm font-semibold text-slate-700 mb-2">プランを選択</label>
+                                        <div className="space-y-2">
+                                            {plans.map(plan => (
+                                                <label
+                                                    key={plan.id}
+                                                    className={`flex items-center justify-between p-3 rounded-xl border-2 cursor-pointer transition-all ${
+                                                        selectedPlanId === plan.id
+                                                            ? 'border-sise-400 bg-sise-50/50'
+                                                            : 'border-slate-200 hover:border-slate-300 bg-white'
+                                                    }`}
+                                                >
+                                                    <div className="flex items-center gap-3">
+                                                        <input
+                                                            type="radio"
+                                                            name="plan"
+                                                            value={plan.id}
+                                                            checked={selectedPlanId === plan.id}
+                                                            onChange={() => setSelectedPlanId(plan.id)}
+                                                            className="accent-sise-500"
+                                                        />
+                                                        <div>
+                                                            <p className="font-medium text-slate-800 text-sm">{plan.name}</p>
+                                                            <p className="text-xs text-slate-400">{cadenceLabel(plan.cadence)}</p>
+                                                        </div>
+                                                    </div>
+                                                    {plan.price > 0 && (
+                                                        <span className="font-bold text-sise-700 text-sm">
+                                                            {Number(plan.price).toLocaleString()}円
+                                                        </span>
+                                                    )}
+                                                </label>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* エラー表示 */}
+                                {error && (
+                                    <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700">
+                                        <Icon name="alert-circle" size={14} className="inline mr-1" />
+                                        {error}
+                                    </div>
+                                )}
+
+                                {/* 生成ボタン */}
+                                {!generatedLink && (
+                                    <button
+                                        onClick={generateLink}
+                                        disabled={loading || !selectedPlanId}
+                                        className="w-full flex items-center justify-center gap-2 px-4 py-3 btn-gradient rounded-xl font-semibold text-sm transition-all disabled:opacity-50"
+                                    >
+                                        {loading ? (
+                                            <>
+                                                <Icon name="loader" size={16} className="animate-spin" />
+                                                生成中...
+                                            </>
+                                        ) : (
+                                            <>
+                                                <Icon name="sparkles" size={16} />
+                                                契約リンクを生成
+                                            </>
+                                        )}
+                                    </button>
+                                )}
+
+                                {/* 生成結果 */}
+                                {generatedLink && (
+                                    <div className="space-y-4 animate-fade-in">
+                                        {/* QRコード */}
+                                        {qrDataUrl && (
+                                            <div className="flex flex-col items-center py-4">
+                                                <img src={qrDataUrl} alt="QR Code" className="w-56 h-56 rounded-xl shadow-lg border border-slate-100" />
+                                                <p className="text-xs text-slate-400 mt-2">お客様にこのQRコードを読み取ってもらってください</p>
+                                            </div>
+                                        )}
+
+                                        {/* URL表示 */}
+                                        <div className="bg-slate-50 rounded-xl p-3 border border-slate-200">
+                                            <label className="block text-xs font-semibold text-slate-500 mb-1.5">契約URL</label>
+                                            <div className="flex items-center gap-2">
+                                                <input
+                                                    type="text"
+                                                    readOnly
+                                                    value={generatedLink.url}
+                                                    className="flex-1 bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-700 select-all outline-none"
+                                                    onClick={(e) => e.target.select()}
+                                                />
+                                                <button
+                                                    onClick={copyUrl}
+                                                    className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
+                                                        copied
+                                                            ? 'bg-green-100 text-green-700 border border-green-200'
+                                                            : 'bg-sise-50 text-sise-700 border border-sise-200 hover:bg-sise-100'
+                                                    }`}
+                                                >
+                                                    <Icon name={copied ? "check" : "copy"} size={14} />
+                                                    {copied ? 'コピー済' : 'コピー'}
+                                                </button>
+                                            </div>
+                                        </div>
+
+                                        {/* アクションボタン */}
+                                        <div className="flex gap-2">
+                                            <button
+                                                onClick={() => { setGeneratedLink(null); setQrDataUrl(null); setError(null); }}
+                                                className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-sm font-medium transition-colors"
+                                            >
+                                                <Icon name="refresh-cw" size={14} />
+                                                別のリンクを生成
+                                            </button>
+                                            {qrDataUrl && (
+                                                <a
+                                                    href={qrDataUrl}
+                                                    download="subscription-qr.png"
+                                                    className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 bg-sise-50 hover:bg-sise-100 text-sise-700 border border-sise-200 rounded-xl text-sm font-medium transition-colors"
+                                                >
+                                                    <Icon name="download" size={14} />
+                                                    QR画像を保存
+                                                </a>
+                                            )}
+                                        </div>
+                                    </div>
+                                )}
+                            </>
+                        )}
+                    </div>
+                </div>
+            );
+        };
+
         const MemberManagementView = ({ memberData, refreshSquareData, operateSubscription, activeStoreId, manualMembersHook }) => {
             const [isRefreshing, setIsRefreshing] = useState(false);
             const [filterStatus, setFilterStatus] = useState('all'); // all, ACTIVE, CANCELED, PENDING
@@ -3505,6 +3891,7 @@
             const [selectedMember, setSelectedMember] = useState(null);
             const [actionLoading, setActionLoading] = useState(null); // 'cancel'|'pause'|'resume'
             const [actionMessage, setActionMessage] = useState(null); // { type, text }
+            const [showSubscriptionLink, setShowSubscriptionLink] = useState(false);
 
             const handleRefresh = async () => {
                 setIsRefreshing(true);
@@ -3602,15 +3989,34 @@
             return (
                 <div className="space-y-5 md:space-y-6 animate-fade-in">
                     <SectionHeader title="会員管理" subtitle="MEMBER MANAGEMENT" icon="users">
-                        <button
-                            onClick={handleRefresh}
-                            disabled={isRefreshing}
-                            className="flex items-center px-4 py-2.5 btn-gradient rounded-xl font-medium text-sm transition-all disabled:opacity-50"
-                        >
-                            <Icon name={isRefreshing ? "loader" : "refresh-cw"} size={16} className={`mr-2 ${isRefreshing ? 'animate-spin' : ''}`} />
-                            {isRefreshing ? '更新中...' : 'データ更新'}
-                        </button>
+                        <div className="flex items-center gap-2">
+                            {(!currentAccess || currentAccess.role === 'manager') && (
+                                <button
+                                    onClick={() => setShowSubscriptionLink(true)}
+                                    className="flex items-center px-4 py-2.5 bg-gradient-to-r from-sise-500 to-sise-600 hover:from-sise-600 hover:to-sise-700 text-white rounded-xl font-medium text-sm transition-all shadow-md hover:shadow-lg"
+                                >
+                                    <Icon name="qr-code" size={16} className="mr-2" />
+                                    契約リンク発行
+                                </button>
+                            )}
+                            <button
+                                onClick={handleRefresh}
+                                disabled={isRefreshing}
+                                className="flex items-center px-4 py-2.5 btn-gradient rounded-xl font-medium text-sm transition-all disabled:opacity-50"
+                            >
+                                <Icon name={isRefreshing ? "loader" : "refresh-cw"} size={16} className={`mr-2 ${isRefreshing ? 'animate-spin' : ''}`} />
+                                {isRefreshing ? '更新中...' : 'データ更新'}
+                            </button>
+                        </div>
                     </SectionHeader>
+
+                    {/* サブスク契約リンク生成モーダル */}
+                    <SubscriptionLinkModal
+                        isOpen={showSubscriptionLink}
+                        onClose={() => setShowSubscriptionLink(false)}
+                        activeStoreId={activeStoreId}
+                        memberData={memberData}
+                    />
 
                     {memberData.error && (
                         <div className="bg-red-50/80 backdrop-blur-sm border border-red-200 rounded-xl p-4">
