@@ -137,6 +137,31 @@
                             '60%': { opacity: '1', transform: 'translateY(-8%)' },
                             '100%': { opacity: '1', transform: 'translateY(0)' },
                         },
+                        'toast-in': {
+                            '0%': { opacity: '0', transform: 'translateY(-16px) scale(0.95)' },
+                            '100%': { opacity: '1', transform: 'translateY(0) scale(1)' },
+                        },
+                        'toast-out': {
+                            '0%': { opacity: '1', transform: 'translateY(0) scale(1)' },
+                            '100%': { opacity: '0', transform: 'translateY(-16px) scale(0.95)' },
+                        },
+                        'ripple': {
+                            '0%': { transform: 'scale(0)', opacity: '0.5' },
+                            '100%': { transform: 'scale(4)', opacity: '0' },
+                        },
+                        'view-enter': {
+                            '0%': { opacity: '0', transform: 'translateY(16px)' },
+                            '100%': { opacity: '1', transform: 'translateY(0)' },
+                        },
+                        'badge-pop': {
+                            '0%': { transform: 'scale(0)' },
+                            '50%': { transform: 'scale(1.2)' },
+                            '100%': { transform: 'scale(1)' },
+                        },
+                        'success-check': {
+                            '0%': { strokeDashoffset: '24' },
+                            '100%': { strokeDashoffset: '0' },
+                        },
                     },
                     animation: {
                         'fade-in-up': 'fade-in-up 0.6s cubic-bezier(0.16,1,0.3,1) forwards',
@@ -154,6 +179,12 @@
                         'sparkline-draw': 'sparkline-draw 1.5s cubic-bezier(0.16,1,0.3,1) forwards',
                         'slide-up-fade': 'slide-up-fade 0.5s cubic-bezier(0.16,1,0.3,1) forwards',
                         'number-roll': 'number-roll 0.8s cubic-bezier(0.16,1,0.3,1) forwards',
+                        'toast-in': 'toast-in 0.35s cubic-bezier(0.16,1,0.3,1) forwards',
+                        'toast-out': 'toast-out 0.25s ease-in forwards',
+                        'ripple': 'ripple 0.6s ease-out',
+                        'view-enter': 'view-enter 0.4s cubic-bezier(0.16,1,0.3,1) forwards',
+                        'badge-pop': 'badge-pop 0.3s cubic-bezier(0.16,1,0.3,1) forwards',
+                        'success-check': 'success-check 0.3s ease forwards',
                     },
                 }
             }
@@ -667,6 +698,92 @@
             border-color: #33a065 !important;
             box-shadow: 0 0 0 3px rgba(51,160,101,0.12);
         }
+
+        /* Toast notification system */
+        .toast-container {
+            position: fixed; top: 72px; right: 16px; z-index: 9999;
+            display: flex; flex-direction: column; gap: 8px;
+            pointer-events: none;
+        }
+        .toast {
+            pointer-events: auto;
+            display: flex; align-items: center; gap: 10px;
+            padding: 12px 18px;
+            border-radius: 14px;
+            background: rgba(255,255,255,0.95);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid rgba(51,160,101,0.15);
+            box-shadow: 0 8px 32px -8px rgba(0,0,0,0.12), 0 2px 8px rgba(51,160,101,0.08);
+            font-size: 13px; font-weight: 600;
+            animation: toast-in 0.35s cubic-bezier(0.16,1,0.3,1) forwards;
+            max-width: 360px;
+        }
+        .toast.leaving { animation: toast-out 0.25s ease-in forwards; }
+        .toast-success { color: #15803d; border-color: rgba(34,197,94,0.25); }
+        .toast-error { color: #b91c1c; border-color: rgba(239,68,68,0.25); }
+        .toast-info { color: #1d6641; border-color: rgba(51,160,101,0.2); }
+        .dark .toast { background: rgba(18,35,27,0.95); border-color: rgba(51,160,101,0.2); }
+        @media (max-width: 768px) {
+            .toast-container { top: 60px; right: 8px; left: 8px; }
+            .toast { max-width: 100%; }
+        }
+
+        /* View transition wrapper */
+        .view-transition { animation: view-enter 0.4s cubic-bezier(0.16,1,0.3,1) forwards; }
+
+        /* Smooth scroll behavior */
+        html { scroll-behavior: smooth; }
+
+        /* Better focus-visible for keyboard navigation */
+        *:focus-visible {
+            outline: 2px solid #33a065;
+            outline-offset: 2px;
+            border-radius: 8px;
+        }
+        button:focus:not(:focus-visible), a:focus:not(:focus-visible) { outline: none; }
+
+        /* Improved select dropdown arrow */
+        select {
+            appearance: none;
+            -webkit-appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 10px center;
+            padding-right: 30px !important;
+        }
+
+        /* Loading bar at top */
+        .top-loading-bar {
+            position: fixed; top: 0; left: 0; right: 0; height: 3px; z-index: 9999;
+            background: linear-gradient(90deg, transparent, #33a065, #55b87f, transparent);
+            background-size: 200% 100%;
+            animation: shimmer 1.2s linear infinite;
+            opacity: 0; transition: opacity 0.2s;
+        }
+        .top-loading-bar.active { opacity: 1; }
+
+        /* Staggered animation delays */
+        .stagger-1 { animation-delay: 0.05s; }
+        .stagger-2 { animation-delay: 0.1s; }
+        .stagger-3 { animation-delay: 0.15s; }
+        .stagger-4 { animation-delay: 0.2s; }
+
+        /* Better dark mode transitions */
+        body, .glass-panel, .glass-card, .glass-card-glow {
+            transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease;
+        }
+
+        /* Empty state */
+        .empty-state {
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            padding: 48px 24px; text-align: center; color: #94a3b8;
+        }
+        .empty-state-icon {
+            width: 64px; height: 64px; border-radius: 20px; margin-bottom: 16px;
+            background: linear-gradient(135deg, rgba(51,160,101,0.08), rgba(51,160,101,0.04));
+            display: flex; align-items: center; justify-content: center;
+        }
     </style>
 </head>
 <body>
@@ -1104,6 +1221,76 @@
                     style={{ width: size, height: size, fontSize: Math.round(size * 0.38) }}
                 >
                     {initial}
+                </div>
+            );
+        };
+
+        // ========================================
+        // トースト通知システム
+        // ========================================
+        const toastState = { listeners: [], toasts: [] };
+        const showToast = (message, type = 'info', duration = 3500) => {
+            const id = Date.now() + Math.random();
+            toastState.toasts = [...toastState.toasts, { id, message, type, leaving: false }];
+            toastState.listeners.forEach(fn => fn([...toastState.toasts]));
+            setTimeout(() => {
+                toastState.toasts = toastState.toasts.map(t => t.id === id ? { ...t, leaving: true } : t);
+                toastState.listeners.forEach(fn => fn([...toastState.toasts]));
+                setTimeout(() => {
+                    toastState.toasts = toastState.toasts.filter(t => t.id !== id);
+                    toastState.listeners.forEach(fn => fn([...toastState.toasts]));
+                }, 260);
+            }, duration);
+        };
+
+        const ToastContainer = () => {
+            const [toasts, setToasts] = useState([]);
+            useEffect(() => {
+                const fn = (t) => setToasts(t);
+                toastState.listeners.push(fn);
+                return () => { toastState.listeners = toastState.listeners.filter(l => l !== fn); };
+            }, []);
+            if (!toasts.length) return null;
+            const iconName = { success: 'check-circle', error: 'alert-circle', info: 'info' };
+            return (
+                <div className="toast-container">
+                    {toasts.map(t => (
+                        <div key={t.id} className={`toast toast-${t.type} ${t.leaving ? 'leaving' : ''}`}>
+                            <Icon name={iconName[t.type] || 'info'} size={18} />
+                            <span>{t.message}</span>
+                        </div>
+                    ))}
+                </div>
+            );
+        };
+
+        // ========================================
+        // ビュー切り替えアニメーション
+        // ========================================
+        const ViewTransition = ({ viewKey, children }) => {
+            const [displayKey, setDisplayKey] = useState(viewKey);
+            const [visible, setVisible] = useState(true);
+
+            useEffect(() => {
+                if (viewKey !== displayKey) {
+                    setVisible(false);
+                    const timer = setTimeout(() => {
+                        setDisplayKey(viewKey);
+                        setVisible(true);
+                    }, 150);
+                    return () => clearTimeout(timer);
+                }
+            }, [viewKey, displayKey]);
+
+            return (
+                <div
+                    style={{
+                        opacity: visible ? 1 : 0,
+                        transform: visible ? 'translateY(0)' : 'translateY(12px)',
+                        transition: 'opacity 0.2s ease, transform 0.3s cubic-bezier(0.16,1,0.3,1)',
+                    }}
+                >
+                    {children}
                 </div>
             );
         };
@@ -2068,8 +2255,10 @@
                         });
                     }
                     setLastSaved(new Date());
+                    showToast('利用回数を保存しました', 'success', 2000);
                 } catch (e) {
                     console.error('Usage save error:', e);
+                    showToast('利用回数の保存に失敗しました', 'error');
                 } finally {
                     setSaving(false);
                 }
@@ -2288,8 +2477,10 @@
                         });
                     }
                     setLastSaved(new Date());
+                    showToast('回数券データを保存しました', 'success', 2000);
                 } catch (e) {
                     console.error('Ticket save error:', e);
+                    showToast('回数券データの保存に失敗しました', 'error');
                 } finally {
                     setSaving(false);
                 }
@@ -8065,8 +8256,6 @@
                 const stored = localStorage.getItem('sise_unified_gas_url');
                 return (stored && stored !== 'YOUR_UNIFIED_GAS_URL') ? stored : '';
             });
-            const [saveMessage, setSaveMessage] = useState('');
-
             // サーバーの接続状態を取得
             useEffect(() => {
                 fetchSquareConfig().then(config => {
@@ -8076,23 +8265,13 @@
 
             const handleSaveGas = () => {
                 localStorage.setItem('sise_unified_gas_url', unifiedGasUrl);
-                setSaveMessage('統合GAS URLを保存しました。リロードで全機能に反映されます。');
+                showToast('統合GAS URLを保存しました。リロードで全機能に反映されます。', 'success');
                 if (onSettingsSaved) onSettingsSaved();
-                setTimeout(() => setSaveMessage(''), 5000);
             };
 
             return (
                 <div className="space-y-6">
                     <h2 className="text-xl font-bold text-slate-900">設定</h2>
-
-                    {saveMessage && (
-                        <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-                            <p className="text-green-700 text-sm flex items-center">
-                                <Icon name="check-circle" size={16} className="mr-2" />
-                                {saveMessage}
-                            </p>
-                        </div>
-                    )}
 
                     {/* Square API 接続状態 */}
                     <Card>
@@ -8255,6 +8434,80 @@
                         </div>
                     </Card>
 
+                    {/* GAS セットアップガイド */}
+                    <Card>
+                        <details className="group">
+                            <summary className="flex items-center cursor-pointer list-none select-none">
+                                <Icon name="book-open" size={20} className="text-sise-500 mr-3" />
+                                <h3 className="text-lg font-semibold text-slate-900 flex-1">GAS セットアップガイド</h3>
+                                <Icon name="chevron-down" size={18} className="text-slate-400 transition-transform duration-200 group-open:rotate-180" />
+                            </summary>
+                            <div className="mt-5 space-y-6">
+                                {/* Step 1 */}
+                                <div className="relative pl-8 border-l-2 border-sise-200 pb-5">
+                                    <div className="absolute left-0 -translate-x-1/2 w-7 h-7 rounded-full bg-gradient-to-br from-sise-500 to-sise-600 text-white flex items-center justify-center text-xs font-bold shadow-sm">1</div>
+                                    <h4 className="font-bold text-slate-800 mb-2">スプレッドシートを作成</h4>
+                                    <p className="text-sm text-slate-600 mb-3">Google ドライブで新しいスプレッドシートを作成します。名前は「si'se 統合管理」などわかりやすいものにしてください。</p>
+                                </div>
+
+                                {/* Step 2 */}
+                                <div className="relative pl-8 border-l-2 border-sise-200 pb-5">
+                                    <div className="absolute left-0 -translate-x-1/2 w-7 h-7 rounded-full bg-gradient-to-br from-sise-500 to-sise-600 text-white flex items-center justify-center text-xs font-bold shadow-sm">2</div>
+                                    <h4 className="font-bold text-slate-800 mb-2">Googleフォームの回答先を設定</h4>
+                                    <p className="text-sm text-slate-600 mb-3">以下の2種類のフォームの回答先を、作成したスプレッドシートに設定します。</p>
+                                    <div className="bg-slate-50 rounded-lg p-3 space-y-2 text-xs">
+                                        <p className="font-semibold text-slate-700">日報フォーム:</p>
+                                        <p className="text-slate-500">フォームの「回答」タブ → スプレッドシートアイコン → 「既存のスプレッドシートを選択」→ 作成したシートを選択。<br/>シート名を<code className="bg-sise-50 text-sise-700 px-1.5 py-0.5 rounded font-bold">日報</code>に変更。</p>
+                                        <div className="border-t border-slate-200 pt-2 mt-2">
+                                            <p className="font-semibold text-slate-700">カウンセリングフォーム（5店舗分）:</p>
+                                            <p className="text-slate-500">各店舗のフォームも同様に同じスプレッドシートに接続し、シート名を以下に変更:</p>
+                                            <div className="flex flex-wrap gap-1.5 mt-1.5">
+                                                {['カウンセリング回答_本厚木店', 'カウンセリング回答_大和店', 'カウンセリング回答_横浜店', 'カウンセリング回答_町田店', 'カウンセリング回答_川口店'].map(name => (
+                                                    <code key={name} className="bg-sise-50 text-sise-700 px-1.5 py-0.5 rounded font-bold">{name}</code>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Step 3 */}
+                                <div className="relative pl-8 border-l-2 border-sise-200 pb-5">
+                                    <div className="absolute left-0 -translate-x-1/2 w-7 h-7 rounded-full bg-gradient-to-br from-sise-500 to-sise-600 text-white flex items-center justify-center text-xs font-bold shadow-sm">3</div>
+                                    <h4 className="font-bold text-slate-800 mb-2">Apps Script にコードを貼り付け</h4>
+                                    <ol className="text-sm text-slate-600 space-y-1.5 list-decimal list-inside">
+                                        <li>スプレッドシートの<strong>「拡張機能」→「Apps Script」</strong>を開く</li>
+                                        <li>既存のコードをすべて削除し、<code className="bg-sise-50 text-sise-700 px-1.5 py-0.5 rounded font-bold">gas/unified.gs</code> の内容をすべて貼り付け</li>
+                                        <li><strong>Ctrl+S（⌘+S）</strong>で保存</li>
+                                    </ol>
+                                </div>
+
+                                {/* Step 4 */}
+                                <div className="relative pl-8 border-l-2 border-sise-200 pb-5">
+                                    <div className="absolute left-0 -translate-x-1/2 w-7 h-7 rounded-full bg-gradient-to-br from-sise-500 to-sise-600 text-white flex items-center justify-center text-xs font-bold shadow-sm">4</div>
+                                    <h4 className="font-bold text-slate-800 mb-2">ウェブアプリとしてデプロイ</h4>
+                                    <ol className="text-sm text-slate-600 space-y-1.5 list-decimal list-inside">
+                                        <li>Apps Script 画面右上の<strong>「デプロイ」→「新しいデプロイ」</strong></li>
+                                        <li>種類: <strong>ウェブアプリ</strong>を選択</li>
+                                        <li>実行するユーザー: <strong>「自分」</strong></li>
+                                        <li>アクセスできるユーザー: <strong>「全員」</strong></li>
+                                        <li>「デプロイ」ボタンをクリック</li>
+                                        <li>初回は Google アカウントの<strong>アクセス許可</strong>が必要（「許可を確認」→ アカウント選択 → 「詳細」→「安全でないページに移動」→「許可」）</li>
+                                    </ol>
+                                </div>
+
+                                {/* Step 5 */}
+                                <div className="relative pl-8 border-l-2 border-sise-200">
+                                    <div className="absolute left-0 -translate-x-1/2 w-7 h-7 rounded-full bg-gradient-to-br from-sise-500 to-sise-600 text-white flex items-center justify-center text-xs font-bold shadow-sm">5</div>
+                                    <h4 className="font-bold text-slate-800 mb-2">URLを上の設定欄に貼り付け</h4>
+                                    <p className="text-sm text-slate-600">デプロイ完了後に表示される<strong>ウェブアプリURL</strong>（https://script.google.com/macros/s/...）をコピーし、上の「統合 GAS URL」欄に貼り付けて保存してください。</p>
+                                    <div className="mt-3 bg-amber-50 border border-amber-200 rounded-lg p-3">
+                                        <p className="text-xs text-amber-800"><Icon name="alert-triangle" size={14} className="inline mr-1" /><strong>コード更新時の注意:</strong> gas/unified.gs を更新した場合は、Apps Script で<strong>「デプロイ」→「デプロイを管理」→ 鉛筆アイコン → バージョン「新しいバージョン」→「デプロイ」</strong>で更新してください。URLは変わりません。</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </details>
+                    </Card>
+
                     {/* スタッフ管理 */}
                     <StaffManagementSection />
 
@@ -8415,6 +8668,10 @@
 
             return (
                 <div className="min-h-screen bg-slate-50 bg-mesh relative">
+                    {/* トースト通知 */}
+                    <ToastContainer />
+                    {/* トップローディングバー */}
+                    <div className={`top-loading-bar ${memberData.loading || reportData.loading ? 'active' : ''}`}></div>
                     {/* 背景装飾オーブ */}
                     <div className="bg-orb bg-orb-1"></div>
                     <div className="bg-orb bg-orb-2"></div>
@@ -8480,6 +8737,7 @@
                                         const icon = e.currentTarget.querySelector('svg');
                                         if (icon) { icon.style.animation = 'spin 0.6s ease'; setTimeout(() => icon.style.animation = '', 600); }
                                         refreshReportData(); refreshSquareData();
+                                        showToast('データを更新中...', 'info', 2000);
                                     }}
                                     className="p-2.5 rounded-xl hover:bg-sise-50 text-slate-400 hover:text-sise-600 transition-all active:scale-90"
                                     title="データ更新"
@@ -8487,7 +8745,10 @@
                                     <Icon name="refresh-cw" size={18} />
                                 </button>
                                 <button
-                                    onClick={() => setIsDarkMode(!isDarkMode)}
+                                    onClick={() => {
+                                        setIsDarkMode(!isDarkMode);
+                                        showToast(isDarkMode ? 'ライトモードに切り替えました' : 'ダークモードに切り替えました', 'info', 1500);
+                                    }}
                                     className="p-2.5 rounded-xl hover:bg-sise-50 text-slate-400 hover:text-sise-600 transition-all active:scale-90 hide-mobile"
                                     title="ダークモード切り替え"
                                 >
@@ -8523,6 +8784,7 @@
                                     onClick={() => {
                                         setCurrentView(item.id);
                                         setIsSidebarOpen(false);
+                                        window.scrollTo({ top: 0, behavior: 'smooth' });
                                     }}
                                     className={`w-full flex items-center px-4 py-2.5 rounded-xl text-left text-sm font-semibold transition-all duration-200 ${
                                         currentView === item.id
@@ -8578,7 +8840,7 @@
                             {navItems.map((item) => (
                                 <button
                                     key={item.id}
-                                    onClick={() => setCurrentView(item.id)}
+                                    onClick={() => { setCurrentView(item.id); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
                                     className={`bottom-nav-item ${currentView === item.id ? 'active' : ''}`}
                                 >
                                     <span className="nav-icon-wrap transition-all duration-300">
@@ -8593,9 +8855,9 @@
                     {/* Main Content */}
                     <main className="pt-14 md:pt-16 lg:pl-56 min-h-screen relative z-10">
                         <div className="px-3 py-2 md:p-5 lg:p-8 max-w-7xl mx-auto pb-24 md:pb-8">
-                            <div key={currentView} className="view-transition">
+                            <ViewTransition viewKey={currentView}>
                                 {renderView()}
-                            </div>
+                            </ViewTransition>
                         </div>
                     </main>
                 </div>
