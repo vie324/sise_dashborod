@@ -981,14 +981,7 @@
             if (loading) {
                 return (
                     <Card hover className="group kpi-card relative overflow-hidden">
-                        <div className="flex justify-between items-start mb-2">
-                            <div className={`rounded-xl bg-gradient-to-br ${gradientFrom} ${gradientTo} text-white shadow-lg p-2.5 md:p-3 opacity-60`}>
-                                <Icon name={icon} size={18} />
-                            </div>
-                        </div>
-                        <div className="skeleton h-3 w-20 rounded mb-2 mt-1"></div>
-                        <div className="skeleton h-7 w-24 rounded mb-2"></div>
-                        <div className="skeleton h-3 w-16 rounded"></div>
+                        <SiseLoader size="sm" className="py-4" />
                     </Card>
                 );
             }
@@ -1036,6 +1029,36 @@
                 {children}
             </div>
         );
+
+        // ブランドローダー（ロゴ + 横棒プログレスバー）
+        const SiseLoader = ({ message, size = 'md', className = '' }) => {
+            const sizes = {
+                sm: { logo: 32, bar: 80, text: 'text-[10px]', gap: 'gap-2', logoRound: 'rounded-lg' },
+                md: { logo: 48, bar: 120, text: 'text-xs', gap: 'gap-3', logoRound: 'rounded-xl' },
+                lg: { logo: 64, bar: 160, text: 'text-sm', gap: 'gap-4', logoRound: 'rounded-2xl' },
+            };
+            const s = sizes[size] || sizes.md;
+            return (
+                <div className={`flex flex-col items-center justify-center ${s.gap} ${className}`}>
+                    <div className={`${s.logoRound} overflow-hidden shadow-lg shadow-sise-500/20`} style={{width: s.logo, height: s.logo}}>
+                        <img
+                            src="./images/logo.png"
+                            alt="si'se"
+                            className="w-full h-full object-contain"
+                            onError={(e) => {
+                                e.target.style.display = 'none';
+                                e.target.parentElement.classList.add('bg-gradient-to-br', 'from-sise-400', 'to-sise-600', 'flex', 'items-center', 'justify-center');
+                                e.target.parentElement.innerHTML = `<span class="text-white font-extrabold" style="font-size:${s.logo * 0.4}px">S</span>`;
+                            }}
+                        />
+                    </div>
+                    <div className="rounded-full overflow-hidden bg-sise-100/60" style={{width: s.bar, height: 3}}>
+                        <div className="h-full bg-gradient-to-r from-sise-400 to-sise-500 rounded-full" style={{width: '40%', animation: 'loading-progress 1.8s ease-in-out infinite'}}></div>
+                    </div>
+                    {message && <p className={`${s.text} text-slate-400 font-medium tracking-wide`}>{message}</p>}
+                </div>
+            );
+        };
 
         // ========================================
         // Square API連携
@@ -2469,7 +2492,7 @@
         const DashboardView = ({ memberData, reportData, selectedStore, setSelectedStore }) => {
             const [dateRange, setDateRange] = useState('month');
 
-            if (!window.Recharts) return <div className="p-8 text-center">チャートを読み込み中...</div>;
+            if (!window.Recharts) return <SiseLoader size="md" message="チャートを読み込み中..." className="py-12" />;
 
             // 日報データの集計
             const aggregatedData = useMemo(() => {
@@ -2916,6 +2939,15 @@
                 reports.forEach(r => { storeCount[r.store] = (storeCount[r.store] || 0) + 1; });
                 return { totalNew, totalContract, totalTreatments, storeCount, total: reports.length };
             }, [filteredReports]);
+
+            if (reportData.loading) {
+                return (
+                    <div className="space-y-5 animate-fade-in">
+                        <SectionHeader title="日報一覧" subtitle="DAILY REPORTS" icon="clipboard-list" />
+                        <SiseLoader size="lg" message="日報データを読み込み中..." className="py-20" />
+                    </div>
+                );
+            }
 
             return (
                 <div className="space-y-4 md:space-y-5 animate-fade-in">
@@ -3776,10 +3808,7 @@
 
                         {/* プラン選択 */}
                         {fetchingPlans ? (
-                            <div className="flex items-center justify-center py-8">
-                                <Icon name="loader" size={24} className="animate-spin text-sise-500 mr-2" />
-                                <span className="text-sm text-slate-500">プランを読み込み中...</span>
-                            </div>
+                            <SiseLoader size="md" message="プランを読み込み中..." className="py-8" />
                         ) : plans.length === 0 ? (
                             <div className="text-center py-8">
                                 <div className="w-14 h-14 bg-slate-100 rounded-2xl flex items-center justify-center mx-auto mb-3">
@@ -4107,7 +4136,7 @@
                         <Card>
                             <h3 className="text-base font-bold text-slate-800 mb-1">収益分析</h3>
                         <p className="text-xs text-slate-400 mb-3 tracking-wide">REVENUE ANALYSIS</p>
-                            <div className="space-y-4">
+                            {memberData.loading ? <SiseLoader size="sm" className="py-8" /> : <div className="space-y-4">
                                 <div className="flex justify-between items-center p-3 bg-slate-50 rounded-lg">
                                     <span className="text-slate-600">月額単価</span>
                                     <span className="font-bold text-slate-900">{formatCurrency(monthlyPrice)}</span>
@@ -4124,13 +4153,13 @@
                                     <span className="text-sise-700 font-medium">推定LTV</span>
                                     <span className="font-bold text-sise-900">{formatCurrency(estimatedLTV)}</span>
                                 </div>
-                            </div>
+                            </div>}
                         </Card>
 
                         <Card>
                             <h3 className="text-base font-bold text-slate-800 mb-1">KPIトレンド</h3>
                         <p className="text-xs text-slate-400 mb-3 tracking-wide">KEY METRICS</p>
-                            <div className="space-y-4">
+                            {memberData.loading ? <SiseLoader size="sm" className="py-8" /> : <div className="space-y-4">
                                 <div>
                                     <div className="flex justify-between text-sm mb-1">
                                         <span className="text-slate-600">会員維持率</span>
@@ -4156,7 +4185,7 @@
                                     </div>
                                     <p className="text-xs text-slate-500 mt-1">目標: 200人</p>
                                 </div>
-                            </div>
+                            </div>}
                         </Card>
                     </div>
 
@@ -4164,7 +4193,9 @@
                     <Card className="stagger-5 animate-fade-in-up">
                         <h3 className="text-base font-bold text-slate-800 mb-1">月間入退会トレンド</h3>
                         <p className="text-xs text-slate-400 mb-4 tracking-wide">MONTHLY ENROLLMENT TREND</p>
-                        {window.Recharts && (
+                        {memberData.loading ? (
+                            <SiseLoader size="md" message="トレンドデータを読み込み中..." className="py-16" />
+                        ) : window.Recharts && (
                             <ResponsiveContainer width="100%" height={350}>
                                 <ComposedChart data={memberData.monthlyTrend || []}>
                                     <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
@@ -4206,7 +4237,9 @@
                     <Card>
                         <h3 className="text-base font-bold text-slate-800 mb-1">月別入退会サマリー</h3>
                         <p className="text-xs text-slate-400 mb-4 tracking-wide">MONTHLY SUMMARY</p>
-                        <div className="overflow-x-auto">
+                        {memberData.loading ? (
+                            <SiseLoader size="sm" message="データ読み込み中..." className="py-10" />
+                        ) : <div className="overflow-x-auto">
                             <table className="w-full text-sm">
                                 <thead>
                                     <tr className="border-b-2 border-slate-200 bg-slate-50">
@@ -4258,7 +4291,7 @@
                                     })}
                                 </tbody>
                             </table>
-                        </div>
+                        </div>}
                     </Card>
 
                     {/* 会員一覧 */}
@@ -4293,20 +4326,9 @@
                             </div>
                         </div>
 
-                        {/* ローディング中スケルトン */}
+                        {/* ローディング中 */}
                         {memberData.loading && (
-                            <div className="space-y-3 py-4">
-                                {[1,2,3,4,5].map(i => (
-                                    <div key={i} className="flex items-center gap-3 p-3 bg-white/60 rounded-xl border border-slate-100">
-                                        <div className="skeleton w-9 h-9 rounded-full flex-shrink-0"></div>
-                                        <div className="flex-1 space-y-2">
-                                            <div className="skeleton h-4 w-32 rounded"></div>
-                                            <div className="skeleton h-3 w-48 rounded"></div>
-                                        </div>
-                                        <div className="skeleton h-6 w-16 rounded-lg"></div>
-                                    </div>
-                                ))}
-                            </div>
+                            <SiseLoader size="md" message="会員データを読み込み中..." className="py-12" />
                         )}
 
                         {/* デスクトップ: テーブル表示 */}
@@ -6735,10 +6757,7 @@
                         )}
 
                         {metaData.loading ? (
-                            <div className="text-center py-8 text-gray-500">
-                                <Icon name="loader" size={24} className="animate-spin mx-auto mb-2" />
-                                データ取得中...
-                            </div>
+                            <SiseLoader size="md" message="Meta広告データを取得中..." className="py-10" />
                         ) : insights ? (
                             <>
                                 {/* KPIカード */}
@@ -6884,10 +6903,7 @@
                         )}
 
                         {tiktokData.loading ? (
-                            <div className="text-center py-8 text-gray-500">
-                                <Icon name="loader" size={24} className="animate-spin mx-auto mb-2" />
-                                データ取得中...
-                            </div>
+                            <SiseLoader size="md" message="TikTok広告データを取得中..." className="py-10" />
                         ) : dailyInsights.length > 0 ? (
                             <>
                                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
