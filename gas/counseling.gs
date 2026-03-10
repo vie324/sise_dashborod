@@ -2,16 +2,28 @@
  * si'se カウンセリングデータ取得 GAS (Google Apps Script)
  *
  * 【セットアップ手順】
- * 1. カウンセリングフォームの回答スプレッドシートを開く
+ * 1. 1つのスプレッドシートに以下5つのシートを用意する
+ *    （各Googleフォームの回答先をこのスプレッドシートの該当シートに設定）
+ *    - カウンセリング回答_本厚木店
+ *    - カウンセリング回答_大和店
+ *    - カウンセリング回答_横浜店
+ *    - カウンセリング回答_町田店
+ *    - カウンセリング回答_川口店
  * 2. 拡張機能 → Apps Script を開く
  * 3. このコードを貼り付ける
- * 4. SHEET_NAME を回答シートのシート名に合わせる
- *    （デフォルトは「店舗」）
- * 5. 必要に応じて COL の列番号を調整する
- * 6. デプロイ → 新しいデプロイ → ウェブアプリ
+ * 4. 必要に応じて STORES のシート名や COL の列番号を調整する
+ * 5. デプロイ → 新しいデプロイ → ウェブアプリ
  *    - 実行するユーザー: 自分
  *    - アクセスできるユーザー: 全員
- * 7. 生成されたURLをダッシュボードの設定画面に貼り付ける
+ * 6. 生成されたURLをダッシュボードの設定画面に貼り付ける
+ *
+ * 【クエリパラメータ】
+ *   ?store=honatsugi  → 本厚木店のシートを参照（必須）
+ *   ?action=stores    → 利用可能な店舗一覧を返す
+ *   ?action=list      → 顧客一覧
+ *   ?action=recent&limit=N → 直近N件
+ *   ?action=detail&name=xxx → 特定顧客の詳細
+ *   ?action=search&q=xxx → 名前で部分一致検索
  *
  * 【フォーム列の対応】（A列から順に）
  * A: タイムスタンプ
@@ -36,7 +48,14 @@
  * ※列の順序がフォームと異なる場合は COL の数値を変更してください
  */
 
-const SHEET_NAME = '店舗';
+// 店舗定義: key → シート名
+const STORES = {
+  honatsugi: 'カウンセリング回答_本厚木店',
+  yamato:    'カウンセリング回答_大和店',
+  yokohama:  'カウンセリング回答_横浜店',
+  machida:   'カウンセリング回答_町田店',
+  kawaguchi: 'カウンセリング回答_川口店'
+};
 
 // 列インデックス（0始まり）
 const COL = {
@@ -62,47 +81,62 @@ const COL = {
 
 /**
  * GETリクエストハンドラ
- * クエリパラメータ:
- *   ?action=list          → 顧客一覧（名前・タイムスタンプのみ）
- *   ?action=detail&name=xxx → 特定顧客の詳細データ
- *   ?action=search&q=xxx  → 名前で部分一致検索
- *   ?action=recent&limit=N → 直近N件の顧客一覧（デフォルト20件）
  */
 function doGet(e) {
   try {
+    const params = e ? (e.parameter || {}) : {};
+    const action = params.action || 'list';
+
+    // 店舗一覧を返す
+    if (action === 'stores') {
+      const storeList = Object.keys(STORES).map(key => ({
+        id: key,
+        name: STORES[key].replace('カウンセリング回答_', '')
+      }));
+      return jsonResponse({ stores: storeList });
+    }
+
+    // store パラメータ必須
+    const storeKey = params.store || '';
+    if (!storeKey || !STORES[storeKey]) {
+      return jsonResponse({
+        error: '店舗を指定してください（store=' + Object.keys(STORES).join('|') + '）',
+        availableStores: Object.keys(STORES)
+      }, 400);
+    }
+
+    const sheetName = STORES[storeKey];
     const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const sheet = ss.getSheetByName(SHEET_NAME);
+    const sheet = ss.getSheetByName(sheetName);
 
     if (!sheet) {
-      return jsonResponse({ error: 'シート "' + SHEET_NAME + '" が見つかりません' }, 404);
+      return jsonResponse({ error: 'シート "' + sheetName + '" が見つかりません' }, 404);
     }
 
     const lastRow = sheet.getLastRow();
     if (lastRow < 2) {
-      return jsonResponse({ customers: [], total: 0 });
+      return jsonResponse({ customers: [], total: 0, store: storeKey });
     }
 
     const numCols = sheet.getLastColumn();
     const data = sheet.getRange(2, 1, lastRow - 1, numCols).getValues();
-    const params = e ? (e.parameter || {}) : {};
-    const action = params.action || 'list';
 
     switch (action) {
       case 'list':
-        return jsonResponse(getCustomerList(data));
+        return jsonResponse({ ...getCustomerList(data), store: storeKey });
 
       case 'recent':
         const limit = parseInt(params.limit) || 20;
-        return jsonResponse(getRecentCustomers(data, limit));
+        return jsonResponse({ ...getRecentCustomers(data, limit), store: storeKey });
 
       case 'detail':
         const name = params.name || '';
         const index = params.index;
-        return jsonResponse(getCustomerDetail(data, name, index));
+        return jsonResponse({ ...getCustomerDetail(data, name, index), store: storeKey });
 
       case 'search':
         const query = params.q || '';
-        return jsonResponse(searchCustomers(data, query));
+        return jsonResponse({ ...searchCustomers(data, query), store: storeKey });
 
       default:
         return jsonResponse({ error: '不明なアクション: ' + action }, 400);

@@ -2630,21 +2630,34 @@
         };
 
         // ========================================
-        // カウンセリングデータ連携
+        // カウンセリングデータ連携（5店舗対応）
         // ========================================
         const COUNSELING_GAS_URL = localStorage.getItem('sise_counseling_gas_url') || 'YOUR_COUNSELING_GAS_URL';
+
+        const COUNSELING_STORES = [
+            { id: 'honatsugi', name: '本厚木店' },
+            { id: 'yamato', name: '大和店' },
+            { id: 'yokohama', name: '横浜店' },
+            { id: 'machida', name: '町田店' },
+            { id: 'kawaguchi', name: '川口店' }
+        ];
 
         const useCounselingData = () => {
             const [customers, setCustomers] = useState([]);
             const [selectedCustomer, setSelectedCustomer] = useState(null);
             const [loading, setLoading] = useState(false);
             const [searchQuery, setSearchQuery] = useState('');
+            const [counselingStore, setCounselingStore] = useState(
+                localStorage.getItem('sise_counseling_store') || 'honatsugi'
+            );
+
+            const storeParam = '&store=' + counselingStore;
 
             const fetchCustomerList = useCallback(async () => {
                 if (COUNSELING_GAS_URL === 'YOUR_COUNSELING_GAS_URL') return;
                 setLoading(true);
                 try {
-                    const res = await fetch(COUNSELING_GAS_URL + '?action=recent&limit=50');
+                    const res = await fetch(COUNSELING_GAS_URL + '?action=recent&limit=50' + storeParam);
                     const data = await res.json();
                     if (data && data.customers) {
                         setCustomers(data.customers);
@@ -2654,13 +2667,13 @@
                 } finally {
                     setLoading(false);
                 }
-            }, []);
+            }, [storeParam]);
 
             const searchCustomers = useCallback(async (q) => {
                 if (COUNSELING_GAS_URL === 'YOUR_COUNSELING_GAS_URL' || !q) return;
                 setLoading(true);
                 try {
-                    const res = await fetch(COUNSELING_GAS_URL + '?action=search&q=' + encodeURIComponent(q));
+                    const res = await fetch(COUNSELING_GAS_URL + '?action=search&q=' + encodeURIComponent(q) + storeParam);
                     const data = await res.json();
                     if (data && data.customers) {
                         setCustomers(data.customers);
@@ -2670,13 +2683,13 @@
                 } finally {
                     setLoading(false);
                 }
-            }, []);
+            }, [storeParam]);
 
             const fetchCustomerDetail = useCallback(async (name, index) => {
                 if (COUNSELING_GAS_URL === 'YOUR_COUNSELING_GAS_URL') return null;
                 setLoading(true);
                 try {
-                    let url = COUNSELING_GAS_URL + '?action=detail';
+                    let url = COUNSELING_GAS_URL + '?action=detail' + storeParam;
                     if (index !== undefined) url += '&index=' + index;
                     else if (name) url += '&name=' + encodeURIComponent(name);
                     const res = await fetch(url);
@@ -2691,17 +2704,21 @@
                     setLoading(false);
                 }
                 return null;
-            }, []);
+            }, [storeParam]);
 
-            // 初回ロード
+            // 店舗変更時にリロード
             useEffect(() => {
+                localStorage.setItem('sise_counseling_store', counselingStore);
+                setCustomers([]);
+                setSelectedCustomer(null);
                 fetchCustomerList();
-            }, [fetchCustomerList]);
+            }, [counselingStore, fetchCustomerList]);
 
             return {
                 customers, selectedCustomer, setSelectedCustomer,
                 loading, searchQuery, setSearchQuery,
-                fetchCustomerList, searchCustomers, fetchCustomerDetail
+                fetchCustomerList, searchCustomers, fetchCustomerDetail,
+                counselingStore, setCounselingStore
             };
         };
 
@@ -7366,7 +7383,7 @@
         ];
 
         const ConceptFormView = ({ counselingHook }) => {
-            const { customers, selectedCustomer, loading, fetchCustomerDetail, searchCustomers, fetchCustomerList } = counselingHook;
+            const { customers, selectedCustomer, loading, fetchCustomerDetail, searchCustomers, fetchCustomerList, counselingStore, setCounselingStore } = counselingHook;
             const [searchInput, setSearchInput] = useState('');
             const [concerns, setConcerns] = useState({});
             const [feedbacks, setFeedbacks] = useState({});
@@ -7679,6 +7696,17 @@
                 <div className="space-y-4">
                     {/* 顧客選択バー */}
                     <div className="cf-customer-bar">
+                        <select
+                            value={counselingStore}
+                            onChange={e => setCounselingStore(e.target.value)}
+                            className="cf-customer-bar select"
+                            style={{maxWidth:140,fontWeight:600,color:'#238050'}}
+                        >
+                            {COUNSELING_STORES.map(s => (
+                                <option key={s.id} value={s.id}>{s.name}</option>
+                            ))}
+                        </select>
+                        <div style={{width:1,height:24,background:'#e2e8f0',flexShrink:0}}></div>
                         <div style={{display:'flex',alignItems:'center',gap:4,minWidth:0,flex:1}}>
                             <Icon name="search" size={16} className="text-sise-500" style={{flexShrink:0}} />
                             <input
@@ -8297,7 +8325,7 @@
                                         保存
                                     </button>
                                 </div>
-                                <p className="text-xs text-slate-400 mt-1.5">Googleフォームのカウンセリング回答データを取得するための URL です（gas/counseling.gs をデプロイ）</p>
+                                <p className="text-xs text-slate-400 mt-1.5">Googleフォームのカウンセリング回答データを取得するための URL です（gas/counseling.gs をデプロイ）。1つのスプレッドシートに5店舗分のシート（カウンセリング回答_本厚木店 / 大和店 / 横浜店 / 町田店 / 川口店）を用意してください。</p>
                             </div>
 
                             {/* 出納帳 GAS URL */}
