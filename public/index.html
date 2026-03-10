@@ -732,6 +732,196 @@
             50% { transform: translateX(200%); }
             100% { transform: translateX(-100%); }
         }
+
+        /* =============================================
+           CONCEPT FORM / COUNSELING TOOL STYLES
+           ============================================= */
+        .cf-customer-bar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:20px;padding:16px;background:linear-gradient(135deg,#f0f9f4,#e8f7ee);border:1.5px solid rgba(42,157,94,.2);border-radius:16px}
+        .cf-customer-bar input[type="text"]{flex:1;min-width:180px;padding:10px 14px;border:1.5px solid #d0e8d8;border-radius:10px;font-size:13px;outline:none;transition:border-color .2s;background:#fff}
+        .cf-customer-bar input[type="text"]:focus{border-color:#33a065}
+        .cf-customer-bar select{flex:1;min-width:180px;padding:10px 14px;border:1.5px solid #d0e8d8;border-radius:10px;font-size:13px;outline:none;background:#fff;cursor:pointer}
+        .cf-customer-bar .cf-btn{padding:10px 20px;border:none;border-radius:10px;font-size:13px;font-weight:600;cursor:pointer;transition:all .2s}
+        .cf-btn-primary{background:linear-gradient(135deg,#33a065,#238050);color:white}
+        .cf-btn-primary:hover{transform:translateY(-1px);box-shadow:0 4px 12px rgba(51,160,101,.3)}
+        .cf-btn-secondary{background:#fff;color:#33a065;border:1.5px solid #33a065 !important}
+        .cf-btn-secondary:hover{background:#f0f9f4}
+        .cf-customer-info{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px;padding:14px 16px;background:#fff;border:1px solid #e8e8e8;border-radius:12px}
+        .cf-info-chip{font-size:12px;padding:4px 12px;border-radius:8px;background:#f5f5f5;color:#555;display:flex;align-items:center;gap:4px}
+        .cf-info-chip strong{color:#333;font-weight:600}
+        .cf-section-card{background:#fff;border-radius:20px;box-shadow:0 1px 3px rgba(0,0,0,.06);border:1px solid rgba(42,157,94,.08);overflow:hidden;margin-bottom:24px}
+        .cf-section-header{padding:20px 24px 16px;border-bottom:1px solid rgba(0,0,0,.04);display:flex;align-items:center;justify-content:space-between}
+        .cf-section-header h3{font-size:16px;font-weight:700;display:flex;align-items:center;gap:8px}
+        .cf-section-body{padding:20px 24px}
+        .cf-step-bar{display:flex;align-items:center;justify-content:center;gap:0;margin-bottom:24px;padding:10px 20px;background:rgba(255,255,255,.92);border:1px solid #eee;border-radius:12px}
+        .cf-step{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:#bbb;cursor:pointer;white-space:nowrap;transition:color .3s}
+        .cf-step.active{color:#238050}
+        .cf-step.done{color:#55b87f}
+        .cf-step-num{width:24px;height:24px;border-radius:50%;border:2px solid #ddd;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;transition:all .3s;flex-shrink:0}
+        .cf-step.active .cf-step-num{border-color:#33a065;background:#33a065;color:white}
+        .cf-step.done .cf-step-num{border-color:#55b87f;background:#55b87f;color:white}
+        .cf-step-connector{width:40px;height:2px;background:#e0e0e0;margin:0 8px;flex-shrink:0;position:relative;overflow:hidden}
+        .cf-step-connector.filled{background:#55b87f}
+        .cf-concept-toggle{display:inline-flex;align-items:center;gap:6px;padding:6px 14px;border-radius:10px;border:1.5px solid #ddd;background:#fff;cursor:pointer;font-size:12px;font-weight:600;color:#888;transition:all .25s}
+        .cf-concept-toggle:hover{border-color:#88d1a8;color:#33a065}
+        .cf-concept-toggle.active{border-color:#33a065;background:#f0f9f4;color:#238050}
+        .cf-check-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+        .cf-check-card{background:#fff;border-radius:14px;padding:18px;border:1px solid rgba(42,157,94,.08)}
+        .cf-check-card h4{font-size:14px;font-weight:700;margin-bottom:14px;display:flex;align-items:center;gap:8px}
+        .cf-checks{display:flex;flex-direction:column;gap:4px}
+        .cf-chk{display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;padding:6px 10px;border-radius:8px;transition:background .2s;user-select:none}
+        .cf-chk:hover{background:rgba(42,157,94,.04)}
+        .cf-chk-box{width:18px;height:18px;border:2px solid #ccc;border-radius:5px;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .2s}
+        .cf-chk.checked .cf-chk-box{border-color:#33a065;background:#33a065}
+        .cf-chk-check{width:12px;height:12px;opacity:0;color:white}.cf-chk.checked .cf-chk-check{opacity:1}
+        .cf-tag{font-size:10px;padding:1px 6px;border-radius:4px;margin-left:4px;font-weight:600;white-space:nowrap}
+        .cf-tag-face{background:#f5f0e0;color:#8a7540}
+        .cf-tag-posture{background:#e4f4f7;color:#1a7a8a}
+        .cf-tag-pelvis{background:#e8f7ee;color:#1e7a49}
+        .cf-rec-result{margin-top:24px;opacity:0;max-height:0;overflow:hidden;transition:opacity .5s,max-height .5s}
+        .cf-rec-result.visible{opacity:1;max-height:2000px}
+        .cf-rec-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:16px}
+        .cf-rec-card{background:#fff;border-radius:14px;border:2px solid #e8e8e8;overflow:hidden;transition:transform .3s,box-shadow .3s}
+        .cf-rec-card:hover{transform:translateY(-2px);box-shadow:0 4px 16px rgba(0,0,0,.08)}
+        .cf-rec-card.rank-matsu{border-color:#b8a472}
+        .cf-rec-card.rank-take{border-color:#55b87f;box-shadow:0 0 0 2px rgba(42,157,94,.12)}
+        .cf-rec-card.rank-ume{border-color:#d0d0d0}
+        .cf-rec-rank{padding:8px 14px;font-size:11px;font-weight:700;letter-spacing:.5px;display:flex;align-items:center;gap:6px}
+        .cf-rec-card.rank-matsu .cf-rec-rank{background:linear-gradient(135deg,#fff8e8,#f5f0e0);color:#8a7540}
+        .cf-rec-card.rank-take .cf-rec-rank{background:linear-gradient(135deg,#f0f9f4,#e8f7ee);color:#1d6641}
+        .cf-rec-card.rank-ume .cf-rec-rank{background:#f5f5f5;color:#888}
+        .cf-rec-body{padding:14px}
+        .cf-rec-plan-name{font-size:16px;font-weight:900;margin-bottom:4px}
+        .cf-rec-plan-freq{font-size:13px;font-weight:600;color:#238050;margin-bottom:8px}
+        .cf-rec-plan-types{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px}
+        .cf-rec-plan-desc{font-size:12px;color:#6b6b6b;line-height:1.7}
+        .cf-graph-wrapper{background:#fff;border-radius:20px;box-shadow:0 4px 16px rgba(0,0,0,.08);border:1px solid rgba(42,157,94,.08);overflow:hidden;margin-bottom:24px}
+        .cf-graph-controls{padding:20px 24px 0}
+        .cf-control-group{margin-bottom:14px}
+        .cf-control-label{font-size:12px;font-weight:700;color:#6b6b6b;letter-spacing:1px;margin-bottom:6px;display:flex;align-items:center;gap:6px}
+        .cf-dot{width:8px;height:8px;border-radius:50%}
+        .cf-control-row{display:flex;flex-wrap:wrap;gap:8px}
+        .cf-ci{display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;padding:7px 14px;border-radius:10px;border:1.5px solid #e4e4e4;background:#fff;transition:all .25s;font-size:13px;font-weight:500}
+        .cf-ci:hover{border-color:#ccc;background:#fafafa}
+        .cf-ci.active{font-weight:600}
+        .cf-ci.active.c-red{border-color:#d94050;background:#fdf0f1;color:#b8303e}
+        .cf-ci.active.c-pink{border-color:#c96088;background:#fdf0f5;color:#c96088}
+        .cf-ci.active.c-orange{border-color:#d68c1a;background:#fdf5e8;color:#d68c1a}
+        .cf-ci.active.c-teal{border-color:#2a8fa0;background:#edf7f9;color:#2a8fa0}
+        .cf-ci.active.c-blue{border-color:#4a78c9;background:#eef3fc;color:#4a78c9}
+        .cf-ci.rec-highlight{box-shadow:0 0 0 2px #55b87f;animation:cfPulse 2s ease infinite}
+        @keyframes cfPulse{0%,100%{box-shadow:0 0 0 2px #55b87f}50%{box-shadow:0 0 0 4px rgba(77,184,126,.3)}}
+        .cf-cc{width:18px;height:18px;border-radius:5px;border:2px solid #ccc;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .25s}
+        .cf-ci.active .cf-cc{border-color:currentColor}
+        .cf-cl{width:22px;height:3px;border-radius:2px;flex-shrink:0}
+        .cf-graph-container{padding:16px 10px 10px;overflow-x:auto}
+        .cf-graph-svg{display:block;margin:0 auto;max-width:100%;height:auto}
+        .cf-graph-svg .line-group{opacity:0;transition:opacity .5s;pointer-events:none}
+        .cf-graph-svg .line-group.visible{opacity:1}
+        .cf-scenario-area{padding:0 24px 20px;min-height:40px}
+        .cf-scenario-msg{display:none;padding:14px 18px;border-radius:12px;font-size:13px;line-height:1.9;animation:fadeIn .35s ease;margin-bottom:6px}
+        .cf-scenario-msg.visible{display:block}
+        .cf-scenario-msg strong{font-weight:700}
+        .cf-scenario-msg.c-red{background:#fdf0f1;border-left:3px solid #d94050}
+        .cf-scenario-msg.c-pink{background:#fdf0f5;border-left:3px solid #c96088}
+        .cf-scenario-msg.c-orange{background:#fdf5e8;border-left:3px solid #d68c1a}
+        .cf-scenario-msg.c-teal{background:#edf7f9;border-left:3px solid #2a8fa0}
+        .cf-scenario-msg.c-blue{background:#eef3fc;border-left:3px solid #4a78c9}
+        .cf-flow-inline{display:inline-flex;align-items:center;gap:5px;margin-top:8px;flex-wrap:wrap}
+        .cf-flow-chip{font-size:11px;font-weight:600;padding:3px 10px;border-radius:6px;white-space:nowrap}
+        .cf-fc-red{background:#fdf0f1;color:#d94050}.cf-fc-teal{background:#edf7f9;color:#2a8fa0}.cf-fc-green{background:#edf8f1;color:#2a9d5e}.cf-fc-gray{background:#eee;color:#888}
+        .cf-plans-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:20px;margin-bottom:20px}
+        .cf-plan-card{background:#fff;border-radius:18px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.06);border:2px solid transparent;position:relative;transition:transform .3s,box-shadow .3s,border-color .4s}
+        .cf-plan-card:hover{transform:translateY(-3px);box-shadow:0 8px 32px rgba(0,0,0,.1)}
+        .cf-plan-card.popular{border-color:#b8a472}
+        .cf-plan-card.recommended{border-color:#55b87f}
+        .cf-plan-card.auto-rec{border-color:#33a065 !important;box-shadow:0 0 0 3px rgba(42,157,94,.15),0 4px 16px rgba(0,0,0,.08)}
+        .cf-plan-card.auto-rec .cf-plan-header{background:linear-gradient(180deg,#f0f9f4,#fff)}
+        .cf-auto-rec-badge{display:none;position:absolute;top:10px;left:14px;background:#33a065;color:white;font-size:10px;font-weight:700;padding:3px 8px;border-radius:5px;z-index:1}
+        .cf-plan-card.auto-rec .cf-auto-rec-badge{display:block}
+        .cf-plan-badge{position:absolute;top:-1px;right:18px;font-size:11px;font-weight:700;padding:5px 14px;border-radius:0 0 8px 8px}
+        .cf-plan-badge.popular{background:#b8a472;color:#fff}
+        .cf-plan-badge.recommended{background:#55b87f;color:#fff}
+        .cf-plan-header{padding:24px 20px 14px;text-align:center;border-bottom:1px solid rgba(0,0,0,.05);transition:background .3s}
+        .cf-plan-name{font-size:18px;font-weight:700;margin-bottom:3px}
+        .cf-plan-base-price{font-size:12px;color:#6b6b6b;margin-bottom:6px}
+        .cf-plan-types{font-size:11px;color:#238050;background:#f0f9f4;padding:5px 12px;border-radius:6px;display:inline-block}
+        .cf-plan-pricing{padding:16px 20px 22px}
+        .cf-price-row{display:flex;align-items:center;justify-content:space-between;padding:12px 0;border-bottom:1px dashed rgba(0,0,0,.06);transition:background .3s,padding .3s}
+        .cf-price-row:last-child{border-bottom:none}
+        .cf-price-row.highlight-freq{background:#f0f9f4;border-radius:8px;margin:0 -8px;padding:12px 8px}
+        .cf-freq-badge{font-size:13px;font-weight:700;color:#1d6641;background:#dbf2e3;padding:4px 12px;border-radius:8px}
+        .cf-price-calc{display:flex;align-items:center;gap:8px}
+        .cf-price-original{font-size:13px;color:#aaa;text-decoration:line-through}
+        .cf-price-arrow{color:#b8a472;font-size:14px}
+        .cf-price-final{font-size:20px;font-weight:900;color:#d94050}
+        .cf-price-yen{font-size:13px;font-weight:600}
+        .cf-plans-bottom{display:grid;grid-template-columns:repeat(2,1fr);gap:20px}
+        .cf-benefits-grid{display:grid;grid-template-columns:1fr;gap:16px}
+        .cf-benefit-item{background:#fff;border-radius:16px;padding:22px;box-shadow:0 1px 3px rgba(0,0,0,.06);border:1px solid rgba(42,157,94,.08);display:flex;gap:16px;align-items:flex-start;transition:transform .3s}
+        .cf-benefit-item:hover{transform:translateY(-2px)}
+        .cf-benefit-num{flex-shrink:0;width:42px;height:42px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:700;color:#fff}
+        .cf-benefit-num.bn-1{background:linear-gradient(135deg,#55b87f,#238050)}
+        .cf-benefit-num.bn-2{background:linear-gradient(135deg,#2a8fa0,#1a7a8a)}
+        .cf-benefit-num.bn-3{background:linear-gradient(135deg,#b8a472,#8a7540)}
+        .cf-benefit-content h4{font-size:15px;font-weight:700;margin-bottom:4px}
+        .cf-benefit-content h4 .highlight{color:#238050}
+        .cf-benefit-content p{font-size:12px;color:#6b6b6b;line-height:1.8}
+        .cf-offer-grid{display:grid;grid-template-columns:1fr;gap:16px}
+        .cf-offer-item{background:linear-gradient(135deg,#fffcf5,#fff8eb);border-radius:16px;padding:22px;box-shadow:0 1px 3px rgba(0,0,0,.06);border:1.5px solid rgba(184,164,114,.2);display:flex;gap:16px;align-items:flex-start;transition:transform .3s}
+        .cf-offer-item:hover{transform:translateY(-2px)}
+        .cf-offer-num{flex-shrink:0;width:42px;height:42px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:700;color:#fff;background:linear-gradient(135deg,#b8a472,#96844a)}
+        .cf-offer-content h4{font-size:15px;font-weight:700;margin-bottom:4px}
+        .cf-offer-content h4 .accent{color:#d94050}
+        .cf-offer-content p{font-size:12px;color:#6b6b6b;line-height:1.8}
+        .cf-offer-content .free-tag{display:inline-block;background:#d94050;color:white;font-size:10px;font-weight:700;padding:2px 8px;border-radius:5px;margin-left:4px;vertical-align:middle}
+        .cf-concept-panels{display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start}
+        .cf-concept-block{opacity:1}
+        .cf-concept-block-label{display:flex;align-items:center;gap:8px;margin-bottom:10px}
+        .cf-concept-block-title{font-size:15px;font-weight:900;line-height:1}
+        .cf-concept-block.problem .cf-concept-block-title{color:#b8303e}
+        .cf-concept-block.solution .cf-concept-block-title{color:#1d6641}
+        .cf-concept-block-badge{font-size:10px;font-weight:700;padding:3px 10px;border-radius:5px;white-space:nowrap}
+        .cf-concept-block.problem .cf-concept-block-badge{background:#fdf0f1;color:#d94050}
+        .cf-concept-block.solution .cf-concept-block-badge{background:#dbf2e3;color:#1d6641}
+        .cf-cascade{display:flex;flex-direction:column;gap:0}
+        .cf-stage-row{display:flex;align-items:center;gap:8px}
+        .cf-stage{flex:1;text-align:center}
+        .cf-stage-card{padding:10px 12px;border-radius:12px;font-size:13px;font-weight:700;line-height:1.5}
+        .cf-stage-num{width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:900;color:#fff;margin:0 auto 4px}
+        .cf-stage.root .cf-stage-card{background:linear-gradient(160deg,#fdf0f1,#fce8e8);border:2px solid #d94050;color:#b8303e}
+        .cf-stage.root .cf-stage-num{background:#d94050}
+        .cf-root-label{display:inline-block;font-size:9px;font-weight:700;color:#d94050;background:#fdf0f1;padding:2px 6px;border-radius:3px;margin-top:3px}
+        .cf-stage.effect .cf-stage-card{background:#f6f8f6;border:1.5px solid #d0d8d0;color:#3e5240}
+        .cf-stage.effect .cf-stage-num{background:#8a9a8a}
+        .cf-branch-side{display:flex;align-items:center;gap:4px;flex-shrink:0}
+        .cf-branch-arrow{font-size:13px;color:#ccc}
+        .cf-branch-text{background:#f8f5ef;border:1px solid #e8e0d0;padding:3px 8px;border-radius:6px;color:#8a7a58;font-size:10px;font-weight:500;white-space:nowrap}
+        .cf-branch-tag{font-size:8px;color:#d94050;font-weight:700;background:#fdf0f1;padding:1px 5px;border-radius:3px;margin-left:2px}
+        .cf-vdown{text-align:center;padding:2px 0;font-size:13px;color:#bbb}
+        .cf-loop-bar{margin-top:6px;padding:8px 12px;background:linear-gradient(90deg,#fdf0f1,#fdf0f1);border:1.5px dashed #d94050;border-radius:10px;display:flex;align-items:center;gap:6px;justify-content:center}
+        .cf-loop-icon{font-size:14px}
+        .cf-loop-text{font-size:11px;font-weight:700;color:#b8303e}
+        .cf-loop-text em{font-style:normal;font-weight:900;border-bottom:2px solid #d94050}
+        .cf-sol-wrap{background:linear-gradient(170deg,#f0f9f4,#e4f3ea);border:2px solid #88d1a8;border-radius:16px;padding:14px}
+        .cf-sol-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+        .cf-sol-card{background:rgba(255,255,255,.85);border:1.5px solid #b9e5ca;border-radius:12px;padding:12px 10px;text-align:center;transition:transform .2s}
+        .cf-sol-card:hover{transform:translateY(-2px)}
+        .cf-sol-card-num{width:24px;height:24px;border-radius:6px;background:#33a065;color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;margin:0 auto 6px}
+        .cf-sol-card-text{font-size:12px;font-weight:600;color:#1d6641;line-height:1.5}
+        .cf-sol-card-text strong{font-weight:800;color:#238050}
+        .cf-sol-card.sol-root{background:linear-gradient(160deg,#dbf2e3,#c8e8d4);border:2px solid #55b87f}
+        .cf-sol-card.sol-root .cf-sol-card-num{width:28px;height:28px;font-size:14px;border-radius:50%;background:#238050}
+        .cf-conclusion-card{text-align:center;padding:14px 20px;border-radius:14px;background:linear-gradient(135deg,#238050,#1a7044);color:white;margin-top:12px}
+        .cf-conclusion-title{font-size:15px;font-weight:900;line-height:1.5}
+        .cf-conclusion-sub{font-size:11px;opacity:.85;line-height:1.8;margin-top:2px}
+        .cf-emphasis-box{margin:20px 0 0;background:linear-gradient(135deg,#f0f9f4,#f5faf7);border:1.5px solid #b9e5ca;border-radius:14px;padding:18px 22px;display:flex;gap:14px;align-items:flex-start}
+        .cf-emphasis-icon{flex-shrink:0;width:40px;height:40px;background:#33a065;border-radius:10px;display:flex;align-items:center;justify-content:center;color:white;font-size:18px;font-weight:700}
+        .cf-emphasis-text{font-size:13px;line-height:1.9}
+        .cf-emphasis-text strong{color:#1d6641}
+        .cf-note-box{background:#fff;border-radius:14px;padding:24px;box-shadow:0 1px 3px rgba(0,0,0,.06);border-left:4px solid #55b87f}
+        .cf-note-box h4{font-size:14px;font-weight:700;margin-bottom:8px;color:#1d6641;display:flex;align-items:center;gap:6px}
+        .cf-note-box p{font-size:12px;color:#6b6b6b;line-height:2}
+        @media(max-width:768px){.cf-check-grid,.cf-concept-panels,.cf-plans-grid,.cf-plans-bottom{grid-template-columns:1fr}.cf-rec-grid{grid-template-columns:1fr}.cf-control-row{flex-direction:column}.cf-ci{width:100%}.cf-emphasis-box,.cf-benefit-item,.cf-offer-item{flex-direction:column;gap:10px}.cf-sol-grid{grid-template-columns:1fr}}
     </style>
 
     <script type="text/babel">
@@ -2437,6 +2627,99 @@
             }, [saveLocal, saveToGAS]);
 
             return { entries, addEntry, updateEntry, deleteEntry, saving };
+        };
+
+        // ========================================
+        // カウンセリングデータ連携（5店舗対応）
+        // ========================================
+        const COUNSELING_GAS_URL = localStorage.getItem('sise_counseling_gas_url') || 'YOUR_COUNSELING_GAS_URL';
+
+        const COUNSELING_STORES = [
+            { id: 'honatsugi', name: '本厚木店' },
+            { id: 'yamato', name: '大和店' },
+            { id: 'yokohama', name: '横浜店' },
+            { id: 'machida', name: '町田店' },
+            { id: 'kawaguchi', name: '川口店' }
+        ];
+
+        const useCounselingData = () => {
+            const [customers, setCustomers] = useState([]);
+            const [selectedCustomer, setSelectedCustomer] = useState(null);
+            const [loading, setLoading] = useState(false);
+            const [searchQuery, setSearchQuery] = useState('');
+            const [counselingStore, setCounselingStore] = useState(
+                localStorage.getItem('sise_counseling_store') || 'honatsugi'
+            );
+
+            const storeParam = '&store=' + counselingStore;
+
+            const fetchCustomerList = useCallback(async () => {
+                if (COUNSELING_GAS_URL === 'YOUR_COUNSELING_GAS_URL') return;
+                setLoading(true);
+                try {
+                    const res = await fetch(COUNSELING_GAS_URL + '?action=recent&limit=50' + storeParam);
+                    const data = await res.json();
+                    if (data && data.customers) {
+                        setCustomers(data.customers);
+                    }
+                } catch (e) {
+                    console.error('カウンセリングデータ取得エラー:', e);
+                } finally {
+                    setLoading(false);
+                }
+            }, [storeParam]);
+
+            const searchCustomers = useCallback(async (q) => {
+                if (COUNSELING_GAS_URL === 'YOUR_COUNSELING_GAS_URL' || !q) return;
+                setLoading(true);
+                try {
+                    const res = await fetch(COUNSELING_GAS_URL + '?action=search&q=' + encodeURIComponent(q) + storeParam);
+                    const data = await res.json();
+                    if (data && data.customers) {
+                        setCustomers(data.customers);
+                    }
+                } catch (e) {
+                    console.error('検索エラー:', e);
+                } finally {
+                    setLoading(false);
+                }
+            }, [storeParam]);
+
+            const fetchCustomerDetail = useCallback(async (name, index) => {
+                if (COUNSELING_GAS_URL === 'YOUR_COUNSELING_GAS_URL') return null;
+                setLoading(true);
+                try {
+                    let url = COUNSELING_GAS_URL + '?action=detail' + storeParam;
+                    if (index !== undefined) url += '&index=' + index;
+                    else if (name) url += '&name=' + encodeURIComponent(name);
+                    const res = await fetch(url);
+                    const data = await res.json();
+                    if (data && data.customer) {
+                        setSelectedCustomer(data.customer);
+                        return data.customer;
+                    }
+                } catch (e) {
+                    console.error('顧客詳細取得エラー:', e);
+                } finally {
+                    setLoading(false);
+                }
+                return null;
+            }, [storeParam]);
+
+            // 店舗変更時にリロード
+            useEffect(() => {
+                localStorage.setItem('sise_counseling_store', counselingStore);
+                setCustomers([]);
+                setSelectedCustomer(null);
+                fetchCustomerList();
+            }, [counselingStore, fetchCustomerList]);
+
+            return {
+                customers, selectedCustomer, setSelectedCustomer,
+                loading, searchQuery, setSearchQuery,
+                fetchCustomerList, searchCustomers, fetchCustomerDetail,
+                counselingStore, setCounselingStore
+            };
         };
 
         // ========================================
@@ -7055,6 +7338,728 @@
         };
 
         // ========================================
+        // カウンセリングツールビュー (Concept Form)
+        // ========================================
+
+        // お悩み箇所のマッピング（Googleフォーム → ツールのチェック項目）
+        const CONCERN_ITEMS = [
+            { id: 'c1',  label: '頭・はちの張り', cat: 'face', formLabels: ['頭・はちの張り', '頭の張り', 'はちの張り'] },
+            { id: 'c2',  label: '眼精疲労', cat: 'face', formLabels: ['眼精疲労'] },
+            { id: 'c3',  label: '頬のたるみ', cat: 'face', formLabels: ['頬のたるみ', '頬たるみ'] },
+            { id: 'c4',  label: '食いしばり・エラの張り', cat: 'face', formLabels: ['食いしばり', 'エラの張り', '食いしばり・エラの張り'] },
+            { id: 'c5',  label: '顔の左右差', cat: 'face', formLabels: ['顔の左右差'] },
+            { id: 'c6',  label: '首・ストレートネック', cat: 'posture', formLabels: ['ストレートネック', '首・ストレートネック', '首の痛み'] },
+            { id: 'c7',  label: '肩こり', cat: 'posture', formLabels: ['肩こり', '肩凝り'] },
+            { id: 'c8',  label: '姿勢・猫背', cat: 'posture', formLabels: ['猫背', '姿勢', '姿勢・猫背', '姿勢の悪さ'] },
+            { id: 'c9',  label: '反り腰', cat: 'posture', formLabels: ['反り腰'] },
+            { id: 'c10', label: '腰痛', cat: 'pelvis', formLabels: ['腰痛'] },
+            { id: 'c11', label: '股関節・膝の痛み', cat: 'pelvis', formLabels: ['股関節', '膝の痛み', '股関節・膝の痛み', '股関節の痛み'] },
+            { id: 'c12', label: '冷え・むくみ', cat: 'pelvis', formLabels: ['冷え', 'むくみ', '冷え・むくみ'] },
+            { id: 'c13', label: '生理痛・生理不順', cat: 'pelvis', formLabels: ['生理痛', '生理不順', '生理痛・生理不順'] },
+            { id: 'c14', label: '下半身太り', cat: 'pelvis', formLabels: ['下半身太り'] },
+            { id: 'c15', label: '骨盤の歪み', cat: 'pelvis', formLabels: ['骨盤の歪み', '骨盤のゆがみ'] },
+            { id: 'c16', label: 'X脚・O脚', cat: 'pelvis', formLabels: ['X脚', 'O脚', 'X脚・O脚'] },
+        ];
+
+        const FEEDBACK_ITEMS = [
+            { id: 'f1', label: 'Before/Afterで変化を確認', severity: 1 },
+            { id: 'f2', label: '施術直後にお客様が改善を実感', severity: 1 },
+            { id: 'f3', label: '筋肉の緊張・硬さが強い', severity: 2 },
+            { id: 'f4', label: '骨格の歪み・ズレが大きい', severity: 2 },
+            { id: 'f5', label: '左右差・アンバランスが顕著', severity: 2 },
+            { id: 'f6', label: '施術後すぐに戻りやすい状態', severity: 3 },
+            { id: 'f7', label: '複数箇所への同時アプローチが必要', severity: 2 },
+            { id: 'f8', label: '症状が慢性化している', severity: 3 },
+            { id: 'f9', label: '可動域の制限がある', severity: 1 },
+            { id: 'f10', label: '日常習慣の影響が大きい', severity: 2 },
+        ];
+
+        const CF_PLAN_CATALOG = [
+            { key:'Premium-4',  id:'Premium',  name:'Premium', freq:4, freqLabel:'月4回（週1回）', types:'全種類対応',  desc:'全種類×週1回で最も効率的に改善', price:32000 },
+            { key:'Standard-4', id:'Standard', name:'Standard',freq:4, freqLabel:'月4回（週1回）', types:'2種類選択',  desc:'2種類を選んで週1回の集中ケア', price:28000 },
+            { key:'Premium-2',  id:'Premium',  name:'Premium', freq:2, freqLabel:'月2回',        types:'全種類対応',  desc:'全種類を月2回でバランス良くケア', price:18000 },
+            { key:'Standard-2', id:'Standard', name:'Standard',freq:2, freqLabel:'月2回',        types:'2種類選択',  desc:'2種類×月2回で着実に改善', price:15000 },
+            { key:'Monthly-1',  id:'Monthly',  name:'月一フル', freq:1, freqLabel:'月1回',        types:'全種類対応',  desc:'月1回で全種類を無理なくメンテナンス', price:10000 },
+        ];
+
+        const ConceptFormView = ({ counselingHook }) => {
+            const { customers, selectedCustomer, loading, fetchCustomerDetail, searchCustomers, fetchCustomerList, counselingStore, setCounselingStore } = counselingHook;
+            const [searchInput, setSearchInput] = useState('');
+            const [concerns, setConcerns] = useState({});
+            const [feedbacks, setFeedbacks] = useState({});
+            const [showConcept, setShowConcept] = useState(false);
+            const [recMode, setRecMode] = useState('auto');
+            const [activeLines, setActiveLines] = useState({});
+            const [completedStep, setCompletedStep] = useState(0);
+            const [recPlan, setRecPlan] = useState(null); // { matsu, take, ume }
+            const [currentRecFreq, setCurrentRecFreq] = useState(0);
+            const [currentRecPlanId, setCurrentRecPlanId] = useState('');
+            const graphRef = React.useRef(null);
+            const graphInitRef = React.useRef(false);
+
+            // Googleフォームのお悩み箇所をチェック項目にマッピング
+            const mapFormConcerns = useCallback((formConcerns) => {
+                const newConcerns = {};
+                if (!formConcerns || !formConcerns.length) return newConcerns;
+                formConcerns.forEach(fc => {
+                    const fcTrim = fc.trim();
+                    CONCERN_ITEMS.forEach(item => {
+                        if (item.formLabels.some(fl => fcTrim.includes(fl) || fl.includes(fcTrim))) {
+                            newConcerns[item.id] = true;
+                        }
+                    });
+                });
+                return newConcerns;
+            }, []);
+
+            // 顧客選択時の処理
+            const handleSelectCustomer = useCallback(async (name, index) => {
+                const detail = await fetchCustomerDetail(name, index);
+                if (detail) {
+                    const mapped = mapFormConcerns(detail.concerns);
+                    setConcerns(mapped);
+                    setFeedbacks({});
+                }
+            }, [fetchCustomerDetail, mapFormConcerns]);
+
+            // 検索実行
+            const handleSearch = useCallback(() => {
+                if (searchInput.trim()) {
+                    searchCustomers(searchInput.trim());
+                } else {
+                    fetchCustomerList();
+                }
+            }, [searchInput, searchCustomers, fetchCustomerList]);
+
+            // チェック変更
+            const toggleConcern = useCallback((id) => {
+                setConcerns(prev => ({ ...prev, [id]: !prev[id] }));
+            }, []);
+
+            const toggleFeedback = useCallback((id) => {
+                setFeedbacks(prev => ({ ...prev, [id]: !prev[id] }));
+            }, []);
+
+            // 推奨エンジン
+            const recommendation = useMemo(() => {
+                const checkedConcerns = CONCERN_ITEMS.filter(c => concerns[c.id]);
+                const checkedFeedbacks = FEEDBACK_ITEMS.filter(f => feedbacks[f.id]);
+                if (checkedConcerns.length === 0 && checkedFeedbacks.length === 0) return null;
+
+                const cats = new Set(checkedConcerns.map(c => c.cat));
+                const nCats = cats.size;
+                const nC = checkedConcerns.length;
+                let sev = 0;
+                checkedFeedbacks.forEach(f => { sev += f.severity; });
+                const fbN = checkedFeedbacks.length;
+                const needIntensive = sev >= 3 || nC >= 4 || fbN >= 2;
+
+                const catLabels = { face: '小顔矯正', posture: '姿勢矯正', pelvis: '骨盤矯正' };
+                const typesArr = [];
+                cats.forEach(c => typesArr.push({ cat: c, label: catLabels[c] }));
+
+                let matsu, take, ume;
+                const find = k => CF_PLAN_CATALOG.find(p => p.key === k);
+
+                if (nCats >= 3) {
+                    if (needIntensive) { matsu = find('Premium-4'); take = find('Premium-2'); ume = find('Standard-2'); }
+                    else { matsu = find('Premium-4'); take = find('Premium-2'); ume = find('Monthly-1'); }
+                } else if (nCats === 2) {
+                    if (needIntensive) { matsu = find('Premium-4'); take = find('Standard-4'); ume = find('Standard-2'); }
+                    else { matsu = find('Standard-4'); take = find('Standard-2'); ume = find('Monthly-1'); }
+                } else {
+                    if (needIntensive) { matsu = find('Premium-4'); take = find('Standard-4'); ume = find('Standard-2'); }
+                    else { matsu = find('Premium-2'); take = find('Standard-2'); ume = find('Monthly-1'); }
+                }
+
+                let reasons = [];
+                if (nC >= 4) reasons.push('お悩みが' + nC + '箇所');
+                if (sev >= 5) reasons.push('身体の状態から集中ケアを推奨');
+                else if (sev >= 3) reasons.push('施術後の評価から定期的なケアが重要');
+                if (nCats >= 3) reasons.push('3種類の矯正が対象');
+                else if (nCats === 2) reasons.push('2種類の矯正が対象');
+                if (reasons.length === 0) reasons.push('お悩みの状態に合わせて');
+
+                return { matsu, take, ume, reasons, typesArr, nCats, needIntensive };
+            }, [concerns, feedbacks]);
+
+            // recommendation変更時にステップと推奨プランを更新
+            useEffect(() => {
+                if (recommendation) {
+                    setRecPlan(recommendation);
+                    setCurrentRecFreq(recommendation.take.freq);
+                    setCurrentRecPlanId(recommendation.take.id);
+                    setCompletedStep(1);
+                } else {
+                    setRecPlan(null);
+                    setCurrentRecFreq(0);
+                    setCurrentRecPlanId('');
+                    setCompletedStep(0);
+                }
+            }, [recommendation]);
+
+            // グラフ線トグル
+            const toggleGraphLine = useCallback((lineId) => {
+                setActiveLines(prev => {
+                    const newState = { ...prev, [lineId]: !prev[lineId] };
+                    return newState;
+                });
+            }, []);
+
+            // SVGグラフ生成
+            const generateGraphSVG = useCallback(() => {
+                const today = new Date();
+                const monthLabel = (o) => {
+                    const d = new Date(today.getFullYear(), today.getMonth() + o, 1);
+                    return d.getFullYear() + '/' + (d.getMonth() + 1) + '月';
+                };
+                const X0=80, XE=860, MW=(XE-X0)/6, YB=390, YS=385, YG=100, YG2=225;
+                const mx = i => X0 + MW * i;
+                const dl = [0,1,2,3,4,5,6].map(i => monthLabel(i));
+
+                const genWave = (vis, bl, amp) => {
+                    const pts = [{ x: X0, y: YS }];
+                    let sch = [];
+                    vis.forEach(v => { for (let m = 0; m < v.months; m++) sch.push(v.freq); });
+                    for (let m = 0; m < 6; m++) {
+                        const f = sch[m] || 1, w = MW / f, xs = mx(m);
+                        const b0 = bl[m], b1 = bl[m + 1], a0 = amp[m], a1 = amp[m + 1];
+                        for (let i = 0; i < f; i++) {
+                            const t0 = i / f, t2 = (i + 1) / f;
+                            pts.push({ x: xs + i * w + w * .15, y: b0 + (b1 - b0) * t0 - (a0 + (a1 - a0) * t0) });
+                            pts.push({ x: xs + i * w + w * .85, y: b0 + (b1 - b0) * t2 + (a0 + (a1 - a0) * t2) * .4 });
+                        }
+                    }
+                    let d = 'M ' + pts[0].x + ',' + pts[0].y;
+                    for (let i = 1; i < pts.length; i++) {
+                        const p = pts[i - 1], c = pts[i], cx = (p.x + c.x) / 2;
+                        d += ' C ' + cx + ',' + p.y + ' ' + cx + ',' + c.y + ' ' + c.x + ',' + c.y;
+                    }
+                    return d;
+                };
+
+                const lines = [
+                    { id:'l1', c:'#d94050', w:2.8, gl:true, v:[{freq:4,months:6}], b:[385,280,195,130,108,100,96], a:[40,32,24,16,12,10,8], recFreq:4 },
+                    { id:'l2', c:'#c96088', w:2.8, gl:true, v:[{freq:4,months:3},{freq:2,months:3}], b:[385,280,195,130,120,112,107], a:[40,32,24,16,14,12,10], at:3, atxt:'月2回へ', recFreq:4, primary:true },
+                    { id:'l3', c:'#d68c1a', w:2.8, v:[{freq:4,months:3},{freq:1,months:3}], b:[385,280,195,130,140,148,152], a:[40,32,24,16,20,22,22], at:3, atxt:'月1回へ', recFreq:4 },
+                    { id:'l4', c:'#2a8fa0', w:2.8, gl:true, v:[{freq:2,months:6}], b:[385,325,270,225,195,170,155], a:[35,28,22,18,15,13,11], recFreq:2, primary:true },
+                    { id:'l5', c:'#4a78c9', w:2.8, v:[{freq:2,months:3},{freq:1,months:3}], b:[385,325,270,225,240,248,252], a:[35,28,22,18,22,24,24], at:3, atxt:'月1回へ', recFreq:2 },
+                ];
+
+                return { dl, mx, X0, XE, MW, YB, YS, YG, YG2, lines, genWave };
+            }, []);
+
+            const graphData = useMemo(() => generateGraphSVG(), [generateGraphSVG]);
+
+            // タグのCSS class
+            const tagClass = (cat) => cat === 'face' ? 'cf-tag-face' : cat === 'posture' ? 'cf-tag-posture' : 'cf-tag-pelvis';
+            const tagLabel = (cat) => cat === 'face' ? '小顔' : cat === 'posture' ? '姿勢' : '骨盤';
+
+            // プランカードの推奨判定
+            const isPlanRec = (planId) => currentRecPlanId === planId;
+            const isFreqRec = (planId, freq) => currentRecPlanId === planId && currentRecFreq === freq;
+
+            // 顧客情報表示
+            const customerInfoSection = selectedCustomer ? (
+                <div className="cf-customer-info">
+                    <div className="cf-info-chip"><strong>{selectedCustomer.name}</strong></div>
+                    {selectedCustomer.birthday && <div className="cf-info-chip">生年月日: <strong>{selectedCustomer.birthday}</strong></div>}
+                    {selectedCustomer.occupation && <div className="cf-info-chip">職業: <strong>{selectedCustomer.occupation}</strong></div>}
+                    {selectedCustomer.improvementTimeline && <div className="cf-info-chip">目標時期: <strong>{selectedCustomer.improvementTimeline}</strong></div>}
+                    {selectedCustomer.treatmentRequest && <div className="cf-info-chip">リクエスト: <strong>{selectedCustomer.treatmentRequest}</strong></div>}
+                    {selectedCustomer.surgeryHistory && selectedCustomer.surgeryHistory !== 'いいえ' && selectedCustomer.surgeryHistory !== 'なし' && (
+                        <div className="cf-info-chip" style={{background:'#fdf0f1',color:'#d94050'}}>手術歴: <strong>{selectedCustomer.surgeryHistory}</strong></div>
+                    )}
+                    {selectedCustomer.currentTreatment && selectedCustomer.currentTreatment !== 'いいえ' && selectedCustomer.currentTreatment !== 'なし' && (
+                        <div className="cf-info-chip" style={{background:'#fdf5e8',color:'#d68c1a'}}>治療中: <strong>{selectedCustomer.currentTreatment}</strong></div>
+                    )}
+                    {selectedCustomer.allergy && selectedCustomer.allergy !== 'いいえ' && selectedCustomer.allergy !== 'なし' && (
+                        <div className="cf-info-chip" style={{background:'#fdf0f1',color:'#d94050'}}>アレルギー: <strong>{selectedCustomer.allergy}</strong></div>
+                    )}
+                </div>
+            ) : null;
+
+            // コンセプトセクション
+            const conceptSection = showConcept ? (
+                <div className="cf-section-card" style={{marginBottom:20}}>
+                    <div className="cf-section-body">
+                        <div style={{display:'flex',alignItems:'center',gap:16,marginBottom:16}}>
+                            <div style={{fontFamily:"'Cormorant Garamond',serif",fontSize:28,fontWeight:600,color:'#238050',letterSpacing:2}}>si<span style={{color:'#b8a472'}}>'</span>se</div>
+                            <div style={{flex:1,height:1,background:'linear-gradient(90deg,#b9e5ca,transparent)'}}></div>
+                        </div>
+                        <div className="cf-concept-panels">
+                            <div className="cf-concept-block problem">
+                                <div className="cf-concept-block-label">
+                                    <div className="cf-concept-block-title">なぜ不調は繰り返すのか？</div>
+                                    <div className="cf-concept-block-badge">悩みの連鎖</div>
+                                </div>
+                                <div className="cf-cascade">
+                                    <div className="cf-stage-row">
+                                        <div className="cf-stage root"><div className="cf-stage-card"><div className="cf-stage-num">1</div>日常の姿勢・癖<div className="cf-root-label">根本原因</div></div></div>
+                                    </div>
+                                    <div className="cf-vdown">↓</div>
+                                    <div className="cf-stage-row">
+                                        <div className="cf-stage effect"><div className="cf-stage-card"><div className="cf-stage-num">2</div>骨格の歪み</div></div>
+                                        <div className="cf-branch-side"><span className="cf-branch-arrow">→</span><span className="cf-branch-text">整体院で対処</span><span className="cf-branch-tag">一時的</span></div>
+                                    </div>
+                                    <div className="cf-vdown">↓</div>
+                                    <div className="cf-stage-row">
+                                        <div className="cf-stage effect"><div className="cf-stage-card"><div className="cf-stage-num">3</div>筋肉の硬化・コリ</div></div>
+                                        <div className="cf-branch-side"><span className="cf-branch-arrow">→</span><span className="cf-branch-text">マッサージで対処</span><span className="cf-branch-tag">一時的</span></div>
+                                    </div>
+                                    <div className="cf-vdown">↓</div>
+                                    <div className="cf-stage-row">
+                                        <div className="cf-stage effect"><div className="cf-stage-card"><div className="cf-stage-num">4</div>インナーマッスル低下</div></div>
+                                        <div className="cf-branch-side"><span className="cf-branch-arrow">→</span><span className="cf-branch-text">エステ・ジムで対処</span><span className="cf-branch-tag">一時的</span></div>
+                                    </div>
+                                    <div className="cf-loop-bar"><div className="cf-loop-icon">🔄</div><div className="cf-loop-text"><em>根本が変わらない限り</em>繰り返す</div></div>
+                                </div>
+                            </div>
+                            <div className="cf-concept-block solution">
+                                <div className="cf-concept-block-label">
+                                    <div className="cf-concept-block-title">si'se なら、すべて解決</div>
+                                    <div className="cf-concept-block-badge">ワンストップで対応</div>
+                                </div>
+                                <div className="cf-sol-wrap">
+                                    <div className="cf-sol-grid">
+                                        <div className="cf-sol-card sol-root"><div className="cf-sol-card-num">✦</div><div className="cf-sol-card-text"><strong>正しい姿勢指導</strong><br/>根本から改善し<br/>繰り返さない身体へ</div></div>
+                                        <div className="cf-sol-card"><div className="cf-sol-card-num">2</div><div className="cf-sol-card-text">ソフトな手技で<br/><strong>安心安全な骨格矯正</strong></div></div>
+                                        <div className="cf-sol-card"><div className="cf-sol-card-num">3</div><div className="cf-sol-card-text">矯正精度を上げる<br/><strong>ボディケア</strong></div></div>
+                                        <div className="cf-sol-card"><div className="cf-sol-card-num">4</div><div className="cf-sol-card-text">セルフケア指導で<br/><strong>自身で身体のケア</strong></div></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div className="cf-conclusion-card">
+                            <div className="cf-conclusion-title">どの段階のお悩みでも、根本から改善し維持できる</div>
+                            <div className="cf-conclusion-sub">一般的なサロンは各段階の「対処」だけ。si'seは全段階＋根本原因をまとめてケアします。</div>
+                        </div>
+                    </div>
+                </div>
+            ) : null;
+
+            // 松竹梅カード
+            const RecCard = ({ rank, label, icon, plan }) => {
+                if (!plan) return null;
+                const typesHtml = recPlan && recPlan.typesArr.length > 0
+                    ? recPlan.typesArr.map(t => <span key={t.cat} className={'cf-tag ' + tagClass(t.cat)} style={{fontSize:11,padding:'3px 10px',borderRadius:6}}>{t.label}</span>)
+                    : <span style={{fontSize:11,color:'#6b6b6b'}}>{plan.types}</span>;
+                return (
+                    <div className={'cf-rec-card rank-' + rank}>
+                        <div className="cf-rec-rank"><span>{icon}</span>{label}</div>
+                        <div className="cf-rec-body">
+                            <div className="cf-rec-plan-name">{plan.name}</div>
+                            <div className="cf-rec-plan-freq">{plan.freqLabel}</div>
+                            <div className="cf-rec-plan-types">{typesHtml}</div>
+                            <div className="cf-rec-plan-desc">{plan.desc}</div>
+                        </div>
+                    </div>
+                );
+            };
+
+            // シナリオ説明データ
+            const scenarios = [
+                { id:'l1', cls:'c-red', title:'月4回 → そのまま月4回で継続（最高の結果）', desc:'週1回ペースで通い続け、最も早く理想の状態に到達。', flow:[{label:'月4回で継続',cls:'cf-fc-red'}] },
+                { id:'l2', cls:'c-pink', title:'月4回 → 4ヶ月目から月2回に切替（おすすめ）', desc:'3ヶ月で土台を整え、安定期から月2回に。効果を高いまま維持しつつ通いやすいパターン。', flow:[{label:'月4回 × 3ヶ月',cls:'cf-fc-red'},{label:'月2回で継続',cls:'cf-fc-teal'}] },
+                { id:'l3', cls:'c-orange', title:'月4回 → 4ヶ月目から月1回に切替', desc:'3ヶ月集中後、月1回で維持。やめるよりは月1回でも継続が大切。', flow:[{label:'月4回 × 3ヶ月',cls:'cf-fc-red'},{label:'月1回',cls:'cf-fc-green'}] },
+                { id:'l4', cls:'c-teal', title:'月2回 → そのまま月2回で継続', desc:'セルフケア併用で着実に改善。無理なく続けやすいペース。', flow:[{label:'月2回で継続',cls:'cf-fc-teal'},{label:'セルフケア',cls:'cf-fc-gray'}] },
+                { id:'l5', cls:'c-blue', title:'月2回 → 4ヶ月目から月1回に切替', desc:'月2回で3ヶ月通い、その後は月1回に。', flow:[{label:'月2回 × 3ヶ月',cls:'cf-fc-teal'},{label:'月1回',cls:'cf-fc-green'}] },
+            ];
+
+            // グラフ線データ
+            const lineControls = [
+                { group: '月4回スタート', dotColor: '#d94050', items: [
+                    { id:'l1', cls:'c-red', color:'#d94050', label:'月4回 → そのまま継続', recFreq:4 },
+                    { id:'l2', cls:'c-pink', color:'#c96088', label:'月4回 → 月2回に切替', recFreq:4, primary:true },
+                    { id:'l3', cls:'c-orange', color:'#d68c1a', label:'月4回 → 月1回に切替', recFreq:4 },
+                ]},
+                { group: '月2回スタート', dotColor: '#2a8fa0', items: [
+                    { id:'l4', cls:'c-teal', color:'#2a8fa0', label:'月2回 → そのまま継続', recFreq:2, primary:true },
+                    { id:'l5', cls:'c-blue', color:'#4a78c9', label:'月2回 → 月1回に切替', recFreq:2 },
+                ]},
+            ];
+
+            // 推奨に基づいてグラフ線をハイライト
+            useEffect(() => {
+                if (currentRecFreq > 0) {
+                    // 推奨頻度のprimary lineを自動表示
+                    const primaryId = currentRecFreq >= 4 ? 'l2' : 'l4';
+                    setActiveLines(prev => {
+                        if (!prev[primaryId]) return { ...prev, [primaryId]: true };
+                        return prev;
+                    });
+                    setCompletedStep(2);
+                }
+            }, [currentRecFreq]);
+
+            return (
+                <div className="space-y-4">
+                    {/* 顧客選択バー */}
+                    <div className="cf-customer-bar">
+                        <select
+                            value={counselingStore}
+                            onChange={e => setCounselingStore(e.target.value)}
+                            className="cf-customer-bar select"
+                            style={{maxWidth:140,fontWeight:600,color:'#238050'}}
+                        >
+                            {COUNSELING_STORES.map(s => (
+                                <option key={s.id} value={s.id}>{s.name}</option>
+                            ))}
+                        </select>
+                        <div style={{width:1,height:24,background:'#e2e8f0',flexShrink:0}}></div>
+                        <div style={{display:'flex',alignItems:'center',gap:4,minWidth:0,flex:1}}>
+                            <Icon name="search" size={16} className="text-sise-500" style={{flexShrink:0}} />
+                            <input
+                                type="text"
+                                placeholder="お客様名で検索..."
+                                value={searchInput}
+                                onChange={e => setSearchInput(e.target.value)}
+                                onKeyDown={e => { if (e.key === 'Enter') handleSearch(); }}
+                                style={{border:'none',background:'transparent',outline:'none',flex:1,fontSize:13,minWidth:0}}
+                            />
+                        </div>
+                        <select
+                            onChange={e => {
+                                if (!e.target.value) return;
+                                const [idx, name] = e.target.value.split('::');
+                                handleSelectCustomer(name, parseInt(idx));
+                            }}
+                            className="cf-customer-bar select"
+                            style={{maxWidth:260}}
+                        >
+                            <option value="">-- 顧客を選択 --</option>
+                            {customers.map(c => (
+                                <option key={c.index + '::' + c.name} value={c.index + '::' + c.name}>
+                                    {c.name}（{new Date(c.timestamp).toLocaleDateString('ja-JP')}）
+                                </option>
+                            ))}
+                        </select>
+                        <button className="cf-btn cf-btn-primary" onClick={handleSearch} disabled={loading}>
+                            {loading ? '読込中...' : '検索'}
+                        </button>
+                        <button className="cf-btn cf-btn-secondary" onClick={() => {
+                            setConcerns({});
+                            setFeedbacks({});
+                            setActiveLines({});
+                            counselingHook.setSelectedCustomer(null);
+                            setSearchInput('');
+                            setCompletedStep(0);
+                        }}>
+                            リセット
+                        </button>
+                    </div>
+
+                    {customerInfoSection}
+
+                    {/* ステップバー */}
+                    <div className="cf-step-bar">
+                        <div className={'cf-step ' + (completedStep >= 1 ? 'done' : completedStep === 0 ? 'active' : '')}>
+                            <div className="cf-step-num">1</div>ヒアリング
+                        </div>
+                        <div className={'cf-step-connector ' + (completedStep >= 1 ? 'filled' : '')}></div>
+                        <div className={'cf-step ' + (completedStep >= 2 ? 'done' : completedStep === 1 ? 'active' : '')}>
+                            <div className="cf-step-num">2</div>シミュレーション
+                        </div>
+                        <div className={'cf-step-connector ' + (completedStep >= 2 ? 'filled' : '')}></div>
+                        <div className={'cf-step ' + (completedStep >= 2 ? 'active' : '')}>
+                            <div className="cf-step-num">3</div>プラン選択
+                        </div>
+                    </div>
+
+                    {/* コンセプトトグル */}
+                    <div style={{textAlign:'right',marginBottom:4}}>
+                        <button className={'cf-concept-toggle ' + (showConcept ? 'active' : '')} onClick={() => setShowConcept(!showConcept)}>
+                            <Icon name="help-circle" size={14} />
+                            コンセプト説明
+                        </button>
+                    </div>
+
+                    {conceptSection}
+
+                    {/* 01 ヒアリング＆プラン診断 */}
+                    <div className="cf-section-card">
+                        <div className="cf-section-header">
+                            <h3><span style={{color:'#b8a472',fontFamily:"'Cormorant Garamond',serif",marginRight:4}}>01</span> ヒアリング＆プラン診断</h3>
+                        </div>
+                        <div className="cf-section-body">
+                            <p style={{fontSize:13,color:'#6b6b6b',marginBottom:16}}>お悩みと施術後のお身体の状態をチェックすると、おすすめプランが表示されます。</p>
+
+                            <div className="cf-check-grid">
+                                <div className="cf-check-card">
+                                    <h4><div style={{width:26,height:26,borderRadius:7,background:'linear-gradient(135deg,#e8f7ee,#d0f0db)',color:'#1e7a49',display:'flex',alignItems:'center',justifyContent:'center',fontSize:13,flexShrink:0}}>✓</div>お悩み箇所</h4>
+                                    <div className="cf-checks">
+                                        {CONCERN_ITEMS.map(item => (
+                                            <div key={item.id} className={'cf-chk ' + (concerns[item.id] ? 'checked' : '')} onClick={() => toggleConcern(item.id)}>
+                                                <div className="cf-chk-box">
+                                                    <svg className="cf-chk-check" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polyline points="2,6 5,9 10,3"/></svg>
+                                                </div>
+                                                <span>{item.label}<span className={'cf-tag ' + tagClass(item.cat)}>{tagLabel(item.cat)}</span></span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                                <div className="cf-check-card">
+                                    <h4><div style={{width:26,height:26,borderRadius:7,background:'linear-gradient(135deg,#e4f4f7,#ceedf3)',color:'#1a7a8a',display:'flex',alignItems:'center',justifyContent:'center',fontSize:13,flexShrink:0}}>☑</div>施術後のフィードバック<span style={{fontSize:11,color:'#6b6b6b',fontWeight:400,marginLeft:8}}>（セラピスト記入）</span></h4>
+                                    <p style={{fontSize:12,color:'#6b6b6b',marginBottom:14,lineHeight:1.6}}>施術後にお客様のお身体の状態を評価してチェックしてください。</p>
+                                    <div className="cf-checks">
+                                        {FEEDBACK_ITEMS.map(item => (
+                                            <div key={item.id} className={'cf-chk ' + (feedbacks[item.id] ? 'checked' : '')} onClick={() => toggleFeedback(item.id)}>
+                                                <div className="cf-chk-box">
+                                                    <svg className="cf-chk-check" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polyline points="2,6 5,9 10,3"/></svg>
+                                                </div>
+                                                <span>{item.label}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* おすすめプラン結果 */}
+                            <div className={'cf-rec-result ' + (recPlan ? 'visible' : '')}>
+                                {recPlan && (
+                                    <>
+                                        <div style={{marginBottom:16}}>
+                                            <div style={{fontSize:16,fontWeight:700,display:'flex',alignItems:'center',gap:8,marginBottom:4}}>
+                                                <div style={{width:28,height:28,background:'#33a065',borderRadius:8,display:'flex',alignItems:'center',justifyContent:'center',color:'white',fontSize:14,flexShrink:0}}>✓</div>
+                                                おすすめプラン
+                                            </div>
+                                            <div style={{fontSize:13,color:'#6b6b6b',lineHeight:1.8}}>{recPlan.reasons.join('・')}、<strong>3つのプラン</strong>をご提案します。担当セラピストとご相談ください。</div>
+                                        </div>
+                                        <div className="cf-rec-grid">
+                                            <RecCard rank="matsu" label="しっかりコース" icon="◆" plan={recPlan.matsu} />
+                                            <RecCard rank="take" label="おすすめ" icon="★" plan={recPlan.take} />
+                                            <RecCard rank="ume" label="お手軽コース" icon="●" plan={recPlan.ume} />
+                                        </div>
+                                    </>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* 02 改善シミュレーション */}
+                    <div className="cf-section-card">
+                        <div className="cf-section-header">
+                            <h3><span style={{color:'#b8a472',fontFamily:"'Cormorant Garamond',serif",marginRight:4}}>02</span> 改善シミュレーション</h3>
+                        </div>
+                        <div className="cf-section-body" style={{padding:0}}>
+                            <div style={{padding:'20px 24px 0'}}>
+                                <p style={{fontSize:13,color:'#6b6b6b',marginBottom:12}}>通い方によって改善スピードと維持力は大きく変わります。</p>
+                            </div>
+                            <div className="cf-emphasis-box" style={{margin:'0 24px 16px'}}>
+                                <div className="cf-emphasis-icon">3</div>
+                                <div className="cf-emphasis-text"><strong>まずは3ヶ月の継続が最も大切です。</strong><br/>どのプランでも最初の3ヶ月で身体の土台が整います。</div>
+                            </div>
+                            <div className="cf-graph-wrapper" style={{boxShadow:'none',border:'none',borderRadius:0}}>
+                                <div className="cf-graph-controls">
+                                    {lineControls.map(group => (
+                                        <div key={group.group} className="cf-control-group">
+                                            <div className="cf-control-label"><div className="cf-dot" style={{background:group.dotColor}}></div>{group.group}</div>
+                                            <div className="cf-control-row">
+                                                {group.items.map(item => (
+                                                    <div
+                                                        key={item.id}
+                                                        className={'cf-ci ' + item.cls + (activeLines[item.id] ? ' active' : '') + (currentRecFreq === item.recFreq && item.primary ? ' rec-highlight' : '')}
+                                                        onClick={() => toggleGraphLine(item.id)}
+                                                    >
+                                                        <div className="cf-cc"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polyline points="2,6 5,9 10,3"/></svg></div>
+                                                        <div className="cf-cl" style={{background:item.color}}></div>
+                                                        <span>{item.label}</span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                                <div style={{display:'flex',gap:8,padding:'8px 24px 0',flexWrap:'wrap'}}>
+                                    <span style={{fontSize:12,fontWeight:600,padding:'4px 12px',borderRadius:16,background:'#e8eef8',color:'#4a6fa5'}}>症状不安定期</span>
+                                    <span style={{fontSize:12,fontWeight:600,padding:'4px 12px',borderRadius:16,background:'#fce8e8',color:'#c55a5a'}}>症状安定期</span>
+                                </div>
+                                <div className="cf-graph-container">
+                                    <svg ref={graphRef} className="cf-graph-svg" viewBox="0 0 940 470" xmlns="http://www.w3.org/2000/svg">
+                                        <defs>
+                                            <linearGradient id="cfUgBg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#c9d6ec" stopOpacity=".28"/><stop offset="100%" stopColor="#c9d6ec" stopOpacity=".03"/></linearGradient>
+                                            <linearGradient id="cfSgBg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#f5c5c5" stopOpacity=".18"/><stop offset="100%" stopColor="#f5c5c5" stopOpacity=".03"/></linearGradient>
+                                            <filter id="cfGl"><feGaussianBlur stdDeviation="1.5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+                                        </defs>
+                                        {/* Background rects */}
+                                        <rect x={graphData.mx(0)} y="45" width={graphData.mx(3)-graphData.mx(0)} height="350" rx="8" fill="url(#cfUgBg)"/>
+                                        <rect x={graphData.mx(3)} y="45" width={graphData.mx(6)-graphData.mx(3)} height="350" rx="8" fill="url(#cfSgBg)"/>
+                                        <line x1={graphData.mx(3)} y1="45" x2={graphData.mx(3)} y2={graphData.YB} stroke="#b8c4d0" strokeWidth="1.2" strokeDasharray="6,4" opacity=".3"/>
+                                        <text x={(graphData.mx(0)+graphData.mx(3))/2} y="68" textAnchor="middle" fontSize="12" fill="#4a6fa5" fontWeight="600" opacity=".55">症状不安定期</text>
+                                        <text x={(graphData.mx(3)+graphData.mx(6))/2} y="68" textAnchor="middle" fontSize="12" fill="#c55a5a" fontWeight="600" opacity=".55">症状安定期</text>
+                                        {/* Goal lines */}
+                                        <line x1={graphData.X0} y1={graphData.YG} x2={graphData.XE} y2={graphData.YG} stroke="#7ecda5" strokeWidth="1.5" strokeDasharray="8,5" opacity=".4"/>
+                                        <rect x="6" y={graphData.YG-12} width="66" height="24" rx="5" fill="#e8f7ee"/>
+                                        <text x="39" y={graphData.YG+5} textAnchor="middle" fontSize="11" fill="#1e7a49" fontWeight="700">理想の状態</text>
+                                        <line x1={graphData.X0} y1={graphData.YG2} x2={graphData.XE} y2={graphData.YG2} stroke="#2a8fa0" strokeWidth="1.5" strokeDasharray="6,4" opacity=".3"/>
+                                        <rect x="6" y={graphData.YG2-12} width="66" height="24" rx="5" fill="#edf7f9"/>
+                                        <text x="39" y={graphData.YG2+5} textAnchor="middle" fontSize="11" fill="#2a8fa0" fontWeight="700">変化の実感</text>
+                                        {/* Axis */}
+                                        <line x1={graphData.X0} y1={graphData.YB} x2={graphData.XE} y2={graphData.YB} stroke="#ddd" strokeWidth="1"/>
+                                        {[0,1,2,3,4,5,6].map(i => <line key={i} x1={graphData.mx(i)} y1={graphData.YB} x2={graphData.mx(i)} y2="78" stroke="#e8e8e8" strokeWidth=".5" strokeDasharray="3,4"/>)}
+                                        {graphData.dl.map((l,i) => <text key={i} x={graphData.mx(i)} y="420" textAnchor="middle" fontSize="10" fill="#999">{l}</text>)}
+                                        <text x={graphData.mx(3)} y="448" textAnchor="middle" fontSize="10" fill="#b0b0b0">▲ 切替タイミング</text>
+                                        <circle cx={graphData.X0} cy={graphData.YS} r="5" fill="white" stroke="#666" strokeWidth="2"/>
+                                        {/* Lines */}
+                                        {graphData.lines.map(l => {
+                                            const d = graphData.genWave(l.v, l.b, l.a);
+                                            const lastMatch = d.match(/([\d.]+),([\d.]+)\s*$/);
+                                            const endX = lastMatch ? +lastMatch[1] : 0;
+                                            const endY = lastMatch ? +lastMatch[2] : 0;
+                                            return (
+                                                <g key={l.id} className={'line-group ' + (activeLines[l.id] ? 'visible' : '')} style={{opacity: activeLines[l.id] ? 1 : 0}}>
+                                                    <path d={d} fill="none" stroke={l.c} strokeWidth={l.w} strokeLinecap="round" className="graph-line" filter={l.gl ? 'url(#cfGl)' : undefined} />
+                                                    <circle cx={endX} cy={endY} r="4" fill="white" stroke={l.c} strokeWidth="2" />
+                                                    {l.at !== undefined && (
+                                                        <>
+                                                            <circle cx={graphData.mx(l.at)} cy={l.b[l.at]} r="6" fill="none" stroke={l.c} strokeWidth="1.5" opacity=".5"/>
+                                                            <text x={graphData.mx(l.at)+12} y={l.b[l.at]+16} fontSize="9" fill={l.c} fontWeight="600" opacity=".8">{l.atxt}</text>
+                                                        </>
+                                                    )}
+                                                </g>
+                                            );
+                                        })}
+                                    </svg>
+                                </div>
+                                <div className="cf-scenario-area">
+                                    {scenarios.map(s => (
+                                        <div key={s.id} className={'cf-scenario-msg ' + s.cls + (activeLines[s.id] ? ' visible' : '')}>
+                                            <strong>{s.title}</strong><br/>{s.desc}
+                                            <div className="cf-flow-inline">
+                                                {s.flow.map((f,i) => (
+                                                    <React.Fragment key={i}>
+                                                        {i > 0 && <span style={{color:'#ccc',fontSize:12}}>→</span>}
+                                                        <span className={'cf-flow-chip ' + f.cls}>{f.label}</span>
+                                                    </React.Fragment>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* 03 プラン選択 */}
+                    <div className="cf-section-card">
+                        <div className="cf-section-header">
+                            <h3><span style={{color:'#b8a472',fontFamily:"'Cormorant Garamond',serif",marginRight:4}}>03</span> プラン選択</h3>
+                        </div>
+                        <div className="cf-section-body">
+                            <p style={{fontSize:13,color:'#6b6b6b',marginBottom:20}}>ヒアリング結果に基づいたおすすめプランがハイライトされています。</p>
+                            <div style={{textAlign:'center',marginBottom:24}}><span style={{display:'inline-block',background:'#dbf2e3',color:'#1d6641',fontSize:14,fontWeight:600,padding:'8px 24px',borderRadius:24}}>初回入会費一律：¥5,000</span></div>
+                            <div className="cf-plans-grid">
+                                <div className={'cf-plan-card popular ' + (isPlanRec('Standard') ? 'auto-rec' : '')}>
+                                    <div className="cf-auto-rec-badge">← 診断おすすめ</div>
+                                    <div className="cf-plan-badge popular">一番人気 ★</div>
+                                    <div className="cf-plan-header">
+                                        <div className="cf-plan-name">Standard</div>
+                                        <div className="cf-plan-base-price">1回 ¥10,000</div>
+                                        <div className="cf-plan-types">小顔矯正・姿勢矯正・骨盤矯正から<strong>2種類</strong></div>
+                                    </div>
+                                    <div className="cf-plan-pricing">
+                                        <div className={'cf-price-row ' + (isFreqRec('Standard',2) ? 'highlight-freq' : '')}><span className="cf-freq-badge">月2回</span><div className="cf-price-calc"><span className="cf-price-original">¥20,000</span><span className="cf-price-arrow">▶</span><span className="cf-price-final"><span className="cf-price-yen">¥</span>15,000</span></div></div>
+                                        <div className={'cf-price-row ' + (isFreqRec('Standard',4) ? 'highlight-freq' : '')}><span className="cf-freq-badge">月4回</span><div className="cf-price-calc"><span className="cf-price-original">¥40,000</span><span className="cf-price-arrow">▶</span><span className="cf-price-final"><span className="cf-price-yen">¥</span>28,000</span></div></div>
+                                    </div>
+                                </div>
+                                <div className={'cf-plan-card recommended ' + (isPlanRec('Premium') ? 'auto-rec' : '')}>
+                                    <div className="cf-auto-rec-badge">← 診断おすすめ</div>
+                                    <div className="cf-plan-badge recommended">オススメ</div>
+                                    <div className="cf-plan-header">
+                                        <div className="cf-plan-name">Premium</div>
+                                        <div className="cf-plan-base-price">1回 ¥11,000</div>
+                                        <div className="cf-plan-types">小顔矯正・姿勢矯正・骨盤矯正の<strong>全種類</strong></div>
+                                    </div>
+                                    <div className="cf-plan-pricing">
+                                        <div className={'cf-price-row ' + (isFreqRec('Premium',2) ? 'highlight-freq' : '')}><span className="cf-freq-badge">月2回</span><div className="cf-price-calc"><span className="cf-price-original">¥22,000</span><span className="cf-price-arrow">▶</span><span className="cf-price-final"><span className="cf-price-yen">¥</span>18,000</span></div></div>
+                                        <div className={'cf-price-row ' + (isFreqRec('Premium',4) ? 'highlight-freq' : '')}><span className="cf-freq-badge">月4回</span><div className="cf-price-calc"><span className="cf-price-original">¥44,000</span><span className="cf-price-arrow">▶</span><span className="cf-price-final"><span className="cf-price-yen">¥</span>32,000</span></div></div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="cf-plans-bottom">
+                                <div className={'cf-plan-card ' + (isPlanRec('Quick') ? 'auto-rec' : '')}>
+                                    <div className="cf-auto-rec-badge">← 診断おすすめ</div>
+                                    <div className="cf-plan-header">
+                                        <div className="cf-plan-name">Quick</div>
+                                        <div className="cf-plan-base-price">1回 ¥9,000</div>
+                                        <div className="cf-plan-types">小顔矯正・姿勢矯正・骨盤矯正から<strong>1種類</strong></div>
+                                    </div>
+                                    <div className="cf-plan-pricing">
+                                        <div className={'cf-price-row ' + (isFreqRec('Quick',4) ? 'highlight-freq' : '')}><span className="cf-freq-badge">月4回</span><div className="cf-price-calc"><span className="cf-price-original">¥36,000</span><span className="cf-price-arrow">▶</span><span className="cf-price-final"><span className="cf-price-yen">¥</span>24,000</span></div></div>
+                                        <div className={'cf-price-row ' + (isFreqRec('Quick',8) ? 'highlight-freq' : '')}><span className="cf-freq-badge">月8回</span><div className="cf-price-calc"><span className="cf-price-original">¥72,000</span><span className="cf-price-arrow">▶</span><span className="cf-price-final"><span className="cf-price-yen">¥</span>44,000</span></div></div>
+                                    </div>
+                                </div>
+                                <div className={'cf-plan-card ' + (isPlanRec('Monthly') ? 'auto-rec' : '')}>
+                                    <div className="cf-auto-rec-badge">← 診断おすすめ</div>
+                                    <div className="cf-plan-header">
+                                        <div className="cf-plan-name">月一フル</div>
+                                        <div className="cf-plan-base-price">1回 ¥11,000</div>
+                                        <div className="cf-plan-types">小顔矯正・姿勢矯正・骨盤矯正の<strong>全種類</strong></div>
+                                    </div>
+                                    <div className="cf-plan-pricing">
+                                        <div className={'cf-price-row ' + (isFreqRec('Monthly',1) ? 'highlight-freq' : '')}><span className="cf-freq-badge">月1回</span><div className="cf-price-calc"><span className="cf-price-original">¥11,000</span><span className="cf-price-arrow">▶</span><span className="cf-price-final"><span className="cf-price-yen">¥</span>10,000</span></div></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* サブスク会員 3つのポイント */}
+                    <div className="cf-section-card">
+                        <div className="cf-section-header">
+                            <h3><span style={{color:'#b8a472',fontSize:'1.1em'}}>★</span> サブスク会員 3つのポイント</h3>
+                        </div>
+                        <div className="cf-section-body">
+                            <div className="cf-benefits-grid">
+                                <div className="cf-benefit-item">
+                                    <div className="cf-benefit-num bn-1">①</div>
+                                    <div className="cf-benefit-content"><h4>通えなかった回数は<span className="highlight">翌月まで繰越可能！</span></h4><p>「たまたま忙しい月が、、、」そんな時もお客様が損しない設計を目指しています！</p></div>
+                                </div>
+                                <div className="cf-benefit-item">
+                                    <div className="cf-benefit-num bn-2">②</div>
+                                    <div className="cf-benefit-content"><h4>効果を高める<span className="highlight">セルフケア指導！</span></h4><p>日常生活動作やセルフケアに関する事を<strong>サブスク会員限定</strong>で指導付き◎</p></div>
+                                </div>
+                                <div className="cf-benefit-item">
+                                    <div className="cf-benefit-num bn-3">③</div>
+                                    <div className="cf-benefit-content"><h4>加入プラン分の回数を<span className="highlight">シェアも可能！</span></h4><p>ご家族・ご友人と回数のシェアも可能！月4回プランを親しい人と2回ずつシェアすると、月2回プランをさらにお得に通えます！</p></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* 当日契約で3つの特典 */}
+                    <div className="cf-section-card">
+                        <div className="cf-section-header">
+                            <h3><span style={{display:'inline-block',background:'linear-gradient(135deg,#fff8e8,#fff0cc)',border:'1.5px solid #d4c99a',color:'#b8a472',fontSize:11,fontWeight:700,padding:'3px 12px',borderRadius:16,marginRight:8}}>TODAY'S SPECIAL</span> 当日契約で3つの特典<span style={{color:'#b8a472',fontSize:'1.1em',marginLeft:4}}>★</span></h3>
+                        </div>
+                        <div className="cf-section-body">
+                            <div className="cf-offer-grid">
+                                <div className="cf-offer-item">
+                                    <div className="cf-offer-num">①</div>
+                                    <div className="cf-offer-content"><h4>入会費用5,000円が<span className="accent">無料（0円）</span>に！</h4><p>はじめてサブスク会員に登録いただく方は初回5,000円頂戴しておりますが、<strong>当日のご契約で無料に！</strong></p></div>
+                                </div>
+                                <div className="cf-offer-item">
+                                    <div className="cf-offer-num">②</div>
+                                    <div className="cf-offer-content"><h4>解約費<span className="accent">無料</span>！翌月プラン変更・解約可能！</h4><p>通常しっかり効果を感じていただくために3ヶ月以内の解約は解約金をいただいております。<br/><strong>リニューアル記念で解約金も0円</strong>で翌月から解約OK！</p></div>
+                                </div>
+                                <div className="cf-offer-item">
+                                    <div className="cf-offer-num">③</div>
+                                    <div className="cf-offer-content"><h4>当日契約限定で指名料が<span className="accent">ずっと無料</span>に！</h4><p>施術の体感があうセラピストの指名予約が<strong>永年無料</strong>に！<br/>身体の状態をより深く理解した担当者による施術で効果も◎</p></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* プラン選びのポイント */}
+                    <div className="cf-note-box">
+                        <h4><Icon name="info" size={16} className="text-sise-500" /> プラン選びのポイント</h4>
+                        <p><strong>3ヶ月続ければ、身体は確実に変わります。</strong>まずはここを目標にしてください。<br/>安定期以降は<strong>月2回の継続</strong>が最もバランスが良く、効果を高いまま維持できます。<br/>離脱するよりは<strong>月1回でも継続する</strong>ことが大切です。</p>
+                    </div>
+                </div>
+            );
+        };
+
+        // ========================================
         // 設定ビュー
         // ========================================
 
@@ -7294,6 +8299,35 @@
                                 <p className="text-xs text-slate-400 mt-1.5">QR決済・現金決済の会員データをスプレッドシートで同期するための URL です</p>
                             </div>
 
+                            {/* カウンセリング GAS URL */}
+                            <div>
+                                <label className="block text-sm font-semibold text-slate-700 mb-2">
+                                    <Icon name="heart-handshake" size={16} className="inline mr-2 text-sise-500" />
+                                    カウンセリングデータ GAS URL
+                                </label>
+                                <div className="flex gap-2">
+                                    <input
+                                        type="url"
+                                        value={localStorage.getItem('sise_counseling_gas_url') || ''}
+                                        onChange={(e) => {
+                                            localStorage.setItem('sise_counseling_gas_url', e.target.value);
+                                        }}
+                                        className="flex-1 px-4 py-2.5 border border-slate-200 rounded-xl focus:border-sise-500 focus:ring-2 focus:ring-sise-500/20 outline-none text-sm"
+                                        placeholder="https://script.google.com/macros/s/..."
+                                    />
+                                    <button
+                                        onClick={() => {
+                                            setSaveMessage('カウンセリング用GAS URLを保存しました。リロードで反映されます。');
+                                            setTimeout(() => setSaveMessage(''), 5000);
+                                        }}
+                                        className="px-4 py-2.5 btn-gradient rounded-xl font-medium text-sm"
+                                    >
+                                        保存
+                                    </button>
+                                </div>
+                                <p className="text-xs text-slate-400 mt-1.5">Googleフォームのカウンセリング回答データを取得するための URL です（gas/counseling.gs をデプロイ）。1つのスプレッドシートに5店舗分のシート（カウンセリング回答_本厚木店 / 大和店 / 横浜店 / 町田店 / 川口店）を用意してください。</p>
+                            </div>
+
                             {/* 出納帳 GAS URL */}
                             <div>
                                 <label className="block text-sm font-semibold text-slate-700 mb-2">
@@ -7376,6 +8410,8 @@
             const cashbookHook = useCashbook();
             // マーケティング管理
             const marketingHook = useMarketingData();
+            // カウンセリングデータ管理
+            const counselingHook = useCounselingData();
 
             // ダークモード切り替え
             useEffect(() => {
@@ -7439,6 +8475,7 @@
                 { id: 'cashbook', label: '出納帳', icon: 'book-open', mobileLabel: '出納帳' },
                 { id: 'usage', label: '利用管理', icon: 'clipboard-check', mobileLabel: '利用' },
                 { id: 'tickets', label: '回数券', icon: 'ticket', mobileLabel: '回数券' },
+                { id: 'counseling', label: 'カウンセリング', icon: 'heart-handshake', mobileLabel: '案内' },
                 { id: 'marketing', label: 'マーケティング', icon: 'megaphone', mobileLabel: '広告' },
                 ...(!isStaffMode ? [{ id: 'settings', label: '設定', icon: 'settings', mobileLabel: '設定' }] : []),
             ];
@@ -7462,6 +8499,8 @@
                         return <MemberUsageView memberData={memberData} usageHook={usageHook} />;
                     case 'tickets':
                         return <TicketManagementView ticketHook={ticketHook} />;
+                    case 'counseling':
+                        return <ConceptFormView counselingHook={counselingHook} />;
                     case 'marketing':
                         return <MarketingView marketingHook={marketingHook} />;
                     case 'settings':
