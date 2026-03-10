@@ -27,6 +27,7 @@ const SANDBOX_WRITE_ENDPOINTS = [
 // Operation endpoints (allowed in all environments with confirmation)
 const OPERATION_ENDPOINTS = [
   'subscriptions/',  // cancel, pause, resume use subscriptions/{id}/cancel etc.
+  'online-checkout/payment-links',  // サブスク契約リンク生成
 ];
 
 // Get store configuration by store ID
@@ -126,16 +127,41 @@ export default async function handler(req, res) {
     ? 'https://connect.squareupsandbox.com/v2'
     : 'https://connect.squareup.com/v2';
 
+  // catalog/list is a GET endpoint with query parameters
+  const GET_ENDPOINTS = ['catalog/list'];
+  const isGetEndpoint = GET_ENDPOINTS.some(ep => squarePath.startsWith(ep));
+
   try {
-    const response = await fetch(`${baseUrl}/${squarePath}`, {
-      method: 'POST',
+    let squareUrl = `${baseUrl}/${squarePath}`;
+    const fetchOptions = {
       headers: {
         'Authorization': `Bearer ${storeConfig.token}`,
         'Content-Type': 'application/json',
         'Square-Version': '2025-01-23'
       },
-      body: JSON.stringify(req.body)
-    });
+    };
+
+    if (isGetEndpoint) {
+      // Convert body params to query string for GET endpoints
+      fetchOptions.method = 'GET';
+      const params = new URLSearchParams();
+      if (req.body) {
+        Object.entries(req.body).forEach(([key, value]) => {
+          if (Array.isArray(value)) {
+            params.set(key, value.join(','));
+          } else if (value !== undefined && value !== null) {
+            params.set(key, String(value));
+          }
+        });
+      }
+      const qs = params.toString();
+      if (qs) squareUrl += `?${qs}`;
+    } else {
+      fetchOptions.method = 'POST';
+      fetchOptions.body = JSON.stringify(req.body);
+    }
+
+    const response = await fetch(squareUrl, fetchOptions);
 
     const data = await response.json();
 
