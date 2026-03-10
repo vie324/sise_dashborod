@@ -936,9 +936,8 @@
         // 店舗マスタ（サーバーから動的に取得）
         let serverStores = [];
 
-        // Google Apps Script Web App URL (日報データ取得用)
-        // ※実際のデプロイ後URLに置き換えてください
-        const GOOGLE_FORM_SHEET_URL = 'YOUR_GOOGLE_APPS_SCRIPT_URL';
+        // 統合 Google Apps Script URL（全機能で共有・1つのスプレッドシートで管理）
+        const UNIFIED_GAS_URL = localStorage.getItem('sise_unified_gas_url') || 'YOUR_UNIFIED_GAS_URL';
 
         // API設定（サーバーサイドプロキシ経由）
         // APIキーはVercel環境変数で管理、フロントエンドには露出しない
@@ -1706,15 +1705,12 @@
             });
 
             const fetchReportData = useCallback(async () => {
-                // localStorageの設定値を優先、なければデフォルト定数
-                const gasUrl = localStorage.getItem('sise_gas_url') || GOOGLE_FORM_SHEET_URL;
-
                 // APIが設定されていない場合は空データ
-                if (!gasUrl || gasUrl === 'YOUR_GOOGLE_APPS_SCRIPT_URL') {
+                if (!UNIFIED_GAS_URL || UNIFIED_GAS_URL === 'YOUR_UNIFIED_GAS_URL') {
                     setReportData({
                         reports: [],
                         loading: false,
-                        error: '日報データのGoogle Apps Script URLが設定されていません。設定画面からURLを入力してください。',
+                        error: '統合GAS URLが設定されていません。設定画面からURLを入力してください。',
                         lastUpdated: null
                     });
                     return;
@@ -1722,7 +1718,7 @@
 
                 try {
                     // 当月+先月のデータを取得（月間トレンド比較用）
-                    const response = await fetch(gasUrl + '?months=2');
+                    const response = await fetch(UNIFIED_GAS_URL + '?type=report&months=2');
                     if (!response.ok) {
                         throw new Error('日報データの取得に失敗しました (HTTP ' + response.status + ')');
                     }
@@ -1920,7 +1916,7 @@
             return `${d.getMonth() + 1}/${d.getDate()}`;
         };
 
-        const MEMBER_USAGE_GAS_URL = localStorage.getItem('sise_usage_gas_url') || 'YOUR_USAGE_GAS_URL';
+        const MEMBER_USAGE_GAS_URL = UNIFIED_GAS_URL;
 
         // プラン別の月間利用上限設定
         const PLAN_LIMITS_STORAGE_KEY = 'sise_usage_plan_limits';
@@ -1974,8 +1970,8 @@
 
             // GASからデータを取得する関数
             const fetchFromGAS = useCallback(() => {
-                if (MEMBER_USAGE_GAS_URL !== 'YOUR_USAGE_GAS_URL') {
-                    return fetch(MEMBER_USAGE_GAS_URL + '?action=getUsage&month=' + currentMonth)
+                if (MEMBER_USAGE_GAS_URL !== 'YOUR_UNIFIED_GAS_URL') {
+                    return fetch(MEMBER_USAGE_GAS_URL + '?type=usage&month=' + currentMonth)
                         .then(r => r.json())
                         .then(data => {
                             if (data && data.usage) {
@@ -2009,7 +2005,7 @@
 
             // 定期同期（60秒ごとにGASからデータ取得）
             useEffect(() => {
-                if (MEMBER_USAGE_GAS_URL === 'YOUR_USAGE_GAS_URL') return;
+                if (MEMBER_USAGE_GAS_URL === 'YOUR_UNIFIED_GAS_URL') return;
                 const interval = setInterval(() => {
                     fetchFromGAS();
                 }, 60000);
@@ -2027,12 +2023,12 @@
                         localStorage.setItem('sise_member_usage', JSON.stringify(all));
                     } catch (e) {}
                     // GASへ即時同期（バックグラウンド）
-                    if (MEMBER_USAGE_GAS_URL !== 'YOUR_USAGE_GAS_URL') {
+                    if (MEMBER_USAGE_GAS_URL !== 'YOUR_UNIFIED_GAS_URL') {
                         fetch(MEMBER_USAGE_GAS_URL, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({
-                                action: 'saveUsage',
+                                type: 'usage', action: 'saveUsage',
                                 data: [{ memberId, month: currentMonth, periodKey: periodKey || '', count: Math.max(0, count), updatedAt: new Date().toISOString() }]
                             })
                         }).catch(() => {});
@@ -2049,7 +2045,7 @@
                     all[currentMonth] = usageData;
                     localStorage.setItem('sise_member_usage', JSON.stringify(all));
 
-                    if (MEMBER_USAGE_GAS_URL !== 'YOUR_USAGE_GAS_URL') {
+                    if (MEMBER_USAGE_GAS_URL !== 'YOUR_UNIFIED_GAS_URL') {
                         const payload = Object.entries(usageData).map(([rawKey, count]) => {
                             const memberId = rawKey.includes('__') ? rawKey.split('__')[0] : rawKey;
                             const periodKey = rawKey.includes('__') ? rawKey.split('__')[1] : '';
@@ -2068,7 +2064,7 @@
                         await fetch(MEMBER_USAGE_GAS_URL, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ action: 'saveUsage', data: payload })
+                            body: JSON.stringify({ type: 'usage', action: 'saveUsage', data: payload })
                         });
                     }
                     setLastSaved(new Date());
@@ -2100,7 +2096,7 @@
         // 回数券管理（Google Sheets連携）
         // ========================================
 
-        const TICKET_GAS_URL = localStorage.getItem('sise_ticket_gas_url') || 'YOUR_TICKET_GAS_URL';
+        const TICKET_GAS_URL = UNIFIED_GAS_URL;
         const TICKET_STORAGE_KEY = 'sise_ticket_data';
 
         const useTicketManagement = () => {
@@ -2114,8 +2110,8 @@
 
             // GASからデータを取得する関数
             const fetchTicketsFromGAS = useCallback(() => {
-                if (TICKET_GAS_URL !== 'YOUR_TICKET_GAS_URL') {
-                    return fetch(TICKET_GAS_URL + '?action=getTickets')
+                if (TICKET_GAS_URL !== 'YOUR_UNIFIED_GAS_URL') {
+                    return fetch(TICKET_GAS_URL + '?type=ticket')
                         .then(r => r.json())
                         .then(data => {
                             if (data && data.plans) {
@@ -2157,7 +2153,7 @@
 
             // 定期同期（60秒ごとにGASからデータ取得）
             useEffect(() => {
-                if (TICKET_GAS_URL === 'YOUR_TICKET_GAS_URL') return;
+                if (TICKET_GAS_URL === 'YOUR_UNIFIED_GAS_URL') return;
                 const interval = setInterval(() => {
                     fetchTicketsFromGAS();
                 }, 60000);
@@ -2284,11 +2280,11 @@
                 setSaving(true);
                 try {
                     saveLocal(ticketPlans, customerTickets);
-                    if (TICKET_GAS_URL !== 'YOUR_TICKET_GAS_URL') {
+                    if (TICKET_GAS_URL !== 'YOUR_UNIFIED_GAS_URL') {
                         await fetch(TICKET_GAS_URL, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ action: 'saveTickets', plans: ticketPlans, tickets: customerTickets })
+                            body: JSON.stringify({ type: 'ticket', action: 'saveTickets', plans: ticketPlans, tickets: customerTickets })
                         });
                     }
                     setLastSaved(new Date());
@@ -2337,7 +2333,7 @@
         // ========================================
 
         const MANUAL_MEMBERS_STORAGE_KEY = 'sise_manual_members';
-        const MANUAL_MEMBERS_GAS_URL = localStorage.getItem('sise_manual_members_gas_url') || 'YOUR_MANUAL_MEMBERS_GAS_URL';
+        const MANUAL_MEMBERS_GAS_URL = UNIFIED_GAS_URL;
 
         const useManualMembers = () => {
             const [manualMembers, setManualMembers] = useState([]);
@@ -2346,8 +2342,8 @@
 
             // GASから取得
             const fetchFromGAS = useCallback(() => {
-                if (MANUAL_MEMBERS_GAS_URL !== 'YOUR_MANUAL_MEMBERS_GAS_URL') {
-                    return fetch(MANUAL_MEMBERS_GAS_URL + '?action=getManualMembers')
+                if (MANUAL_MEMBERS_GAS_URL !== 'YOUR_UNIFIED_GAS_URL') {
+                    return fetch(MANUAL_MEMBERS_GAS_URL + '?type=members')
                         .then(r => r.json())
                         .then(data => {
                             if (data && data.members) {
@@ -2372,7 +2368,7 @@
 
             // 定期同期（60秒ごと）
             useEffect(() => {
-                if (MANUAL_MEMBERS_GAS_URL === 'YOUR_MANUAL_MEMBERS_GAS_URL') return;
+                if (MANUAL_MEMBERS_GAS_URL === 'YOUR_UNIFIED_GAS_URL') return;
                 const interval = setInterval(fetchFromGAS, 60000);
                 return () => clearInterval(interval);
             }, [fetchFromGAS]);
@@ -2383,11 +2379,11 @@
 
             // GASに保存
             const saveToGAS = useCallback(async (members) => {
-                if (MANUAL_MEMBERS_GAS_URL !== 'YOUR_MANUAL_MEMBERS_GAS_URL') {
+                if (MANUAL_MEMBERS_GAS_URL !== 'YOUR_UNIFIED_GAS_URL') {
                     await fetch(MANUAL_MEMBERS_GAS_URL, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ action: 'saveManualMembers', members })
+                        body: JSON.stringify({ type: 'members', action: 'saveManualMembers', members })
                     }).catch(() => {});
                 }
             }, []);
@@ -2542,7 +2538,7 @@
         // ========================================
 
         const CASHBOOK_STORAGE_KEY = 'sise_cashbook';
-        const CASHBOOK_GAS_URL = localStorage.getItem('sise_cashbook_gas_url') || 'YOUR_CASHBOOK_GAS_URL';
+        const CASHBOOK_GAS_URL = UNIFIED_GAS_URL;
 
         const useCashbook = () => {
             const [entries, setEntries] = useState([]);
@@ -2554,8 +2550,8 @@
                     const stored = JSON.parse(localStorage.getItem(CASHBOOK_STORAGE_KEY) || '[]');
                     setEntries(stored);
                 } catch (e) {}
-                if (CASHBOOK_GAS_URL !== 'YOUR_CASHBOOK_GAS_URL') {
-                    fetch(CASHBOOK_GAS_URL + '?action=getCashbook')
+                if (CASHBOOK_GAS_URL !== 'YOUR_UNIFIED_GAS_URL') {
+                    fetch(CASHBOOK_GAS_URL + '?type=cashbook')
                         .then(r => r.json())
                         .then(data => {
                             if (data && data.entries) {
@@ -2572,11 +2568,11 @@
             }, []);
 
             const saveToGAS = useCallback(async (data) => {
-                if (CASHBOOK_GAS_URL !== 'YOUR_CASHBOOK_GAS_URL') {
+                if (CASHBOOK_GAS_URL !== 'YOUR_UNIFIED_GAS_URL') {
                     await fetch(CASHBOOK_GAS_URL, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ action: 'saveCashbook', entries: data })
+                        body: JSON.stringify({ type: 'cashbook', action: 'saveCashbook', entries: data })
                     }).catch(() => {});
                 }
             }, []);
@@ -2632,7 +2628,7 @@
         // ========================================
         // カウンセリングデータ連携（5店舗対応）
         // ========================================
-        const COUNSELING_GAS_URL = localStorage.getItem('sise_counseling_gas_url') || 'YOUR_COUNSELING_GAS_URL';
+        const COUNSELING_GAS_URL = UNIFIED_GAS_URL;
 
         const COUNSELING_STORES = [
             { id: 'honatsugi', name: '本厚木店' },
@@ -2654,10 +2650,10 @@
             const storeParam = '&store=' + counselingStore;
 
             const fetchCustomerList = useCallback(async () => {
-                if (COUNSELING_GAS_URL === 'YOUR_COUNSELING_GAS_URL') return;
+                if (COUNSELING_GAS_URL === 'YOUR_UNIFIED_GAS_URL') return;
                 setLoading(true);
                 try {
-                    const res = await fetch(COUNSELING_GAS_URL + '?action=recent&limit=50' + storeParam);
+                    const res = await fetch(COUNSELING_GAS_URL + '?type=counseling&action=recent&limit=50' + storeParam);
                     const data = await res.json();
                     if (data && data.customers) {
                         setCustomers(data.customers);
@@ -2670,10 +2666,10 @@
             }, [storeParam]);
 
             const searchCustomers = useCallback(async (q) => {
-                if (COUNSELING_GAS_URL === 'YOUR_COUNSELING_GAS_URL' || !q) return;
+                if (COUNSELING_GAS_URL === 'YOUR_UNIFIED_GAS_URL' || !q) return;
                 setLoading(true);
                 try {
-                    const res = await fetch(COUNSELING_GAS_URL + '?action=search&q=' + encodeURIComponent(q) + storeParam);
+                    const res = await fetch(COUNSELING_GAS_URL + '?type=counseling&action=search&q=' + encodeURIComponent(q) + storeParam);
                     const data = await res.json();
                     if (data && data.customers) {
                         setCustomers(data.customers);
@@ -2686,10 +2682,10 @@
             }, [storeParam]);
 
             const fetchCustomerDetail = useCallback(async (name, index) => {
-                if (COUNSELING_GAS_URL === 'YOUR_COUNSELING_GAS_URL') return null;
+                if (COUNSELING_GAS_URL === 'YOUR_UNIFIED_GAS_URL') return null;
                 setLoading(true);
                 try {
-                    let url = COUNSELING_GAS_URL + '?action=detail' + storeParam;
+                    let url = COUNSELING_GAS_URL + '?type=counseling&action=detail' + storeParam;
                     if (index !== undefined) url += '&index=' + index;
                     else if (name) url += '&name=' + encodeURIComponent(name);
                     const res = await fetch(url);
@@ -8065,9 +8061,9 @@
 
         const SettingsView = ({ onSettingsSaved }) => {
             const [squareStatus, setSquareStatus] = useState({ loading: true });
-            const [googleFormUrl, setGoogleFormUrl] = useState(() => {
-                const stored = localStorage.getItem('sise_gas_url');
-                return (stored && stored !== 'YOUR_GOOGLE_APPS_SCRIPT_URL') ? stored : '';
+            const [unifiedGasUrl, setUnifiedGasUrl] = useState(() => {
+                const stored = localStorage.getItem('sise_unified_gas_url');
+                return (stored && stored !== 'YOUR_UNIFIED_GAS_URL') ? stored : '';
             });
             const [saveMessage, setSaveMessage] = useState('');
 
@@ -8079,10 +8075,10 @@
             }, []);
 
             const handleSaveGas = () => {
-                localStorage.setItem('sise_gas_url', googleFormUrl);
-                setSaveMessage('GAS URLを保存しました。データを再取得します...');
+                localStorage.setItem('sise_unified_gas_url', unifiedGasUrl);
+                setSaveMessage('統合GAS URLを保存しました。リロードで全機能に反映されます。');
                 if (onSettingsSaved) onSettingsSaved();
-                setTimeout(() => setSaveMessage(''), 3000);
+                setTimeout(() => setSaveMessage(''), 5000);
             };
 
             return (
@@ -8196,19 +8192,20 @@
                         )}
                     </Card>
 
-                    {/* Googleフォーム連携 */}
+                    {/* Google Sheets 統合連携 */}
                     <Card>
                         <h3 className="text-lg font-semibold text-slate-900 mb-4">Google Sheets 連携</h3>
                         <div className="space-y-5">
                             <div>
-                                <label className="block text-sm font-medium text-slate-700 mb-1">
-                                    日報データ用 GAS URL
+                                <label className="block text-sm font-semibold text-slate-700 mb-2">
+                                    <Icon name="database" size={16} className="inline mr-2 text-sise-500" />
+                                    統合 GAS URL
                                 </label>
                                 <div className="flex gap-2">
                                     <input
                                         type="url"
-                                        value={googleFormUrl}
-                                        onChange={(e) => setGoogleFormUrl(e.target.value)}
+                                        value={unifiedGasUrl}
+                                        onChange={(e) => setUnifiedGasUrl(e.target.value)}
                                         className="flex-1 px-4 py-2.5 border border-slate-200 rounded-xl focus:border-sise-500 focus:ring-2 focus:ring-sise-500/20 outline-none text-sm"
                                         placeholder="https://script.google.com/macros/s/..."
                                     />
@@ -8219,142 +8216,41 @@
                                         保存
                                     </button>
                                 </div>
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-slate-700 mb-1">
-                                    利用回数管理用 GAS URL
-                                </label>
-                                <div className="flex gap-2">
-                                    <input
-                                        type="url"
-                                        value={localStorage.getItem('sise_usage_gas_url') || ''}
-                                        onChange={(e) => {
-                                            localStorage.setItem('sise_usage_gas_url', e.target.value);
-                                        }}
-                                        className="flex-1 px-4 py-2.5 border border-slate-200 rounded-xl focus:border-sise-500 focus:ring-2 focus:ring-sise-500/20 outline-none text-sm"
-                                        placeholder="https://script.google.com/macros/s/..."
-                                    />
-                                    <button
-                                        onClick={() => {
-                                            setSaveMessage('利用回数用GAS URLを保存しました。リロードで反映されます。');
-                                            setTimeout(() => setSaveMessage(''), 5000);
-                                        }}
-                                        className="px-4 py-2.5 btn-gradient rounded-xl font-medium text-sm"
-                                    >
-                                        保存
-                                    </button>
-                                </div>
-                                <p className="text-xs text-slate-400 mt-1.5">会員の月間利用回数をスプレッドシートに保存するための URL です</p>
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-slate-700 mb-1">
-                                    回数券管理用 GAS URL
-                                </label>
-                                <div className="flex gap-2">
-                                    <input
-                                        type="url"
-                                        value={localStorage.getItem('sise_ticket_gas_url') || ''}
-                                        onChange={(e) => {
-                                            localStorage.setItem('sise_ticket_gas_url', e.target.value);
-                                        }}
-                                        className="flex-1 px-4 py-2.5 border border-slate-200 rounded-xl focus:border-sise-500 focus:ring-2 focus:ring-sise-500/20 outline-none text-sm"
-                                        placeholder="https://script.google.com/macros/s/..."
-                                    />
-                                    <button
-                                        onClick={() => {
-                                            setSaveMessage('回数券用GAS URLを保存しました。リロードで反映されます。');
-                                            setTimeout(() => setSaveMessage(''), 5000);
-                                        }}
-                                        className="px-4 py-2.5 btn-gradient rounded-xl font-medium text-sm"
-                                    >
-                                        保存
-                                    </button>
-                                </div>
-                                <p className="text-xs text-slate-400 mt-1.5">回数券のプラン・購入者データをスプレッドシートに保存するための URL です</p>
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-slate-700 mb-1">
-                                    QR・現金会員管理用 GAS URL
-                                </label>
-                                <div className="flex gap-2">
-                                    <input
-                                        type="url"
-                                        value={localStorage.getItem('sise_manual_members_gas_url') || ''}
-                                        onChange={(e) => {
-                                            localStorage.setItem('sise_manual_members_gas_url', e.target.value);
-                                        }}
-                                        className="flex-1 px-4 py-2.5 border border-slate-200 rounded-xl focus:border-sise-500 focus:ring-2 focus:ring-sise-500/20 outline-none text-sm"
-                                        placeholder="https://script.google.com/macros/s/..."
-                                    />
-                                    <button
-                                        onClick={() => {
-                                            setSaveMessage('QR・現金会員管理用GAS URLを保存しました。リロードで反映されます。');
-                                            setTimeout(() => setSaveMessage(''), 5000);
-                                        }}
-                                        className="px-4 py-2.5 btn-gradient rounded-xl font-medium text-sm"
-                                    >
-                                        保存
-                                    </button>
-                                </div>
-                                <p className="text-xs text-slate-400 mt-1.5">QR決済・現金決済の会員データをスプレッドシートで同期するための URL です</p>
+                                <p className="text-xs text-slate-400 mt-1.5">
+                                    1つのスプレッドシートで全データを管理します（gas/unified.gs をデプロイ）。
+                                    このURL1つで日報・カウンセリング・利用回数・回数券・会員・出納帳すべてに対応します。
+                                </p>
                             </div>
 
-                            {/* カウンセリング GAS URL */}
-                            <div>
-                                <label className="block text-sm font-semibold text-slate-700 mb-2">
-                                    <Icon name="heart-handshake" size={16} className="inline mr-2 text-sise-500" />
-                                    カウンセリングデータ GAS URL
-                                </label>
-                                <div className="flex gap-2">
-                                    <input
-                                        type="url"
-                                        value={localStorage.getItem('sise_counseling_gas_url') || ''}
-                                        onChange={(e) => {
-                                            localStorage.setItem('sise_counseling_gas_url', e.target.value);
-                                        }}
-                                        className="flex-1 px-4 py-2.5 border border-slate-200 rounded-xl focus:border-sise-500 focus:ring-2 focus:ring-sise-500/20 outline-none text-sm"
-                                        placeholder="https://script.google.com/macros/s/..."
-                                    />
-                                    <button
-                                        onClick={() => {
-                                            setSaveMessage('カウンセリング用GAS URLを保存しました。リロードで反映されます。');
-                                            setTimeout(() => setSaveMessage(''), 5000);
-                                        }}
-                                        className="px-4 py-2.5 btn-gradient rounded-xl font-medium text-sm"
-                                    >
-                                        保存
-                                    </button>
+                            <div className="bg-slate-50 rounded-lg p-4 border border-slate-200">
+                                <h4 className="font-semibold text-slate-900 mb-3">スプレッドシートのシート構成</h4>
+                                <div className="space-y-1.5 text-xs">
+                                    <div className="flex items-center gap-2 p-2 bg-white rounded border border-slate-200">
+                                        <Icon name="file-text" size={14} className="text-blue-500" />
+                                        <span className="font-semibold text-slate-700 w-48">日報</span>
+                                        <span className="text-slate-500">Googleフォーム回答（読み取り専用）</span>
+                                    </div>
+                                    {['本厚木店', '大和店', '横浜店', '町田店', '川口店'].map(store => (
+                                        <div key={store} className="flex items-center gap-2 p-2 bg-white rounded border border-slate-200">
+                                            <Icon name="heart-handshake" size={14} className="text-sise-500" />
+                                            <span className="font-semibold text-slate-700 w-48">カウンセリング回答_{store}</span>
+                                            <span className="text-slate-500">Googleフォーム回答（読み取り専用）</span>
+                                        </div>
+                                    ))}
+                                    {[
+                                        { name: '利用回数', icon: 'bar-chart-2', desc: '会員の月間利用回数' },
+                                        { name: '回数券プラン', icon: 'ticket', desc: '回数券プラン定義' },
+                                        { name: '回数券データ', icon: 'ticket', desc: '回数券購入・利用データ' },
+                                        { name: 'QR現金会員', icon: 'users', desc: 'QR・現金決済会員データ' },
+                                        { name: '出納帳', icon: 'book-open', desc: '入出金記録' },
+                                    ].map(s => (
+                                        <div key={s.name} className="flex items-center gap-2 p-2 bg-white rounded border border-slate-200">
+                                            <Icon name={s.icon} size={14} className="text-amber-500" />
+                                            <span className="font-semibold text-slate-700 w-48">{s.name}</span>
+                                            <span className="text-slate-500">{s.desc}（自動作成・読み書き）</span>
+                                        </div>
+                                    ))}
                                 </div>
-                                <p className="text-xs text-slate-400 mt-1.5">Googleフォームのカウンセリング回答データを取得するための URL です（gas/counseling.gs をデプロイ）。1つのスプレッドシートに5店舗分のシート（カウンセリング回答_本厚木店 / 大和店 / 横浜店 / 町田店 / 川口店）を用意してください。</p>
-                            </div>
-
-                            {/* 出納帳 GAS URL */}
-                            <div>
-                                <label className="block text-sm font-semibold text-slate-700 mb-2">
-                                    <Icon name="book-open" size={16} className="inline mr-2 text-sise-500" />
-                                    出納帳 GAS URL
-                                </label>
-                                <div className="flex gap-2">
-                                    <input
-                                        type="url"
-                                        value={localStorage.getItem('sise_cashbook_gas_url') || ''}
-                                        onChange={(e) => {
-                                            localStorage.setItem('sise_cashbook_gas_url', e.target.value);
-                                        }}
-                                        className="flex-1 px-4 py-2.5 border border-slate-200 rounded-xl focus:border-sise-500 focus:ring-2 focus:ring-sise-500/20 outline-none text-sm"
-                                        placeholder="https://script.google.com/macros/s/..."
-                                    />
-                                    <button
-                                        onClick={() => {
-                                            setSaveMessage('出納帳用GAS URLを保存しました。リロードで反映されます。');
-                                            setTimeout(() => setSaveMessage(''), 5000);
-                                        }}
-                                        className="px-4 py-2.5 btn-gradient rounded-xl font-medium text-sm"
-                                    >
-                                        保存
-                                    </button>
-                                </div>
-                                <p className="text-xs text-slate-400 mt-1.5">出納帳データをスプレッドシートで同期するための URL です</p>
                             </div>
                         </div>
                     </Card>
