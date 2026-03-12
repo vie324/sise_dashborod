@@ -7573,7 +7573,7 @@
             { key:'Monthly-1',  id:'Monthly',  name:'月一フル', freq:1, freqLabel:'月1回',        types:'全種類対応',  desc:'月1回で全種類を無理なくメンテナンス', price:10000 },
         ];
 
-        const ConceptFormView = ({ counselingHook, activeStoreId }) => {
+        const ConceptFormView = ({ counselingHook, activeStoreId, memberData }) => {
             const { customers, selectedCustomer, loading, fetchCustomerDetail, searchCustomers, fetchCustomerList, counselingStore, setCounselingStore } = counselingHook;
             const [searchInput, setSearchInput] = useState('');
             const [concerns, setConcerns] = useState({});
@@ -7626,25 +7626,82 @@
                         if (obj.type === 'SUBSCRIPTION_PLAN' && obj.subscription_plan_data) {
                             const planData = obj.subscription_plan_data;
                             const variations = planData.subscription_plan_variations || [];
-                            variations.forEach(v => {
-                                const varData = v.subscription_plan_variation_data;
-                                const phases = varData?.phases || [];
-                                let vPrice = 0;
-                                let cadence = 'MONTHLY';
-                                if (phases.length > 0) {
-                                    const paidPhase = phases.find(p => p.pricing?.price_money?.amount > 0) || phases[0];
-                                    vPrice = paidPhase.pricing?.price_money?.amount || paidPhase.recurring_price_money?.amount || 0;
-                                    cadence = paidPhase.cadence || 'MONTHLY';
-                                }
-                                planList.push({
-                                    id: v.id,
-                                    name: varData?.name || planData.name || obj.id,
-                                    price: vPrice,
-                                    cadence,
+                            if (variations.length > 0) {
+                                variations.forEach(v => {
+                                    const varData = v.subscription_plan_variation_data;
+                                    const phases = varData?.phases || [];
+                                    let vPrice = 0;
+                                    let cadence = 'MONTHLY';
+                                    if (phases.length > 0) {
+                                        const paidPhase = phases.find(p => p.pricing?.price_money?.amount > 0) || phases[0];
+                                        vPrice = paidPhase.pricing?.price_money?.amount || paidPhase.recurring_price_money?.amount || 0;
+                                        cadence = paidPhase.cadence || 'MONTHLY';
+                                    }
+                                    planList.push({
+                                        id: v.id,
+                                        name: `${planData.name} - ${varData?.name || 'デフォルト'}`,
+                                        price: vPrice,
+                                        cadence,
+                                    });
                                 });
+                            } else {
+                                planList.push({
+                                    id: obj.id,
+                                    name: planData.name,
+                                    price: 0,
+                                    cadence: 'MONTHLY',
+                                });
+                            }
+                        }
+                        if (obj.type === 'SUBSCRIPTION_PLAN_VARIATION' && obj.subscription_plan_variation_data) {
+                            const varData = obj.subscription_plan_variation_data;
+                            const phases = varData.phases || [];
+                            let vPrice = 0;
+                            let cadence = 'MONTHLY';
+                            if (phases.length > 0) {
+                                const paidPhase = phases.find(p => p.pricing?.price_money?.amount > 0) || phases[0];
+                                vPrice = paidPhase.pricing?.price_money?.amount || paidPhase.recurring_price_money?.amount || 0;
+                                cadence = paidPhase.cadence || 'MONTHLY';
+                            }
+                            planList.push({
+                                id: obj.id,
+                                name: varData.name || obj.id,
+                                price: vPrice,
+                                cadence,
                             });
                         }
                     });
+
+                    // フォールバック: バリエーション無しのプランオブジェクト
+                    if (planList.length === 0 && objects.length > 0) {
+                        objects.forEach(obj => {
+                            if (obj.subscription_plan_data) {
+                                planList.push({
+                                    id: obj.id,
+                                    name: obj.subscription_plan_data.name || obj.id,
+                                    price: 0,
+                                    cadence: 'MONTHLY',
+                                });
+                            }
+                        });
+                    }
+
+                    // フォールバック: memberDataからプランバリエーションIDを取得
+                    if (planList.length === 0 && memberData && memberData.members) {
+                        const planMap = new Map();
+                        memberData.members.forEach(m => {
+                            if (m.planVariationId && !planMap.has(m.planVariationId)) {
+                                planMap.set(m.planVariationId, {
+                                    id: m.planVariationId,
+                                    name: m.planName || 'プラン',
+                                    price: m.monthlyPrice || 0,
+                                    cadence: m.cadence || 'MONTHLY',
+                                });
+                            }
+                        });
+                        planList.push(...planMap.values());
+                    }
+
                     setQrPlans(planList);
                     // 名前と金額でマッチングを試みる
                     const matched = planList.find(p =>
@@ -8881,7 +8938,7 @@
                     case 'tickets':
                         return <TicketManagementView ticketHook={ticketHook} />;
                     case 'counseling':
-                        return <ConceptFormView counselingHook={counselingHook} activeStoreId={activeStoreId} />;
+                        return <ConceptFormView counselingHook={counselingHook} activeStoreId={activeStoreId} memberData={memberData} />;
                     case 'marketing':
                         return <MarketingView marketingHook={marketingHook} />;
                     case 'settings':
