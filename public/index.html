@@ -1116,6 +1116,8 @@
                     name: decoded.n || '不明',
                     role: decoded.r || 'staff',
                     storeIds: decoded.sid || [],
+                    hasPassword: !!decoded.pw,
+                    staffId: decoded.id || '',
                 };
             } catch (e) {
                 console.warn('Invalid access token');
@@ -1125,7 +1127,7 @@
 
         // アクセストークン生成（UTF-8対応）
         const generateStaffToken = (staff) => {
-            const payload = { n: staff.name, r: staff.role, sid: staff.storeIds };
+            const payload = { n: staff.name, r: staff.role, sid: staff.storeIds, pw: staff.password ? 1 : 0, id: staff.id };
             return btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
         };
 
@@ -1136,12 +1138,70 @@
             return `${base}?v=${token}`;
         };
 
-        // localStorage管理
+        // localStorage管理（GASフォールバック用）
         const loadStaffList = () => {
             try { return JSON.parse(localStorage.getItem(STAFF_STORAGE_KEY)) || []; }
             catch (e) { return []; }
         };
-        const saveStaffList = (list) => localStorage.setItem(STAFF_STORAGE_KEY, JSON.stringify(list));
+        const saveStaffListLocal = (list) => localStorage.setItem(STAFF_STORAGE_KEY, JSON.stringify(list));
+
+        // GASスプレッドシート経由のスタッフ管理
+        const fetchStaffFromGas = async () => {
+            const gasUrl = localStorage.getItem('sise_unified_gas_url');
+            if (!gasUrl) return null;
+            try {
+                const resp = await fetch(gasUrl + '?type=staff');
+                const data = await resp.json();
+                return data.staff || [];
+            } catch (e) {
+                console.warn('GASスタッフ取得エラー:', e);
+                return null;
+            }
+        };
+
+        const saveStaffToGas = async (staffList) => {
+            const gasUrl = localStorage.getItem('sise_unified_gas_url');
+            if (!gasUrl) return false;
+            try {
+                await fetch(gasUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ type: 'staff', action: 'saveStaff', staff: staffList })
+                });
+                return true;
+            } catch (e) {
+                console.warn('GASスタッフ保存エラー:', e);
+                return false;
+            }
+        };
+
+        const deleteStaffFromGas = async (staffId) => {
+            const gasUrl = localStorage.getItem('sise_unified_gas_url');
+            if (!gasUrl) return false;
+            try {
+                await fetch(gasUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ type: 'staff', action: 'deleteStaff', staffId })
+                });
+                return true;
+            } catch (e) {
+                console.warn('GASスタッフ削除エラー:', e);
+                return false;
+            }
+        };
+
+        // パスワード検証（URLアクセス時のスタッフ照合）
+        const verifyStaffPassword = async (staffId, password) => {
+            // まずGASから最新のスタッフリストを取得
+            const gasStaff = await fetchStaffFromGas();
+            const list = gasStaff || loadStaffList();
+            const staff = list.find(s => s.id === staffId);
+            if (!staff) return { ok: false, reason: 'スタッフが見つかりません' };
+            if (!staff.password) return { ok: true }; // パスワード未設定なら通過
+            if (staff.password === password) return { ok: true };
+            return { ok: false, reason: 'パスワードが正しくありません' };
+        };
 
         // 現在のアクセス情報（URLから解析）
         const currentAccess = parseAccessFromUrl();
@@ -4535,7 +4595,7 @@
                 <div className="space-y-5 md:space-y-6 animate-fade-in">
                     <SectionHeader title="会員管理" subtitle="MEMBER MANAGEMENT" icon="users">
                         <div className="flex items-center gap-2">
-                            {(!currentAccess || currentAccess.role === 'manager') && (
+                            {(!currentAccess || currentAccess.role === 'manager' || currentAccess.role === 'headquarter') && (
                                 <button
                                     onClick={() => setShowSubscriptionLink(true)}
                                     className="flex items-center px-4 py-2.5 bg-gradient-to-r from-sise-500 to-sise-600 hover:from-sise-600 hover:to-sise-700 text-white rounded-xl font-medium text-sm transition-all shadow-md hover:shadow-lg"
@@ -4970,7 +5030,7 @@
                                 </div>
 
                                 {/* 操作ボタン（管理者・責任者のみ） */}
-                                {(!currentAccess || currentAccess.role === 'manager') && <div className="mb-4">
+                                {(!currentAccess || currentAccess.role === 'manager' || currentAccess.role === 'headquarter') && <div className="mb-4">
                                     <h4 className="text-sm font-semibold text-slate-700 mb-2">サブスクリプション操作</h4>
                                     <div className="flex flex-wrap gap-2">
                                         {selectedMember.status === 'ACTIVE' && (
@@ -6045,33 +6105,53 @@
             const [editingStaff, setEditingStaff] = useState(null);
             const [isAdding, setIsAdding] = useState(false);
             const [copiedId, setCopiedId] = useState(null);
-            const [formData, setFormData] = useState({ name: '', role: 'staff', storeIds: [] });
+            const [gasSyncing, setGasSyncing] = useState(false);
+            const [gasConnected, setGasConnected] = useState(false);
+            const [formData, setFormData] = useState({ name: '', role: 'staff', password: '', storeIds: [] });
 
-            const handleSave = () => {
+            // GASからスタッフリストを初回取得
+            useEffect(() => {
+                (async () => {
+                    const gasStaff = await fetchStaffFromGas();
+                    if (gasStaff) {
+                        setStaffList(gasStaff);
+                        saveStaffListLocal(gasStaff);
+                        setGasConnected(true);
+                    }
+                })();
+            }, []);
+
+            const handleSave = async () => {
                 if (!formData.name.trim()) return;
                 let updated;
                 if (editingStaff) {
                     updated = staffList.map(s => s.id === editingStaff.id ? { ...s, ...formData } : s);
                 } else {
-                    const newStaff = { ...formData, id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6) };
+                    const newStaff = { ...formData, id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), createdAt: new Date().toISOString().slice(0, 10) };
                     updated = [...staffList, newStaff];
                 }
                 setStaffList(updated);
-                saveStaffList(updated);
+                saveStaffListLocal(updated);
+                setGasSyncing(true);
+                await saveStaffToGas(updated);
+                setGasSyncing(false);
                 setEditingStaff(null);
                 setIsAdding(false);
-                setFormData({ name: '', role: 'staff', storeIds: [] });
+                setFormData({ name: '', role: 'staff', password: '', storeIds: [] });
             };
 
-            const handleDelete = (id) => {
+            const handleDelete = async (id) => {
                 if (!confirm('このスタッフを削除しますか？')) return;
                 const updated = staffList.filter(s => s.id !== id);
                 setStaffList(updated);
-                saveStaffList(updated);
+                saveStaffListLocal(updated);
+                setGasSyncing(true);
+                await deleteStaffFromGas(id);
+                setGasSyncing(false);
             };
 
             const handleEdit = (staff) => {
-                setFormData({ name: staff.name, role: staff.role, storeIds: staff.storeIds || [] });
+                setFormData({ name: staff.name, role: staff.role, password: staff.password || '', storeIds: staff.storeIds || [] });
                 setEditingStaff(staff);
                 setIsAdding(true);
             };
@@ -6130,7 +6210,7 @@
                                 </div>
                                 <div>
                                     <label className="block text-sm font-medium text-slate-700 mb-1">役割</label>
-                                    <div className="flex gap-3">
+                                    <div className="flex gap-2 flex-wrap">
                                         <label className={`flex items-center px-4 py-2.5 rounded-xl border cursor-pointer transition-all ${formData.role === 'staff' ? 'bg-sise-50 border-sise-300 text-sise-700' : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'}`}>
                                             <input type="radio" name="role" value="staff" checked={formData.role === 'staff'} onChange={() => setFormData(prev => ({ ...prev, role: 'staff' }))} className="sr-only" />
                                             <Icon name="user" size={16} className="mr-2" />
@@ -6147,12 +6227,39 @@
                                                 <p className="text-[10px] text-slate-400">複数店舗閲覧可</p>
                                             </div>
                                         </label>
+                                        <label className={`flex items-center px-4 py-2.5 rounded-xl border cursor-pointer transition-all ${formData.role === 'headquarter' ? 'bg-violet-50 border-violet-300 text-violet-700' : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'}`}>
+                                            <input type="radio" name="role" value="headquarter" checked={formData.role === 'headquarter'} onChange={() => setFormData(prev => ({ ...prev, role: 'headquarter', storeIds: serverStores.map(s => s.id) }))} className="sr-only" />
+                                            <Icon name="building" size={16} className="mr-2" />
+                                            <div>
+                                                <p className="text-sm font-medium">本部</p>
+                                                <p className="text-[10px] text-slate-400">全店舗アクセス</p>
+                                            </div>
+                                        </label>
                                     </div>
                                 </div>
                                 <div>
                                     <label className="block text-sm font-medium text-slate-700 mb-1">
-                                        {formData.role === 'manager' ? '閲覧可能な店舗（複数選択可）' : '所属店舗'}
+                                        パスワード
+                                        <span className="text-xs text-slate-400 ml-1">（URL共有時に入力が必要）</span>
                                     </label>
+                                    <input
+                                        type="text"
+                                        value={formData.password}
+                                        onChange={(e) => setFormData(prev => ({ ...prev, password: e.target.value }))}
+                                        placeholder="例: sise2024（空欄ならパスワードなし）"
+                                        className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:border-sise-400 focus:ring-1 focus:ring-sise-400/30 outline-none"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-700 mb-1">
+                                        {formData.role === 'headquarter' ? '閲覧可能な店舗（全店舗）' : formData.role === 'manager' ? '閲覧可能な店舗（複数選択可）' : '所属店舗'}
+                                    </label>
+                                    {formData.role === 'headquarter' && (
+                                        <div className="mb-2 px-3 py-2 bg-violet-50 rounded-lg border border-violet-200 text-xs text-violet-700">
+                                            <Icon name="info" size={12} className="inline mr-1" />
+                                            本部は全店舗にアクセスできます。
+                                        </div>
+                                    )}
                                     {serverStores.length > 0 ? (
                                         <div className="space-y-2">
                                             {serverStores.map(store => (
@@ -6206,6 +6313,13 @@
                         </div>
                     )}
 
+                    {/* GAS同期ステータス */}
+                    <div className={`mb-3 flex items-center gap-2 px-3 py-2 rounded-lg text-xs ${gasConnected ? 'bg-green-50 border border-green-200 text-green-700' : 'bg-slate-50 border border-slate-200 text-slate-500'}`}>
+                        <Icon name={gasConnected ? 'cloud' : 'hard-drive'} size={13} />
+                        {gasConnected ? 'スプレッドシート同期中' : 'ローカル保存（GAS URL未設定）'}
+                        {gasSyncing && <span className="ml-auto animate-pulse">保存中...</span>}
+                    </div>
+
                     {/* スタッフ一覧 */}
                     {staffList.length > 0 ? (
                         <div className="space-y-3">
@@ -6213,15 +6327,20 @@
                                 <div key={staff.id} className="p-4 bg-white rounded-xl border border-slate-200 hover:border-sise-200 transition-colors">
                                     <div className="flex items-start justify-between">
                                         <div className="flex items-center">
-                                            <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${staff.role === 'manager' ? 'bg-amber-50 text-amber-600' : 'bg-sise-50 text-sise-600'}`}>
-                                                <Icon name={staff.role === 'manager' ? 'shield' : 'user'} size={20} />
+                                            <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${staff.role === 'headquarter' ? 'bg-violet-50 text-violet-600' : staff.role === 'manager' ? 'bg-amber-50 text-amber-600' : 'bg-sise-50 text-sise-600'}`}>
+                                                <Icon name={staff.role === 'headquarter' ? 'building' : staff.role === 'manager' ? 'shield' : 'user'} size={20} />
                                             </div>
                                             <div className="ml-3">
                                                 <p className="font-semibold text-slate-800">{staff.name}</p>
-                                                <div className="flex items-center gap-2 mt-0.5">
-                                                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${staff.role === 'manager' ? 'bg-amber-100 text-amber-700' : 'bg-sise-100 text-sise-700'}`}>
-                                                        {staff.role === 'manager' ? '店舗責任者' : 'スタッフ'}
+                                                <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                                                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${staff.role === 'headquarter' ? 'bg-violet-100 text-violet-700' : staff.role === 'manager' ? 'bg-amber-100 text-amber-700' : 'bg-sise-100 text-sise-700'}`}>
+                                                        {staff.role === 'headquarter' ? '本部' : staff.role === 'manager' ? '店舗責任者' : 'スタッフ'}
                                                     </span>
+                                                    {staff.password && (
+                                                        <span className="text-xs px-2 py-0.5 rounded-full bg-blue-50 text-blue-600 font-medium">
+                                                            <Icon name="lock" size={10} className="inline mr-0.5" />PW設定済
+                                                        </span>
+                                                    )}
                                                     <span className="text-xs text-slate-400">
                                                         {(staff.storeIds || []).map(sid => {
                                                             const store = serverStores.find(s => s.id === sid);
@@ -6276,8 +6395,12 @@
                         <p className="text-xs text-slate-500 leading-relaxed">
                             <Icon name="info" size={12} className="inline mr-1" />
                             各スタッフの「URL」ボタンで専用リンクをコピーできます。
-                            そのURLを開くと、割り当てられた店舗のデータのみ表示されます。
-                            店舗責任者は複数店舗を閲覧可能です。管理者（URLなし）は全データにアクセスできます。
+                            パスワードを設定するとURL共有時にパスワード入力が必要になります。<br />
+                            <strong>本部</strong>: 全店舗データにアクセス可能
+                            <strong>店舗責任者</strong>: 複数店舗を閲覧可能
+                            <strong>スタッフ</strong>: 自店舗のみ閲覧<br />
+                            マスターURL（パラメータなし）は本部のみが使用してください。
+                            スタッフ情報はGASスプレッドシートの「スタッフ管理」シートに保存されます。
                         </p>
                     </div>
                 </Card>
@@ -9067,6 +9190,7 @@
                                         { name: '回数券データ', icon: 'ticket', desc: '回数券購入・利用データ' },
                                         { name: 'QR現金会員', icon: 'users', desc: 'QR・現金決済会員データ' },
                                         { name: '出納帳', icon: 'book-open', desc: '入出金記録' },
+                                        { name: 'スタッフ管理', icon: 'users', desc: 'スタッフ・パスワード管理' },
                                     ].map(s => (
                                         <div key={s.name} className="flex items-center gap-2 p-2 bg-white rounded border border-slate-200">
                                             <Icon name={s.icon} size={14} className="text-amber-500" />
@@ -9177,11 +9301,79 @@
         // メインアプリケーション
         // ========================================
 
+        // パスワードロック画面コンポーネント
+        const PasswordLockScreen = ({ access, onUnlock }) => {
+            const [password, setPassword] = useState('');
+            const [error, setError] = useState('');
+            const [checking, setChecking] = useState(false);
+
+            const handleSubmit = async (e) => {
+                e.preventDefault();
+                if (!password.trim()) return;
+                setChecking(true);
+                setError('');
+                const result = await verifyStaffPassword(access.staffId, password);
+                setChecking(false);
+                if (result.ok) {
+                    sessionStorage.setItem('sise_pw_verified', '1');
+                    onUnlock();
+                } else {
+                    setError(result.reason || 'パスワードが正しくありません');
+                }
+            };
+
+            return (
+                <div style={{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center',background:'linear-gradient(135deg,#f0f7f3 0%,#e8f5ec 50%,#f5f0e8 100%)',padding:20}}>
+                    <div style={{width:'100%',maxWidth:380,background:'white',borderRadius:24,boxShadow:'0 20px 60px rgba(0,0,0,.08)',padding:40,textAlign:'center'}}>
+                        <div style={{width:64,height:64,background:'linear-gradient(135deg,#2d7a4f,#1a5136)',borderRadius:20,display:'flex',alignItems:'center',justifyContent:'center',margin:'0 auto 20px'}}>
+                            <Icon name="lock" size={28} className="text-white" />
+                        </div>
+                        <h2 style={{fontSize:20,fontWeight:700,color:'#1a1a1a',marginBottom:4}}>パスワード入力</h2>
+                        <p style={{fontSize:13,color:'#6b6b6b',marginBottom:24}}>
+                            <strong>{access.name}</strong> さんのアクセスにはパスワードが必要です
+                        </p>
+                        <form onSubmit={handleSubmit}>
+                            <input
+                                type="password"
+                                value={password}
+                                onChange={e => setPassword(e.target.value)}
+                                placeholder="パスワードを入力"
+                                autoFocus
+                                style={{width:'100%',padding:'12px 16px',border:'2px solid #e2e8f0',borderRadius:14,fontSize:15,outline:'none',transition:'border-color .2s',boxSizing:'border-box'}}
+                                onFocus={e => e.target.style.borderColor = '#33a065'}
+                                onBlur={e => e.target.style.borderColor = '#e2e8f0'}
+                            />
+                            {error && (
+                                <p style={{color:'#dc2626',fontSize:13,marginTop:8,textAlign:'left'}}>
+                                    <Icon name="alert-circle" size={13} className="inline mr-1" />{error}
+                                </p>
+                            )}
+                            <button
+                                type="submit"
+                                disabled={checking || !password.trim()}
+                                style={{width:'100%',marginTop:16,padding:'12px',background:checking ? '#94a3b8' : 'linear-gradient(135deg,#2d7a4f,#1a5136)',color:'white',border:'none',borderRadius:14,fontSize:15,fontWeight:600,cursor:checking ? 'wait' : 'pointer',transition:'opacity .2s'}}
+                            >
+                                {checking ? '確認中...' : 'ログイン'}
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            );
+        };
+
         const App = () => {
             const [currentView, setCurrentView] = useState('dashboard');
             const [selectedStore, setSelectedStore] = useState('all');
             const [isSidebarOpen, setIsSidebarOpen] = useState(false);
             const [isDarkMode, setIsDarkMode] = useState(false);
+            const [passwordVerified, setPasswordVerified] = useState(
+                !currentAccess || !currentAccess.hasPassword || sessionStorage.getItem('sise_pw_verified') === '1'
+            );
+
+            // パスワードロック画面を表示
+            if (currentAccess && currentAccess.hasPassword && !passwordVerified) {
+                return <PasswordLockScreen access={currentAccess} onUnlock={() => setPasswordVerified(true)} />;
+            }
 
             const isStaffMode = !!currentAccess;
             const [activeStoreId, setActiveStoreId] = useState(
@@ -9369,7 +9561,7 @@
                                 {/* スタッフ表示 */}
                                 {currentView !== 'counseling' && isStaffMode && (
                                     <div className="flex items-center px-2 md:px-3 py-1.5 bg-sise-50/80 border border-sise-200 rounded-xl hide-mobile">
-                                        <Icon name={currentAccess.role === 'manager' ? 'shield' : 'user'} size={13} className="text-sise-500 mr-1" />
+                                        <Icon name={currentAccess.role === 'headquarter' ? 'building' : currentAccess.role === 'manager' ? 'shield' : 'user'} size={13} className="text-sise-500 mr-1" />
                                         <span className="text-xs font-semibold text-sise-700">{currentAccess.name}</span>
                                     </div>
                                 )}
@@ -9465,13 +9657,13 @@
                         <div className="absolute bottom-0 left-0 right-0 p-4 border-t border-slate-200/30">
                             {isStaffMode && (
                                 <div className="flex items-center mb-2 px-1">
-                                    <div className={`w-7 h-7 rounded-lg flex items-center justify-center ${currentAccess.role === 'manager' ? 'bg-amber-50 text-amber-500' : 'bg-sise-50 text-sise-500'}`}>
-                                        <Icon name={currentAccess.role === 'manager' ? 'shield' : 'user'} size={14} />
+                                    <div className={`w-7 h-7 rounded-lg flex items-center justify-center ${currentAccess.role === 'headquarter' ? 'bg-violet-50 text-violet-500' : currentAccess.role === 'manager' ? 'bg-amber-50 text-amber-500' : 'bg-sise-50 text-sise-500'}`}>
+                                        <Icon name={currentAccess.role === 'headquarter' ? 'building' : currentAccess.role === 'manager' ? 'shield' : 'user'} size={14} />
                                     </div>
                                     <div className="ml-2">
                                         <p className="text-xs font-semibold text-slate-700 leading-tight">{currentAccess.name}</p>
                                         <p className="text-[10px] text-slate-400">
-                                            {currentAccess.role === 'manager' ? '店舗責任者' : 'スタッフ'}
+                                            {currentAccess.role === 'headquarter' ? '本部' : currentAccess.role === 'manager' ? '店舗責任者' : 'スタッフ'}
                                         </p>
                                     </div>
                                 </div>
