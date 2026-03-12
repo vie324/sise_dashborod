@@ -106,48 +106,57 @@ const COUNSELING_COL_DEFAULT = {
 };
 
 // ヘッダー行からカラム位置を動的に検出するためのキーワードマッピング
-// ヘッダーテキストに含まれるキーワードでマッチング
+// ヘッダーテキストに含まれるキーワードでマッチング（優先度の高いものを先に）
 const COUNSELING_HEADER_KEYWORDS = {
-  TIMESTAMP:            ['タイムスタンプ', 'timestamp'],
-  NAME:                 ['お名前', '名前', 'name'],
-  BIRTHDAY:             ['生年月日', '誕生日', 'birthday'],
-  PHONE:                ['電話', 'tel', 'phone'],
-  EMAIL:                ['メール', 'email', 'mail'],
-  OCCUPATION:           ['職業', 'occupation'],
-  ADDRESS:              ['住所', '地域', 'address'],
-  VISIT_PURPOSE:        ['来店目的', '来店きっかけ', 'きっかけ', '目的'],
-  CONCERNS:             ['お悩み', '気になる箇所', '気になる部位', '悩み', 'お身体のお悩み', 'お体のお悩み', 'concern'],
-  IMPROVEMENT_TIMELINE: ['改善', '期間', 'いつまで', 'timeline'],
-  TREATMENT_REQUEST:    ['施術', 'リクエスト', '希望', 'request'],
-  TREATMENT_EXPERIENCE: ['整体', '経験', 'experience'],
-  SURGERY_HISTORY:      ['手術', 'surgery'],
-  CURRENT_TREATMENT:    ['通院', '治療中', 'treatment'],
-  ALLERGY:              ['アレルギー', 'allergy'],
-  COSMETIC_SURGERY:     ['美容整形', '美容外科', 'cosmetic'],
-  PREGNANCY_CHECK:      ['妊娠', 'pregnancy'],
-  DISCLAIMER:           ['同意', '注意事項', '免責', 'disclaimer']
+  TIMESTAMP:            ['タイムスタンプ', 'timestamp', '日時', '送信日'],
+  NAME:                 ['お名前', '氏名', 'フルネーム', '名前', 'name'],
+  BIRTHDAY:             ['生年月日', '誕生日', 'birthday', '生まれ'],
+  PHONE:                ['電話番号', '電話', 'tel', 'phone', '連絡先'],
+  EMAIL:                ['メールアドレス', 'メール', 'email', 'mail'],
+  OCCUPATION:           ['ご職業', '職業', 'occupation'],
+  ADDRESS:              ['ご住所', '住所', '地域', 'address', 'お住まい'],
+  VISIT_PURPOSE:        ['ご来店', '来店目的', '来店きっかけ', 'きっかけ', '何で知りました', '知ったきっかけ'],
+  CONCERNS:             ['お悩み', '気になる箇所', '気になる部位', '気になること', 'お身体のお悩み', 'お体のお悩み', 'お体で気になる', 'お身体で気になる', '不調', '症状', 'お困り'],
+  IMPROVEMENT_TIMELINE: ['いつまでに', 'どのくらいの期間', '改善したい時期', '改善', '期間', 'いつ頃まで'],
+  TREATMENT_REQUEST:    ['施術のご希望', '施術の希望', 'ご希望の施術', '施術についてのご要望', 'リクエスト', '希望する施術'],
+  TREATMENT_EXPERIENCE: ['整体', '受けたことが', '施術経験', '経験'],
+  SURGERY_HISTORY:      ['手術', '外科'],
+  CURRENT_TREATMENT:    ['通院', '治療中'],
+  ALLERGY:              ['アレルギー'],
+  COSMETIC_SURGERY:     ['美容整形', '美容外科', '美容医療'],
+  PREGNANCY_CHECK:      ['妊娠', '授乳'],
+  DISCLAIMER:           ['同意', '注意事項', '免責', '確認事項']
 };
 
 // ヘッダー行から動的にカラムマッピングを構築
 function detectCounselingColumns(headerRow) {
   var C = {};
-  var headers = headerRow.map(function(h) { return String(h || '').trim().toLowerCase(); });
+  var headers = headerRow.map(function(h) { return String(h || '').trim(); });
+  var headersLower = headers.map(function(h) { return h.toLowerCase(); });
   var keys = Object.keys(COUNSELING_HEADER_KEYWORDS);
+  var usedCols = {}; // 同じ列が複数キーに割り当てられるのを防ぐ
 
   for (var k = 0; k < keys.length; k++) {
     var key = keys[k];
     var keywords = COUNSELING_HEADER_KEYWORDS[key];
     var found = -1;
-    for (var i = 0; i < headers.length; i++) {
-      for (var j = 0; j < keywords.length; j++) {
-        if (headers[i].indexOf(keywords[j].toLowerCase()) !== -1) {
+    for (var j = 0; j < keywords.length; j++) {
+      var kw = keywords[j].toLowerCase();
+      for (var i = 0; i < headersLower.length; i++) {
+        if (usedCols[i]) continue; // 既に別のキーに使われている列はスキップ
+        if (headersLower[i].indexOf(kw) !== -1) {
           found = i;
           break;
         }
       }
       if (found !== -1) break;
     }
-    C[key] = found !== -1 ? found : (COUNSELING_COL_DEFAULT[key] !== undefined ? COUNSELING_COL_DEFAULT[key] : -1);
+    if (found !== -1) {
+      C[key] = found;
+      usedCols[found] = key;
+    } else {
+      C[key] = COUNSELING_COL_DEFAULT[key] !== undefined ? COUNSELING_COL_DEFAULT[key] : -1;
+    }
   }
   return C;
 }
@@ -304,22 +313,36 @@ function handleCounselingGet(params) {
   const C = detectCounselingColumns(headerRow);
   const data = sheet.getRange(2, 1, lastRow - 1, numCols).getValues();
 
-  // デバッグ用: 検出されたカラム位置
-  var colInfo = { TIMESTAMP: C.TIMESTAMP, NAME: C.NAME, CONCERNS: C.CONCERNS };
+  // デバッグ用: 検出されたカラム位置＋実際のヘッダー名
+  var debugHeaders = headerRow.map(function(h, i) { return i + ':' + String(h || '').trim().substring(0, 30); });
+  // CONCERNSカラムのサンプルデータ（最初の非空行）
+  var sampleConcern = '';
+  if (C.CONCERNS >= 0) {
+    for (var si = 0; si < Math.min(data.length, 10); si++) {
+      var sv = colVal(data[si], C.CONCERNS);
+      if (sv) { sampleConcern = String(sv).substring(0, 100); break; }
+    }
+  }
+  var _debug = {
+    colMap: C,
+    headers: debugHeaders,
+    sampleConcern: sampleConcern,
+    sheetName: sheetName
+  };
 
   switch (action) {
     case 'list':
-      return { ...counselingList(data, C), store: storeKey, _colMap: colInfo };
+      return { ...counselingList(data, C), store: storeKey, _debug: _debug };
     case 'recent':
       var limit = parseInt(params.limit) || 20;
       var result = counselingList(data, C);
       result.customers = result.customers.slice(0, limit);
       result.total = result.customers.length;
-      return { ...result, store: storeKey, _colMap: colInfo };
+      return { ...result, store: storeKey, _debug: _debug };
     case 'detail':
-      return { ...counselingDetail(data, C, params.name, params.index), store: storeKey, _colMap: colInfo };
+      return { ...counselingDetail(data, C, params.name, params.index), store: storeKey, _debug: _debug };
     case 'search':
-      return { ...counselingSearch(data, C, params.q || ''), store: storeKey, _colMap: colInfo };
+      return { ...counselingSearch(data, C, params.q || ''), store: storeKey, _debug: _debug };
     default:
       return { error: '不明なアクション: ' + action };
   }
@@ -329,6 +352,32 @@ function handleCounselingGet(params) {
 function colVal(row, colIndex) {
   if (colIndex === undefined || colIndex < 0 || colIndex >= row.length) return '';
   return row[colIndex];
+}
+
+// フォールバック: 全列をスキャンしてお悩みデータを含むセルを探す
+var CONCERN_SCAN_KEYWORDS = ['肩こり', '腰痛', '頭痛', '猫背', '骨盤', 'むくみ', '冷え', '眼精疲労',
+  'ストレートネック', '反り腰', '股関節', '姿勢', '食いしばり', '頬のたるみ', '生理痛', '下半身',
+  'X脚', 'O脚', 'はちの張り', '顔の左右差', 'エラの張り', '首', '膝'];
+
+function scanForConcerns(row, C) {
+  var best = [];
+  for (var ci = 0; ci < row.length; ci++) {
+    // 既知の非お悩み列はスキップ
+    if (ci === C.NAME || ci === C.TIMESTAMP || ci === C.PHONE || ci === C.EMAIL || ci === C.ADDRESS || ci === C.BIRTHDAY) continue;
+    var cellVal = String(row[ci] || '').trim();
+    if (!cellVal || cellVal.length > 200) continue;
+    var matchCount = 0;
+    for (var ck = 0; ck < CONCERN_SCAN_KEYWORDS.length; ck++) {
+      if (cellVal.indexOf(CONCERN_SCAN_KEYWORDS[ck]) !== -1) matchCount++;
+    }
+    if (matchCount >= 1) {
+      var candidate = parseMultiSelect(cellVal);
+      if (candidate.length > best.length) {
+        best = candidate;
+      }
+    }
+  }
+  return best;
 }
 
 function counselingList(data, C) {
@@ -341,7 +390,12 @@ function counselingList(data, C) {
     if (isNaN(date.getTime())) continue;
     const name = String(colVal(row, C.NAME) || '').trim();
     if (!name) continue;
-    customers.push({ index: i, name, timestamp: date.toISOString(), concerns: parseMultiSelect(colVal(row, C.CONCERNS)) });
+    var concerns = parseMultiSelect(colVal(row, C.CONCERNS));
+    // フォールバック: CONCERNSカラムが空なら全列スキャン
+    if (concerns.length === 0) {
+      concerns = scanForConcerns(row, C);
+    }
+    customers.push({ index: i, name, timestamp: date.toISOString(), concerns: concerns });
   }
   customers.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
   return { customers, total: customers.length, lastUpdated: new Date().toISOString() };
@@ -360,6 +414,14 @@ function counselingDetail(data, C, name, index) {
   if (!row) return { error: '顧客が見つかりません', customer: null };
   const ts = colVal(row, C.TIMESTAMP);
   const date = ts instanceof Date ? ts : new Date(ts);
+
+  // CONCERNSカラムのデータを取得。空なら全カラムをスキャンしてお悩みデータを探す
+  var rawConcerns = colVal(row, C.CONCERNS);
+  var concerns = parseMultiSelect(rawConcerns);
+  if (concerns.length === 0) {
+    concerns = scanForConcerns(row, C);
+  }
+
   return {
     customer: {
       index: rowIndex,
@@ -371,7 +433,7 @@ function counselingDetail(data, C, name, index) {
       occupation: String(colVal(row, C.OCCUPATION) || '').trim(),
       address: String(colVal(row, C.ADDRESS) || '').trim(),
       visitPurpose: parseMultiSelect(colVal(row, C.VISIT_PURPOSE)),
-      concerns: parseMultiSelect(colVal(row, C.CONCERNS)),
+      concerns: concerns,
       improvementTimeline: String(colVal(row, C.IMPROVEMENT_TIMELINE) || '').trim(),
       treatmentRequest: String(colVal(row, C.TREATMENT_REQUEST) || '').trim(),
       treatmentExperience: parseMultiSelect(colVal(row, C.TREATMENT_EXPERIENCE)),
@@ -379,7 +441,8 @@ function counselingDetail(data, C, name, index) {
       currentTreatment: String(colVal(row, C.CURRENT_TREATMENT) || '').trim(),
       allergy: String(colVal(row, C.ALLERGY) || '').trim(),
       cosmeticSurgery: String(colVal(row, C.COSMETIC_SURGERY) || '').trim(),
-      pregnancyCheck: String(colVal(row, C.PREGNANCY_CHECK) || '').trim()
+      pregnancyCheck: String(colVal(row, C.PREGNANCY_CHECK) || '').trim(),
+      _rawConcerns: String(rawConcerns || '').substring(0, 100)
     }
   };
 }
@@ -395,7 +458,9 @@ function counselingSearch(data, C, query) {
     const ts = colVal(row, C.TIMESTAMP);
     const date = ts instanceof Date ? ts : new Date(ts);
     if (isNaN(date.getTime())) continue;
-    customers.push({ index: i, name, timestamp: date.toISOString(), concerns: parseMultiSelect(colVal(row, C.CONCERNS)) });
+    var concerns = parseMultiSelect(colVal(row, C.CONCERNS));
+    if (concerns.length === 0) concerns = scanForConcerns(row, C);
+    customers.push({ index: i, name, timestamp: date.toISOString(), concerns: concerns });
   }
   return { customers, total: customers.length, lastUpdated: new Date().toISOString() };
 }
@@ -597,9 +662,10 @@ function getOrCreateSheet(name, headers) {
 
 function parseMultiSelect(val) {
   if (!val) return [];
-  const str = String(val).trim();
+  var str = String(val).trim();
   if (!str) return [];
-  return str.split(/[,;、]\s*/).map(s => s.trim()).filter(s => s);
+  // Google Formsの複数選択: カンマ区切り、セミコロン区切り、読点区切り、改行区切りに対応
+  return str.split(/[,;、\n\r]+/).map(function(s) { return s.trim(); }).filter(function(s) { return s; });
 }
 
 function formatDate(val) {

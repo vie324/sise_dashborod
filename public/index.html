@@ -2967,10 +2967,20 @@
                 if (COUNSELING_GAS_URL === 'YOUR_UNIFIED_GAS_URL') return;
                 setLoading(true);
                 try {
-                    const res = await fetch(COUNSELING_GAS_URL + '?type=counseling&action=recent&limit=50' + storeParam);
+                    const url = COUNSELING_GAS_URL + '?type=counseling&action=recent&limit=50' + storeParam;
+                    console.log('[カウンセリング] 顧客一覧取得:', url);
+                    const res = await fetch(url);
                     const data = await res.json();
+                    console.log('[カウンセリング] 一覧レスポンス _debug:', JSON.stringify(data._debug || {}));
                     if (data && data.customers) {
                         setCustomers(data.customers);
+                        // 最初の顧客のconcernsをログ
+                        if (data.customers.length > 0) {
+                            console.log('[カウンセリング] 最初の顧客concerns:', data.customers[0].concerns);
+                        }
+                    }
+                    if (data && data.error) {
+                        console.error('[カウンセリング] GASエラー:', data.error);
                     }
                 } catch (e) {
                     console.error('カウンセリングデータ取得エラー:', e);
@@ -3002,11 +3012,16 @@
                     let url = COUNSELING_GAS_URL + '?type=counseling&action=detail' + storeParam;
                     if (index !== undefined) url += '&index=' + index;
                     else if (name) url += '&name=' + encodeURIComponent(name);
+                    console.log('[カウンセリング] detail URL:', url);
                     const res = await fetch(url);
                     const data = await res.json();
+                    console.log('[カウンセリング] GASレスポンス:', JSON.stringify(data._debug || {}));
                     if (data && data.customer) {
                         setSelectedCustomer(data.customer);
                         return data.customer;
+                    }
+                    if (data && data.error) {
+                        console.error('[カウンセリング] GASエラー:', data.error);
                     }
                 } catch (e) {
                     console.error('顧客詳細取得エラー:', e);
@@ -8397,20 +8412,25 @@
                 if (!formConcerns || !formConcerns.length) return newConcerns;
                 formConcerns.forEach(fc => {
                     const fcTrim = fc.trim();
+                    if (!fcTrim) return;
                     CONCERN_ITEMS.forEach(item => {
                         if (item.formLabels.some(fl => fcTrim.includes(fl) || fl.includes(fcTrim))) {
                             newConcerns[item.id] = true;
                         }
                     });
                 });
+                console.log('[カウンセリング] フォーム悩み:', formConcerns, '→ マッピング結果:', newConcerns);
                 return newConcerns;
             }, []);
 
             // 顧客選択時の処理
             const handleSelectCustomer = useCallback(async (name, index) => {
                 const detail = await fetchCustomerDetail(name, index);
+                console.log('[カウンセリング] 顧客詳細:', detail);
                 if (detail) {
+                    console.log('[カウンセリング] concerns配列:', detail.concerns, '長さ:', detail.concerns?.length);
                     const mapped = mapFormConcerns(detail.concerns);
+                    console.log('[カウンセリング] マッピング済:', mapped, 'チェック数:', Object.keys(mapped).length);
                     setConcerns(mapped);
                     setFeedbacks({});
                 }
