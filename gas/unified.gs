@@ -16,6 +16,7 @@
  *    ─ 回数券データ    （GASが自動で読み書き）
  *    ─ QR現金会員     （GASが自動で読み書き）
  *    ─ 出納帳        （GASが自動で読み書き）
+ *    ─ スタッフ管理    （GASが自動で作成・読み書き）
  *
  * 2. 拡張機能 → Apps Script を開く
  * 3. このコードを貼り付ける
@@ -32,8 +33,11 @@
  * GET ?type=members                  → QR現金会員データ
  * GET ?type=cashbook                 → 出納帳データ
  * GET ?type=stores                   → 店舗一覧
+ * GET ?type=staff                    → スタッフ一覧
  *
  * POST { type:"usage", action:"saveUsage", data:[...] }
+ * POST { type:"staff", action:"saveStaff", staff:[...] }
+ * POST { type:"staff", action:"deleteStaff", staffId:"xxx" }
  * POST { type:"ticket", action:"saveTickets", plans:[...], tickets:[...] }
  * POST { type:"members", action:"saveManualMembers", members:[...] }
  * POST { type:"cashbook", action:"saveCashbook", entries:[...] }
@@ -49,7 +53,8 @@ const SHEETS = {
   TICKET_PLANS: '回数券プラン',
   TICKET_DATA: '回数券データ',
   MEMBERS: 'QR現金会員',
-  CASHBOOK: '出納帳'
+  CASHBOOK: '出納帳',
+  STAFF: 'スタッフ管理'
 };
 
 const COUNSELING_STORES = {
@@ -98,6 +103,7 @@ function doGet(e) {
       case 'members':    return jsonResponse(handleMembersGet(params));
       case 'cashbook':   return jsonResponse(handleCashbookGet(params));
       case 'stores':     return jsonResponse(handleStoresGet());
+      case 'staff':      return jsonResponse(handleStaffGet(params));
       default:           return jsonResponse({ error: '不明なtype: ' + type }, 400);
     }
   } catch (error) {
@@ -115,6 +121,7 @@ function doPost(e) {
       case 'ticket':   return jsonResponse(handleTicketPost(body));
       case 'members':  return jsonResponse(handleMembersPost(body));
       case 'cashbook': return jsonResponse(handleCashbookPost(body));
+      case 'staff':    return jsonResponse(handleStaffPost(body));
       default:         return jsonResponse({ error: '不明なtype: ' + type }, 400);
     }
   } catch (error) {
@@ -523,6 +530,87 @@ function formatDate(val) {
 function toInt(val) {
   const n = parseInt(val, 10);
   return isNaN(n) ? 0 : n;
+}
+
+// ============================================================
+// スタッフ管理
+// ============================================================
+// シート列: A=ID, B=名前, C=役割(headquarter/manager/staff), D=パスワード, E=店舗IDs(カンマ区切り), F=作成日
+
+function ensureStaffSheet() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(SHEETS.STAFF);
+  if (!sheet) {
+    sheet = ss.insertSheet(SHEETS.STAFF);
+    sheet.appendRow(['ID', '名前', '役割', 'パスワード', '店舗IDs', '作成日']);
+    sheet.setFrozenRows(1);
+    sheet.getRange('A1:F1').setFontWeight('bold');
+  }
+  return sheet;
+}
+
+function handleStaffGet(params) {
+  const sheet = ensureStaffSheet();
+  const rows = sheet.getDataRange().getValues();
+  if (rows.length <= 1) return { staff: [] };
+
+  const staff = [];
+  for (let i = 1; i < rows.length; i++) {
+    const r = rows[i];
+    if (!r[0]) continue;
+    staff.push({
+      id: String(r[0]),
+      name: String(r[1] || ''),
+      role: String(r[2] || 'staff'),
+      password: String(r[3] || ''),
+      storeIds: splitList(r[4]),
+      createdAt: formatDate(r[5])
+    });
+  }
+  return { staff: staff };
+}
+
+function handleStaffPost(body) {
+  const action = body.action || '';
+  switch (action) {
+    case 'saveStaff': return saveStaffList(body.staff || []);
+    case 'deleteStaff': return deleteStaff(body.staffId);
+    default: return { error: '不明なstaff action: ' + action };
+  }
+}
+
+function saveStaffList(staffArr) {
+  const sheet = ensureStaffSheet();
+  // ヘッダー行を保持して全データを書き換え
+  const lastRow = sheet.getLastRow();
+  if (lastRow > 1) {
+    sheet.getRange(2, 1, lastRow - 1, 6).clearContent();
+  }
+  const rows = staffArr.map(s => [
+    s.id || '',
+    s.name || '',
+    s.role || 'staff',
+    s.password || '',
+    (s.storeIds || []).join(','),
+    s.createdAt || new Date()
+  ]);
+  if (rows.length > 0) {
+    sheet.getRange(2, 1, rows.length, 6).setValues(rows);
+  }
+  return { success: true, count: rows.length };
+}
+
+function deleteStaff(staffId) {
+  if (!staffId) return { error: 'staffIdが必要です' };
+  const sheet = ensureStaffSheet();
+  const rows = sheet.getDataRange().getValues();
+  for (let i = rows.length - 1; i >= 1; i--) {
+    if (String(rows[i][0]) === String(staffId)) {
+      sheet.deleteRow(i + 1);
+      return { success: true, deleted: staffId };
+    }
+  }
+  return { error: 'スタッフが見つかりません: ' + staffId };
 }
 
 function jsonResponse(data) {
