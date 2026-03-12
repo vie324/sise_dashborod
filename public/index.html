@@ -4067,16 +4067,19 @@
                                         const varData = v.subscription_plan_variation_data;
                                         const phases = varData?.phases || [];
                                         let price = 0;
+                                        let currency = 'JPY';
                                         let cadence = 'MONTHLY';
                                         if (phases.length > 0) {
                                             const paidPhase = phases.find(p => p.pricing?.price_money?.amount > 0) || phases[0];
                                             price = paidPhase.pricing?.price_money?.amount || paidPhase.recurring_price_money?.amount || 0;
+                                            currency = paidPhase.pricing?.price_money?.currency || paidPhase.recurring_price_money?.currency || 'JPY';
                                             cadence = paidPhase.cadence || 'MONTHLY';
                                         }
                                         planList.push({
                                             id: v.id,
                                             name: `${planData.name} - ${varData?.name || 'デフォルト'}`,
                                             price,
+                                            currency,
                                             cadence,
                                         });
                                     });
@@ -4095,16 +4098,19 @@
                                 const varData = obj.subscription_plan_variation_data;
                                 const phases = varData.phases || [];
                                 let price = 0;
+                                let currency = 'JPY';
                                 let cadence = 'MONTHLY';
                                 if (phases.length > 0) {
                                     const paidPhase = phases.find(p => p.pricing?.price_money?.amount > 0) || phases[0];
                                     price = paidPhase.pricing?.price_money?.amount || paidPhase.recurring_price_money?.amount || 0;
+                                    currency = paidPhase.pricing?.price_money?.currency || paidPhase.recurring_price_money?.currency || 'JPY';
                                     cadence = paidPhase.cadence || 'MONTHLY';
                                 }
                                 planList.push({
                                     id: obj.id,
                                     name: varData.name || obj.id,
                                     price,
+                                    currency,
                                     cadence,
                                 });
                             }
@@ -4154,6 +4160,8 @@
             // 契約リンク生成
             const generateLink = async () => {
                 if (!selectedPlanId) return;
+                const selectedPlan = plans.find(p => p.id === selectedPlanId);
+                if (!selectedPlan) return;
                 setLoading(true);
                 setError(null);
                 setGeneratedLink(null);
@@ -4163,13 +4171,18 @@
                     const headers = { 'Content-Type': 'application/json' };
                     { const sid = resolveStoreId(activeStoreId); if (sid) headers['X-Store-Id'] = sid; }
 
+                    const body = {
+                        idempotency_key: crypto.randomUUID(),
+                        subscription_plan_id: selectedPlanId,
+                        price_money: {
+                            amount: selectedPlan.price,
+                            currency: selectedPlan.currency || 'JPY',
+                        },
+                    };
                     const res = await fetch(`${SQUARE_PROXY_BASE}/online-checkout/payment-links`, {
                         method: 'POST',
                         headers,
-                        body: JSON.stringify({
-                            idempotency_key: crypto.randomUUID(),
-                            subscription_plan_id: selectedPlanId,
-                        })
+                        body: JSON.stringify(body)
                     });
 
                     if (!res.ok) {
@@ -7638,16 +7651,19 @@
                                     const varData = v.subscription_plan_variation_data;
                                     const phases = varData?.phases || [];
                                     let vPrice = 0;
+                                    let vCurrency = 'JPY';
                                     let cadence = 'MONTHLY';
                                     if (phases.length > 0) {
                                         const paidPhase = phases.find(p => p.pricing?.price_money?.amount > 0) || phases[0];
                                         vPrice = paidPhase.pricing?.price_money?.amount || paidPhase.recurring_price_money?.amount || 0;
+                                        vCurrency = paidPhase.pricing?.price_money?.currency || paidPhase.recurring_price_money?.currency || 'JPY';
                                         cadence = paidPhase.cadence || 'MONTHLY';
                                     }
                                     planList.push({
                                         id: v.id,
                                         name: `${planData.name} - ${varData?.name || 'デフォルト'}`,
                                         price: vPrice,
+                                        currency: vCurrency,
                                         cadence,
                                     });
                                 });
@@ -7656,6 +7672,7 @@
                                     id: obj.id,
                                     name: planData.name,
                                     price: 0,
+                                    currency: 'JPY',
                                     cadence: 'MONTHLY',
                                 });
                             }
@@ -7664,16 +7681,19 @@
                             const varData = obj.subscription_plan_variation_data;
                             const phases = varData.phases || [];
                             let vPrice = 0;
+                            let vCurrency = 'JPY';
                             let cadence = 'MONTHLY';
                             if (phases.length > 0) {
                                 const paidPhase = phases.find(p => p.pricing?.price_money?.amount > 0) || phases[0];
                                 vPrice = paidPhase.pricing?.price_money?.amount || paidPhase.recurring_price_money?.amount || 0;
+                                vCurrency = paidPhase.pricing?.price_money?.currency || paidPhase.recurring_price_money?.currency || 'JPY';
                                 cadence = paidPhase.cadence || 'MONTHLY';
                             }
                             planList.push({
                                 id: obj.id,
                                 name: varData.name || obj.id,
                                 price: vPrice,
+                                currency: vCurrency,
                                 cadence,
                             });
                         }
@@ -7728,6 +7748,8 @@
             // QRリンク生成
             const generateQrLink = async () => {
                 if (!qrSelectedPlanId) return;
+                const selectedPlan = qrPlans.find(p => p.id === qrSelectedPlanId);
+                if (!selectedPlan) return;
                 setQrLoading(true);
                 setQrError(null);
                 setQrLink(null);
@@ -7735,13 +7757,18 @@
                 try {
                     const headers = { 'Content-Type': 'application/json' };
                     { const sid = resolveStoreId(activeStoreId); if (sid) headers['X-Store-Id'] = sid; }
+                    const body = {
+                        idempotency_key: crypto.randomUUID(),
+                        subscription_plan_id: qrSelectedPlanId,
+                        price_money: {
+                            amount: selectedPlan.price,
+                            currency: selectedPlan.currency || 'JPY',
+                        },
+                    };
                     const res = await fetch(`${SQUARE_PROXY_BASE}/online-checkout/payment-links`, {
                         method: 'POST',
                         headers,
-                        body: JSON.stringify({
-                            idempotency_key: crypto.randomUUID(),
-                            subscription_plan_id: qrSelectedPlanId,
-                        })
+                        body: JSON.stringify(body)
                     });
                     if (!res.ok) {
                         const errData = await res.json().catch(() => ({}));
