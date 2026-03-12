@@ -9816,19 +9816,25 @@
             );
         };
 
+        // パスワードロック付きラッパー（HooksルールのためAppと分離）
+        const AppWithAuth = () => {
+            const [passwordVerified, setPasswordVerified] = useState(
+                !currentAccess || !currentAccess.hasPassword || sessionStorage.getItem('sise_pw_verified') === '1'
+            );
+
+            // パスワードロック画面を表示（Appの前に判定し、Hooks順序を壊さない）
+            if (currentAccess && currentAccess.hasPassword && !passwordVerified) {
+                return <PasswordLockScreen access={currentAccess} onUnlock={() => setPasswordVerified(true)} />;
+            }
+
+            return <App />;
+        };
+
         const App = () => {
             const [currentView, setCurrentView] = useState('dashboard');
             const [selectedStore, setSelectedStore] = useState('all');
             const [isSidebarOpen, setIsSidebarOpen] = useState(false);
             const [isDarkMode, setIsDarkMode] = useState(false);
-            const [passwordVerified, setPasswordVerified] = useState(
-                !currentAccess || !currentAccess.hasPassword || sessionStorage.getItem('sise_pw_verified') === '1'
-            );
-
-            // パスワードロック画面を表示
-            if (currentAccess && currentAccess.hasPassword && !passwordVerified) {
-                return <PasswordLockScreen access={currentAccess} onUnlock={() => setPasswordVerified(true)} />;
-            }
 
             const isStaffMode = !!currentAccess;
             const [activeStoreId, setActiveStoreId] = useState(
@@ -10177,7 +10183,7 @@
 
         // アプリケーションのレンダリング
         const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(<App />);
+        root.render(<AppWithAuth />);
     </script>
 </body>
 </html>
