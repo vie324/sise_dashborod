@@ -1146,11 +1146,27 @@
         const saveStaffListLocal = (list) => localStorage.setItem(STAFF_STORAGE_KEY, JSON.stringify(list));
 
         // GASスプレッドシート経由のスタッフ管理
-        const fetchStaffFromGas = async () => {
+        const gasPostRequest = async (body) => {
             const gasUrl = localStorage.getItem('sise_unified_gas_url');
             if (!gasUrl) return null;
             try {
-                const resp = await fetch(gasUrl + '?type=staff');
+                const resp = await fetch(gasUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                return await resp.json();
+            } catch (e) {
+                console.warn('GAS POST エラー:', e);
+                return null;
+            }
+        };
+
+        const fetchStaffFromGas = async (includeInactive = true) => {
+            const gasUrl = localStorage.getItem('sise_unified_gas_url');
+            if (!gasUrl) return null;
+            try {
+                const resp = await fetch(gasUrl + '?type=staff&includeInactive=' + (includeInactive ? 'true' : 'false'));
                 const data = await resp.json();
                 return data.staff || [];
             } catch (e) {
@@ -1159,37 +1175,28 @@
             }
         };
 
-        const saveStaffToGas = async (staffList) => {
+        const saveStaffToGas = async (staffList) => gasPostRequest({ type: 'staff', action: 'saveStaff', staff: staffList });
+        const softDeleteStaffGas = async (staffId) => gasPostRequest({ type: 'staff', action: 'deleteStaff', staffId });
+        const restoreStaffGas = async (staffId) => gasPostRequest({ type: 'staff', action: 'restoreStaff', staffId });
+
+        // GASスプレッドシート経由の店舗管理
+        const fetchStoresFromGas = async (includeInactive = true) => {
             const gasUrl = localStorage.getItem('sise_unified_gas_url');
-            if (!gasUrl) return false;
+            if (!gasUrl) return null;
             try {
-                await fetch(gasUrl, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ type: 'staff', action: 'saveStaff', staff: staffList })
-                });
-                return true;
+                const resp = await fetch(gasUrl + '?type=storeManage&includeInactive=' + (includeInactive ? 'true' : 'false'));
+                const data = await resp.json();
+                return data.stores || [];
             } catch (e) {
-                console.warn('GASスタッフ保存エラー:', e);
-                return false;
+                console.warn('GAS店舗取得エラー:', e);
+                return null;
             }
         };
 
-        const deleteStaffFromGas = async (staffId) => {
-            const gasUrl = localStorage.getItem('sise_unified_gas_url');
-            if (!gasUrl) return false;
-            try {
-                await fetch(gasUrl, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ type: 'staff', action: 'deleteStaff', staffId })
-                });
-                return true;
-            } catch (e) {
-                console.warn('GASスタッフ削除エラー:', e);
-                return false;
-            }
-        };
+        const addStoreToGas = async (store) => gasPostRequest({ type: 'storeManage', action: 'addStore', store });
+        const updateStoreInGas = async (store) => gasPostRequest({ type: 'storeManage', action: 'updateStore', store });
+        const softDeleteStoreGas = async (storeId) => gasPostRequest({ type: 'storeManage', action: 'deleteStore', storeId });
+        const restoreStoreGas = async (storeId) => gasPostRequest({ type: 'storeManage', action: 'restoreStore', storeId });
 
         // パスワード検証（URLアクセス時のスタッフ照合）
         const verifyStaffPassword = async (staffId, password) => {
@@ -6101,25 +6108,31 @@
         // ========================================
 
         const StaffManagementSection = () => {
-            const [staffList, setStaffList] = useState(loadStaffList());
+            const [staffList, setStaffList] = useState([]);
             const [editingStaff, setEditingStaff] = useState(null);
             const [isAdding, setIsAdding] = useState(false);
             const [copiedId, setCopiedId] = useState(null);
             const [gasSyncing, setGasSyncing] = useState(false);
             const [gasConnected, setGasConnected] = useState(false);
+            const [showInactive, setShowInactive] = useState(false);
             const [formData, setFormData] = useState({ name: '', role: 'staff', password: '', storeIds: [] });
 
-            // GASからスタッフリストを初回取得
+            // GASからスタッフリストを初回取得（inactive含む）
             useEffect(() => {
                 (async () => {
-                    const gasStaff = await fetchStaffFromGas();
+                    const gasStaff = await fetchStaffFromGas(true);
                     if (gasStaff) {
                         setStaffList(gasStaff);
                         saveStaffListLocal(gasStaff);
                         setGasConnected(true);
+                    } else {
+                        setStaffList(loadStaffList());
                     }
                 })();
             }, []);
+
+            const activeStaff = staffList.filter(s => s.status !== 'inactive');
+            const inactiveStaff = staffList.filter(s => s.status === 'inactive');
 
             const handleSave = async () => {
                 if (!formData.name.trim()) return;
@@ -6127,7 +6140,7 @@
                 if (editingStaff) {
                     updated = staffList.map(s => s.id === editingStaff.id ? { ...s, ...formData } : s);
                 } else {
-                    const newStaff = { ...formData, id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), createdAt: new Date().toISOString().slice(0, 10) };
+                    const newStaff = { ...formData, id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), createdAt: new Date().toISOString().slice(0, 10), status: 'active' };
                     updated = [...staffList, newStaff];
                 }
                 setStaffList(updated);
@@ -6140,13 +6153,18 @@
                 setFormData({ name: '', role: 'staff', password: '', storeIds: [] });
             };
 
-            const handleDelete = async (id) => {
-                if (!confirm('このスタッフを削除しますか？')) return;
-                const updated = staffList.filter(s => s.id !== id);
-                setStaffList(updated);
-                saveStaffListLocal(updated);
+            const handleSoftDelete = async (id) => {
+                if (!confirm('このスタッフを無効にしますか？（データは保持されます）')) return;
+                setStaffList(prev => prev.map(s => s.id === id ? { ...s, status: 'inactive' } : s));
                 setGasSyncing(true);
-                await deleteStaffFromGas(id);
+                await softDeleteStaffGas(id);
+                setGasSyncing(false);
+            };
+
+            const handleRestore = async (id) => {
+                setStaffList(prev => prev.map(s => s.id === id ? { ...s, status: 'active' } : s));
+                setGasSyncing(true);
+                await restoreStaffGas(id);
                 setGasSyncing(false);
             };
 
@@ -6173,6 +6191,74 @@
                 }));
             };
 
+            const StaffRow = ({ staff, inactive }) => (
+                <div className={`p-4 rounded-xl border transition-all ${inactive ? 'bg-slate-50/50 border-slate-200 opacity-60' : 'bg-white border-slate-200 hover:border-sise-200'}`}>
+                    <div className="flex items-start justify-between">
+                        <div className="flex items-center">
+                            <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${inactive ? 'bg-slate-100 text-slate-400' : staff.role === 'headquarter' ? 'bg-violet-50 text-violet-600' : staff.role === 'manager' ? 'bg-amber-50 text-amber-600' : 'bg-sise-50 text-sise-600'}`}>
+                                <Icon name={staff.role === 'headquarter' ? 'building' : staff.role === 'manager' ? 'shield' : 'user'} size={20} />
+                            </div>
+                            <div className="ml-3">
+                                <p className={`font-semibold ${inactive ? 'text-slate-400 line-through' : 'text-slate-800'}`}>{staff.name}</p>
+                                <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${inactive ? 'bg-slate-100 text-slate-400' : staff.role === 'headquarter' ? 'bg-violet-100 text-violet-700' : staff.role === 'manager' ? 'bg-amber-100 text-amber-700' : 'bg-sise-100 text-sise-700'}`}>
+                                        {staff.role === 'headquarter' ? '本部' : staff.role === 'manager' ? '店舗責任者' : 'スタッフ'}
+                                    </span>
+                                    {inactive && <span className="text-xs px-2 py-0.5 rounded-full bg-red-50 text-red-500 font-medium">無効</span>}
+                                    {!inactive && staff.password && (
+                                        <span className="text-xs px-2 py-0.5 rounded-full bg-blue-50 text-blue-600 font-medium">
+                                            <Icon name="lock" size={10} className="inline mr-0.5" />PW設定済
+                                        </span>
+                                    )}
+                                    <span className="text-xs text-slate-400">
+                                        {(staff.storeIds || []).map(sid => {
+                                            const store = serverStores.find(s => s.id === sid);
+                                            return store ? store.name : `店舗${sid}`;
+                                        }).join(', ')}
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                        <div className="flex items-center gap-1">
+                            {inactive ? (
+                                <button
+                                    onClick={() => handleRestore(staff.id)}
+                                    className="flex items-center px-2.5 py-1.5 rounded-lg text-xs font-medium bg-sise-50 hover:bg-sise-100 text-sise-600 transition-all"
+                                    title="復元"
+                                >
+                                    <Icon name="rotate-ccw" size={14} className="mr-1" />復元
+                                </button>
+                            ) : (
+                                <>
+                                    <button
+                                        onClick={() => handleCopyUrl(staff)}
+                                        className={`flex items-center px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all ${copiedId === staff.id ? 'bg-green-100 text-green-700' : 'bg-slate-100 hover:bg-sise-50 text-slate-600 hover:text-sise-600'}`}
+                                        title="URLをコピー"
+                                    >
+                                        <Icon name={copiedId === staff.id ? 'check' : 'link'} size={14} className="mr-1" />
+                                        {copiedId === staff.id ? 'コピー済' : 'URL'}
+                                    </button>
+                                    <button
+                                        onClick={() => handleEdit(staff)}
+                                        className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
+                                        title="編集"
+                                    >
+                                        <Icon name="pencil" size={14} />
+                                    </button>
+                                    <button
+                                        onClick={() => handleSoftDelete(staff.id)}
+                                        className="p-1.5 rounded-lg hover:bg-red-50 text-slate-400 hover:text-red-500 transition-colors"
+                                        title="無効にする"
+                                    >
+                                        <Icon name="user-minus" size={14} />
+                                    </button>
+                                </>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            );
+
             return (
                 <Card>
                     <div className="flex items-center justify-between mb-4">
@@ -6182,7 +6268,7 @@
                         </div>
                         {!isAdding && (
                             <button
-                                onClick={() => { setIsAdding(true); setEditingStaff(null); setFormData({ name: '', role: 'staff', storeIds: [] }); }}
+                                onClick={() => { setIsAdding(true); setEditingStaff(null); setFormData({ name: '', role: 'staff', password: '', storeIds: [] }); }}
                                 className="flex items-center px-3 py-2 bg-sise-500 hover:bg-sise-600 text-white rounded-xl text-sm font-medium shadow-lg shadow-sise-500/25 transition-all"
                             >
                                 <Icon name="user-plus" size={16} className="mr-1.5" />
@@ -6277,8 +6363,7 @@
                                         </div>
                                     ) : (
                                         <p className="text-sm text-slate-500 bg-slate-50 p-3 rounded-lg">
-                                            店舗が未設定です。先にSquare APIを接続してください。<br />
-                                            デモモードでも手動で店舗IDを指定できます。
+                                            店舗が未設定です。先にSquare APIを接続するか、下の店舗管理から追加してください。
                                         </p>
                                     )}
                                     {serverStores.length === 0 && (
@@ -6320,63 +6405,10 @@
                         {gasSyncing && <span className="ml-auto animate-pulse">保存中...</span>}
                     </div>
 
-                    {/* スタッフ一覧 */}
-                    {staffList.length > 0 ? (
+                    {/* アクティブスタッフ一覧 */}
+                    {activeStaff.length > 0 ? (
                         <div className="space-y-3">
-                            {staffList.map(staff => (
-                                <div key={staff.id} className="p-4 bg-white rounded-xl border border-slate-200 hover:border-sise-200 transition-colors">
-                                    <div className="flex items-start justify-between">
-                                        <div className="flex items-center">
-                                            <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${staff.role === 'headquarter' ? 'bg-violet-50 text-violet-600' : staff.role === 'manager' ? 'bg-amber-50 text-amber-600' : 'bg-sise-50 text-sise-600'}`}>
-                                                <Icon name={staff.role === 'headquarter' ? 'building' : staff.role === 'manager' ? 'shield' : 'user'} size={20} />
-                                            </div>
-                                            <div className="ml-3">
-                                                <p className="font-semibold text-slate-800">{staff.name}</p>
-                                                <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-                                                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${staff.role === 'headquarter' ? 'bg-violet-100 text-violet-700' : staff.role === 'manager' ? 'bg-amber-100 text-amber-700' : 'bg-sise-100 text-sise-700'}`}>
-                                                        {staff.role === 'headquarter' ? '本部' : staff.role === 'manager' ? '店舗責任者' : 'スタッフ'}
-                                                    </span>
-                                                    {staff.password && (
-                                                        <span className="text-xs px-2 py-0.5 rounded-full bg-blue-50 text-blue-600 font-medium">
-                                                            <Icon name="lock" size={10} className="inline mr-0.5" />PW設定済
-                                                        </span>
-                                                    )}
-                                                    <span className="text-xs text-slate-400">
-                                                        {(staff.storeIds || []).map(sid => {
-                                                            const store = serverStores.find(s => s.id === sid);
-                                                            return store ? store.name : `店舗${sid}`;
-                                                        }).join(', ')}
-                                                    </span>
-                                                </div>
-                                            </div>
-                                        </div>
-                                        <div className="flex items-center gap-1">
-                                            <button
-                                                onClick={() => handleCopyUrl(staff)}
-                                                className={`flex items-center px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all ${copiedId === staff.id ? 'bg-green-100 text-green-700' : 'bg-slate-100 hover:bg-sise-50 text-slate-600 hover:text-sise-600'}`}
-                                                title="URLをコピー"
-                                            >
-                                                <Icon name={copiedId === staff.id ? 'check' : 'link'} size={14} className="mr-1" />
-                                                {copiedId === staff.id ? 'コピー済' : 'URL'}
-                                            </button>
-                                            <button
-                                                onClick={() => handleEdit(staff)}
-                                                className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
-                                                title="編集"
-                                            >
-                                                <Icon name="pencil" size={14} />
-                                            </button>
-                                            <button
-                                                onClick={() => handleDelete(staff.id)}
-                                                className="p-1.5 rounded-lg hover:bg-red-50 text-slate-400 hover:text-red-500 transition-colors"
-                                                title="削除"
-                                            >
-                                                <Icon name="trash-2" size={14} />
-                                            </button>
-                                        </div>
-                                    </div>
-                                </div>
-                            ))}
+                            {activeStaff.map(staff => <StaffRow key={staff.id} staff={staff} inactive={false} />)}
                         </div>
                     ) : (
                         !isAdding && (
@@ -6390,17 +6422,298 @@
                         )
                     )}
 
+                    {/* 無効スタッフ（折りたたみ） */}
+                    {inactiveStaff.length > 0 && (
+                        <div className="mt-4">
+                            <button
+                                onClick={() => setShowInactive(!showInactive)}
+                                className="flex items-center gap-2 w-full px-3 py-2 bg-slate-50 hover:bg-slate-100 rounded-lg text-xs text-slate-500 font-medium transition-colors"
+                            >
+                                <Icon name={showInactive ? 'chevron-down' : 'chevron-right'} size={14} />
+                                無効なスタッフ（{inactiveStaff.length}名）
+                                <span className="ml-auto text-slate-400">データは保持されています</span>
+                            </button>
+                            {showInactive && (
+                                <div className="mt-2 space-y-2 animate-scale-in">
+                                    {inactiveStaff.map(staff => <StaffRow key={staff.id} staff={staff} inactive={true} />)}
+                                </div>
+                            )}
+                        </div>
+                    )}
+
                     {/* ヘルプ */}
                     <div className="mt-4 p-3 bg-slate-50 rounded-lg border border-slate-200">
                         <p className="text-xs text-slate-500 leading-relaxed">
                             <Icon name="info" size={12} className="inline mr-1" />
-                            各スタッフの「URL」ボタンで専用リンクをコピーできます。
-                            パスワードを設定するとURL共有時にパスワード入力が必要になります。<br />
-                            <strong>本部</strong>: 全店舗データにアクセス可能
-                            <strong>店舗責任者</strong>: 複数店舗を閲覧可能
-                            <strong>スタッフ</strong>: 自店舗のみ閲覧<br />
-                            マスターURL（パラメータなし）は本部のみが使用してください。
-                            スタッフ情報はGASスプレッドシートの「スタッフ管理」シートに保存されます。
+                            スタッフを無効にしてもデータは「スタッフ管理」シートに残ります。いつでも復元可能です。<br />
+                            パスワードを設定するとURL共有時にパスワード入力が必要になります。
+                        </p>
+                    </div>
+                </Card>
+            );
+        };
+
+        // ========================================
+        // 店舗管理セクション
+        // ========================================
+
+        const StoreManagementSection = () => {
+            const [storeList, setStoreList] = useState([]);
+            const [isAdding, setIsAdding] = useState(false);
+            const [editingStore, setEditingStore] = useState(null);
+            const [gasSyncing, setGasSyncing] = useState(false);
+            const [gasConnected, setGasConnected] = useState(false);
+            const [showInactive, setShowInactive] = useState(false);
+            const [formData, setFormData] = useState({ id: '', name: '', memo: '' });
+
+            useEffect(() => {
+                (async () => {
+                    const gasStores = await fetchStoresFromGas(true);
+                    if (gasStores) {
+                        setStoreList(gasStores);
+                        setGasConnected(true);
+                    }
+                })();
+            }, []);
+
+            const activeStores = storeList.filter(s => s.status !== 'inactive');
+            const inactiveStores = storeList.filter(s => s.status === 'inactive');
+
+            const handleSave = async () => {
+                if (!formData.name.trim()) return;
+                if (editingStore) {
+                    // 編集
+                    setStoreList(prev => prev.map(s => s.id === editingStore.id ? { ...s, name: formData.name, memo: formData.memo } : s));
+                    setGasSyncing(true);
+                    await updateStoreInGas({ id: editingStore.id, name: formData.name, memo: formData.memo });
+                    setGasSyncing(false);
+                } else {
+                    // 新規追加
+                    const storeId = formData.id.trim() || Date.now().toString(36);
+                    if (storeList.find(s => s.id === storeId)) { alert('このIDは既に使われています'); return; }
+                    const newStore = { id: storeId, name: formData.name, status: 'active', memo: formData.memo, createdAt: new Date().toISOString().slice(0, 10) };
+                    setStoreList(prev => [...prev, newStore]);
+                    setGasSyncing(true);
+                    await addStoreToGas(newStore);
+                    setGasSyncing(false);
+                }
+                setEditingStore(null);
+                setIsAdding(false);
+                setFormData({ id: '', name: '', memo: '' });
+            };
+
+            const handleSoftDelete = async (id) => {
+                if (!confirm('この店舗を無効にしますか？（データは保持されます）')) return;
+                setStoreList(prev => prev.map(s => s.id === id ? { ...s, status: 'inactive' } : s));
+                setGasSyncing(true);
+                await softDeleteStoreGas(id);
+                setGasSyncing(false);
+            };
+
+            const handleRestore = async (id) => {
+                setStoreList(prev => prev.map(s => s.id === id ? { ...s, status: 'active' } : s));
+                setGasSyncing(true);
+                await restoreStoreGas(id);
+                setGasSyncing(false);
+            };
+
+            const handleEdit = (store) => {
+                setFormData({ id: store.id, name: store.name, memo: store.memo || '' });
+                setEditingStore(store);
+                setIsAdding(true);
+            };
+
+            return (
+                <Card>
+                    <div className="flex items-center justify-between mb-4">
+                        <div>
+                            <h3 className="text-lg font-semibold text-slate-900">店舗管理</h3>
+                            <p className="text-xs text-sise-500 tracking-wide mt-0.5">STORE MANAGEMENT</p>
+                        </div>
+                        {!isAdding && (
+                            <button
+                                onClick={() => { setIsAdding(true); setEditingStore(null); setFormData({ id: '', name: '', memo: '' }); }}
+                                className="flex items-center px-3 py-2 bg-sise-500 hover:bg-sise-600 text-white rounded-xl text-sm font-medium shadow-lg shadow-sise-500/25 transition-all"
+                            >
+                                <Icon name="plus" size={16} className="mr-1.5" />
+                                店舗を追加
+                            </button>
+                        )}
+                    </div>
+
+                    {/* 追加・編集フォーム */}
+                    {isAdding && (
+                        <div className="mb-6 p-4 bg-sise-50/50 rounded-xl border border-sise-200 animate-scale-in">
+                            <h4 className="font-semibold text-slate-800 mb-3">
+                                {editingStore ? '店舗編集' : '新規店舗追加'}
+                            </h4>
+                            <div className="space-y-3">
+                                {!editingStore && (
+                                    <div>
+                                        <label className="block text-sm font-medium text-slate-700 mb-1">
+                                            店舗ID
+                                            <span className="text-xs text-slate-400 ml-1">（空欄なら自動生成）</span>
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={formData.id}
+                                            onChange={(e) => setFormData(prev => ({ ...prev, id: e.target.value }))}
+                                            placeholder="例: honatsugi（半角英数）"
+                                            className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:border-sise-400 focus:ring-1 focus:ring-sise-400/30 outline-none"
+                                        />
+                                    </div>
+                                )}
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-700 mb-1">店舗名</label>
+                                    <input
+                                        type="text"
+                                        value={formData.name}
+                                        onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
+                                        placeholder="例: 本厚木店"
+                                        className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:border-sise-400 focus:ring-1 focus:ring-sise-400/30 outline-none"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-700 mb-1">メモ</label>
+                                    <input
+                                        type="text"
+                                        value={formData.memo}
+                                        onChange={(e) => setFormData(prev => ({ ...prev, memo: e.target.value }))}
+                                        placeholder="例: 2024年4月オープン"
+                                        className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:border-sise-400 focus:ring-1 focus:ring-sise-400/30 outline-none"
+                                    />
+                                </div>
+                            </div>
+                            <div className="flex justify-end gap-2 mt-4">
+                                <button
+                                    onClick={() => { setIsAdding(false); setEditingStore(null); }}
+                                    className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-xl transition-colors"
+                                >
+                                    キャンセル
+                                </button>
+                                <button
+                                    onClick={handleSave}
+                                    disabled={!formData.name.trim()}
+                                    className="px-4 py-2 bg-sise-500 hover:bg-sise-600 text-white rounded-xl text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                    {editingStore ? '更新' : '追加'}
+                                </button>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* GAS同期ステータス */}
+                    <div className={`mb-3 flex items-center gap-2 px-3 py-2 rounded-lg text-xs ${gasConnected ? 'bg-green-50 border border-green-200 text-green-700' : 'bg-slate-50 border border-slate-200 text-slate-500'}`}>
+                        <Icon name={gasConnected ? 'cloud' : 'hard-drive'} size={13} />
+                        {gasConnected ? 'スプレッドシート同期中' : 'GAS URL未設定'}
+                        {gasSyncing && <span className="ml-auto animate-pulse">保存中...</span>}
+                    </div>
+
+                    {/* Square連携店舗（読み取り専用） */}
+                    {serverStores.length > 0 && (
+                        <div className="mb-3">
+                            <p className="text-xs text-slate-500 font-medium mb-2">
+                                <Icon name="zap" size={12} className="inline mr-1 text-amber-500" />
+                                Square API連携済み店舗（環境変数で設定済み）
+                            </p>
+                            <div className="space-y-1.5">
+                                {serverStores.map(s => (
+                                    <div key={s.id} className="flex items-center px-3 py-2 bg-amber-50/50 rounded-lg border border-amber-100 text-sm">
+                                        <Icon name="store" size={14} className="text-amber-500 mr-2" />
+                                        <span className="font-medium text-slate-700">{s.name}</span>
+                                        <span className="ml-auto text-xs text-slate-400">ID: {s.id}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* GAS管理店舗 */}
+                    {activeStores.length > 0 ? (
+                        <div className="space-y-2">
+                            <p className="text-xs text-slate-500 font-medium">
+                                <Icon name="database" size={12} className="inline mr-1 text-sise-500" />
+                                スプレッドシート管理店舗
+                            </p>
+                            {activeStores.map(store => (
+                                <div key={store.id} className="flex items-center px-4 py-3 bg-white rounded-xl border border-slate-200 hover:border-sise-200 transition-colors">
+                                    <div className="w-9 h-9 rounded-xl bg-sise-50 text-sise-600 flex items-center justify-center">
+                                        <Icon name="map-pin" size={18} />
+                                    </div>
+                                    <div className="ml-3 flex-1 min-w-0">
+                                        <p className="font-semibold text-slate-800 text-sm">{store.name}</p>
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-xs text-slate-400">ID: {store.id}</span>
+                                            {store.memo && <span className="text-xs text-slate-400">/ {store.memo}</span>}
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center gap-1">
+                                        <button onClick={() => handleEdit(store)} className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors" title="編集">
+                                            <Icon name="pencil" size={14} />
+                                        </button>
+                                        <button onClick={() => handleSoftDelete(store.id)} className="p-1.5 rounded-lg hover:bg-red-50 text-slate-400 hover:text-red-500 transition-colors" title="無効にする">
+                                            <Icon name="archive" size={14} />
+                                        </button>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    ) : (
+                        !isAdding && serverStores.length === 0 && (
+                            <div className="text-center py-8">
+                                <div className="w-16 h-16 bg-slate-100 rounded-2xl flex items-center justify-center mx-auto mb-3">
+                                    <Icon name="map-pin" size={28} className="text-slate-300" />
+                                </div>
+                                <p className="text-slate-500 text-sm">店舗が登録されていません</p>
+                                <p className="text-slate-400 text-xs mt-1">「店舗を追加」から登録してください</p>
+                            </div>
+                        )
+                    )}
+
+                    {/* 無効店舗（折りたたみ） */}
+                    {inactiveStores.length > 0 && (
+                        <div className="mt-4">
+                            <button
+                                onClick={() => setShowInactive(!showInactive)}
+                                className="flex items-center gap-2 w-full px-3 py-2 bg-slate-50 hover:bg-slate-100 rounded-lg text-xs text-slate-500 font-medium transition-colors"
+                            >
+                                <Icon name={showInactive ? 'chevron-down' : 'chevron-right'} size={14} />
+                                無効な店舗（{inactiveStores.length}件）
+                                <span className="ml-auto text-slate-400">データは保持されています</span>
+                            </button>
+                            {showInactive && (
+                                <div className="mt-2 space-y-2 animate-scale-in">
+                                    {inactiveStores.map(store => (
+                                        <div key={store.id} className="flex items-center px-4 py-3 bg-slate-50/50 rounded-xl border border-slate-200 opacity-60">
+                                            <div className="w-9 h-9 rounded-xl bg-slate-100 text-slate-400 flex items-center justify-center">
+                                                <Icon name="map-pin" size={18} />
+                                            </div>
+                                            <div className="ml-3 flex-1 min-w-0">
+                                                <p className="font-semibold text-slate-400 line-through text-sm">{store.name}</p>
+                                                <div className="flex items-center gap-2">
+                                                    <span className="text-xs px-2 py-0.5 rounded-full bg-red-50 text-red-500 font-medium">無効</span>
+                                                    <span className="text-xs text-slate-400">ID: {store.id}</span>
+                                                </div>
+                                            </div>
+                                            <button
+                                                onClick={() => handleRestore(store.id)}
+                                                className="flex items-center px-2.5 py-1.5 rounded-lg text-xs font-medium bg-sise-50 hover:bg-sise-100 text-sise-600 transition-all"
+                                            >
+                                                <Icon name="rotate-ccw" size={14} className="mr-1" />復元
+                                            </button>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {/* ヘルプ */}
+                    <div className="mt-4 p-3 bg-slate-50 rounded-lg border border-slate-200">
+                        <p className="text-xs text-slate-500 leading-relaxed">
+                            <Icon name="info" size={12} className="inline mr-1" />
+                            店舗を無効にしてもデータは「店舗管理」シートに残ります。いつでも復元可能です。<br />
+                            Square API連携店舗は環境変数で管理されるため、ここでは追加・削除できません。
                         </p>
                     </div>
                 </Card>
@@ -9191,6 +9504,7 @@
                                         { name: 'QR現金会員', icon: 'users', desc: 'QR・現金決済会員データ' },
                                         { name: '出納帳', icon: 'book-open', desc: '入出金記録' },
                                         { name: 'スタッフ管理', icon: 'users', desc: 'スタッフ・パスワード管理' },
+                                        { name: '店舗管理', icon: 'map-pin', desc: '店舗の追加・無効化管理' },
                                     ].map(s => (
                                         <div key={s.name} className="flex items-center gap-2 p-2 bg-white rounded border border-slate-200">
                                             <Icon name={s.icon} size={14} className="text-amber-500" />
@@ -9276,6 +9590,9 @@
                             </div>
                         </details>
                     </Card>
+
+                    {/* 店舗管理 */}
+                    <StoreManagementSection />
 
                     {/* スタッフ管理 */}
                     <StaffManagementSection />

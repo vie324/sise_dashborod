@@ -17,6 +17,7 @@
  *    ─ QR現金会員     （GASが自動で読み書き）
  *    ─ 出納帳        （GASが自動で読み書き）
  *    ─ スタッフ管理    （GASが自動で作成・読み書き）
+ *    ─ 店舗管理       （GASが自動で作成・読み書き）
  *
  * 2. 拡張機能 → Apps Script を開く
  * 3. このコードを貼り付ける
@@ -33,11 +34,16 @@
  * GET ?type=members                  → QR現金会員データ
  * GET ?type=cashbook                 → 出納帳データ
  * GET ?type=stores                   → 店舗一覧
- * GET ?type=staff                    → スタッフ一覧
+ * GET ?type=staff                    → スタッフ一覧（&includeInactive=true で無効含む）
+ * GET ?type=storeManage              → 店舗一覧（&includeInactive=true で無効含む）
  *
  * POST { type:"usage", action:"saveUsage", data:[...] }
  * POST { type:"staff", action:"saveStaff", staff:[...] }
- * POST { type:"staff", action:"deleteStaff", staffId:"xxx" }
+ * POST { type:"staff", action:"deleteStaff", staffId:"xxx" }  → ソフトデリート
+ * POST { type:"staff", action:"restoreStaff", staffId:"xxx" } → 復元
+ * POST { type:"storeManage", action:"addStore", store:{id,name} }
+ * POST { type:"storeManage", action:"deleteStore", storeId:"xxx" } → ソフトデリート
+ * POST { type:"storeManage", action:"restoreStore", storeId:"xxx" } → 復元
  * POST { type:"ticket", action:"saveTickets", plans:[...], tickets:[...] }
  * POST { type:"members", action:"saveManualMembers", members:[...] }
  * POST { type:"cashbook", action:"saveCashbook", entries:[...] }
@@ -54,7 +60,8 @@ const SHEETS = {
   TICKET_DATA: '回数券データ',
   MEMBERS: 'QR現金会員',
   CASHBOOK: '出納帳',
-  STAFF: 'スタッフ管理'
+  STAFF: 'スタッフ管理',
+  STORES: '店舗管理'
 };
 
 const COUNSELING_STORES = {
@@ -104,6 +111,7 @@ function doGet(e) {
       case 'cashbook':   return jsonResponse(handleCashbookGet(params));
       case 'stores':     return jsonResponse(handleStoresGet());
       case 'staff':      return jsonResponse(handleStaffGet(params));
+      case 'storeManage': return jsonResponse(handleStoreManageGet(params));
       default:           return jsonResponse({ error: '不明なtype: ' + type }, 400);
     }
   } catch (error) {
@@ -120,8 +128,9 @@ function doPost(e) {
       case 'usage':    return jsonResponse(handleUsagePost(body));
       case 'ticket':   return jsonResponse(handleTicketPost(body));
       case 'members':  return jsonResponse(handleMembersPost(body));
-      case 'cashbook': return jsonResponse(handleCashbookPost(body));
-      case 'staff':    return jsonResponse(handleStaffPost(body));
+      case 'cashbook':    return jsonResponse(handleCashbookPost(body));
+      case 'staff':       return jsonResponse(handleStaffPost(body));
+      case 'storeManage': return jsonResponse(handleStoreManagePost(body));
       default:         return jsonResponse({ error: '不明なtype: ' + type }, 400);
     }
   } catch (error) {
@@ -535,82 +544,232 @@ function toInt(val) {
 // ============================================================
 // スタッフ管理
 // ============================================================
-// シート列: A=ID, B=名前, C=役割(headquarter/manager/staff), D=パスワード, E=店舗IDs(カンマ区切り), F=作成日
+// シート列: A=ID, B=名前, C=役割, D=パスワード, E=店舗IDs, F=作成日, G=ステータス(active/inactive)
 
 function ensureStaffSheet() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   let sheet = ss.getSheetByName(SHEETS.STAFF);
   if (!sheet) {
     sheet = ss.insertSheet(SHEETS.STAFF);
-    sheet.appendRow(['ID', '名前', '役割', 'パスワード', '店舗IDs', '作成日']);
+    sheet.appendRow(['ID', '名前', '役割', 'パスワード', '店舗IDs', '作成日', 'ステータス']);
     sheet.setFrozenRows(1);
-    sheet.getRange('A1:F1').setFontWeight('bold');
+    sheet.getRange('A1:G1').setFontWeight('bold');
+  } else {
+    // 既存シートにG列が無い場合はヘッダー追加
+    var header = sheet.getRange(1, 7).getValue();
+    if (!header) sheet.getRange(1, 7).setValue('ステータス');
   }
   return sheet;
 }
 
 function handleStaffGet(params) {
-  const sheet = ensureStaffSheet();
-  const rows = sheet.getDataRange().getValues();
+  var includeInactive = params.includeInactive === 'true' || params.includeInactive === '1';
+  var sheet = ensureStaffSheet();
+  var rows = sheet.getDataRange().getValues();
   if (rows.length <= 1) return { staff: [] };
 
-  const staff = [];
-  for (let i = 1; i < rows.length; i++) {
-    const r = rows[i];
+  var staff = [];
+  for (var i = 1; i < rows.length; i++) {
+    var r = rows[i];
     if (!r[0]) continue;
+    var status = String(r[6] || 'active');
+    if (!includeInactive && status === 'inactive') continue;
     staff.push({
       id: String(r[0]),
       name: String(r[1] || ''),
       role: String(r[2] || 'staff'),
       password: String(r[3] || ''),
       storeIds: splitList(r[4]),
-      createdAt: formatDate(r[5])
+      createdAt: formatDate(r[5]),
+      status: status
     });
   }
   return { staff: staff };
 }
 
 function handleStaffPost(body) {
-  const action = body.action || '';
+  var action = body.action || '';
   switch (action) {
-    case 'saveStaff': return saveStaffList(body.staff || []);
-    case 'deleteStaff': return deleteStaff(body.staffId);
+    case 'saveStaff':    return saveStaffList(body.staff || []);
+    case 'deleteStaff':  return softDeleteStaff(body.staffId);
+    case 'restoreStaff': return restoreStaff(body.staffId);
     default: return { error: '不明なstaff action: ' + action };
   }
 }
 
 function saveStaffList(staffArr) {
-  const sheet = ensureStaffSheet();
-  // ヘッダー行を保持して全データを書き換え
-  const lastRow = sheet.getLastRow();
+  var sheet = ensureStaffSheet();
+  var lastRow = sheet.getLastRow();
   if (lastRow > 1) {
-    sheet.getRange(2, 1, lastRow - 1, 6).clearContent();
+    sheet.getRange(2, 1, lastRow - 1, 7).clearContent();
   }
-  const rows = staffArr.map(s => [
-    s.id || '',
-    s.name || '',
-    s.role || 'staff',
-    s.password || '',
-    (s.storeIds || []).join(','),
-    s.createdAt || new Date()
-  ]);
+  var rows = staffArr.map(function(s) {
+    return [
+      s.id || '',
+      s.name || '',
+      s.role || 'staff',
+      s.password || '',
+      (s.storeIds || []).join(','),
+      s.createdAt || new Date(),
+      s.status || 'active'
+    ];
+  });
   if (rows.length > 0) {
-    sheet.getRange(2, 1, rows.length, 6).setValues(rows);
+    sheet.getRange(2, 1, rows.length, 7).setValues(rows);
   }
   return { success: true, count: rows.length };
 }
 
-function deleteStaff(staffId) {
+function softDeleteStaff(staffId) {
   if (!staffId) return { error: 'staffIdが必要です' };
-  const sheet = ensureStaffSheet();
-  const rows = sheet.getDataRange().getValues();
-  for (let i = rows.length - 1; i >= 1; i--) {
+  var sheet = ensureStaffSheet();
+  var rows = sheet.getDataRange().getValues();
+  for (var i = rows.length - 1; i >= 1; i--) {
     if (String(rows[i][0]) === String(staffId)) {
-      sheet.deleteRow(i + 1);
-      return { success: true, deleted: staffId };
+      sheet.getRange(i + 1, 7).setValue('inactive');
+      return { success: true, staffId: staffId, status: 'inactive' };
     }
   }
   return { error: 'スタッフが見つかりません: ' + staffId };
+}
+
+function restoreStaff(staffId) {
+  if (!staffId) return { error: 'staffIdが必要です' };
+  var sheet = ensureStaffSheet();
+  var rows = sheet.getDataRange().getValues();
+  for (var i = rows.length - 1; i >= 1; i--) {
+    if (String(rows[i][0]) === String(staffId)) {
+      sheet.getRange(i + 1, 7).setValue('active');
+      return { success: true, staffId: staffId, status: 'active' };
+    }
+  }
+  return { error: 'スタッフが見つかりません: ' + staffId };
+}
+
+// ============================================================
+// 店舗管理
+// ============================================================
+// シート列: A=ID, B=店舗名, C=ステータス(active/inactive), D=作成日, E=メモ
+
+function ensureStoreSheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEETS.STORES);
+  if (!sheet) {
+    sheet = ss.insertSheet(SHEETS.STORES);
+    sheet.appendRow(['ID', '店舗名', 'ステータス', '作成日', 'メモ']);
+    sheet.setFrozenRows(1);
+    sheet.getRange('A1:E1').setFontWeight('bold');
+  }
+  return sheet;
+}
+
+function handleStoreManageGet(params) {
+  var includeInactive = params.includeInactive === 'true' || params.includeInactive === '1';
+  var sheet = ensureStoreSheet();
+  var rows = sheet.getDataRange().getValues();
+  if (rows.length <= 1) return { stores: [] };
+
+  var stores = [];
+  for (var i = 1; i < rows.length; i++) {
+    var r = rows[i];
+    if (!r[0]) continue;
+    var status = String(r[2] || 'active');
+    if (!includeInactive && status === 'inactive') continue;
+    stores.push({
+      id: String(r[0]),
+      name: String(r[1] || ''),
+      status: status,
+      createdAt: formatDate(r[3]),
+      memo: String(r[4] || '')
+    });
+  }
+  return { stores: stores };
+}
+
+function handleStoreManagePost(body) {
+  var action = body.action || '';
+  switch (action) {
+    case 'saveStores':    return saveStoreList(body.stores || []);
+    case 'addStore':      return addStore(body.store || {});
+    case 'updateStore':   return updateStore(body.store || {});
+    case 'deleteStore':   return softDeleteStore(body.storeId);
+    case 'restoreStore':  return restoreStore(body.storeId);
+    default: return { error: '不明なstoreManage action: ' + action };
+  }
+}
+
+function saveStoreList(storeArr) {
+  var sheet = ensureStoreSheet();
+  var lastRow = sheet.getLastRow();
+  if (lastRow > 1) {
+    sheet.getRange(2, 1, lastRow - 1, 5).clearContent();
+  }
+  var rows = storeArr.map(function(s) {
+    return [
+      s.id || '',
+      s.name || '',
+      s.status || 'active',
+      s.createdAt || new Date(),
+      s.memo || ''
+    ];
+  });
+  if (rows.length > 0) {
+    sheet.getRange(2, 1, rows.length, 5).setValues(rows);
+  }
+  return { success: true, count: rows.length };
+}
+
+function addStore(store) {
+  if (!store.id || !store.name) return { error: 'IDと店舗名が必要です' };
+  var sheet = ensureStoreSheet();
+  sheet.appendRow([
+    store.id,
+    store.name,
+    'active',
+    new Date(),
+    store.memo || ''
+  ]);
+  return { success: true, store: { id: store.id, name: store.name, status: 'active' } };
+}
+
+function updateStore(store) {
+  if (!store.id) return { error: 'storeIdが必要です' };
+  var sheet = ensureStoreSheet();
+  var rows = sheet.getDataRange().getValues();
+  for (var i = 1; i < rows.length; i++) {
+    if (String(rows[i][0]) === String(store.id)) {
+      if (store.name) sheet.getRange(i + 1, 2).setValue(store.name);
+      if (store.memo !== undefined) sheet.getRange(i + 1, 5).setValue(store.memo);
+      return { success: true, storeId: store.id };
+    }
+  }
+  return { error: '店舗が見つかりません: ' + store.id };
+}
+
+function softDeleteStore(storeId) {
+  if (!storeId) return { error: 'storeIdが必要です' };
+  var sheet = ensureStoreSheet();
+  var rows = sheet.getDataRange().getValues();
+  for (var i = 1; i < rows.length; i++) {
+    if (String(rows[i][0]) === String(storeId)) {
+      sheet.getRange(i + 1, 3).setValue('inactive');
+      return { success: true, storeId: storeId, status: 'inactive' };
+    }
+  }
+  return { error: '店舗が見つかりません: ' + storeId };
+}
+
+function restoreStore(storeId) {
+  if (!storeId) return { error: 'storeIdが必要です' };
+  var sheet = ensureStoreSheet();
+  var rows = sheet.getDataRange().getValues();
+  for (var i = 1; i < rows.length; i++) {
+    if (String(rows[i][0]) === String(storeId)) {
+      sheet.getRange(i + 1, 3).setValue('active');
+      return { success: true, storeId: storeId, status: 'active' };
+    }
+  }
+  return { error: '店舗が見つかりません: ' + storeId };
 }
 
 function jsonResponse(data) {
