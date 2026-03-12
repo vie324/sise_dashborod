@@ -18,6 +18,8 @@
  *    ─ 出納帳        （GASが自動で読み書き）
  *    ─ スタッフ管理    （GASが自動で作成・読み書き）
  *    ─ 店舗管理       （GASが自動で作成・読み書き）
+ *    ─ ダッシュボード設定 （GASが自動で作成・読み書き）
+ *    ─ HPBデータ      （GASが自動で作成・読み書き）
  *
  * 2. 拡張機能 → Apps Script を開く
  * 3. このコードを貼り付ける
@@ -44,6 +46,13 @@
  * POST { type:"storeManage", action:"addStore", store:{id,name} }
  * POST { type:"storeManage", action:"deleteStore", storeId:"xxx" } → ソフトデリート
  * POST { type:"storeManage", action:"restoreStore", storeId:"xxx" } → 復元
+ * GET ?type=dashConfig                → 全設定取得
+ * GET ?type=dashConfig&key=planLimits → 個別キー取得
+ * POST { type:"dashConfig", action:"set", key:"planLimits", value:{...} }
+ * POST { type:"dashConfig", action:"setBulk", entries:{key1:val1, key2:val2} }
+ * GET ?type=hpb                       → HPB月次データ取得
+ * POST { type:"hpb", action:"upsert", entry:{yearMonth,views,...} }
+ * POST { type:"hpb", action:"delete", yearMonth:"2026-03" }
  * POST { type:"ticket", action:"saveTickets", plans:[...], tickets:[...] }
  * POST { type:"members", action:"saveManualMembers", members:[...] }
  * POST { type:"cashbook", action:"saveCashbook", entries:[...] }
@@ -61,7 +70,9 @@ const SHEETS = {
   MEMBERS: 'QR現金会員',
   CASHBOOK: '出納帳',
   STAFF: 'スタッフ管理',
-  STORES: '店舗管理'
+  STORES: '店舗管理',
+  DASH_CONFIG: 'ダッシュボード設定',
+  HPB: 'HPBデータ'
 };
 
 const COUNSELING_STORES = {
@@ -110,9 +121,11 @@ function doGet(e) {
       case 'members':    return jsonResponse(handleMembersGet(params));
       case 'cashbook':   return jsonResponse(handleCashbookGet(params));
       case 'stores':     return jsonResponse(handleStoresGet());
-      case 'staff':      return jsonResponse(handleStaffGet(params));
+      case 'staff':       return jsonResponse(handleStaffGet(params));
       case 'storeManage': return jsonResponse(handleStoreManageGet(params));
-      default:           return jsonResponse({ error: '不明なtype: ' + type }, 400);
+      case 'dashConfig':  return jsonResponse(handleDashConfigGet(params));
+      case 'hpb':         return jsonResponse(handleHpbGet(params));
+      default:            return jsonResponse({ error: '不明なtype: ' + type }, 400);
     }
   } catch (error) {
     return jsonResponse({ error: error.message }, 500);
@@ -131,6 +144,8 @@ function doPost(e) {
       case 'cashbook':    return jsonResponse(handleCashbookPost(body));
       case 'staff':       return jsonResponse(handleStaffPost(body));
       case 'storeManage': return jsonResponse(handleStoreManagePost(body));
+      case 'dashConfig':  return jsonResponse(handleDashConfigPost(body));
+      case 'hpb':         return jsonResponse(handleHpbPost(body));
       default:         return jsonResponse({ error: '不明なtype: ' + type }, 400);
     }
   } catch (error) {
@@ -770,6 +785,185 @@ function restoreStore(storeId) {
     }
   }
   return { error: '店舗が見つかりません: ' + storeId };
+}
+
+// ============================================================
+// ダッシュボード設定（キー・バリュー型）
+// ============================================================
+// シート列: A=キー, B=値(JSON文字列)
+
+function ensureDashConfigSheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEETS.DASH_CONFIG);
+  if (!sheet) {
+    sheet = ss.insertSheet(SHEETS.DASH_CONFIG);
+    sheet.appendRow(['キー', '値']);
+    sheet.setFrozenRows(1);
+    sheet.getRange('A1:B1').setFontWeight('bold');
+  }
+  return sheet;
+}
+
+function handleDashConfigGet(params) {
+  var key = params.key || '';
+  var sheet = ensureDashConfigSheet();
+  var rows = sheet.getDataRange().getValues();
+  if (key) {
+    for (var i = 1; i < rows.length; i++) {
+      if (String(rows[i][0]) === key) {
+        try { return { key: key, value: JSON.parse(String(rows[i][1])) }; }
+        catch(e) { return { key: key, value: String(rows[i][1]) }; }
+      }
+    }
+    return { key: key, value: null };
+  }
+  // 全件取得
+  var result = {};
+  for (var i = 1; i < rows.length; i++) {
+    if (!rows[i][0]) continue;
+    try { result[String(rows[i][0])] = JSON.parse(String(rows[i][1])); }
+    catch(e) { result[String(rows[i][0])] = String(rows[i][1]); }
+  }
+  return { config: result };
+}
+
+function handleDashConfigPost(body) {
+  var action = body.action || 'set';
+  if (action === 'set') {
+    return setDashConfig(body.key, body.value);
+  } else if (action === 'setBulk') {
+    return setDashConfigBulk(body.entries || {});
+  }
+  return { error: '不明なdashConfig action: ' + action };
+}
+
+function setDashConfig(key, value) {
+  if (!key) return { error: 'keyが必要です' };
+  var sheet = ensureDashConfigSheet();
+  var rows = sheet.getDataRange().getValues();
+  var jsonVal = JSON.stringify(value);
+  for (var i = 1; i < rows.length; i++) {
+    if (String(rows[i][0]) === key) {
+      sheet.getRange(i + 1, 2).setValue(jsonVal);
+      return { success: true, key: key };
+    }
+  }
+  sheet.appendRow([key, jsonVal]);
+  return { success: true, key: key };
+}
+
+function setDashConfigBulk(entries) {
+  var keys = Object.keys(entries);
+  for (var k = 0; k < keys.length; k++) {
+    setDashConfig(keys[k], entries[keys[k]]);
+  }
+  return { success: true, count: keys.length };
+}
+
+// ============================================================
+// HPBデータ
+// ============================================================
+// シート列: A=年月, B=PV数, C=予約数, D=掲載費, E=クリック数, F=CVR, G=メモ
+
+function ensureHpbSheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEETS.HPB);
+  if (!sheet) {
+    sheet = ss.insertSheet(SHEETS.HPB);
+    sheet.appendRow(['年月', 'PV数', '予約数', '掲載費', 'クリック数', 'CVR', 'メモ']);
+    sheet.setFrozenRows(1);
+    sheet.getRange('A1:G1').setFontWeight('bold');
+  }
+  return sheet;
+}
+
+function handleHpbGet(params) {
+  var sheet = ensureHpbSheet();
+  var rows = sheet.getDataRange().getValues();
+  var monthly = [];
+  for (var i = 1; i < rows.length; i++) {
+    var r = rows[i];
+    if (!r[0]) continue;
+    monthly.push({
+      yearMonth: String(r[0]),
+      views: toInt(r[1]),
+      bookings: toInt(r[2]),
+      cost: toInt(r[3]),
+      clicks: toInt(r[4]),
+      cvr: r[5] ? parseFloat(r[5]) : 0,
+      memo: String(r[6] || '')
+    });
+  }
+  return { monthly: monthly };
+}
+
+function handleHpbPost(body) {
+  var action = body.action || '';
+  switch (action) {
+    case 'saveAll':   return saveHpbAll(body.monthly || []);
+    case 'upsert':    return upsertHpbMonth(body.entry || {});
+    case 'delete':    return deleteHpbMonth(body.yearMonth);
+    default: return { error: '不明なhpb action: ' + action };
+  }
+}
+
+function saveHpbAll(monthly) {
+  var sheet = ensureHpbSheet();
+  var lastRow = sheet.getLastRow();
+  if (lastRow > 1) {
+    sheet.getRange(2, 1, lastRow - 1, 7).clearContent();
+  }
+  var rows = monthly.map(function(m) {
+    return [
+      m.yearMonth || '',
+      m.views || 0,
+      m.bookings || 0,
+      m.cost || 0,
+      m.clicks || 0,
+      m.cvr || 0,
+      m.memo || ''
+    ];
+  });
+  if (rows.length > 0) {
+    sheet.getRange(2, 1, rows.length, 7).setValues(rows);
+  }
+  return { success: true, count: rows.length };
+}
+
+function upsertHpbMonth(entry) {
+  if (!entry.yearMonth) return { error: 'yearMonthが必要です' };
+  var sheet = ensureHpbSheet();
+  var rows = sheet.getDataRange().getValues();
+  var rowData = [
+    entry.yearMonth,
+    entry.views || 0,
+    entry.bookings || 0,
+    entry.cost || 0,
+    entry.clicks || 0,
+    entry.cvr || 0,
+    entry.memo || ''
+  ];
+  for (var i = 1; i < rows.length; i++) {
+    if (String(rows[i][0]) === String(entry.yearMonth)) {
+      sheet.getRange(i + 1, 1, 1, 7).setValues([rowData]);
+      return { success: true, yearMonth: entry.yearMonth, action: 'updated' };
+    }
+  }
+  sheet.appendRow(rowData);
+  return { success: true, yearMonth: entry.yearMonth, action: 'added' };
+}
+
+function deleteHpbMonth(yearMonth) {
+  if (!yearMonth) return { error: 'yearMonthが必要です' };
+  var sheet = ensureHpbSheet();
+  var rows = sheet.getDataRange().getValues();
+  for (var i = rows.length - 1; i >= 1; i--) {
+    if (String(rows[i][0]) === String(yearMonth)) {
+      sheet.deleteRow(i + 1);
+      return { success: true, yearMonth: yearMonth };
+    }
+  }
+  return { error: 'データが見つかりません: ' + yearMonth };
 }
 
 function jsonResponse(data) {

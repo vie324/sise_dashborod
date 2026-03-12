@@ -1198,6 +1198,36 @@
         const softDeleteStoreGas = async (storeId) => gasPostRequest({ type: 'storeManage', action: 'deleteStore', storeId });
         const restoreStoreGas = async (storeId) => gasPostRequest({ type: 'storeManage', action: 'restoreStore', storeId });
 
+        // GASダッシュボード設定（キー・バリュー）
+        const fetchDashConfig = async (key) => {
+            const gasUrl = localStorage.getItem('sise_unified_gas_url');
+            if (!gasUrl) return null;
+            try {
+                const url = key ? gasUrl + '?type=dashConfig&key=' + encodeURIComponent(key) : gasUrl + '?type=dashConfig';
+                const resp = await fetch(url);
+                const data = await resp.json();
+                return key ? data.value : (data.config || {});
+            } catch (e) { return null; }
+        };
+
+        const saveDashConfig = async (key, value) => gasPostRequest({ type: 'dashConfig', action: 'set', key, value });
+        const saveDashConfigBulk = async (entries) => gasPostRequest({ type: 'dashConfig', action: 'setBulk', entries });
+
+        // GAS HPBデータ
+        const fetchHpbFromGas = async () => {
+            const gasUrl = localStorage.getItem('sise_unified_gas_url');
+            if (!gasUrl) return null;
+            try {
+                const resp = await fetch(gasUrl + '?type=hpb');
+                const data = await resp.json();
+                return data.monthly || null;
+            } catch (e) { return null; }
+        };
+
+        const upsertHpbMonthGas = async (entry) => gasPostRequest({ type: 'hpb', action: 'upsert', entry });
+        const deleteHpbMonthGas = async (yearMonth) => gasPostRequest({ type: 'hpb', action: 'delete', yearMonth });
+        const saveHpbAllGas = async (monthly) => gasPostRequest({ type: 'hpb', action: 'saveAll', monthly });
+
         // パスワード検証（URLアクセス時のスタッフ照合）
         const verifyStaffPassword = async (staffId, password) => {
             // まずGASから最新のスタッフリストを取得
@@ -2197,11 +2227,29 @@
 
             const currentMonth = new Date().toISOString().slice(0, 7); // YYYY-MM
 
+            // GASからプラン上限・繰越を初回取得
+            useEffect(() => {
+                (async () => {
+                    const config = await fetchDashConfig();
+                    if (config) {
+                        if (config.planLimits) {
+                            setPlanLimits(config.planLimits);
+                            try { localStorage.setItem(PLAN_LIMITS_STORAGE_KEY, JSON.stringify(config.planLimits)); } catch(e) {}
+                        }
+                        if (config.carryoverData) {
+                            setCarryoverData(config.carryoverData);
+                            try { localStorage.setItem(CARRYOVER_STORAGE_KEY, JSON.stringify(config.carryoverData)); } catch(e) {}
+                        }
+                    }
+                })();
+            }, []);
+
             // プラン上限を設定
             const setPlanLimit = useCallback((planName, maxSessions) => {
                 setPlanLimits(prev => {
                     const updated = { ...prev, [planName]: maxSessions };
                     try { localStorage.setItem(PLAN_LIMITS_STORAGE_KEY, JSON.stringify(updated)); } catch(e) {}
+                    saveDashConfig('planLimits', updated);
                     return updated;
                 });
             }, []);
@@ -2212,6 +2260,7 @@
                 setCarryoverData(prev => {
                     const updated = { ...prev, [key]: Math.max(0, count) };
                     try { localStorage.setItem(CARRYOVER_STORAGE_KEY, JSON.stringify(updated)); } catch(e) {}
+                    saveDashConfig('carryoverData', updated);
                     return updated;
                 });
             }, []);
@@ -6739,10 +6788,36 @@
                 } catch { return { monthly: [], settings: { avgViews: 300, avgBookingRate: 2.5 } }; }
             });
 
+            // GASからHPBデータを初回取得
+            useEffect(() => {
+                (async () => {
+                    // HPB月次データ
+                    const gasMonthly = await fetchHpbFromGas();
+                    if (gasMonthly) {
+                        setHpbData(prev => {
+                            const updated = { ...prev, monthly: gasMonthly };
+                            localStorage.setItem(HPB_STORAGE_KEY, JSON.stringify(updated));
+                            return updated;
+                        });
+                    }
+                    // HPB設定
+                    const gasSettings = await fetchDashConfig('hpbSettings');
+                    if (gasSettings) {
+                        setHpbData(prev => {
+                            const updated = { ...prev, settings: { ...prev.settings, ...gasSettings } };
+                            localStorage.setItem(HPB_STORAGE_KEY, JSON.stringify(updated));
+                            return updated;
+                        });
+                    }
+                })();
+            }, []);
+
             // HPBデータの保存
             const saveHpbData = useCallback((data) => {
                 setHpbData(data);
                 localStorage.setItem(HPB_STORAGE_KEY, JSON.stringify(data));
+                saveHpbAllGas(data.monthly || []);
+                if (data.settings) saveDashConfig('hpbSettings', data.settings);
             }, []);
 
             // HPB月次データ追加/更新
@@ -6757,6 +6832,7 @@
                         updated.monthly = [...prev.monthly, entry].sort((a, b) => a.yearMonth.localeCompare(b.yearMonth));
                     }
                     localStorage.setItem(HPB_STORAGE_KEY, JSON.stringify(updated));
+                    upsertHpbMonthGas(entry);
                     return updated;
                 });
             }, []);
@@ -6766,6 +6842,7 @@
                 setHpbData(prev => {
                     const updated = { ...prev, settings: { ...prev.settings, ...settings } };
                     localStorage.setItem(HPB_STORAGE_KEY, JSON.stringify(updated));
+                    saveDashConfig('hpbSettings', updated.settings);
                     return updated;
                 });
             }, []);
@@ -6775,6 +6852,7 @@
                 setHpbData(prev => {
                     const updated = { ...prev, monthly: prev.monthly.filter(m => m.yearMonth !== yearMonth) };
                     localStorage.setItem(HPB_STORAGE_KEY, JSON.stringify(updated));
+                    deleteHpbMonthGas(yearMonth);
                     return updated;
                 });
             }, []);
@@ -9505,6 +9583,8 @@
                                         { name: '出納帳', icon: 'book-open', desc: '入出金記録' },
                                         { name: 'スタッフ管理', icon: 'users', desc: 'スタッフ・パスワード管理' },
                                         { name: '店舗管理', icon: 'map-pin', desc: '店舗の追加・無効化管理' },
+                                        { name: 'ダッシュボード設定', icon: 'settings', desc: 'プラン上限・繰越など各種設定' },
+                                        { name: 'HPBデータ', icon: 'bar-chart-2', desc: 'HPB月次マーケティングデータ' },
                                     ].map(s => (
                                         <div key={s.name} className="flex items-center gap-2 p-2 bg-white rounded border border-slate-200">
                                             <Icon name={s.icon} size={14} className="text-amber-500" />
