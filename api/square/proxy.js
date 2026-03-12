@@ -128,7 +128,7 @@ export default async function handler(req, res) {
     : 'https://connect.squareup.com/v2';
 
   // catalog/list is a GET endpoint with query parameters
-  const GET_ENDPOINTS = ['catalog/list'];
+  const GET_ENDPOINTS = ['catalog/list', 'locations'];
   const isGetEndpoint = GET_ENDPOINTS.some(ep => squarePath.startsWith(ep));
 
   try {
