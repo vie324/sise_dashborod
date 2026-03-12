@@ -4169,14 +4169,26 @@
 
                 try {
                     const headers = { 'Content-Type': 'application/json' };
-                    { const sid = resolveStoreId(activeStoreId); if (sid) headers['X-Store-Id'] = sid; }
+                    const sid = resolveStoreId(activeStoreId);
+                    if (sid) headers['X-Store-Id'] = sid;
+
+                    // location_idを取得
+                    const store = serverStores.find(s => s.id === sid);
+                    const locationId = store?.locationId || '';
+                    if (!locationId) throw new Error('店舗のロケーションIDが設定されていません');
 
                     const body = {
                         idempotency_key: crypto.randomUUID(),
-                        subscription_plan_id: selectedPlanId,
-                        price_money: {
-                            amount: selectedPlan.price,
-                            currency: selectedPlan.currency || 'JPY',
+                        quick_pay: {
+                            location_id: locationId,
+                            name: selectedPlan.name,
+                            price_money: {
+                                amount: selectedPlan.price,
+                                currency: selectedPlan.currency || 'JPY',
+                            },
+                        },
+                        checkout_options: {
+                            subscription_plan_id: selectedPlanId,
                         },
                     };
                     const res = await fetch(`${SQUARE_PROXY_BASE}/online-checkout/payment-links`, {
@@ -7756,13 +7768,26 @@
                 setQrDataUrl(null);
                 try {
                     const headers = { 'Content-Type': 'application/json' };
-                    { const sid = resolveStoreId(activeStoreId); if (sid) headers['X-Store-Id'] = sid; }
+                    const sid = resolveStoreId(activeStoreId);
+                    if (sid) headers['X-Store-Id'] = sid;
+
+                    // location_idを取得
+                    const store = serverStores.find(s => s.id === sid);
+                    const locationId = store?.locationId || '';
+                    if (!locationId) throw new Error('店舗のロケーションIDが設定されていません');
+
                     const body = {
                         idempotency_key: crypto.randomUUID(),
-                        subscription_plan_id: qrSelectedPlanId,
-                        price_money: {
-                            amount: selectedPlan.price,
-                            currency: selectedPlan.currency || 'JPY',
+                        quick_pay: {
+                            location_id: locationId,
+                            name: selectedPlan.name,
+                            price_money: {
+                                amount: selectedPlan.price,
+                                currency: selectedPlan.currency || 'JPY',
+                            },
+                        },
+                        checkout_options: {
+                            subscription_plan_id: qrSelectedPlanId,
                         },
                     };
                     const res = await fetch(`${SQUARE_PROXY_BASE}/online-checkout/payment-links`, {
