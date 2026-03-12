@@ -1176,6 +1176,7 @@
         };
 
         const saveStaffToGas = async (staffList) => gasPostRequest({ type: 'staff', action: 'saveStaff', staff: staffList });
+        const updateStaffGas = async (staffId, updates) => gasPostRequest({ type: 'staff', action: 'updateStaff', staffId, updates });
         const softDeleteStaffGas = async (staffId) => gasPostRequest({ type: 'staff', action: 'deleteStaff', staffId });
         const restoreStaffGas = async (staffId) => gasPostRequest({ type: 'staff', action: 'restoreStaff', staffId });
 
@@ -1197,6 +1198,36 @@
         const updateStoreInGas = async (store) => gasPostRequest({ type: 'storeManage', action: 'updateStore', store });
         const softDeleteStoreGas = async (storeId) => gasPostRequest({ type: 'storeManage', action: 'deleteStore', storeId });
         const restoreStoreGas = async (storeId) => gasPostRequest({ type: 'storeManage', action: 'restoreStore', storeId });
+
+        // GASダッシュボード設定（キー・バリュー）
+        const fetchDashConfig = async (key) => {
+            const gasUrl = localStorage.getItem('sise_unified_gas_url');
+            if (!gasUrl) return null;
+            try {
+                const url = key ? gasUrl + '?type=dashConfig&key=' + encodeURIComponent(key) : gasUrl + '?type=dashConfig';
+                const resp = await fetch(url);
+                const data = await resp.json();
+                return key ? data.value : (data.config || {});
+            } catch (e) { return null; }
+        };
+
+        const saveDashConfig = async (key, value) => gasPostRequest({ type: 'dashConfig', action: 'set', key, value });
+        const saveDashConfigBulk = async (entries) => gasPostRequest({ type: 'dashConfig', action: 'setBulk', entries });
+
+        // GAS HPBデータ
+        const fetchHpbFromGas = async () => {
+            const gasUrl = localStorage.getItem('sise_unified_gas_url');
+            if (!gasUrl) return null;
+            try {
+                const resp = await fetch(gasUrl + '?type=hpb');
+                const data = await resp.json();
+                return data.monthly || null;
+            } catch (e) { return null; }
+        };
+
+        const upsertHpbMonthGas = async (entry) => gasPostRequest({ type: 'hpb', action: 'upsert', entry });
+        const deleteHpbMonthGas = async (yearMonth) => gasPostRequest({ type: 'hpb', action: 'delete', yearMonth });
+        const saveHpbAllGas = async (monthly) => gasPostRequest({ type: 'hpb', action: 'saveAll', monthly });
 
         // パスワード検証（URLアクセス時のスタッフ照合）
         const verifyStaffPassword = async (staffId, password) => {
@@ -2197,11 +2228,29 @@
 
             const currentMonth = new Date().toISOString().slice(0, 7); // YYYY-MM
 
+            // GASからプラン上限・繰越を初回取得
+            useEffect(() => {
+                (async () => {
+                    const config = await fetchDashConfig();
+                    if (config) {
+                        if (config.planLimits) {
+                            setPlanLimits(config.planLimits);
+                            try { localStorage.setItem(PLAN_LIMITS_STORAGE_KEY, JSON.stringify(config.planLimits)); } catch(e) {}
+                        }
+                        if (config.carryoverData) {
+                            setCarryoverData(config.carryoverData);
+                            try { localStorage.setItem(CARRYOVER_STORAGE_KEY, JSON.stringify(config.carryoverData)); } catch(e) {}
+                        }
+                    }
+                })();
+            }, []);
+
             // プラン上限を設定
             const setPlanLimit = useCallback((planName, maxSessions) => {
                 setPlanLimits(prev => {
                     const updated = { ...prev, [planName]: maxSessions };
                     try { localStorage.setItem(PLAN_LIMITS_STORAGE_KEY, JSON.stringify(updated)); } catch(e) {}
+                    saveDashConfig('planLimits', updated);
                     return updated;
                 });
             }, []);
@@ -2212,6 +2261,7 @@
                 setCarryoverData(prev => {
                     const updated = { ...prev, [key]: Math.max(0, count) };
                     try { localStorage.setItem(CARRYOVER_STORAGE_KEY, JSON.stringify(updated)); } catch(e) {}
+                    saveDashConfig('carryoverData', updated);
                     return updated;
                 });
             }, []);
@@ -6138,16 +6188,34 @@
                 if (!formData.name.trim()) return;
                 let updated;
                 if (editingStaff) {
-                    updated = staffList.map(s => s.id === editingStaff.id ? { ...s, ...formData } : s);
+                    // 編集: 個別更新
+                    const changes = { name: formData.name, role: formData.role, password: formData.password, storeIds: formData.storeIds };
+                    updated = staffList.map(s => s.id === editingStaff.id ? { ...s, ...changes } : s);
+                    setStaffList(updated);
+                    saveStaffListLocal(updated);
+                    setGasSyncing(true);
+                    await updateStaffGas(editingStaff.id, changes);
+                    setGasSyncing(false);
+                    // 名前・店舗・役割が変わった場合、URLも変わるので注意喚起
+                    const nameChanged = editingStaff.name !== formData.name;
+                    const storeChanged = JSON.stringify(editingStaff.storeIds || []) !== JSON.stringify(formData.storeIds);
+                    const roleChanged = editingStaff.role !== formData.role;
+                    if (nameChanged || storeChanged || roleChanged) {
+                        showToast(`「${formData.name}」を更新しました。URLが変更されたため、再度コピーしてください`, 'info', 5000);
+                    } else {
+                        showToast(`「${formData.name}」を更新しました`, 'success', 2000);
+                    }
                 } else {
+                    // 新規追加
                     const newStaff = { ...formData, id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), createdAt: new Date().toISOString().slice(0, 10), status: 'active' };
                     updated = [...staffList, newStaff];
+                    setStaffList(updated);
+                    saveStaffListLocal(updated);
+                    setGasSyncing(true);
+                    await saveStaffToGas(updated);
+                    setGasSyncing(false);
+                    showToast(`「${formData.name}」を追加しました`, 'success', 2000);
                 }
-                setStaffList(updated);
-                saveStaffListLocal(updated);
-                setGasSyncing(true);
-                await saveStaffToGas(updated);
-                setGasSyncing(false);
                 setEditingStaff(null);
                 setIsAdding(false);
                 setFormData({ name: '', role: 'staff', password: '', storeIds: [] });
@@ -6155,17 +6223,29 @@
 
             const handleSoftDelete = async (id) => {
                 if (!confirm('このスタッフを無効にしますか？（データは保持されます）')) return;
-                setStaffList(prev => prev.map(s => s.id === id ? { ...s, status: 'inactive' } : s));
+                const staff = staffList.find(s => s.id === id);
+                setStaffList(prev => {
+                    const updated = prev.map(s => s.id === id ? { ...s, status: 'inactive' } : s);
+                    saveStaffListLocal(updated);
+                    return updated;
+                });
                 setGasSyncing(true);
                 await softDeleteStaffGas(id);
                 setGasSyncing(false);
+                showToast(`「${staff?.name || ''}」を無効にしました`, 'success', 2000);
             };
 
             const handleRestore = async (id) => {
-                setStaffList(prev => prev.map(s => s.id === id ? { ...s, status: 'active' } : s));
+                const staff = staffList.find(s => s.id === id);
+                setStaffList(prev => {
+                    const updated = prev.map(s => s.id === id ? { ...s, status: 'active' } : s);
+                    saveStaffListLocal(updated);
+                    return updated;
+                });
                 setGasSyncing(true);
                 await restoreStaffGas(id);
                 setGasSyncing(false);
+                showToast(`「${staff?.name || ''}」を復元しました`, 'success', 2000);
             };
 
             const handleEdit = (staff) => {
@@ -6231,19 +6311,19 @@
                             ) : (
                                 <>
                                     <button
+                                        onClick={() => handleEdit(staff)}
+                                        className="flex items-center px-2.5 py-1.5 rounded-lg text-xs font-medium bg-slate-100 hover:bg-amber-50 text-slate-600 hover:text-amber-700 transition-all"
+                                        title="名前・店舗・パスワードを編集"
+                                    >
+                                        <Icon name="pencil" size={14} className="mr-1" />編集
+                                    </button>
+                                    <button
                                         onClick={() => handleCopyUrl(staff)}
                                         className={`flex items-center px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all ${copiedId === staff.id ? 'bg-green-100 text-green-700' : 'bg-slate-100 hover:bg-sise-50 text-slate-600 hover:text-sise-600'}`}
                                         title="URLをコピー"
                                     >
                                         <Icon name={copiedId === staff.id ? 'check' : 'link'} size={14} className="mr-1" />
                                         {copiedId === staff.id ? 'コピー済' : 'URL'}
-                                    </button>
-                                    <button
-                                        onClick={() => handleEdit(staff)}
-                                        className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
-                                        title="編集"
-                                    >
-                                        <Icon name="pencil" size={14} />
                                     </button>
                                     <button
                                         onClick={() => handleSoftDelete(staff.id)}
@@ -6283,6 +6363,12 @@
                             <h4 className="font-semibold text-slate-800 mb-3">
                                 {editingStaff ? 'スタッフ編集' : '新規スタッフ追加'}
                             </h4>
+                            {editingStaff && (
+                                <div className="mb-3 px-3 py-2 bg-amber-50 rounded-lg border border-amber-200 text-xs text-amber-700">
+                                    <Icon name="alert-triangle" size={12} className="inline mr-1" />
+                                    名前・役割・店舗を変更すると共有URLが変わります。更新後はURLを再コピーしてください。
+                                </div>
+                            )}
                             <div className="space-y-3">
                                 <div>
                                     <label className="block text-sm font-medium text-slate-700 mb-1">名前</label>
@@ -6739,10 +6825,36 @@
                 } catch { return { monthly: [], settings: { avgViews: 300, avgBookingRate: 2.5 } }; }
             });
 
+            // GASからHPBデータを初回取得
+            useEffect(() => {
+                (async () => {
+                    // HPB月次データ
+                    const gasMonthly = await fetchHpbFromGas();
+                    if (gasMonthly) {
+                        setHpbData(prev => {
+                            const updated = { ...prev, monthly: gasMonthly };
+                            localStorage.setItem(HPB_STORAGE_KEY, JSON.stringify(updated));
+                            return updated;
+                        });
+                    }
+                    // HPB設定
+                    const gasSettings = await fetchDashConfig('hpbSettings');
+                    if (gasSettings) {
+                        setHpbData(prev => {
+                            const updated = { ...prev, settings: { ...prev.settings, ...gasSettings } };
+                            localStorage.setItem(HPB_STORAGE_KEY, JSON.stringify(updated));
+                            return updated;
+                        });
+                    }
+                })();
+            }, []);
+
             // HPBデータの保存
             const saveHpbData = useCallback((data) => {
                 setHpbData(data);
                 localStorage.setItem(HPB_STORAGE_KEY, JSON.stringify(data));
+                saveHpbAllGas(data.monthly || []);
+                if (data.settings) saveDashConfig('hpbSettings', data.settings);
             }, []);
 
             // HPB月次データ追加/更新
@@ -6757,6 +6869,7 @@
                         updated.monthly = [...prev.monthly, entry].sort((a, b) => a.yearMonth.localeCompare(b.yearMonth));
                     }
                     localStorage.setItem(HPB_STORAGE_KEY, JSON.stringify(updated));
+                    upsertHpbMonthGas(entry);
                     return updated;
                 });
             }, []);
@@ -6766,6 +6879,7 @@
                 setHpbData(prev => {
                     const updated = { ...prev, settings: { ...prev.settings, ...settings } };
                     localStorage.setItem(HPB_STORAGE_KEY, JSON.stringify(updated));
+                    saveDashConfig('hpbSettings', updated.settings);
                     return updated;
                 });
             }, []);
@@ -6775,6 +6889,7 @@
                 setHpbData(prev => {
                     const updated = { ...prev, monthly: prev.monthly.filter(m => m.yearMonth !== yearMonth) };
                     localStorage.setItem(HPB_STORAGE_KEY, JSON.stringify(updated));
+                    deleteHpbMonthGas(yearMonth);
                     return updated;
                 });
             }, []);
@@ -9505,6 +9620,8 @@
                                         { name: '出納帳', icon: 'book-open', desc: '入出金記録' },
                                         { name: 'スタッフ管理', icon: 'users', desc: 'スタッフ・パスワード管理' },
                                         { name: '店舗管理', icon: 'map-pin', desc: '店舗の追加・無効化管理' },
+                                        { name: 'ダッシュボード設定', icon: 'settings', desc: 'プラン上限・繰越など各種設定' },
+                                        { name: 'HPBデータ', icon: 'bar-chart-2', desc: 'HPB月次マーケティングデータ' },
                                     ].map(s => (
                                         <div key={s.name} className="flex items-center gap-2 p-2 bg-white rounded border border-slate-200">
                                             <Icon name={s.icon} size={14} className="text-amber-500" />
