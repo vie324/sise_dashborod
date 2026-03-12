@@ -972,6 +972,10 @@
         .cf-price-arrow{color:#b8a472;font-size:14px}
         .cf-price-final{font-size:20px;font-weight:900;color:#d94050}
         .cf-price-yen{font-size:13px;font-weight:600}
+        .cf-qr-btn{width:100%;display:flex;align-items:center;justify-content:center;gap:6px;padding:10px 0;margin-top:4px;background:linear-gradient(135deg,#f0fdf4,#dcfce7);border:1.5px solid #86efac;border-radius:0 0 14px 14px;color:#166534;font-size:12px;font-weight:600;cursor:pointer;transition:all .2s}
+        .cf-qr-btn:hover{background:linear-gradient(135deg,#dcfce7,#bbf7d0);border-color:#4ade80;transform:translateY(-1px)}
+        .cf-qr-btn:active{transform:scale(.98)}
+        .cf-qr-panel{background:#fff;border:2px solid #86efac;border-radius:16px;padding:20px;box-shadow:0 4px 24px rgba(0,0,0,.08)}
         .cf-plans-bottom{display:grid;grid-template-columns:repeat(2,1fr);gap:20px}
         .cf-benefits-grid{display:grid;grid-template-columns:1fr;gap:16px}
         .cf-benefit-item{background:#fff;border-radius:16px;padding:22px;box-shadow:0 1px 3px rgba(0,0,0,.06);border:1px solid rgba(42,157,94,.08);display:flex;gap:16px;align-items:flex-start;transition:transform .3s}
@@ -7569,7 +7573,7 @@
             { key:'Monthly-1',  id:'Monthly',  name:'月一フル', freq:1, freqLabel:'月1回',        types:'全種類対応',  desc:'月1回で全種類を無理なくメンテナンス', price:10000 },
         ];
 
-        const ConceptFormView = ({ counselingHook }) => {
+        const ConceptFormView = ({ counselingHook, activeStoreId }) => {
             const { customers, selectedCustomer, loading, fetchCustomerDetail, searchCustomers, fetchCustomerList, counselingStore, setCounselingStore } = counselingHook;
             const [searchInput, setSearchInput] = useState('');
             const [concerns, setConcerns] = useState({});
@@ -7583,6 +7587,139 @@
             const [currentRecPlanId, setCurrentRecPlanId] = useState('');
             const graphRef = React.useRef(null);
             const graphInitRef = React.useRef(false);
+
+            // サブスク契約QR・リンク発行
+            const [qrTarget, setQrTarget] = useState(null); // { planName, freq, price }
+            const [qrPlans, setQrPlans] = useState([]);
+            const [qrFetchingPlans, setQrFetchingPlans] = useState(false);
+            const [qrSelectedPlanId, setQrSelectedPlanId] = useState('');
+            const [qrLoading, setQrLoading] = useState(false);
+            const [qrLink, setQrLink] = useState(null);
+            const [qrDataUrl, setQrDataUrl] = useState(null);
+            const [qrError, setQrError] = useState(null);
+            const [qrCopied, setQrCopied] = useState(false);
+
+            // QR発行パネルを開く
+            const openQrPanel = async (planName, freq, price) => {
+                setQrTarget({ planName, freq, price });
+                setQrLink(null);
+                setQrDataUrl(null);
+                setQrError(null);
+                setQrSelectedPlanId('');
+                setQrCopied(false);
+
+                // Square プラン一覧を取得
+                setQrFetchingPlans(true);
+                try {
+                    const headers = { 'Content-Type': 'application/json' };
+                    if (activeStoreId && activeStoreId !== 'all') headers['X-Store-Id'] = activeStoreId;
+                    const res = await fetch(`${SQUARE_PROXY_BASE}/catalog/list`, {
+                        method: 'POST',
+                        headers,
+                        body: JSON.stringify({ types: ['SUBSCRIPTION_PLAN'] })
+                    });
+                    if (!res.ok) throw new Error('プラン取得に失敗しました');
+                    const data = await res.json();
+                    const objects = data.objects || [];
+                    const planList = [];
+                    objects.forEach(obj => {
+                        if (obj.type === 'SUBSCRIPTION_PLAN' && obj.subscription_plan_data) {
+                            const planData = obj.subscription_plan_data;
+                            const variations = planData.subscription_plan_variations || [];
+                            variations.forEach(v => {
+                                const varData = v.subscription_plan_variation_data;
+                                const phases = varData?.phases || [];
+                                let vPrice = 0;
+                                let cadence = 'MONTHLY';
+                                if (phases.length > 0) {
+                                    const paidPhase = phases.find(p => p.pricing?.price_money?.amount > 0) || phases[0];
+                                    vPrice = paidPhase.pricing?.price_money?.amount || paidPhase.recurring_price_money?.amount || 0;
+                                    cadence = paidPhase.cadence || 'MONTHLY';
+                                }
+                                planList.push({
+                                    id: v.id,
+                                    name: varData?.name || planData.name || obj.id,
+                                    price: vPrice,
+                                    cadence,
+                                });
+                            });
+                        }
+                    });
+                    setQrPlans(planList);
+                    // 名前と金額でマッチングを試みる
+                    const matched = planList.find(p =>
+                        p.name.toLowerCase().includes(planName.toLowerCase()) && p.price === price
+                    ) || planList.find(p =>
+                        p.name.toLowerCase().includes(planName.toLowerCase())
+                    );
+                    if (matched) setQrSelectedPlanId(matched.id);
+                    else if (planList.length > 0) setQrSelectedPlanId(planList[0].id);
+                } catch (e) {
+                    setQrError(e.message);
+                } finally {
+                    setQrFetchingPlans(false);
+                }
+            };
+
+            // QRリンク生成
+            const generateQrLink = async () => {
+                if (!qrSelectedPlanId) return;
+                setQrLoading(true);
+                setQrError(null);
+                setQrLink(null);
+                setQrDataUrl(null);
+                try {
+                    const headers = { 'Content-Type': 'application/json' };
+                    if (activeStoreId && activeStoreId !== 'all') headers['X-Store-Id'] = activeStoreId;
+                    const res = await fetch(`${SQUARE_PROXY_BASE}/online-checkout/payment-links`, {
+                        method: 'POST',
+                        headers,
+                        body: JSON.stringify({
+                            idempotency_key: crypto.randomUUID(),
+                            subscription_plan_id: qrSelectedPlanId,
+                        })
+                    });
+                    if (!res.ok) {
+                        const errData = await res.json().catch(() => ({}));
+                        const detail = errData.errors ? errData.errors.map(e => e.detail || e.code).join(', ') : JSON.stringify(errData);
+                        throw new Error(detail);
+                    }
+                    const data = await res.json();
+                    const link = data.payment_link;
+                    if (!link || !link.url) throw new Error('リンクの生成に失敗しました');
+                    setQrLink({ url: link.url, longUrl: link.long_url || link.url, id: link.id });
+                    if (window.QRCode) {
+                        const qrUrl = await window.QRCode.toDataURL(link.url, {
+                            width: 280, margin: 2,
+                            color: { dark: '#1a5136', light: '#ffffff' },
+                            errorCorrectionLevel: 'M',
+                        });
+                        setQrDataUrl(qrUrl);
+                    }
+                    showToast('契約リンクを生成しました', 'success');
+                } catch (e) {
+                    setQrError(e.message);
+                    showToast('リンク生成に失敗しました', 'error');
+                } finally {
+                    setQrLoading(false);
+                }
+            };
+
+            const copyQrUrl = async () => {
+                if (!qrLink) return;
+                try {
+                    await navigator.clipboard.writeText(qrLink.url);
+                } catch (e) {
+                    const ta = document.createElement('textarea');
+                    ta.value = qrLink.url;
+                    document.body.appendChild(ta);
+                    ta.select();
+                    document.execCommand('copy');
+                    document.body.removeChild(ta);
+                }
+                setQrCopied(true);
+                setTimeout(() => setQrCopied(false), 2000);
+            };
 
             // Googleフォームのお悩み箇所をチェック項目にマッピング
             const mapFormConcerns = useCallback((formConcerns) => {
@@ -8148,6 +8285,7 @@
                                         <div className={'cf-price-row ' + (isFreqRec('Standard',2) ? 'highlight-freq' : '')}><span className="cf-freq-badge">月2回</span><div className="cf-price-calc"><span className="cf-price-original">¥20,000</span><span className="cf-price-arrow">▶</span><span className="cf-price-final"><span className="cf-price-yen">¥</span>15,000</span></div></div>
                                         <div className={'cf-price-row ' + (isFreqRec('Standard',4) ? 'highlight-freq' : '')}><span className="cf-freq-badge">月4回</span><div className="cf-price-calc"><span className="cf-price-original">¥40,000</span><span className="cf-price-arrow">▶</span><span className="cf-price-final"><span className="cf-price-yen">¥</span>28,000</span></div></div>
                                     </div>
+                                    <button onClick={() => openQrPanel('Standard', 4, 28000)} className="cf-qr-btn"><Icon name="qr-code" size={14} /> 契約QR・リンク発行</button>
                                 </div>
                                 <div className={'cf-plan-card recommended ' + (isPlanRec('Premium') ? 'auto-rec' : '')}>
                                     <div className="cf-auto-rec-badge">← 診断おすすめ</div>
@@ -8161,6 +8299,7 @@
                                         <div className={'cf-price-row ' + (isFreqRec('Premium',2) ? 'highlight-freq' : '')}><span className="cf-freq-badge">月2回</span><div className="cf-price-calc"><span className="cf-price-original">¥22,000</span><span className="cf-price-arrow">▶</span><span className="cf-price-final"><span className="cf-price-yen">¥</span>18,000</span></div></div>
                                         <div className={'cf-price-row ' + (isFreqRec('Premium',4) ? 'highlight-freq' : '')}><span className="cf-freq-badge">月4回</span><div className="cf-price-calc"><span className="cf-price-original">¥44,000</span><span className="cf-price-arrow">▶</span><span className="cf-price-final"><span className="cf-price-yen">¥</span>32,000</span></div></div>
                                     </div>
+                                    <button onClick={() => openQrPanel('Premium', 4, 32000)} className="cf-qr-btn"><Icon name="qr-code" size={14} /> 契約QR・リンク発行</button>
                                 </div>
                             </div>
                             <div className="cf-plans-bottom">
@@ -8175,6 +8314,7 @@
                                         <div className={'cf-price-row ' + (isFreqRec('Quick',4) ? 'highlight-freq' : '')}><span className="cf-freq-badge">月4回</span><div className="cf-price-calc"><span className="cf-price-original">¥36,000</span><span className="cf-price-arrow">▶</span><span className="cf-price-final"><span className="cf-price-yen">¥</span>24,000</span></div></div>
                                         <div className={'cf-price-row ' + (isFreqRec('Quick',8) ? 'highlight-freq' : '')}><span className="cf-freq-badge">月8回</span><div className="cf-price-calc"><span className="cf-price-original">¥72,000</span><span className="cf-price-arrow">▶</span><span className="cf-price-final"><span className="cf-price-yen">¥</span>44,000</span></div></div>
                                     </div>
+                                    <button onClick={() => openQrPanel('Quick', 4, 24000)} className="cf-qr-btn"><Icon name="qr-code" size={14} /> 契約QR・リンク発行</button>
                                 </div>
                                 <div className={'cf-plan-card ' + (isPlanRec('Monthly') ? 'auto-rec' : '')}>
                                     <div className="cf-auto-rec-badge">← 診断おすすめ</div>
@@ -8186,8 +8326,100 @@
                                     <div className="cf-plan-pricing">
                                         <div className={'cf-price-row ' + (isFreqRec('Monthly',1) ? 'highlight-freq' : '')}><span className="cf-freq-badge">月1回</span><div className="cf-price-calc"><span className="cf-price-original">¥11,000</span><span className="cf-price-arrow">▶</span><span className="cf-price-final"><span className="cf-price-yen">¥</span>10,000</span></div></div>
                                     </div>
+                                    <button onClick={() => openQrPanel('Monthly', 1, 10000)} className="cf-qr-btn"><Icon name="qr-code" size={14} /> 契約QR・リンク発行</button>
                                 </div>
                             </div>
+
+                            {/* QR・リンク発行パネル */}
+                            {qrTarget && (
+                                <div className="cf-qr-panel animate-fade-in" style={{marginTop:20}}>
+                                    <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:16}}>
+                                        <div style={{display:'flex',alignItems:'center',gap:10}}>
+                                            <div style={{width:36,height:36,background:'linear-gradient(135deg,#2d7a4f,#1a5136)',borderRadius:10,display:'flex',alignItems:'center',justifyContent:'center'}}>
+                                                <Icon name="link" size={18} className="text-white" />
+                                            </div>
+                                            <div>
+                                                <h4 style={{margin:0,fontSize:15,fontWeight:700,color:'#1a1a1a'}}>契約QR・リンク発行</h4>
+                                                <p style={{margin:0,fontSize:11,color:'#999'}}>{qrTarget.planName} を選択中</p>
+                                            </div>
+                                        </div>
+                                        <button onClick={() => { setQrTarget(null); setQrLink(null); setQrDataUrl(null); }} style={{background:'#f1f5f9',border:'none',borderRadius:8,padding:'6px 8px',cursor:'pointer'}}><Icon name="x" size={16} /></button>
+                                    </div>
+
+                                    {qrFetchingPlans ? (
+                                        <div style={{textAlign:'center',padding:'20px 0'}}>
+                                            <Icon name="loader" size={20} className="animate-spin text-sise-500" />
+                                            <p style={{fontSize:12,color:'#999',marginTop:8}}>Squareプランを読み込み中...</p>
+                                        </div>
+                                    ) : qrPlans.length === 0 && !qrLink ? (
+                                        <div style={{textAlign:'center',padding:'20px 0'}}>
+                                            <p style={{fontSize:13,color:'#666'}}>Squareにサブスクリプションプランが見つかりません</p>
+                                            <p style={{fontSize:11,color:'#999'}}>Squareダッシュボードでプランを作成してください</p>
+                                        </div>
+                                    ) : (
+                                        <>
+                                            {!qrLink && (
+                                                <div style={{marginBottom:16}}>
+                                                    <label style={{display:'block',fontSize:12,fontWeight:600,color:'#555',marginBottom:8}}>Squareプランを選択</label>
+                                                    <div style={{display:'flex',flexDirection:'column',gap:6}}>
+                                                        {qrPlans.map(p => (
+                                                            <label key={p.id} style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 12px',borderRadius:10,border: qrSelectedPlanId === p.id ? '2px solid #2d7a4f' : '2px solid #e2e8f0',background: qrSelectedPlanId === p.id ? '#f0fdf4' : '#fff',cursor:'pointer',transition:'all .2s'}}>
+                                                                <div style={{display:'flex',alignItems:'center',gap:8}}>
+                                                                    <input type="radio" name="qrPlan" value={p.id} checked={qrSelectedPlanId === p.id} onChange={() => setQrSelectedPlanId(p.id)} style={{accentColor:'#2d7a4f'}} />
+                                                                    <span style={{fontSize:13,fontWeight:500,color:'#333'}}>{p.name}</span>
+                                                                </div>
+                                                                {p.price > 0 && <span style={{fontSize:13,fontWeight:700,color:'#2d7a4f'}}>{Number(p.price).toLocaleString()}円</span>}
+                                                            </label>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            )}
+
+                                            {qrError && (
+                                                <div style={{padding:'10px 14px',background:'#fef2f2',border:'1px solid #fecaca',borderRadius:10,marginBottom:12,fontSize:13,color:'#b91c1c'}}>
+                                                    <Icon name="alert-circle" size={14} className="inline mr-1" />{qrError}
+                                                </div>
+                                            )}
+
+                                            {!qrLink && (
+                                                <button onClick={generateQrLink} disabled={qrLoading || !qrSelectedPlanId} style={{width:'100%',display:'flex',alignItems:'center',justifyContent:'center',gap:8,padding:'12px 16px',background: qrLoading || !qrSelectedPlanId ? '#ccc' : 'linear-gradient(135deg,#2d7a4f,#1a5136)',color:'#fff',border:'none',borderRadius:12,fontSize:14,fontWeight:600,cursor: qrLoading || !qrSelectedPlanId ? 'not-allowed' : 'pointer',transition:'all .2s'}}>
+                                                    {qrLoading ? (<><Icon name="loader" size={16} className="animate-spin" /> 生成中...</>) : (<><Icon name="sparkles" size={16} /> 契約リンクを生成</>)}
+                                                </button>
+                                            )}
+
+                                            {qrLink && (
+                                                <div className="animate-fade-in" style={{display:'flex',flexDirection:'column',gap:16}}>
+                                                    {qrDataUrl && (
+                                                        <div style={{display:'flex',flexDirection:'column',alignItems:'center',padding:'20px 0'}}>
+                                                            <img src={qrDataUrl} alt="QR Code" style={{width:220,height:220,borderRadius:12,boxShadow:'0 4px 20px rgba(0,0,0,.1)',border:'1px solid #e2e8f0'}} />
+                                                            <p style={{fontSize:12,color:'#999',marginTop:10}}>お客様にこのQRコードを読み取ってもらってください</p>
+                                                        </div>
+                                                    )}
+                                                    <div style={{background:'#f8fafc',borderRadius:12,padding:'12px 14px',border:'1px solid #e2e8f0'}}>
+                                                        <label style={{display:'block',fontSize:11,fontWeight:600,color:'#999',marginBottom:6}}>契約URL</label>
+                                                        <div style={{display:'flex',alignItems:'center',gap:8}}>
+                                                            <input type="text" readOnly value={qrLink.url} onClick={(e) => e.target.select()} style={{flex:1,background:'#fff',border:'1px solid #e2e8f0',borderRadius:8,padding:'8px 10px',fontSize:12,color:'#333',outline:'none'}} />
+                                                            <button onClick={copyQrUrl} style={{display:'flex',alignItems:'center',gap:4,padding:'8px 12px',borderRadius:8,fontSize:12,fontWeight:500,border:'1px solid',transition:'all .2s',cursor:'pointer',background: qrCopied ? '#dcfce7' : '#f0fdf4',color: qrCopied ? '#166534' : '#2d7a4f',borderColor: qrCopied ? '#86efac' : '#bbf7d0'}}>
+                                                                <Icon name={qrCopied ? "check" : "copy"} size={13} />{qrCopied ? 'コピー済' : 'コピー'}
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                    <div style={{display:'flex',gap:8}}>
+                                                        <button onClick={() => { setQrLink(null); setQrDataUrl(null); setQrError(null); }} style={{flex:1,display:'flex',alignItems:'center',justifyContent:'center',gap:6,padding:'10px',background:'#f1f5f9',border:'none',borderRadius:10,fontSize:12,fontWeight:500,color:'#475569',cursor:'pointer'}}>
+                                                            <Icon name="refresh-cw" size={13} />別のリンクを生成
+                                                        </button>
+                                                        {qrDataUrl && (
+                                                            <a href={qrDataUrl} download="subscription-qr.png" style={{flex:1,display:'flex',alignItems:'center',justifyContent:'center',gap:6,padding:'10px',background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:10,fontSize:12,fontWeight:500,color:'#2d7a4f',textDecoration:'none',cursor:'pointer'}}>
+                                                                <Icon name="download" size={13} />QR画像を保存
+                                                            </a>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </>
+                                    )}
+                                </div>
+                            )}
                         </div>
                     </div>
 
@@ -8649,7 +8881,7 @@
                     case 'tickets':
                         return <TicketManagementView ticketHook={ticketHook} />;
                     case 'counseling':
-                        return <ConceptFormView counselingHook={counselingHook} />;
+                        return <ConceptFormView counselingHook={counselingHook} activeStoreId={activeStoreId} />;
                     case 'marketing':
                         return <MarketingView marketingHook={marketingHook} />;
                     case 'settings':
