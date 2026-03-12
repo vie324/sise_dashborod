@@ -96,14 +96,61 @@ const REPORT_COL = {
   TASK_COMPLETE: 11, PREP_COMPLETE: 12
 };
 
-// カウンセリング
-const COUNSELING_COL = {
+// カウンセリング（本厚木店のフォーム列順のフォールバック）
+const COUNSELING_COL_DEFAULT = {
   TIMESTAMP: 0, NAME: 1, BIRTHDAY: 2, PHONE: 3, EMAIL: 4,
   OCCUPATION: 5, ADDRESS: 6, VISIT_PURPOSE: 7, CONCERNS: 8,
   IMPROVEMENT_TIMELINE: 9, TREATMENT_REQUEST: 10, TREATMENT_EXPERIENCE: 11,
   SURGERY_HISTORY: 12, CURRENT_TREATMENT: 13, ALLERGY: 14,
   COSMETIC_SURGERY: 15, PREGNANCY_CHECK: 16, DISCLAIMER: 17
 };
+
+// ヘッダー行からカラム位置を動的に検出するためのキーワードマッピング
+// ヘッダーテキストに含まれるキーワードでマッチング
+const COUNSELING_HEADER_KEYWORDS = {
+  TIMESTAMP:            ['タイムスタンプ', 'timestamp'],
+  NAME:                 ['お名前', '名前', 'name'],
+  BIRTHDAY:             ['生年月日', '誕生日', 'birthday'],
+  PHONE:                ['電話', 'tel', 'phone'],
+  EMAIL:                ['メール', 'email', 'mail'],
+  OCCUPATION:           ['職業', 'occupation'],
+  ADDRESS:              ['住所', '地域', 'address'],
+  VISIT_PURPOSE:        ['来店目的', '来店きっかけ', 'きっかけ', '目的'],
+  CONCERNS:             ['お悩み', '気になる箇所', '気になる部位', '悩み', 'お身体のお悩み', 'お体のお悩み', 'concern'],
+  IMPROVEMENT_TIMELINE: ['改善', '期間', 'いつまで', 'timeline'],
+  TREATMENT_REQUEST:    ['施術', 'リクエスト', '希望', 'request'],
+  TREATMENT_EXPERIENCE: ['整体', '経験', 'experience'],
+  SURGERY_HISTORY:      ['手術', 'surgery'],
+  CURRENT_TREATMENT:    ['通院', '治療中', 'treatment'],
+  ALLERGY:              ['アレルギー', 'allergy'],
+  COSMETIC_SURGERY:     ['美容整形', '美容外科', 'cosmetic'],
+  PREGNANCY_CHECK:      ['妊娠', 'pregnancy'],
+  DISCLAIMER:           ['同意', '注意事項', '免責', 'disclaimer']
+};
+
+// ヘッダー行から動的にカラムマッピングを構築
+function detectCounselingColumns(headerRow) {
+  var C = {};
+  var headers = headerRow.map(function(h) { return String(h || '').trim().toLowerCase(); });
+  var keys = Object.keys(COUNSELING_HEADER_KEYWORDS);
+
+  for (var k = 0; k < keys.length; k++) {
+    var key = keys[k];
+    var keywords = COUNSELING_HEADER_KEYWORDS[key];
+    var found = -1;
+    for (var i = 0; i < headers.length; i++) {
+      for (var j = 0; j < keywords.length; j++) {
+        if (headers[i].indexOf(keywords[j].toLowerCase()) !== -1) {
+          found = i;
+          break;
+        }
+      }
+      if (found !== -1) break;
+    }
+    C[key] = found !== -1 ? found : (COUNSELING_COL_DEFAULT[key] !== undefined ? COUNSELING_COL_DEFAULT[key] : -1);
+  }
+  return C;
+}
 
 // ============================================================
 // ルーター
@@ -252,38 +299,49 @@ function handleCounselingGet(params) {
   if (lastRow < 2) return { customers: [], total: 0, store: storeKey };
 
   const numCols = sheet.getLastColumn();
+  // ヘッダー行を読み取り、カラムを動的検出
+  const headerRow = sheet.getRange(1, 1, 1, numCols).getValues()[0];
+  const C = detectCounselingColumns(headerRow);
   const data = sheet.getRange(2, 1, lastRow - 1, numCols).getValues();
-  const C = COUNSELING_COL;
+
+  // デバッグ用: 検出されたカラム位置
+  var colInfo = { TIMESTAMP: C.TIMESTAMP, NAME: C.NAME, CONCERNS: C.CONCERNS };
 
   switch (action) {
     case 'list':
-      return { ...counselingList(data, C), store: storeKey };
+      return { ...counselingList(data, C), store: storeKey, _colMap: colInfo };
     case 'recent':
       var limit = parseInt(params.limit) || 20;
       var result = counselingList(data, C);
       result.customers = result.customers.slice(0, limit);
       result.total = result.customers.length;
-      return { ...result, store: storeKey };
+      return { ...result, store: storeKey, _colMap: colInfo };
     case 'detail':
-      return { ...counselingDetail(data, C, params.name, params.index), store: storeKey };
+      return { ...counselingDetail(data, C, params.name, params.index), store: storeKey, _colMap: colInfo };
     case 'search':
-      return { ...counselingSearch(data, C, params.q || ''), store: storeKey };
+      return { ...counselingSearch(data, C, params.q || ''), store: storeKey, _colMap: colInfo };
     default:
       return { error: '不明なアクション: ' + action };
   }
+}
+
+// 安全なカラムアクセス（列が見つからない場合は空値を返す）
+function colVal(row, colIndex) {
+  if (colIndex === undefined || colIndex < 0 || colIndex >= row.length) return '';
+  return row[colIndex];
 }
 
 function counselingList(data, C) {
   const customers = [];
   for (let i = 0; i < data.length; i++) {
     const row = data[i];
-    const ts = row[C.TIMESTAMP];
+    const ts = colVal(row, C.TIMESTAMP);
     if (!ts) continue;
     const date = ts instanceof Date ? ts : new Date(ts);
     if (isNaN(date.getTime())) continue;
-    const name = String(row[C.NAME] || '').trim();
+    const name = String(colVal(row, C.NAME) || '').trim();
     if (!name) continue;
-    customers.push({ index: i, name, timestamp: date.toISOString(), concerns: parseMultiSelect(row[C.CONCERNS]) });
+    customers.push({ index: i, name, timestamp: date.toISOString(), concerns: parseMultiSelect(colVal(row, C.CONCERNS)) });
   }
   customers.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
   return { customers, total: customers.length, lastUpdated: new Date().toISOString() };
@@ -296,32 +354,32 @@ function counselingDetail(data, C, name, index) {
     if (idx >= 0 && idx < data.length) { row = data[idx]; rowIndex = idx; }
   } else if (name) {
     for (let i = data.length - 1; i >= 0; i--) {
-      if (String(data[i][C.NAME] || '').trim() === name) { row = data[i]; rowIndex = i; break; }
+      if (String(colVal(data[i], C.NAME) || '').trim() === name) { row = data[i]; rowIndex = i; break; }
     }
   }
   if (!row) return { error: '顧客が見つかりません', customer: null };
-  const ts = row[C.TIMESTAMP];
+  const ts = colVal(row, C.TIMESTAMP);
   const date = ts instanceof Date ? ts : new Date(ts);
   return {
     customer: {
       index: rowIndex,
-      name: String(row[C.NAME] || '').trim(),
+      name: String(colVal(row, C.NAME) || '').trim(),
       timestamp: date.toISOString(),
-      birthday: formatDate(row[C.BIRTHDAY]),
-      phone: String(row[C.PHONE] || '').trim(),
-      email: String(row[C.EMAIL] || '').trim(),
-      occupation: String(row[C.OCCUPATION] || '').trim(),
-      address: String(row[C.ADDRESS] || '').trim(),
-      visitPurpose: parseMultiSelect(row[C.VISIT_PURPOSE]),
-      concerns: parseMultiSelect(row[C.CONCERNS]),
-      improvementTimeline: String(row[C.IMPROVEMENT_TIMELINE] || '').trim(),
-      treatmentRequest: String(row[C.TREATMENT_REQUEST] || '').trim(),
-      treatmentExperience: parseMultiSelect(row[C.TREATMENT_EXPERIENCE]),
-      surgeryHistory: String(row[C.SURGERY_HISTORY] || '').trim(),
-      currentTreatment: String(row[C.CURRENT_TREATMENT] || '').trim(),
-      allergy: String(row[C.ALLERGY] || '').trim(),
-      cosmeticSurgery: String(row[C.COSMETIC_SURGERY] || '').trim(),
-      pregnancyCheck: String(row[C.PREGNANCY_CHECK] || '').trim()
+      birthday: formatDate(colVal(row, C.BIRTHDAY)),
+      phone: String(colVal(row, C.PHONE) || '').trim(),
+      email: String(colVal(row, C.EMAIL) || '').trim(),
+      occupation: String(colVal(row, C.OCCUPATION) || '').trim(),
+      address: String(colVal(row, C.ADDRESS) || '').trim(),
+      visitPurpose: parseMultiSelect(colVal(row, C.VISIT_PURPOSE)),
+      concerns: parseMultiSelect(colVal(row, C.CONCERNS)),
+      improvementTimeline: String(colVal(row, C.IMPROVEMENT_TIMELINE) || '').trim(),
+      treatmentRequest: String(colVal(row, C.TREATMENT_REQUEST) || '').trim(),
+      treatmentExperience: parseMultiSelect(colVal(row, C.TREATMENT_EXPERIENCE)),
+      surgeryHistory: String(colVal(row, C.SURGERY_HISTORY) || '').trim(),
+      currentTreatment: String(colVal(row, C.CURRENT_TREATMENT) || '').trim(),
+      allergy: String(colVal(row, C.ALLERGY) || '').trim(),
+      cosmeticSurgery: String(colVal(row, C.COSMETIC_SURGERY) || '').trim(),
+      pregnancyCheck: String(colVal(row, C.PREGNANCY_CHECK) || '').trim()
     }
   };
 }
@@ -331,13 +389,13 @@ function counselingSearch(data, C, query) {
   const customers = [], seen = {};
   for (let i = data.length - 1; i >= 0; i--) {
     const row = data[i];
-    const name = String(row[C.NAME] || '').trim();
+    const name = String(colVal(row, C.NAME) || '').trim();
     if (!name || !name.includes(query) || seen[name]) continue;
     seen[name] = true;
-    const ts = row[C.TIMESTAMP];
+    const ts = colVal(row, C.TIMESTAMP);
     const date = ts instanceof Date ? ts : new Date(ts);
     if (isNaN(date.getTime())) continue;
-    customers.push({ index: i, name, timestamp: date.toISOString(), concerns: parseMultiSelect(row[C.CONCERNS]) });
+    customers.push({ index: i, name, timestamp: date.toISOString(), concerns: parseMultiSelect(colVal(row, C.CONCERNS)) });
   }
   return { customers, total: customers.length, lastUpdated: new Date().toISOString() };
 }
