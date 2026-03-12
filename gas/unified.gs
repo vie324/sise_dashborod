@@ -653,7 +653,7 @@ function handleStaffGet(params) {
       name: String(r[1] || ''),
       role: String(r[2] || 'staff'),
       password: String(r[3] || ''),
-      storeIds: splitList(r[4]),
+      storeIds: parseMultiSelect(r[4]),
       createdAt: formatDate(r[5]),
       status: status
     });
