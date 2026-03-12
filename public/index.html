@@ -8539,6 +8539,241 @@
         // 設定ビュー
         // ========================================
 
+        // Square API 診断テストコンポーネント
+        const SquareDiagnostics = ({ stores }) => {
+            const [diagResult, setDiagResult] = useState(null);
+            const [diagLoading, setDiagLoading] = useState(false);
+
+            const runDiagnostics = async () => {
+                setDiagLoading(true);
+                const results = {};
+
+                // テスト対象の店舗ID一覧
+                const storeIds = (stores && stores.length > 0)
+                    ? stores.map(s => s.id)
+                    : ['default'];
+
+                for (const sid of storeIds) {
+                    const storeResult = { storeId: sid, tests: {} };
+                    const headers = { 'Content-Type': 'application/json' };
+                    if (sid !== 'default') headers['X-Store-Id'] = sid;
+
+                    // 1. locations テスト（基本接続確認）
+                    try {
+                        const r = await fetch(`${SQUARE_PROXY_BASE}/locations`, { method: 'POST', headers });
+                        const d = await r.json();
+                        storeResult.tests.locations = {
+                            status: r.status,
+                            ok: r.ok,
+                            count: d.locations?.length || 0,
+                            raw: d
+                        };
+                    } catch (e) {
+                        storeResult.tests.locations = { status: 0, ok: false, error: e.message };
+                    }
+
+                    // 2. catalog/list (全タイプ) テスト
+                    try {
+                        const r = await fetch(`${SQUARE_PROXY_BASE}/catalog/list`, {
+                            method: 'POST', headers,
+                            body: JSON.stringify({})
+                        });
+                        const d = await r.json();
+                        storeResult.tests.catalogAll = {
+                            status: r.status,
+                            ok: r.ok,
+                            objectCount: d.objects?.length || 0,
+                            types: [...new Set((d.objects || []).map(o => o.type))],
+                            raw: d
+                        };
+                    } catch (e) {
+                        storeResult.tests.catalogAll = { status: 0, ok: false, error: e.message };
+                    }
+
+                    // 3. catalog/list (SUBSCRIPTION_PLAN) テスト
+                    try {
+                        const r = await fetch(`${SQUARE_PROXY_BASE}/catalog/list`, {
+                            method: 'POST', headers,
+                            body: JSON.stringify({ types: ['SUBSCRIPTION_PLAN'] })
+                        });
+                        const d = await r.json();
+                        storeResult.tests.catalogSub = {
+                            status: r.status,
+                            ok: r.ok,
+                            objectCount: d.objects?.length || 0,
+                            plans: (d.objects || []).map(o => ({
+                                id: o.id,
+                                type: o.type,
+                                name: o.subscription_plan_data?.name || o.subscription_plan_variation_data?.name || o.id,
+                                hasVariations: (o.subscription_plan_data?.subscription_plan_variations?.length || 0) > 0,
+                                variationCount: o.subscription_plan_data?.subscription_plan_variations?.length || 0,
+                            })),
+                            raw: d
+                        };
+                    } catch (e) {
+                        storeResult.tests.catalogSub = { status: 0, ok: false, error: e.message };
+                    }
+
+                    // 4. subscriptions/search テスト（ITEMS_READ以外の権限確認）
+                    try {
+                        const r = await fetch(`${SQUARE_PROXY_BASE}/subscriptions/search`, {
+                            method: 'POST', headers,
+                            body: JSON.stringify({ query: { filter: {} } })
+                        });
+                        const d = await r.json();
+                        storeResult.tests.subscriptions = {
+                            status: r.status,
+                            ok: r.ok,
+                            count: d.subscriptions?.length || 0,
+                            raw: d
+                        };
+                    } catch (e) {
+                        storeResult.tests.subscriptions = { status: 0, ok: false, error: e.message };
+                    }
+
+                    results[sid] = storeResult;
+                }
+
+                setDiagResult(results);
+                setDiagLoading(false);
+            };
+
+            const StatusBadge = ({ ok, status }) => (
+                <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded font-medium ${
+                    ok ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                }`}>
+                    <Icon name={ok ? 'check' : 'x'} size={12} />
+                    {status}
+                </span>
+            );
+
+            return (
+                <div className="bg-blue-50 rounded-lg p-4 border border-blue-200">
+                    <div className="flex items-center justify-between mb-3">
+                        <h4 className="font-semibold text-slate-900">
+                            <Icon name="activity" size={16} className="inline mr-2 text-blue-500" />
+                            Square API 診断テスト
+                        </h4>
+                        <button
+                            onClick={runDiagnostics}
+                            disabled={diagLoading}
+                            className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white text-xs font-semibold rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+                        >
+                            {diagLoading ? (
+                                <><Icon name="loader" size={14} className="animate-spin" /> テスト中...</>
+                            ) : (
+                                <><Icon name="play" size={14} /> 診断実行</>
+                            )}
+                        </button>
+                    </div>
+                    <p className="text-xs text-slate-600 mb-3">アクセストークンの権限・API接続を確認します。</p>
+
+                    {diagResult && Object.entries(diagResult).map(([sid, sr]) => (
+                        <div key={sid} className="bg-white rounded-lg border border-slate-200 p-4 mb-3 last:mb-0">
+                            <h5 className="font-semibold text-sm text-slate-900 mb-3">店舗: {sid}</h5>
+                            <div className="space-y-3">
+                                {/* locations テスト */}
+                                <div className="border-b border-slate-100 pb-2">
+                                    <div className="flex items-center justify-between mb-1">
+                                        <span className="text-sm font-medium text-slate-700">① 基本接続 (locations)</span>
+                                        <StatusBadge ok={sr.tests.locations?.ok} status={sr.tests.locations?.status} />
+                                    </div>
+                                    {sr.tests.locations?.ok ? (
+                                        <p className="text-xs text-green-700">接続成功 — {sr.tests.locations.count}ロケーション検出</p>
+                                    ) : (
+                                        <p className="text-xs text-red-700">接続失敗: {sr.tests.locations?.error || JSON.stringify(sr.tests.locations?.raw?.errors || sr.tests.locations?.raw)}</p>
+                                    )}
+                                </div>
+
+                                {/* catalog 全タイプ */}
+                                <div className="border-b border-slate-100 pb-2">
+                                    <div className="flex items-center justify-between mb-1">
+                                        <span className="text-sm font-medium text-slate-700">② カタログ全体 (ITEMS_READ権限)</span>
+                                        <StatusBadge ok={sr.tests.catalogAll?.ok} status={sr.tests.catalogAll?.status} />
+                                    </div>
+                                    {sr.tests.catalogAll?.ok ? (
+                                        <div>
+                                            <p className="text-xs text-green-700">{sr.tests.catalogAll.objectCount}個のオブジェクト検出</p>
+                                            {sr.tests.catalogAll.types.length > 0 ? (
+                                                <p className="text-xs text-slate-600 mt-1">含まれるタイプ: {sr.tests.catalogAll.types.join(', ')}</p>
+                                            ) : (
+                                                <p className="text-xs text-amber-600 mt-1">カタログが空です。ITEMS_READ権限が無い可能性があります。</p>
+                                            )}
+                                        </div>
+                                    ) : (
+                                        <p className="text-xs text-red-700">{sr.tests.catalogAll?.error || JSON.stringify(sr.tests.catalogAll?.raw?.errors || sr.tests.catalogAll?.raw)}</p>
+                                    )}
+                                </div>
+
+                                {/* SUBSCRIPTION_PLAN */}
+                                <div className="border-b border-slate-100 pb-2">
+                                    <div className="flex items-center justify-between mb-1">
+                                        <span className="text-sm font-medium text-slate-700">③ サブスクリプションプラン</span>
+                                        <StatusBadge ok={sr.tests.catalogSub?.ok} status={sr.tests.catalogSub?.status} />
+                                    </div>
+                                    {sr.tests.catalogSub?.ok ? (
+                                        <div>
+                                            {sr.tests.catalogSub.objectCount > 0 ? (
+                                                <div>
+                                                    <p className="text-xs text-green-700">{sr.tests.catalogSub.objectCount}個のプランを検出</p>
+                                                    <div className="mt-2 space-y-1">
+                                                        {sr.tests.catalogSub.plans.map(p => (
+                                                            <div key={p.id} className="text-xs bg-slate-50 rounded p-2 border border-slate-100">
+                                                                <span className="font-medium text-slate-800">{p.name}</span>
+                                                                <span className="text-slate-400 ml-2">({p.type})</span>
+                                                                <span className="text-slate-500 ml-2">バリエーション: {p.variationCount}個</span>
+                                                                <div className="text-slate-400 mt-0.5 font-mono" style={{fontSize:10}}>ID: {p.id}</div>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            ) : (
+                                                <div>
+                                                    <p className="text-xs text-amber-600 font-medium">SUBSCRIPTION_PLANタイプのオブジェクトが0件です</p>
+                                                    <p className="text-xs text-slate-500 mt-1">考えられる原因:</p>
+                                                    <ul className="text-xs text-slate-500 list-disc ml-4 mt-1 space-y-0.5">
+                                                        <li>アクセストークンに <strong>ITEMS_READ</strong> 権限が無い</li>
+                                                        <li>Squareダッシュボードでサブスクリプションプランが作成されていない</li>
+                                                        <li>プランが別のロケーションに紐づいている</li>
+                                                    </ul>
+                                                </div>
+                                            )}
+                                        </div>
+                                    ) : (
+                                        <p className="text-xs text-red-700">{sr.tests.catalogSub?.error || JSON.stringify(sr.tests.catalogSub?.raw?.errors || sr.tests.catalogSub?.raw)}</p>
+                                    )}
+                                </div>
+
+                                {/* subscriptions/search */}
+                                <div>
+                                    <div className="flex items-center justify-between mb-1">
+                                        <span className="text-sm font-medium text-slate-700">④ サブスクリプション検索 (SUBSCRIPTIONS_READ権限)</span>
+                                        <StatusBadge ok={sr.tests.subscriptions?.ok} status={sr.tests.subscriptions?.status} />
+                                    </div>
+                                    {sr.tests.subscriptions?.ok ? (
+                                        <p className="text-xs text-green-700">成功 — {sr.tests.subscriptions.count}件の契約を検出</p>
+                                    ) : (
+                                        <p className="text-xs text-red-700">{sr.tests.subscriptions?.error || JSON.stringify(sr.tests.subscriptions?.raw?.errors || sr.tests.subscriptions?.raw)}</p>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* 生レスポンス表示 */}
+                            <details className="mt-3">
+                                <summary className="text-xs text-slate-400 cursor-pointer hover:text-slate-600">APIレスポンス（生データ）を表示</summary>
+                                <pre className="mt-2 bg-slate-900 text-green-400 text-xs p-3 rounded-lg overflow-auto max-h-64 font-mono" style={{fontSize:10}}>{JSON.stringify({
+                                    locations: sr.tests.locations?.raw,
+                                    catalogAll: sr.tests.catalogAll?.raw,
+                                    catalogSubscription: sr.tests.catalogSub?.raw,
+                                    subscriptions: sr.tests.subscriptions?.raw,
+                                }, null, 2)}</pre>
+                            </details>
+                        </div>
+                    ))}
+                </div>
+            );
+        };
+
         const SettingsView = ({ onSettingsSaved }) => {
             const [squareStatus, setSquareStatus] = useState({ loading: true });
             const [unifiedGasUrl, setUnifiedGasUrl] = useState(() => {
@@ -8614,6 +8849,9 @@
                                         </div>
                                     </div>
                                 )}
+
+                                {/* Square API 診断テスト */}
+                                <SquareDiagnostics stores={squareStatus.stores} />
 
                                 <div className="bg-slate-50 rounded-lg p-4 border border-slate-200">
                                     <h4 className="font-semibold text-slate-900 mb-3">環境変数の設定方法</h4>
