@@ -897,8 +897,9 @@
         .cf-rec-result{margin-top:24px;opacity:0;max-height:0;overflow:hidden;transition:opacity .5s,max-height .5s}
         .cf-rec-result.visible{opacity:1;max-height:2000px}
         .cf-rec-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:16px}
-        .cf-rec-card{background:#fff;border-radius:14px;border:2px solid #e8e8e8;overflow:hidden;transition:transform .3s,box-shadow .3s}
+        .cf-rec-card{background:#fff;border-radius:14px;border:2px solid #e8e8e8;overflow:hidden;transition:transform .3s,box-shadow .3s,border-color .2s}
         .cf-rec-card:hover{transform:translateY(-2px);box-shadow:0 4px 16px rgba(0,0,0,.08)}
+        .cf-rec-card.rec-selected{border-color:#33a065!important;box-shadow:0 0 0 3px rgba(51,160,101,.18),0 4px 16px rgba(0,0,0,.06)!important;transform:translateY(-2px)}
         .cf-rec-card.rank-matsu{border-color:#b8a472}
         .cf-rec-card.rank-take{border-color:#55b87f;box-shadow:0 0 0 2px rgba(42,157,94,.12)}
         .cf-rec-card.rank-ume{border-color:#d0d0d0}
@@ -7617,6 +7618,7 @@
             const [recPlan, setRecPlan] = useState(null); // { matsu, take, ume }
             const [currentRecFreq, setCurrentRecFreq] = useState(0);
             const [currentRecPlanId, setCurrentRecPlanId] = useState('');
+            const [manualOverride, setManualOverride] = useState(null); // セラピスト手動選択: CF_PLAN_CATALOG item or null
             const graphRef = React.useRef(null);
             const graphInitRef = React.useRef(false);
 
@@ -7927,11 +7929,15 @@
             useEffect(() => {
                 if (recommendation) {
                     setRecPlan(recommendation);
-                    setCurrentRecFreq(recommendation.take.freq);
-                    setCurrentRecPlanId(recommendation.take.id);
+                    // 手動オーバーライドがなければ自動のtakeを使用
+                    if (!manualOverride) {
+                        setCurrentRecFreq(recommendation.take.freq);
+                        setCurrentRecPlanId(recommendation.take.id);
+                    }
                     setCompletedStep(1);
                 } else {
                     setRecPlan(null);
+                    setManualOverride(null);
                     setCurrentRecFreq(0);
                     setCurrentRecPlanId('');
                     setCompletedStep(0);
@@ -7994,6 +8000,26 @@
             // タグのCSS class
             const tagClass = (cat) => cat === 'face' ? 'cf-tag-face' : cat === 'posture' ? 'cf-tag-posture' : 'cf-tag-pelvis';
             const tagLabel = (cat) => cat === 'face' ? '小顔' : cat === 'posture' ? '姿勢' : '骨盤';
+
+            // セラピスト手動でおすすめプラン変更
+            const handleRecCardSelect = (plan) => {
+                setManualOverride(plan);
+                setCurrentRecPlanId(plan.id);
+                setCurrentRecFreq(plan.freq);
+            };
+            const handleManualPlanChange = (key) => {
+                if (!key) {
+                    // 「自動」に戻す
+                    setManualOverride(null);
+                    if (recommendation) {
+                        setCurrentRecPlanId(recommendation.take.id);
+                        setCurrentRecFreq(recommendation.take.freq);
+                    }
+                } else {
+                    const plan = CF_PLAN_CATALOG.find(p => p.key === key);
+                    if (plan) handleRecCardSelect(plan);
+                }
+            };
 
             // プランカードの推奨判定
             const isPlanRec = (planId) => currentRecPlanId === planId;
@@ -8079,13 +8105,18 @@
             ) : null;
 
             // 松竹梅カード
-            const RecCard = ({ rank, label, icon, plan }) => {
+            const RecCard = ({ rank, label, icon, plan, isSelected, onSelect }) => {
                 if (!plan) return null;
                 const typesHtml = recPlan && recPlan.typesArr.length > 0
                     ? recPlan.typesArr.map(t => <span key={t.cat} className={'cf-tag ' + tagClass(t.cat)} style={{fontSize:11,padding:'3px 10px',borderRadius:6}}>{t.label}</span>)
                     : <span style={{fontSize:11,color:'#6b6b6b'}}>{plan.types}</span>;
                 return (
-                    <div className={'cf-rec-card rank-' + rank}>
+                    <div
+                        className={'cf-rec-card rank-' + rank + (isSelected ? ' rec-selected' : '')}
+                        onClick={() => onSelect && onSelect(plan)}
+                        style={{cursor: onSelect ? 'pointer' : 'default', position:'relative'}}
+                    >
+                        {isSelected && <div style={{position:'absolute',top:8,right:8,width:22,height:22,background:'#33a065',borderRadius:'50%',display:'flex',alignItems:'center',justifyContent:'center',color:'white',fontSize:12,fontWeight:700,boxShadow:'0 2px 6px rgba(51,160,101,.4)'}}>✓</div>}
                         <div className="cf-rec-rank"><span>{icon}</span>{label}</div>
                         <div className="cf-rec-body">
                             <div className="cf-rec-plan-name">{plan.name}</div>
@@ -8263,12 +8294,40 @@
                                                 <div style={{width:28,height:28,background:'#33a065',borderRadius:8,display:'flex',alignItems:'center',justifyContent:'center',color:'white',fontSize:14,flexShrink:0}}>✓</div>
                                                 おすすめプラン
                                             </div>
-                                            <div style={{fontSize:13,color:'#6b6b6b',lineHeight:1.8}}>{recPlan.reasons.join('・')}、<strong>3つのプラン</strong>をご提案します。担当セラピストとご相談ください。</div>
+                                            <div style={{fontSize:13,color:'#6b6b6b',lineHeight:1.8}}>{recPlan.reasons.join('・')}、<strong>3つのプラン</strong>をご提案します。カードをタップで変更できます。</div>
                                         </div>
                                         <div className="cf-rec-grid">
-                                            <RecCard rank="matsu" label="しっかりコース" icon="◆" plan={recPlan.matsu} />
-                                            <RecCard rank="take" label="おすすめ" icon="★" plan={recPlan.take} />
-                                            <RecCard rank="ume" label="お手軽コース" icon="●" plan={recPlan.ume} />
+                                            <RecCard rank="matsu" label="しっかりコース" icon="◆" plan={recPlan.matsu}
+                                                isSelected={manualOverride ? manualOverride.key === recPlan.matsu?.key : false}
+                                                onSelect={handleRecCardSelect} />
+                                            <RecCard rank="take" label="おすすめ" icon="★" plan={recPlan.take}
+                                                isSelected={manualOverride ? manualOverride.key === recPlan.take?.key : !manualOverride}
+                                                onSelect={handleRecCardSelect} />
+                                            <RecCard rank="ume" label="お手軽コース" icon="●" plan={recPlan.ume}
+                                                isSelected={manualOverride ? manualOverride.key === recPlan.ume?.key : false}
+                                                onSelect={handleRecCardSelect} />
+                                        </div>
+                                        {/* セラピスト手動変更 */}
+                                        <div style={{marginTop:14,padding:'12px 16px',background:'#f8fafc',borderRadius:12,border:'1px solid #e2e8f0',display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
+                                            <div style={{display:'flex',alignItems:'center',gap:6,fontSize:12,color:'#64748b',fontWeight:600,whiteSpace:'nowrap'}}>
+                                                <Icon name="sliders-horizontal" size={14} />
+                                                セラピスト変更
+                                            </div>
+                                            <select
+                                                value={manualOverride ? manualOverride.key : ''}
+                                                onChange={e => handleManualPlanChange(e.target.value)}
+                                                style={{flex:1,minWidth:180,padding:'7px 12px',borderRadius:8,border:'1px solid #d1d5db',fontSize:13,color:'#334155',background:'white',cursor:'pointer'}}
+                                            >
+                                                <option value="">自動おすすめ（{recPlan.take?.name} {recPlan.take?.freqLabel}）</option>
+                                                {CF_PLAN_CATALOG.map(p => (
+                                                    <option key={p.key} value={p.key}>{p.name} {p.freqLabel} — ¥{p.price.toLocaleString()}</option>
+                                                ))}
+                                            </select>
+                                            {manualOverride && (
+                                                <button onClick={() => handleManualPlanChange('')} style={{padding:'6px 12px',background:'#e2e8f0',border:'none',borderRadius:8,fontSize:12,color:'#475569',cursor:'pointer',fontWeight:500}}>
+                                                    自動に戻す
+                                                </button>
+                                            )}
                                         </div>
                                     </>
                                 )}
