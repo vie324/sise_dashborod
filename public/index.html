@@ -1233,7 +1233,8 @@
         const verifyStaffPassword = async (staffId, password) => {
             // まずGASから最新のスタッフリストを取得
             const gasStaff = await fetchStaffFromGas();
-            const list = gasStaff || loadStaffList();
+            // GASが空配列やnullの場合、localStorageにフォールバック
+            const list = (gasStaff && gasStaff.length > 0) ? gasStaff : loadStaffList();
             const staff = list.find(s => s.id === staffId);
             if (!staff) return { ok: false, reason: 'スタッフが見つかりません' };
             if (!staff.password) return { ok: true }; // パスワード未設定なら通過
