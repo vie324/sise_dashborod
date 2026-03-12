@@ -295,6 +295,9 @@ function handleCounselingGet(params) {
   // 店舗一覧
   if (action === 'stores') return handleStoresGet();
 
+  // 全店舗診断モード
+  if (action === 'diagnose') return diagnoseCounselingSheets();
+
   const storeKey = params.store || '';
   if (!storeKey || !COUNSELING_STORES[storeKey]) {
     return { error: '店舗を指定してください（store=' + Object.keys(COUNSELING_STORES).join('|') + '）' };
@@ -463,6 +466,114 @@ function counselingSearch(data, C, query) {
     customers.push({ index: i, name, timestamp: date.toISOString(), concerns: concerns });
   }
   return { customers, total: customers.length, lastUpdated: new Date().toISOString() };
+}
+
+// ============================================================
+// カウンセリング診断（全店舗のシート状態を一括チェック）
+// ============================================================
+
+function diagnoseCounselingSheets() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var allSheetNames = ss.getSheets().map(function(s) { return s.getName(); });
+  var storeKeys = Object.keys(COUNSELING_STORES);
+  var results = {};
+
+  for (var s = 0; s < storeKeys.length; s++) {
+    var storeKey = storeKeys[s];
+    var expectedName = COUNSELING_STORES[storeKey];
+    var info = { expectedSheetName: expectedName, exists: false };
+
+    var sheet = ss.getSheetByName(expectedName);
+    if (!sheet) {
+      // 部分一致でシートを探す
+      var partialMatch = null;
+      for (var a = 0; a < allSheetNames.length; a++) {
+        if (allSheetNames[a].indexOf(storeKey === 'honatsugi' ? '本厚木' :
+            storeKey === 'yamato' ? '大和' :
+            storeKey === 'yokohama' ? '横浜' :
+            storeKey === 'machida' ? '町田' : '川口') !== -1) {
+          partialMatch = allSheetNames[a];
+          break;
+        }
+      }
+      info.exists = false;
+      info.error = 'シートが見つかりません';
+      info.suggestion = partialMatch
+        ? '似た名前のシートがあります: "' + partialMatch + '" → シート名を "' + expectedName + '" に変更してください'
+        : 'このスプレッドシートにシートを作成するか、GASコードのCOUNSELING_STORESのシート名を修正してください';
+      info.allSheetNames = allSheetNames;
+      results[storeKey] = info;
+      continue;
+    }
+
+    info.exists = true;
+    var lastRow = sheet.getLastRow();
+    var numCols = sheet.getLastColumn();
+    info.rows = lastRow - 1; // ヘッダー除く
+    info.cols = numCols;
+
+    if (lastRow < 1 || numCols < 1) {
+      info.error = 'シートが空です';
+      results[storeKey] = info;
+      continue;
+    }
+
+    // ヘッダー行
+    var headerRow = sheet.getRange(1, 1, 1, numCols).getValues()[0];
+    info.headers = headerRow.map(function(h, i) { return { col: i, header: String(h || '').trim() }; });
+
+    // カラム検出
+    var C = detectCounselingColumns(headerRow);
+    info.detectedColumns = {};
+    var allKeys = Object.keys(COUNSELING_COL_DEFAULT);
+    for (var k = 0; k < allKeys.length; k++) {
+      var colKey = allKeys[k];
+      var colIdx = C[colKey];
+      var headerText = (colIdx >= 0 && colIdx < headerRow.length) ? String(headerRow[colIdx] || '').trim() : '(未検出)';
+      info.detectedColumns[colKey] = { column: colIdx, header: headerText };
+    }
+
+    // CONCERNS列のサンプルデータ
+    if (lastRow >= 2) {
+      var sampleRows = Math.min(lastRow - 1, 5);
+      var data = sheet.getRange(2, 1, sampleRows, numCols).getValues();
+      info.sampleData = [];
+      for (var r = 0; r < data.length; r++) {
+        var row = data[r];
+        var sample = {
+          name: String(colVal(row, C.NAME) || '').trim(),
+          concernsCol: C.CONCERNS,
+          rawConcernsValue: C.CONCERNS >= 0 ? String(row[C.CONCERNS] || '').substring(0, 100) : '(列未検出)',
+          parsedConcerns: C.CONCERNS >= 0 ? parseMultiSelect(row[C.CONCERNS]) : []
+        };
+        // フォールバックスキャンも実行
+        if (sample.parsedConcerns.length === 0) {
+          var scanned = scanForConcerns(row, C);
+          if (scanned.length > 0) {
+            sample.fallbackScanFound = scanned;
+            // どの列で見つかったかも記録
+            for (var ci = 0; ci < row.length; ci++) {
+              var cv = String(row[ci] || '').trim();
+              if (cv && scanned.join(',') === parseMultiSelect(cv).join(',')) {
+                sample.fallbackScanColumn = ci;
+                sample.fallbackScanHeader = String(headerRow[ci] || '').trim();
+                break;
+              }
+            }
+          }
+        }
+        info.sampleData.push(sample);
+      }
+    }
+
+    results[storeKey] = info;
+  }
+
+  return {
+    diagnosis: results,
+    allSheetNames: allSheetNames,
+    instructions: '各店舗の結果を確認してください。exists=false の場合はシート名を修正。detectedColumns.CONCERNS.column が正しくない場合はヘッダー名を確認してください。'
+  };
 }
 
 // ============================================================
