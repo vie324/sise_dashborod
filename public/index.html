@@ -4016,6 +4016,13 @@
         // ========================================
         // サブスク契約リンク生成モーダル
         // ========================================
+        // activeStoreIdが'all'の場合、最初の店舗IDにフォールバック
+        const resolveStoreId = (sid) => {
+            if (sid && sid !== 'all') return sid;
+            if (serverStores.length > 0) return serverStores[0].id;
+            return null; // defaultにフォールバック（ヘッダー送信しない）
+        };
+
         const SubscriptionLinkModal = ({ isOpen, onClose, activeStoreId, memberData }) => {
             const [plans, setPlans] = useState([]);
             const [selectedPlanId, setSelectedPlanId] = useState('');
@@ -4038,7 +4045,7 @@
                     setFetchingPlans(true);
                     try {
                         const headers = { 'Content-Type': 'application/json' };
-                        if (activeStoreId && activeStoreId !== 'all') headers['X-Store-Id'] = activeStoreId;
+                        { const sid = resolveStoreId(activeStoreId); if (sid) headers['X-Store-Id'] = sid; }
                         const res = await fetch(`${SQUARE_PROXY_BASE}/catalog/list`, {
                             method: 'POST',
                             headers,
@@ -4154,7 +4161,7 @@
 
                 try {
                     const headers = { 'Content-Type': 'application/json' };
-                    if (activeStoreId && activeStoreId !== 'all') headers['X-Store-Id'] = activeStoreId;
+                    { const sid = resolveStoreId(activeStoreId); if (sid) headers['X-Store-Id'] = sid; }
 
                     const res = await fetch(`${SQUARE_PROXY_BASE}/online-checkout/payment-links`, {
                         method: 'POST',
@@ -7612,7 +7619,7 @@
                 setQrFetchingPlans(true);
                 try {
                     const headers = { 'Content-Type': 'application/json' };
-                    if (activeStoreId && activeStoreId !== 'all') headers['X-Store-Id'] = activeStoreId;
+                    { const sid = resolveStoreId(activeStoreId); if (sid) headers['X-Store-Id'] = sid; }
                     const res = await fetch(`${SQUARE_PROXY_BASE}/catalog/list`, {
                         method: 'POST',
                         headers,
@@ -7727,7 +7734,7 @@
                 setQrDataUrl(null);
                 try {
                     const headers = { 'Content-Type': 'application/json' };
-                    if (activeStoreId && activeStoreId !== 'all') headers['X-Store-Id'] = activeStoreId;
+                    { const sid = resolveStoreId(activeStoreId); if (sid) headers['X-Store-Id'] = sid; }
                     const res = await fetch(`${SQUARE_PROXY_BASE}/online-checkout/payment-links`, {
                         method: 'POST',
                         headers,
