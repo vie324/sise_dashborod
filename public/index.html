@@ -1176,6 +1176,7 @@
         };
 
         const saveStaffToGas = async (staffList) => gasPostRequest({ type: 'staff', action: 'saveStaff', staff: staffList });
+        const updateStaffGas = async (staffId, updates) => gasPostRequest({ type: 'staff', action: 'updateStaff', staffId, updates });
         const softDeleteStaffGas = async (staffId) => gasPostRequest({ type: 'staff', action: 'deleteStaff', staffId });
         const restoreStaffGas = async (staffId) => gasPostRequest({ type: 'staff', action: 'restoreStaff', staffId });
 
@@ -6187,16 +6188,34 @@
                 if (!formData.name.trim()) return;
                 let updated;
                 if (editingStaff) {
-                    updated = staffList.map(s => s.id === editingStaff.id ? { ...s, ...formData } : s);
+                    // 編集: 個別更新
+                    const changes = { name: formData.name, role: formData.role, password: formData.password, storeIds: formData.storeIds };
+                    updated = staffList.map(s => s.id === editingStaff.id ? { ...s, ...changes } : s);
+                    setStaffList(updated);
+                    saveStaffListLocal(updated);
+                    setGasSyncing(true);
+                    await updateStaffGas(editingStaff.id, changes);
+                    setGasSyncing(false);
+                    // 名前・店舗・役割が変わった場合、URLも変わるので注意喚起
+                    const nameChanged = editingStaff.name !== formData.name;
+                    const storeChanged = JSON.stringify(editingStaff.storeIds || []) !== JSON.stringify(formData.storeIds);
+                    const roleChanged = editingStaff.role !== formData.role;
+                    if (nameChanged || storeChanged || roleChanged) {
+                        showToast(`「${formData.name}」を更新しました。URLが変更されたため、再度コピーしてください`, 'info', 5000);
+                    } else {
+                        showToast(`「${formData.name}」を更新しました`, 'success', 2000);
+                    }
                 } else {
+                    // 新規追加
                     const newStaff = { ...formData, id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), createdAt: new Date().toISOString().slice(0, 10), status: 'active' };
                     updated = [...staffList, newStaff];
+                    setStaffList(updated);
+                    saveStaffListLocal(updated);
+                    setGasSyncing(true);
+                    await saveStaffToGas(updated);
+                    setGasSyncing(false);
+                    showToast(`「${formData.name}」を追加しました`, 'success', 2000);
                 }
-                setStaffList(updated);
-                saveStaffListLocal(updated);
-                setGasSyncing(true);
-                await saveStaffToGas(updated);
-                setGasSyncing(false);
                 setEditingStaff(null);
                 setIsAdding(false);
                 setFormData({ name: '', role: 'staff', password: '', storeIds: [] });
@@ -6204,17 +6223,29 @@
 
             const handleSoftDelete = async (id) => {
                 if (!confirm('このスタッフを無効にしますか？（データは保持されます）')) return;
-                setStaffList(prev => prev.map(s => s.id === id ? { ...s, status: 'inactive' } : s));
+                const staff = staffList.find(s => s.id === id);
+                setStaffList(prev => {
+                    const updated = prev.map(s => s.id === id ? { ...s, status: 'inactive' } : s);
+                    saveStaffListLocal(updated);
+                    return updated;
+                });
                 setGasSyncing(true);
                 await softDeleteStaffGas(id);
                 setGasSyncing(false);
+                showToast(`「${staff?.name || ''}」を無効にしました`, 'success', 2000);
             };
 
             const handleRestore = async (id) => {
-                setStaffList(prev => prev.map(s => s.id === id ? { ...s, status: 'active' } : s));
+                const staff = staffList.find(s => s.id === id);
+                setStaffList(prev => {
+                    const updated = prev.map(s => s.id === id ? { ...s, status: 'active' } : s);
+                    saveStaffListLocal(updated);
+                    return updated;
+                });
                 setGasSyncing(true);
                 await restoreStaffGas(id);
                 setGasSyncing(false);
+                showToast(`「${staff?.name || ''}」を復元しました`, 'success', 2000);
             };
 
             const handleEdit = (staff) => {
@@ -6280,19 +6311,19 @@
                             ) : (
                                 <>
                                     <button
+                                        onClick={() => handleEdit(staff)}
+                                        className="flex items-center px-2.5 py-1.5 rounded-lg text-xs font-medium bg-slate-100 hover:bg-amber-50 text-slate-600 hover:text-amber-700 transition-all"
+                                        title="名前・店舗・パスワードを編集"
+                                    >
+                                        <Icon name="pencil" size={14} className="mr-1" />編集
+                                    </button>
+                                    <button
                                         onClick={() => handleCopyUrl(staff)}
                                         className={`flex items-center px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all ${copiedId === staff.id ? 'bg-green-100 text-green-700' : 'bg-slate-100 hover:bg-sise-50 text-slate-600 hover:text-sise-600'}`}
                                         title="URLをコピー"
                                     >
                                         <Icon name={copiedId === staff.id ? 'check' : 'link'} size={14} className="mr-1" />
                                         {copiedId === staff.id ? 'コピー済' : 'URL'}
-                                    </button>
-                                    <button
-                                        onClick={() => handleEdit(staff)}
-                                        className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
-                                        title="編集"
-                                    >
-                                        <Icon name="pencil" size={14} />
                                     </button>
                                     <button
                                         onClick={() => handleSoftDelete(staff.id)}
@@ -6332,6 +6363,12 @@
                             <h4 className="font-semibold text-slate-800 mb-3">
                                 {editingStaff ? 'スタッフ編集' : '新規スタッフ追加'}
                             </h4>
+                            {editingStaff && (
+                                <div className="mb-3 px-3 py-2 bg-amber-50 rounded-lg border border-amber-200 text-xs text-amber-700">
+                                    <Icon name="alert-triangle" size={12} className="inline mr-1" />
+                                    名前・役割・店舗を変更すると共有URLが変わります。更新後はURLを再コピーしてください。
+                                </div>
+                            )}
                             <div className="space-y-3">
                                 <div>
                                     <label className="block text-sm font-medium text-slate-700 mb-1">名前</label>

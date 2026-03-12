@@ -41,6 +41,7 @@
  *
  * POST { type:"usage", action:"saveUsage", data:[...] }
  * POST { type:"staff", action:"saveStaff", staff:[...] }
+ * POST { type:"staff", action:"updateStaff", staffId:"xxx", updates:{name,role,password,storeIds} }
  * POST { type:"staff", action:"deleteStaff", staffId:"xxx" }  → ソフトデリート
  * POST { type:"staff", action:"restoreStaff", staffId:"xxx" } → 復元
  * POST { type:"storeManage", action:"addStore", store:{id,name} }
@@ -606,6 +607,7 @@ function handleStaffPost(body) {
   var action = body.action || '';
   switch (action) {
     case 'saveStaff':    return saveStaffList(body.staff || []);
+    case 'updateStaff':  return updateSingleStaff(body.staffId, body.updates || {});
     case 'deleteStaff':  return softDeleteStaff(body.staffId);
     case 'restoreStaff': return restoreStaff(body.staffId);
     default: return { error: '不明なstaff action: ' + action };
@@ -633,6 +635,23 @@ function saveStaffList(staffArr) {
     sheet.getRange(2, 1, rows.length, 7).setValues(rows);
   }
   return { success: true, count: rows.length };
+}
+
+function updateSingleStaff(staffId, updates) {
+  if (!staffId) return { error: 'staffIdが必要です' };
+  var sheet = ensureStaffSheet();
+  var rows = sheet.getDataRange().getValues();
+  for (var i = 1; i < rows.length; i++) {
+    if (String(rows[i][0]) === String(staffId)) {
+      // B=名前, C=役割, D=パスワード, E=店舗IDs
+      if (updates.name !== undefined)     sheet.getRange(i + 1, 2).setValue(updates.name);
+      if (updates.role !== undefined)     sheet.getRange(i + 1, 3).setValue(updates.role);
+      if (updates.password !== undefined) sheet.getRange(i + 1, 4).setValue(updates.password);
+      if (updates.storeIds !== undefined) sheet.getRange(i + 1, 5).setValue((updates.storeIds || []).join(','));
+      return { success: true, staffId: staffId };
+    }
+  }
+  return { error: 'スタッフが見つかりません: ' + staffId };
 }
 
 function softDeleteStaff(staffId) {
