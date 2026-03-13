@@ -2969,6 +2969,29 @@
             { id: 'kawaguchi', name: '川口店' }
         ];
 
+        // スタッフ権限のSquare店舗IDからカウンセリング店舗を特定するヘルパー
+        // currentAccess.storeIds（Square ID）→ serverStores（name）→ COUNSELING_STORES（id）
+        const getAllowedCounselingStores = () => {
+            if (!currentAccess || !currentAccess.storeIds || currentAccess.storeIds.length === 0) {
+                return COUNSELING_STORES; // 管理者は全店舗
+            }
+            // serverStores未ロード時はマッピング不可のため全店舗を仮表示
+            // （ConceptFormViewのuseEffectでロード後に再検証される）
+            if (serverStores.length === 0) {
+                return COUNSELING_STORES;
+            }
+            // Square IDから店舗名を取得し、カウンセリング店舗名と照合
+            const allowedNames = currentAccess.storeIds.map(sid => {
+                const s = serverStores.find(st => st.id === sid);
+                return s ? s.name : sid;
+            });
+            const allowed = COUNSELING_STORES.filter(cs =>
+                allowedNames.includes(cs.name)
+            );
+            // マッピング解決済みだが一致なし → アクセス権なしとして空配列を返さず最低1店舗は表示
+            return allowed.length > 0 ? allowed : [];
+        };
+
         const useCounselingData = () => {
             const [customers, setCustomers] = useState([]);
             const [selectedCustomer, setSelectedCustomer] = useState(null);
@@ -2976,12 +2999,12 @@
             const [searchQuery, setSearchQuery] = useState('');
             const [counselingStore, setCounselingStore] = useState(() => {
                 const saved = localStorage.getItem('sise_counseling_store') || 'honatsugi';
-                // 権限のある店舗のみ許可
-                if (currentAccess && currentAccess.storeIds && currentAccess.storeIds.length > 0) {
-                    if (currentAccess.storeIds.includes(saved)) return saved;
-                    // カウンセリング店舗IDと権限storeIdsの交差を探す
-                    const allowed = COUNSELING_STORES.find(s => currentAccess.storeIds.includes(s.id));
-                    return allowed ? allowed.id : saved;
+                // 権限のある店舗のみ許可（Square IDと名前ベースで照合）
+                const allowed = getAllowedCounselingStores();
+                if (allowed.length > 0 && allowed.length < COUNSELING_STORES.length) {
+                    // 制限あり: 保存値が許可リストにあればそれを使う
+                    if (allowed.find(s => s.id === saved)) return saved;
+                    return allowed[0].id;
                 }
                 return saved;
             });
@@ -8264,6 +8287,15 @@
             const [currentRecFreq, setCurrentRecFreq] = useState(0);
             const [currentRecPlanId, setCurrentRecPlanId] = useState('');
             const [manualOverride, setManualOverride] = useState(null); // セラピスト手動選択: CF_PLAN_CATALOG item or null
+
+            // serverStoresが非同期でロードされるため、ロード後にカウンセリング店舗を再検証
+            useEffect(() => {
+                if (!currentAccess || !memberData.stores || memberData.stores.length === 0) return;
+                const allowed = getAllowedCounselingStores();
+                if (allowed.length > 0 && allowed.length < COUNSELING_STORES.length && !allowed.find(s => s.id === counselingStore)) {
+                    setCounselingStore(allowed[0].id);
+                }
+            }, [memberData.stores]);
             const graphRef = React.useRef(null);
             const graphInitRef = React.useRef(false);
 
@@ -8817,19 +8849,23 @@
                 <div className="space-y-4">
                     {/* 顧客選択バー */}
                     <div className="cf-customer-bar">
-                        <select
-                            value={counselingStore}
-                            onChange={e => setCounselingStore(e.target.value)}
-                            className="cf-customer-bar select"
-                            style={{maxWidth:140,fontWeight:600,color:'#238050'}}
-                        >
-                            {(currentAccess && currentAccess.storeIds
-                                ? COUNSELING_STORES.filter(s => currentAccess.storeIds.includes(s.id))
-                                : COUNSELING_STORES
-                            ).map(s => (
-                                <option key={s.id} value={s.id}>{s.name}</option>
-                            ))}
-                        </select>
+                        {(() => {
+                            const allowedStores = getAllowedCounselingStores();
+                            const isRestricted = currentAccess && currentAccess.role !== 'headquarter';
+                            return allowedStores.length === 0
+                                ? <span style={{fontSize:13,fontWeight:600,color:'#94a3b8',padding:'4px 8px'}}>アクセス権限がありません</span>
+                                : <select
+                                    value={counselingStore}
+                                    onChange={e => setCounselingStore(e.target.value)}
+                                    className="cf-customer-bar select"
+                                    style={{maxWidth:140,fontWeight:600,color:'#238050'}}
+                                    disabled={isRestricted && allowedStores.length <= 1}
+                                >
+                                    {allowedStores.map(s => (
+                                        <option key={s.id} value={s.id}>{s.name}</option>
+                                    ))}
+                                </select>;
+                        })()}
                         <div style={{width:1,height:24,background:'#e2e8f0',flexShrink:0}}></div>
                         <div style={{display:'flex',alignItems:'center',gap:4,minWidth:0,flex:1}}>
                             <Icon name="search" size={16} className="text-sise-500" style={{flexShrink:0}} />
