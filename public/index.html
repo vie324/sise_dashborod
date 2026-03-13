@@ -1245,6 +1245,23 @@
         // 現在のアクセス情報（URLから解析）
         const currentAccess = parseAccessFromUrl();
 
+        // 権限チェック: レポートの店舗名が許可されたstoreIdsに含まれるか判定
+        // storeIds は Square の店舗ID（例: "LID..."）、r.store は店舗名（例: "本厚木店"）
+        // serverStores（{id, name}の配列）を使って名前→ID変換して判定
+        const isStoreAllowed = (storeName) => {
+            if (!currentAccess || !currentAccess.storeIds || currentAccess.storeIds.length === 0) return true;
+            // serverStoresがロード済みならID→名前マッピングで判定
+            if (serverStores.length > 0) {
+                const allowedNames = currentAccess.storeIds.map(sid => {
+                    const s = serverStores.find(st => st.id === sid);
+                    return s ? s.name : sid;
+                });
+                return allowedNames.includes(storeName);
+            }
+            // serverStores未ロードの場合、storeIdsに名前が直接含まれるかも確認
+            return currentAccess.storeIds.includes(storeName);
+        };
+
         // ========================================
         // ヘルパー関数
         // ========================================
@@ -2957,9 +2974,17 @@
             const [selectedCustomer, setSelectedCustomer] = useState(null);
             const [loading, setLoading] = useState(false);
             const [searchQuery, setSearchQuery] = useState('');
-            const [counselingStore, setCounselingStore] = useState(
-                localStorage.getItem('sise_counseling_store') || 'honatsugi'
-            );
+            const [counselingStore, setCounselingStore] = useState(() => {
+                const saved = localStorage.getItem('sise_counseling_store') || 'honatsugi';
+                // 権限のある店舗のみ許可
+                if (currentAccess && currentAccess.storeIds && currentAccess.storeIds.length > 0) {
+                    if (currentAccess.storeIds.includes(saved)) return saved;
+                    // カウンセリング店舗IDと権限storeIdsの交差を探す
+                    const allowed = COUNSELING_STORES.find(s => currentAccess.storeIds.includes(s.id));
+                    return allowed ? allowed.id : saved;
+                }
+                return saved;
+            });
 
             const storeParam = '&store=' + counselingStore;
 
@@ -3092,6 +3117,10 @@
                 }
 
                 let filtered = reportData.reports;
+                // 権限のある店舗のみに絞り込み（スタッフ・店舗管理者モード）
+                if (currentAccess) {
+                    filtered = filtered.filter(r => isStoreAllowed(r.store));
+                }
                 if (selectedStore !== 'all') {
                     filtered = filtered.filter(r => r.store === selectedStore);
                 }
@@ -3105,9 +3134,13 @@
                 }
                 filtered = filtered.filter(r => new Date(r.timestamp) >= startDate);
 
-                // 本日のレポート
+                // 本日のレポート（権限のある店舗のみ）
                 const todayStr = now.toISOString().slice(0, 10);
-                const todayReports = reportData.reports.filter(r => r.timestamp && r.timestamp.startsWith(todayStr));
+                let todayBase = reportData.reports;
+                if (currentAccess) {
+                    todayBase = todayBase.filter(r => isStoreAllowed(r.store));
+                }
+                const todayReports = todayBase.filter(r => r.timestamp && r.timestamp.startsWith(todayStr));
                 const todayNew = todayReports.reduce((s, r) => s + (r.hpbNew||0) + (r.metaNew||0) + (r.referralNew||0) + (r.discountNew||0), 0);
                 const todayContract = todayReports.reduce((s, r) => s + (r.hpbContract||0) + (r.metaContract||0) + (r.referralContract||0) + (r.discountContract||0), 0);
                 const todayTreatments = todayReports.reduce((s, r) => s + (r.existingTreatments||0), 0);
@@ -3503,6 +3536,10 @@
 
             const filteredReports = useMemo(() => {
                 let reports = reportData.reports || [];
+                // 権限のある店舗のみに絞り込み
+                if (currentAccess) {
+                    reports = reports.filter(r => isStoreAllowed(r.store));
+                }
                 if (filterStore !== 'all') {
                     reports = reports.filter(r => r.store === filterStore);
                 }
@@ -3719,6 +3756,10 @@
 
             const filteredManual = useMemo(() => {
                 let list = manualMembers || [];
+                // 権限のある店舗のみ表示
+                if (currentAccess) {
+                    list = list.filter(m => !m.storeName || isStoreAllowed(m.storeName));
+                }
                 if (manualFilter !== 'all') list = list.filter(m => m.status === manualFilter);
                 if (manualSearch) {
                     const q = manualSearch.toLowerCase();
@@ -3731,7 +3772,7 @@
             const combinedMembers = useMemo(() => {
                 if (viewMode !== 'combined') return [];
                 const sq = (squareMembers || []).map(m => ({ ...m, source: 'square' }));
-                const man = (manualMembers || []).filter(m => m.status === 'ACTIVE').map(m => ({
+                const man = storeFilteredManual.filter(m => m.status === 'ACTIVE').map(m => ({
                     id: m.id, name: m.name, phone: m.phone || '', email: m.email || '',
                     status: m.status, startDate: m.startDate, planName: m.planName,
                     monthlyPrice: m.monthlyPrice, paymentMethod: m.paymentMethod,
@@ -3745,9 +3786,14 @@
                 return all.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ja'));
             }, [squareMembers, manualMembers, viewMode, manualSearch]);
 
-            const activeManualCount = (manualMembers || []).filter(m => m.status === 'ACTIVE').length;
-            const canceledManualCount = (manualMembers || []).filter(m => m.status === 'CANCELED').length;
-            const manualRevenue = (manualMembers || []).filter(m => m.status === 'ACTIVE').reduce((s, m) => s + (m.monthlyPrice || 0), 0);
+            const storeFilteredManual = useMemo(() => {
+                let list = manualMembers || [];
+                if (currentAccess) list = list.filter(m => !m.storeName || isStoreAllowed(m.storeName));
+                return list;
+            }, [manualMembers]);
+            const activeManualCount = storeFilteredManual.filter(m => m.status === 'ACTIVE').length;
+            const canceledManualCount = storeFilteredManual.filter(m => m.status === 'CANCELED').length;
+            const manualRevenue = storeFilteredManual.filter(m => m.status === 'ACTIVE').reduce((s, m) => s + (m.monthlyPrice || 0), 0);
 
             // 今月の支払状況確認
             const getCurrentMonthPayment = (member) => {
@@ -5288,6 +5334,10 @@
             // フィルタリング
             const filteredTickets = useMemo(() => {
                 let list = customerTickets;
+                // 権限のある店舗のみ表示
+                if (currentAccess) {
+                    list = list.filter(t => !t.storeName || isStoreAllowed(t.storeName));
+                }
                 if (filterStatus !== 'all') {
                     list = list.filter(t => getTicketStatus(t) === filterStatus);
                 }
@@ -5371,13 +5421,24 @@
                         </div>
                     )}
 
-                    {/* KPIサマリ */}
-                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 md:gap-4">
-                        <KpiCard title="有効回数券" value={stats.active} subValue={`全${stats.total}件`} icon="ticket" gradientFrom="from-sise-400" gradientTo="to-sise-600" />
-                        <KpiCard title="期限間近" value={stats.expiringSoon} subValue="30日以内" icon="alert-triangle" gradientFrom={stats.expiringSoon > 0 ? "from-amber-400" : "from-slate-400"} gradientTo={stats.expiringSoon > 0 ? "to-amber-600" : "to-slate-500"} />
-                        <KpiCard title="残セッション" value={stats.totalRemaining} subValue="有効分の合計" icon="hash" gradientFrom="from-blue-400" gradientTo="to-blue-600" />
-                        <KpiCard title="累計売上" value={formatCurrency(stats.totalRevenue)} subValue="回数券販売額" icon="wallet" gradientFrom="from-emerald-400" gradientTo="to-emerald-600" />
-                    </div>
+                    {/* KPIサマリ（権限フィルタ適用済みデータから算出） */}
+                    {(() => {
+                        let storeTickets = customerTickets;
+                        if (currentAccess) storeTickets = storeTickets.filter(t => !t.storeName || isStoreAllowed(t.storeName));
+                        const now = new Date();
+                        const fActive = storeTickets.filter(t => t.remainingSessions > 0 && new Date(t.expirationDate) >= now);
+                        const fExpiring = storeTickets.filter(t => { const d = (new Date(t.expirationDate) - now) / 86400000; return t.remainingSessions > 0 && d >= 0 && d <= 30; });
+                        const fRemaining = fActive.reduce((s, t) => s + t.remainingSessions, 0);
+                        const fRevenue = storeTickets.reduce((s, t) => s + (t.price || 0), 0);
+                        return (
+                            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 md:gap-4">
+                                <KpiCard title="有効回数券" value={fActive.length} subValue={`全${storeTickets.length}件`} icon="ticket" gradientFrom="from-sise-400" gradientTo="to-sise-600" />
+                                <KpiCard title="期限間近" value={fExpiring.length} subValue="30日以内" icon="alert-triangle" gradientFrom={fExpiring.length > 0 ? "from-amber-400" : "from-slate-400"} gradientTo={fExpiring.length > 0 ? "to-amber-600" : "to-slate-500"} />
+                                <KpiCard title="残セッション" value={fRemaining} subValue="有効分の合計" icon="hash" gradientFrom="from-blue-400" gradientTo="to-blue-600" />
+                                <KpiCard title="累計売上" value={formatCurrency(fRevenue)} subValue="回数券販売額" icon="wallet" gradientFrom="from-emerald-400" gradientTo="to-emerald-600" />
+                            </div>
+                        );
+                    })()}
 
                     {/* タブ切り替え */}
                     <div className="flex gap-1 bg-slate-100 dark:bg-slate-800/60 rounded-2xl p-1.5">
@@ -7016,8 +7077,25 @@
         // 出納帳ビュー
         // ========================================
 
-        const CashbookView = ({ cashbookHook, memberData, manualMembersHook }) => {
-            const { entries, addEntry, updateEntry, deleteEntry } = cashbookHook;
+        const CashbookView = ({ cashbookHook, memberData, manualMembersHook, activeStoreId }) => {
+            const { entries: rawEntries, addEntry: rawAddEntry, updateEntry, deleteEntry } = cashbookHook;
+
+            // 権限のある店舗のみ表示（storeフィールドがあればフィルタ、なければ非staffモードのみ表示）
+            const entries = useMemo(() => {
+                if (!currentAccess) return rawEntries; // 管理者は全件表示
+                return (rawEntries || []).filter(e => {
+                    if (!e.store) return true; // store未設定の既存データは表示（後方互換）
+                    return currentAccess.storeIds.includes(e.store);
+                });
+            }, [rawEntries]);
+
+            // 新規エントリーに店舗IDを自動付与
+            const addEntry = useCallback((entry) => {
+                return rawAddEntry({
+                    ...entry,
+                    store: entry.store || activeStoreId || (currentAccess && currentAccess.storeIds.length === 1 ? currentAccess.storeIds[0] : 'all')
+                });
+            }, [rawAddEntry, activeStoreId]);
             const [showForm, setShowForm] = useState(false);
             const [selectedDate, setSelectedDate] = useState(new Date().toISOString().slice(0, 10));
             const [viewMonth, setViewMonth] = useState(new Date().toISOString().slice(0, 7));
@@ -8745,7 +8823,10 @@
                             className="cf-customer-bar select"
                             style={{maxWidth:140,fontWeight:600,color:'#238050'}}
                         >
-                            {COUNSELING_STORES.map(s => (
+                            {(currentAccess && currentAccess.storeIds
+                                ? COUNSELING_STORES.filter(s => currentAccess.storeIds.includes(s.id))
+                                : COUNSELING_STORES
+                            ).map(s => (
                                 <option key={s.id} value={s.id}>{s.name}</option>
                             ))}
                         </select>
@@ -9923,7 +10004,7 @@
                 { id: 'usage', label: '利用管理', icon: 'clipboard-check', mobileLabel: '利用' },
                 { id: 'tickets', label: '回数券', icon: 'ticket', mobileLabel: '回数券' },
                 { id: 'counseling', label: 'カウンセリング', icon: 'heart-handshake', mobileLabel: '案内' },
-                { id: 'marketing', label: 'マーケティング', icon: 'megaphone', mobileLabel: '広告' },
+                ...(!isStaffMode || (currentAccess && currentAccess.role === 'headquarter') ? [{ id: 'marketing', label: 'マーケティング', icon: 'megaphone', mobileLabel: '広告' }] : []),
                 ...(!isStaffMode ? [{ id: 'settings', label: '設定', icon: 'settings', mobileLabel: '設定' }] : []),
             ];
 
@@ -9941,7 +10022,7 @@
                     case 'members':
                         return <MemberManagementView memberData={memberData} refreshSquareData={refreshSquareData} operateSubscription={operateSubscription} activeStoreId={activeStoreId} manualMembersHook={manualMembersHook} />;
                     case 'cashbook':
-                        return <CashbookView cashbookHook={cashbookHook} memberData={memberData} manualMembersHook={manualMembersHook} />;
+                        return <CashbookView cashbookHook={cashbookHook} memberData={memberData} manualMembersHook={manualMembersHook} activeStoreId={activeStoreId} />;
                     case 'usage':
                         return <MemberUsageView memberData={memberData} usageHook={usageHook} />;
                     case 'tickets':
@@ -9949,6 +10030,10 @@
                     case 'counseling':
                         return <ConceptFormView counselingHook={counselingHook} activeStoreId={activeStoreId} memberData={memberData} />;
                     case 'marketing':
+                        // マーケティングは本部のみアクセス可
+                        if (isStaffMode && (!currentAccess || currentAccess.role !== 'headquarter')) {
+                            return <DashboardView memberData={memberData} reportData={reportData} selectedStore={selectedStore} setSelectedStore={setSelectedStore} />;
+                        }
                         return <MarketingView marketingHook={marketingHook} />;
                     case 'settings':
                         return isStaffMode
