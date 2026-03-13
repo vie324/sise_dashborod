@@ -3099,7 +3099,7 @@
             );
         };
 
-        const DashboardView = ({ memberData, reportData, selectedStore, setSelectedStore }) => {
+        const DashboardView = ({ memberData, reportData, selectedStore, setSelectedStore, allowedStoreNames }) => {
             const [dateRange, setDateRange] = useState('month');
 
             if (!window.Recharts) return <div className="p-8 text-center">チャートを読み込み中...</div>;
@@ -3118,8 +3118,8 @@
 
                 let filtered = reportData.reports;
                 // 権限のある店舗のみに絞り込み（スタッフ・店舗管理者モード）
-                if (currentAccess) {
-                    filtered = filtered.filter(r => isStoreAllowed(r.store));
+                if (allowedStoreNames) {
+                    filtered = filtered.filter(r => allowedStoreNames.includes(r.store));
                 }
                 if (selectedStore !== 'all') {
                     filtered = filtered.filter(r => r.store === selectedStore);
@@ -3137,8 +3137,8 @@
                 // 本日のレポート（権限のある店舗のみ）
                 const todayStr = now.toISOString().slice(0, 10);
                 let todayBase = reportData.reports;
-                if (currentAccess) {
-                    todayBase = todayBase.filter(r => isStoreAllowed(r.store));
+                if (allowedStoreNames) {
+                    todayBase = todayBase.filter(r => allowedStoreNames.includes(r.store));
                 }
                 const todayReports = todayBase.filter(r => r.timestamp && r.timestamp.startsWith(todayStr));
                 const todayNew = todayReports.reduce((s, r) => s + (r.hpbNew||0) + (r.metaNew||0) + (r.referralNew||0) + (r.discountNew||0), 0);
@@ -3201,7 +3201,7 @@
                     dailyNewTrend, dailyContractTrend, dailyTreatmentTrend,
                     bestChannel, topStore
                 };
-            }, [reportData.reports, selectedStore, dateRange]);
+            }, [reportData.reports, selectedStore, dateRange, allowedStoreNames]);
 
             const storeColors = ['#33a065', '#3b82f6', '#f97316', '#a855f7', '#ec4899'];
             const tooltipStyle = { backgroundColor: 'rgba(255,255,255,0.95)', borderColor: '#e2e8f0', borderRadius: '16px', boxShadow: '0 12px 40px -8px rgba(0,0,0,0.1)', padding: '12px 16px' };
@@ -3530,15 +3530,15 @@
         // 日報一覧ビュー
         // ========================================
 
-        const DailyReportListView = ({ reportData }) => {
+        const DailyReportListView = ({ reportData, allowedStoreNames }) => {
             const [filterStore, setFilterStore] = useState('all');
             const [sortOrder, setSortOrder] = useState('desc');
 
             const filteredReports = useMemo(() => {
                 let reports = reportData.reports || [];
                 // 権限のある店舗のみに絞り込み
-                if (currentAccess) {
-                    reports = reports.filter(r => isStoreAllowed(r.store));
+                if (allowedStoreNames) {
+                    reports = reports.filter(r => allowedStoreNames.includes(r.store));
                 }
                 if (filterStore !== 'all') {
                     reports = reports.filter(r => r.store === filterStore);
@@ -3548,7 +3548,7 @@
                     const dateB = new Date(b.timestamp);
                     return sortOrder === 'desc' ? dateB - dateA : dateA - dateB;
                 });
-            }, [reportData.reports, filterStore, sortOrder]);
+            }, [reportData.reports, filterStore, sortOrder, allowedStoreNames]);
 
             // 日報サマリー統計
             const reportStats = useMemo(() => {
@@ -9926,6 +9926,19 @@
                 activeStoreId,
                 isStaffMode ? currentAccess.storeIds : null
             );
+
+            // 権限のある店舗名リスト（レポートのstore名フィルタ用）
+            // memberData.storesは全店舗、currentAccess.storeIdsでフィルタして名前リストを作る
+            const allowedStoreNames = useMemo(() => {
+                if (!isStaffMode) return null; // null = フィルタなし（全店舗表示）
+                const allStores = memberData.stores || [];
+                if (allStores.length === 0) return currentAccess.storeIds; // フォールバック: IDそのまま
+                return currentAccess.storeIds.map(sid => {
+                    const s = allStores.find(st => st.id === sid);
+                    return s ? s.name : sid;
+                });
+            }, [isStaffMode, memberData.stores]);
+
             // 日報データ取得
             const { reportData, refreshReportData } = useDailyReportData();
             // 利用回数管理
@@ -10016,9 +10029,10 @@
                             reportData={reportData}
                             selectedStore={selectedStore}
                             setSelectedStore={setSelectedStore}
+                            allowedStoreNames={allowedStoreNames}
                         />;
                     case 'reports':
-                        return <DailyReportListView reportData={reportData} />;
+                        return <DailyReportListView reportData={reportData} allowedStoreNames={allowedStoreNames} />;
                     case 'members':
                         return <MemberManagementView memberData={memberData} refreshSquareData={refreshSquareData} operateSubscription={operateSubscription} activeStoreId={activeStoreId} manualMembersHook={manualMembersHook} />;
                     case 'cashbook':
@@ -10032,12 +10046,12 @@
                     case 'marketing':
                         // マーケティングは本部のみアクセス可
                         if (isStaffMode && (!currentAccess || currentAccess.role !== 'headquarter')) {
-                            return <DashboardView memberData={memberData} reportData={reportData} selectedStore={selectedStore} setSelectedStore={setSelectedStore} />;
+                            return <DashboardView memberData={memberData} reportData={reportData} selectedStore={selectedStore} setSelectedStore={setSelectedStore} allowedStoreNames={allowedStoreNames} />;
                         }
                         return <MarketingView marketingHook={marketingHook} />;
                     case 'settings':
                         return isStaffMode
-                            ? <DashboardView memberData={memberData} reportData={reportData} selectedStore={selectedStore} setSelectedStore={setSelectedStore} />
+                            ? <DashboardView memberData={memberData} reportData={reportData} selectedStore={selectedStore} setSelectedStore={setSelectedStore} allowedStoreNames={allowedStoreNames} />
                             : <SettingsView onSettingsSaved={() => { refreshReportData(); }} />;
                     default:
                         return <DashboardView
@@ -10045,6 +10059,7 @@
                             reportData={reportData}
                             selectedStore={selectedStore}
                             setSelectedStore={setSelectedStore}
+                            allowedStoreNames={allowedStoreNames}
                         />;
                 }
             };
