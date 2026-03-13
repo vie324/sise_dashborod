@@ -2975,15 +2975,7 @@
             const [loading, setLoading] = useState(false);
             const [searchQuery, setSearchQuery] = useState('');
             const [counselingStore, setCounselingStore] = useState(() => {
-                const saved = localStorage.getItem('sise_counseling_store') || 'honatsugi';
-                // 権限のある店舗のみ許可
-                if (currentAccess && currentAccess.storeIds && currentAccess.storeIds.length > 0) {
-                    if (currentAccess.storeIds.includes(saved)) return saved;
-                    // カウンセリング店舗IDと権限storeIdsの交差を探す
-                    const allowed = COUNSELING_STORES.find(s => currentAccess.storeIds.includes(s.id));
-                    return allowed ? allowed.id : saved;
-                }
-                return saved;
+                return localStorage.getItem('sise_counseling_store') || 'honatsugi';
             });
 
             const storeParam = '&store=' + counselingStore;
@@ -8251,9 +8243,19 @@
             { key:'Monthly-1',  id:'Monthly',  name:'月一フル', freq:1, freqLabel:'月1回',        types:'全種類対応',  desc:'月1回で全種類を無理なくメンテナンス', price:10000 },
         ];
 
-        const ConceptFormView = ({ counselingHook, activeStoreId, memberData }) => {
+        const ConceptFormView = ({ counselingHook, activeStoreId, memberData, allowedStoreNames }) => {
             const { customers, selectedCustomer, loading, fetchCustomerDetail, searchCustomers, fetchCustomerList, counselingStore, setCounselingStore } = counselingHook;
             const [searchInput, setSearchInput] = useState('');
+
+            // 権限のある店舗が確定したら、現在選択中の店舗が権限外なら自動補正
+            useEffect(() => {
+                if (!allowedStoreNames) return;
+                const currentStore = COUNSELING_STORES.find(s => s.id === counselingStore);
+                if (currentStore && allowedStoreNames.includes(currentStore.name)) return; // OK
+                // 権限外 → 最初の許可店舗に切り替え
+                const firstAllowed = COUNSELING_STORES.find(s => allowedStoreNames.includes(s.name));
+                if (firstAllowed) setCounselingStore(firstAllowed.id);
+            }, [allowedStoreNames, counselingStore]);
             const [concerns, setConcerns] = useState({});
             const [feedbacks, setFeedbacks] = useState({});
             const [showConcept, setShowConcept] = useState(false);
@@ -8823,8 +8825,8 @@
                             className="cf-customer-bar select"
                             style={{maxWidth:140,fontWeight:600,color:'#238050'}}
                         >
-                            {(currentAccess && currentAccess.storeIds
-                                ? COUNSELING_STORES.filter(s => currentAccess.storeIds.includes(s.id))
+                            {(allowedStoreNames
+                                ? COUNSELING_STORES.filter(s => allowedStoreNames.includes(s.name))
                                 : COUNSELING_STORES
                             ).map(s => (
                                 <option key={s.id} value={s.id}>{s.name}</option>
@@ -10042,7 +10044,7 @@
                     case 'tickets':
                         return <TicketManagementView ticketHook={ticketHook} />;
                     case 'counseling':
-                        return <ConceptFormView counselingHook={counselingHook} activeStoreId={activeStoreId} memberData={memberData} />;
+                        return <ConceptFormView counselingHook={counselingHook} activeStoreId={activeStoreId} memberData={memberData} allowedStoreNames={allowedStoreNames} />;
                     case 'marketing':
                         // マーケティングは本部のみアクセス可
                         if (isStaffMode && (!currentAccess || currentAccess.role !== 'headquarter')) {
