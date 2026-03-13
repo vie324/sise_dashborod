@@ -1061,6 +1061,156 @@
         // 統合 Google Apps Script URL（全機能で共有・1つのスプレッドシートで管理）
         const UNIFIED_GAS_URL = localStorage.getItem('sise_unified_gas_url') || 'https://script.google.com/macros/s/AKfycbwuRYK8zSVri6jipLbJYKv_LMi0520g5fr--LYjQFbckznMuMx3Jlspse69pFZqXxYKqQ/exec';
 
+        // ========================================
+        // 認証トークン管理
+        // ========================================
+
+        // SHA-256ハッシュ（Web Crypto API）
+        const sha256 = async (message) => {
+            const encoder = new TextEncoder();
+            const data = encoder.encode(message);
+            const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+            const hashArray = Array.from(new Uint8Array(hashBuffer));
+            return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+        };
+
+        // HMAC-SHA256署名（Web Crypto API）
+        const hmacSign = async (message, secret) => {
+            const encoder = new TextEncoder();
+            const keyData = encoder.encode(secret);
+            const key = await crypto.subtle.importKey(
+                'raw', keyData, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']
+            );
+            const sigBuffer = await crypto.subtle.sign('HMAC', key, encoder.encode(message));
+            const sigArray = Array.from(new Uint8Array(sigBuffer));
+            return sigArray.map(b => b.toString(16).padStart(2, '0')).join('');
+        };
+
+        // 認証トークン管理
+        const AuthManager = {
+            getToken: () => sessionStorage.getItem('sise_auth_token') || '',
+            setToken: (token) => sessionStorage.setItem('sise_auth_token', token),
+            clearToken: () => sessionStorage.removeItem('sise_auth_token'),
+            getSecret: () => sessionStorage.getItem('sise_auth_secret') || '',
+            setSecret: (secret) => sessionStorage.setItem('sise_auth_secret', secret),
+            isAuthenticated: () => !!sessionStorage.getItem('sise_auth_token'),
+
+            // 署名済みトークンをクライアント側で生成（管理者用 - secretが必要）
+            generateToken: async (staffId, role, storeIds, isAdmin) => {
+                const secret = AuthManager.getSecret();
+                if (!secret) return null;
+                const payload = {
+                    staffId, role, storeIds: storeIds || [],
+                    isAdmin: !!isAdmin,
+                    exp: Date.now() + (24 * 60 * 60 * 1000),
+                    iat: Date.now()
+                };
+                const payloadB64 = btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
+                const signature = await hmacSign(payloadB64, secret);
+                return payloadB64 + '.' + signature;
+            },
+
+            // GASにログインしてトークンを取得
+            login: async (staffId, password) => {
+                const gasUrl = localStorage.getItem('sise_unified_gas_url') || UNIFIED_GAS_URL;
+                const res = await fetch(gasUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ type: 'auth', action: 'login', staffId, password })
+                });
+                const data = await res.json();
+                if (data.success && data.token) {
+                    AuthManager.setToken(data.token);
+                }
+                return data;
+            },
+
+            // 管理者ログイン
+            adminLogin: async (password) => {
+                const gasUrl = localStorage.getItem('sise_unified_gas_url') || UNIFIED_GAS_URL;
+                const res = await fetch(gasUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ type: 'auth', action: 'adminLogin', password })
+                });
+                const data = await res.json();
+                if (data.success && data.token) {
+                    AuthManager.setToken(data.token);
+                    if (data.secret) AuthManager.setSecret(data.secret);
+                }
+                return data;
+            },
+
+            // 管理者パスワード設定
+            setAdminPassword: async (newPassword, currentPassword) => {
+                const gasUrl = localStorage.getItem('sise_unified_gas_url') || UNIFIED_GAS_URL;
+                const res = await fetch(gasUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ type: 'auth', action: 'setAdminPassword', newPassword, currentPassword })
+                });
+                const data = await res.json();
+                if (data.success && data.token) {
+                    AuthManager.setToken(data.token);
+                    if (data.secret) AuthManager.setSecret(data.secret);
+                }
+                return data;
+            },
+
+            // パスワードマイグレーション実行
+            migratePasswords: async () => {
+                const gasUrl = localStorage.getItem('sise_unified_gas_url') || UNIFIED_GAS_URL;
+                const res = await fetch(gasUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ type: 'auth', action: 'migratePasswords', auth: AuthManager.getToken() })
+                });
+                return await res.json();
+            },
+
+            // 認証情報取得（認証不要）
+            getAuthInfo: async () => {
+                const gasUrl = localStorage.getItem('sise_unified_gas_url') || UNIFIED_GAS_URL;
+                try {
+                    const res = await fetch(gasUrl + '?type=authInfo');
+                    return await res.json();
+                } catch (e) {
+                    return { authEnabled: false, adminPasswordSet: false };
+                }
+            }
+        };
+
+        // 認証付きGAS fetch（GET）
+        const gasAuthGet = async (url) => {
+            const token = AuthManager.getToken();
+            const separator = url.includes('?') ? '&' : '?';
+            const authUrl = url + separator + 'auth=' + encodeURIComponent(token);
+            const res = await fetch(authUrl);
+            const data = await res.json();
+            if (data.authRequired) {
+                // 認証切れ - 再ログインが必要
+                AuthManager.clearToken();
+                window.dispatchEvent(new CustomEvent('sise-auth-expired'));
+            }
+            return data;
+        };
+
+        // 認証付きGAS fetch（POST）
+        const gasAuthPost = async (url, body) => {
+            const token = AuthManager.getToken();
+            const res = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ...body, auth: token })
+            });
+            const data = await res.json();
+            if (data.authRequired) {
+                AuthManager.clearToken();
+                window.dispatchEvent(new CustomEvent('sise-auth-expired'));
+            }
+            return data;
+        };
+
         // API設定（サーバーサイドプロキシ経由）
         // APIキーはVercel環境変数で管理、フロントエンドには露出しない
         const SQUARE_PROXY_BASE = '/api/square';
@@ -1127,7 +1277,7 @@
 
         // アクセストークン生成（UTF-8対応）
         const generateStaffToken = (staff) => {
-            const payload = { n: staff.name, r: staff.role, sid: staff.storeIds, pw: staff.password ? 1 : 0, id: staff.id };
+            const payload = { n: staff.name, r: staff.role, sid: staff.storeIds, pw: (staff.hasPassword || staff.password) ? 1 : 0, id: staff.id };
             return btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
         };
 
@@ -1145,17 +1295,12 @@
         };
         const saveStaffListLocal = (list) => localStorage.setItem(STAFF_STORAGE_KEY, JSON.stringify(list));
 
-        // GASスプレッドシート経由のスタッフ管理
+        // GASスプレッドシート経由のスタッフ管理（認証付き）
         const gasPostRequest = async (body) => {
             const gasUrl = localStorage.getItem('sise_unified_gas_url');
             if (!gasUrl) return null;
             try {
-                const resp = await fetch(gasUrl, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(body)
-                });
-                return await resp.json();
+                return await gasAuthPost(gasUrl, body);
             } catch (e) {
                 console.warn('GAS POST エラー:', e);
                 return null;
@@ -1166,8 +1311,11 @@
             const gasUrl = localStorage.getItem('sise_unified_gas_url');
             if (!gasUrl) return null;
             try {
-                const resp = await fetch(gasUrl + '?type=staff&includeInactive=' + (includeInactive ? 'true' : 'false'));
-                const data = await resp.json();
+                const data = await gasAuthGet(gasUrl + '?type=staff&includeInactive=' + (includeInactive ? 'true' : 'false'));
+                if (data.error) {
+                    console.warn('GASスタッフ取得エラー:', data.error);
+                    return null;
+                }
                 return data.staff || [];
             } catch (e) {
                 console.warn('GASスタッフ取得エラー:', e);
@@ -1185,8 +1333,7 @@
             const gasUrl = localStorage.getItem('sise_unified_gas_url');
             if (!gasUrl) return null;
             try {
-                const resp = await fetch(gasUrl + '?type=storeManage&includeInactive=' + (includeInactive ? 'true' : 'false'));
-                const data = await resp.json();
+                const data = await gasAuthGet(gasUrl + '?type=storeManage&includeInactive=' + (includeInactive ? 'true' : 'false'));
                 return data.stores || [];
             } catch (e) {
                 console.warn('GAS店舗取得エラー:', e);
@@ -1205,8 +1352,7 @@
             if (!gasUrl) return null;
             try {
                 const url = key ? gasUrl + '?type=dashConfig&key=' + encodeURIComponent(key) : gasUrl + '?type=dashConfig';
-                const resp = await fetch(url);
-                const data = await resp.json();
+                const data = await gasAuthGet(url);
                 return key ? data.value : (data.config || {});
             } catch (e) { return null; }
         };
@@ -1219,8 +1365,7 @@
             const gasUrl = localStorage.getItem('sise_unified_gas_url');
             if (!gasUrl) return null;
             try {
-                const resp = await fetch(gasUrl + '?type=hpb');
-                const data = await resp.json();
+                const data = await gasAuthGet(gasUrl + '?type=hpb');
                 return data.monthly || null;
             } catch (e) { return null; }
         };
@@ -1229,17 +1374,15 @@
         const deleteHpbMonthGas = async (yearMonth) => gasPostRequest({ type: 'hpb', action: 'delete', yearMonth });
         const saveHpbAllGas = async (monthly) => gasPostRequest({ type: 'hpb', action: 'saveAll', monthly });
 
-        // パスワード検証（URLアクセス時のスタッフ照合）
+        // パスワード検証（URLアクセス時のスタッフ照合）- GASサーバー経由でログイン
         const verifyStaffPassword = async (staffId, password) => {
-            // まずGASから最新のスタッフリストを取得
-            const gasStaff = await fetchStaffFromGas();
-            // GASが空配列やnullの場合、localStorageにフォールバック
-            const list = (gasStaff && gasStaff.length > 0) ? gasStaff : loadStaffList();
-            const staff = list.find(s => s.id === staffId);
-            if (!staff) return { ok: false, reason: 'スタッフが見つかりません' };
-            if (!staff.password) return { ok: true }; // パスワード未設定なら通過
-            if (staff.password === password) return { ok: true };
-            return { ok: false, reason: 'パスワードが正しくありません' };
+            try {
+                const result = await AuthManager.login(staffId, password);
+                if (result.success) return { ok: true };
+                return { ok: false, reason: result.error || 'パスワードが正しくありません' };
+            } catch (e) {
+                return { ok: false, reason: '認証サーバーに接続できません' };
+            }
         };
 
         // 現在のアクセス情報（URLから解析）
@@ -2026,11 +2169,7 @@
 
                 try {
                     // 当月+先月のデータを取得（月間トレンド比較用）
-                    const response = await fetch(UNIFIED_GAS_URL + '?type=report&months=2');
-                    if (!response.ok) {
-                        throw new Error('日報データの取得に失敗しました (HTTP ' + response.status + ')');
-                    }
-                    const data = await response.json();
+                    const data = await gasAuthGet(UNIFIED_GAS_URL + '?type=report&months=2');
 
                     if (data.error) {
                         throw new Error(data.error);
@@ -2298,8 +2437,7 @@
             // GASからデータを取得する関数
             const fetchFromGAS = useCallback(() => {
                 if (MEMBER_USAGE_GAS_URL !== 'YOUR_UNIFIED_GAS_URL') {
-                    return fetch(MEMBER_USAGE_GAS_URL + '?type=usage&month=' + currentMonth)
-                        .then(r => r.json())
+                    return gasAuthGet(MEMBER_USAGE_GAS_URL + '?type=usage&month=' + currentMonth)
                         .then(data => {
                             if (data && data.usage) {
                                 setUsageData(prev => {
@@ -2351,13 +2489,9 @@
                     } catch (e) {}
                     // GASへ即時同期（バックグラウンド）
                     if (MEMBER_USAGE_GAS_URL !== 'YOUR_UNIFIED_GAS_URL') {
-                        fetch(MEMBER_USAGE_GAS_URL, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
+                        gasAuthPost(MEMBER_USAGE_GAS_URL, {
                                 type: 'usage', action: 'saveUsage',
                                 data: [{ memberId, month: currentMonth, periodKey: periodKey || '', count: Math.max(0, count), updatedAt: new Date().toISOString() }]
-                            })
                         }).catch(() => {});
                     }
                     return updated;
@@ -2388,11 +2522,7 @@
                                 updatedAt: new Date().toISOString()
                             };
                         });
-                        await fetch(MEMBER_USAGE_GAS_URL, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ type: 'usage', action: 'saveUsage', data: payload })
-                        });
+                        await gasAuthPost(MEMBER_USAGE_GAS_URL, { type: 'usage', action: 'saveUsage', data: payload });
                     }
                     setLastSaved(new Date());
                     showToast('利用回数を保存しました', 'success', 2000);
@@ -2440,8 +2570,7 @@
             // GASからデータを取得する関数
             const fetchTicketsFromGAS = useCallback(() => {
                 if (TICKET_GAS_URL !== 'YOUR_UNIFIED_GAS_URL') {
-                    return fetch(TICKET_GAS_URL + '?type=ticket')
-                        .then(r => r.json())
+                    return gasAuthGet(TICKET_GAS_URL + '?type=ticket')
                         .then(data => {
                             if (data && data.plans) {
                                 setTicketPlans(data.plans);
@@ -2610,11 +2739,7 @@
                 try {
                     saveLocal(ticketPlans, customerTickets);
                     if (TICKET_GAS_URL !== 'YOUR_UNIFIED_GAS_URL') {
-                        await fetch(TICKET_GAS_URL, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ type: 'ticket', action: 'saveTickets', plans: ticketPlans, tickets: customerTickets })
-                        });
+                        await gasAuthPost(TICKET_GAS_URL, { type: 'ticket', action: 'saveTickets', plans: ticketPlans, tickets: customerTickets });
                     }
                     setLastSaved(new Date());
                     showToast('回数券データを保存しました', 'success', 2000);
@@ -2674,8 +2799,7 @@
             // GASから取得
             const fetchFromGAS = useCallback(() => {
                 if (MANUAL_MEMBERS_GAS_URL !== 'YOUR_UNIFIED_GAS_URL') {
-                    return fetch(MANUAL_MEMBERS_GAS_URL + '?type=members')
-                        .then(r => r.json())
+                    return gasAuthGet(MANUAL_MEMBERS_GAS_URL + '?type=members')
                         .then(data => {
                             if (data && data.members) {
                                 setManualMembers(data.members);
@@ -2711,11 +2835,7 @@
             // GASに保存
             const saveToGAS = useCallback(async (members) => {
                 if (MANUAL_MEMBERS_GAS_URL !== 'YOUR_UNIFIED_GAS_URL') {
-                    await fetch(MANUAL_MEMBERS_GAS_URL, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ type: 'members', action: 'saveManualMembers', members })
-                    }).catch(() => {});
+                    await gasAuthPost(MANUAL_MEMBERS_GAS_URL, { type: 'members', action: 'saveManualMembers', members }).catch(() => {});
                 }
             }, []);
 
@@ -2882,8 +3002,7 @@
                     setEntries(stored);
                 } catch (e) {}
                 if (CASHBOOK_GAS_URL !== 'YOUR_UNIFIED_GAS_URL') {
-                    fetch(CASHBOOK_GAS_URL + '?type=cashbook')
-                        .then(r => r.json())
+                    gasAuthGet(CASHBOOK_GAS_URL + '?type=cashbook')
                         .then(data => {
                             if (data && data.entries) {
                                 setEntries(data.entries);
@@ -2900,11 +3019,7 @@
 
             const saveToGAS = useCallback(async (data) => {
                 if (CASHBOOK_GAS_URL !== 'YOUR_UNIFIED_GAS_URL') {
-                    await fetch(CASHBOOK_GAS_URL, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ type: 'cashbook', action: 'saveCashbook', entries: data })
-                    }).catch(() => {});
+                    await gasAuthPost(CASHBOOK_GAS_URL, { type: 'cashbook', action: 'saveCashbook', entries: data }).catch(() => {});
                 }
             }, []);
 
@@ -3017,8 +3132,7 @@
                 try {
                     const url = COUNSELING_GAS_URL + '?type=counseling&action=recent&limit=50' + storeParam;
                     console.log('[カウンセリング] 顧客一覧取得:', url);
-                    const res = await fetch(url);
-                    const data = await res.json();
+                    const data = await gasAuthGet(url);
                     console.log('[カウンセリング] 一覧レスポンス _debug:', JSON.stringify(data._debug || {}));
                     if (data && data.customers) {
                         setCustomers(data.customers);
@@ -3041,8 +3155,7 @@
                 if (COUNSELING_GAS_URL === 'YOUR_UNIFIED_GAS_URL' || !q) return;
                 setLoading(true);
                 try {
-                    const res = await fetch(COUNSELING_GAS_URL + '?type=counseling&action=search&q=' + encodeURIComponent(q) + storeParam);
-                    const data = await res.json();
+                    const data = await gasAuthGet(COUNSELING_GAS_URL + '?type=counseling&action=search&q=' + encodeURIComponent(q) + storeParam);
                     if (data && data.customers) {
                         setCustomers(data.customers);
                     }
@@ -3061,8 +3174,7 @@
                     if (index !== undefined) url += '&index=' + index;
                     else if (name) url += '&name=' + encodeURIComponent(name);
                     console.log('[カウンセリング] detail URL:', url);
-                    const res = await fetch(url);
-                    const data = await res.json();
+                    const data = await gasAuthGet(url);
                     console.log('[カウンセリング] GASレスポンス:', JSON.stringify(data._debug || {}));
                     if (data && data.customer) {
                         setSelectedCustomer(data.customer);
@@ -9581,6 +9693,88 @@
             );
         };
 
+        // セキュリティ管理セクション
+        const SecurityManagementSection = () => {
+            const [adminPw, setAdminPw] = useState('');
+            const [adminPwConfirm, setAdminPwConfirm] = useState('');
+            const [currentPw, setCurrentPw] = useState('');
+            const [pwMessage, setPwMessage] = useState('');
+            const [migrateMessage, setMigrateMessage] = useState('');
+            const [processing, setProcessing] = useState(false);
+
+            const handleChangeAdminPassword = async () => {
+                if (adminPw.length < 6) { setPwMessage('パスワードは6文字以上必要です'); return; }
+                if (adminPw !== adminPwConfirm) { setPwMessage('パスワードが一致しません'); return; }
+                setProcessing(true);
+                setPwMessage('');
+                const result = await AuthManager.setAdminPassword(adminPw, currentPw);
+                setProcessing(false);
+                if (result.success) {
+                    setPwMessage('管理者パスワードを変更しました');
+                    setAdminPw(''); setAdminPwConfirm(''); setCurrentPw('');
+                } else {
+                    setPwMessage(result.error || '変更に失敗しました');
+                }
+            };
+
+            const handleMigrate = async () => {
+                setProcessing(true);
+                setMigrateMessage('');
+                const result = await AuthManager.migratePasswords();
+                setProcessing(false);
+                if (result.success) {
+                    setMigrateMessage(`${result.migrated}件のパスワードをハッシュ化しました`);
+                } else {
+                    setMigrateMessage(result.error || 'マイグレーションに失敗しました');
+                }
+            };
+
+            return (
+                <Card>
+                    <h3 className="text-lg font-semibold text-slate-900 mb-4">
+                        <Icon name="shield" size={20} className="inline mr-2 text-sise-500" />セキュリティ管理
+                    </h3>
+                    <div className="space-y-4">
+                        <div className="p-4 bg-green-50 border border-green-200 rounded-xl">
+                            <p className="text-sm text-green-700">
+                                <Icon name="check-circle" size={14} className="inline mr-1" />
+                                GAS API認証が有効です。全てのリクエストはHMAC署名付きトークンで保護されています。
+                            </p>
+                        </div>
+
+                        <div className="border-t pt-4">
+                            <h4 className="text-sm font-semibold text-slate-700 mb-3">管理者パスワード変更</h4>
+                            <div className="space-y-2">
+                                <input type="password" value={currentPw} onChange={e => setCurrentPw(e.target.value)}
+                                    placeholder="現在のパスワード" className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm outline-none focus:border-sise-400" />
+                                <input type="password" value={adminPw} onChange={e => setAdminPw(e.target.value)}
+                                    placeholder="新しいパスワード（6文字以上）" className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm outline-none focus:border-sise-400" />
+                                <input type="password" value={adminPwConfirm} onChange={e => setAdminPwConfirm(e.target.value)}
+                                    placeholder="新しいパスワード（確認）" className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm outline-none focus:border-sise-400" />
+                                <button onClick={handleChangeAdminPassword} disabled={processing}
+                                    className="px-4 py-2 bg-sise-500 hover:bg-sise-600 text-white rounded-xl text-sm font-medium disabled:opacity-50">
+                                    {processing ? '処理中...' : 'パスワードを変更'}
+                                </button>
+                                {pwMessage && <p className="text-sm text-slate-600 mt-1">{pwMessage}</p>}
+                            </div>
+                        </div>
+
+                        <div className="border-t pt-4">
+                            <h4 className="text-sm font-semibold text-slate-700 mb-2">パスワードマイグレーション</h4>
+                            <p className="text-xs text-slate-500 mb-3">
+                                既存の平文パスワードをSHA-256ハッシュに変換します（1回のみ実行推奨）
+                            </p>
+                            <button onClick={handleMigrate} disabled={processing}
+                                className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-sm font-medium disabled:opacity-50">
+                                {processing ? '処理中...' : 'パスワードをハッシュ化'}
+                            </button>
+                            {migrateMessage && <p className="text-sm text-slate-600 mt-2">{migrateMessage}</p>}
+                        </div>
+                    </div>
+                </Card>
+            );
+        };
+
         const SettingsView = ({ onSettingsSaved }) => {
             const [squareStatus, setSquareStatus] = useState({ loading: true });
             const [unifiedGasUrl, setUnifiedGasUrl] = useState(() => {
@@ -9852,19 +10046,8 @@
                     {/* スタッフ管理 */}
                     <StaffManagementSection />
 
-                    {/* セキュリティ情報 */}
-                    <Card className="bg-green-50 border-green-200">
-                        <div className="flex items-start">
-                            <Icon name="shield-check" size={20} className="text-green-500 mr-3 mt-0.5" />
-                            <div>
-                                <h4 className="font-semibold text-green-900 mb-1">セキュリティ</h4>
-                                <p className="text-sm text-green-700">
-                                    Square APIトークンはVercelのサーバーサイドで管理されています。
-                                    ブラウザにはトークンが露出しない安全な構成です。
-                                </p>
-                            </div>
-                        </div>
-                    </Card>
+                    {/* セキュリティ管理 */}
+                    <SecurityManagementSection />
                 </div>
             );
         };
@@ -9933,13 +10116,122 @@
             );
         };
 
+        // 管理者ログイン画面
+        const AdminLoginScreen = ({ onLogin }) => {
+            const [password, setPassword] = useState('');
+            const [newPassword, setNewPassword] = useState('');
+            const [confirmPassword, setConfirmPassword] = useState('');
+            const [error, setError] = useState('');
+            const [checking, setChecking] = useState(false);
+            const [isSetup, setIsSetup] = useState(false);
+            const [authInfo, setAuthInfo] = useState(null);
+
+            useEffect(() => {
+                AuthManager.getAuthInfo().then(info => {
+                    setAuthInfo(info);
+                    if (!info.adminPasswordSet) setIsSetup(true);
+                });
+            }, []);
+
+            const handleLogin = async (e) => {
+                e.preventDefault();
+                setChecking(true);
+                setError('');
+                try {
+                    if (isSetup) {
+                        if (newPassword.length < 6) { setError('パスワードは6文字以上必要です'); setChecking(false); return; }
+                        if (newPassword !== confirmPassword) { setError('パスワードが一致しません'); setChecking(false); return; }
+                        const result = await AuthManager.setAdminPassword(newPassword, password);
+                        if (result.success) { onLogin(); }
+                        else { setError(result.error || '設定に失敗しました'); }
+                    } else {
+                        const result = await AuthManager.adminLogin(password);
+                        if (result.success) { onLogin(); }
+                        else { setError(result.error || 'パスワードが正しくありません'); }
+                    }
+                } catch (e) {
+                    setError('サーバーに接続できません');
+                } finally { setChecking(false); }
+            };
+
+            if (!authInfo) return React.createElement('div', { style: { display:'flex', justifyContent:'center', alignItems:'center', height:'100vh', background:'linear-gradient(135deg,#f0fdf4,#ecfdf5)' } },
+                React.createElement('p', { style: { color:'#64748b' } }, '読み込み中...')
+            );
+
+            return (
+                <div style={{display:'flex',justifyContent:'center',alignItems:'center',minHeight:'100vh',background:'linear-gradient(135deg,#f0fdf4,#ecfdf5)',padding:16}}>
+                    <div style={{background:'white',borderRadius:24,padding:'40px 32px',maxWidth:380,width:'100%',boxShadow:'0 8px 32px rgba(0,0,0,0.08)',textAlign:'center'}}>
+                        <div style={{width:56,height:56,borderRadius:16,background:'linear-gradient(135deg,#2d7a4f,#1a5136)',display:'flex',alignItems:'center',justifyContent:'center',margin:'0 auto 16px'}}>
+                            <Icon name="shield" size={28} style={{color:'white'}} />
+                        </div>
+                        <h2 style={{fontSize:20,fontWeight:700,color:'#1e293b',marginBottom:4}}>
+                            {isSetup && !authInfo.adminPasswordSet ? '管理者パスワード設定' : '管理者ログイン'}
+                        </h2>
+                        <p style={{fontSize:13,color:'#64748b',marginBottom:24}}>
+                            {isSetup && !authInfo.adminPasswordSet
+                                ? '初回セットアップ: 管理者パスワードを設定してください'
+                                : 'ダッシュボードへのアクセスにはパスワードが必要です'}
+                        </p>
+                        <form onSubmit={handleLogin}>
+                            {isSetup && authInfo.adminPasswordSet && (
+                                <input type="password" value={password} onChange={e => setPassword(e.target.value)}
+                                    placeholder="現在のパスワード" autoFocus
+                                    style={{width:'100%',padding:'12px 16px',border:'1.5px solid #e2e8f0',borderRadius:14,fontSize:15,outline:'none',marginBottom:12,boxSizing:'border-box'}} />
+                            )}
+                            {isSetup ? (
+                                <>
+                                    <input type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)}
+                                        placeholder="新しいパスワード（6文字以上）" autoFocus={!authInfo.adminPasswordSet}
+                                        style={{width:'100%',padding:'12px 16px',border:'1.5px solid #e2e8f0',borderRadius:14,fontSize:15,outline:'none',marginBottom:12,boxSizing:'border-box'}} />
+                                    <input type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)}
+                                        placeholder="パスワード確認"
+                                        style={{width:'100%',padding:'12px 16px',border:'1.5px solid #e2e8f0',borderRadius:14,fontSize:15,outline:'none',marginBottom:12,boxSizing:'border-box'}} />
+                                </>
+                            ) : (
+                                <input type="password" value={password} onChange={e => setPassword(e.target.value)}
+                                    placeholder="管理者パスワード" autoFocus
+                                    style={{width:'100%',padding:'12px 16px',border:'1.5px solid #e2e8f0',borderRadius:14,fontSize:15,outline:'none',marginBottom:12,boxSizing:'border-box'}} />
+                            )}
+                            {error && <p style={{color:'#dc2626',fontSize:13,marginTop:4,marginBottom:8,textAlign:'left'}}><Icon name="alert-circle" size={13} className="inline mr-1" />{error}</p>}
+                            <button type="submit" disabled={checking}
+                                style={{width:'100%',marginTop:8,padding:'12px',background:checking ? '#94a3b8' : 'linear-gradient(135deg,#2d7a4f,#1a5136)',color:'white',border:'none',borderRadius:14,fontSize:15,fontWeight:600,cursor:checking ? 'wait' : 'pointer'}}>
+                                {checking ? '処理中...' : (isSetup && !authInfo.adminPasswordSet ? 'パスワードを設定' : 'ログイン')}
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            );
+        };
+
         // パスワードロック付きラッパー（HooksルールのためAppと分離）
         const AppWithAuth = () => {
             const [passwordVerified, setPasswordVerified] = useState(
                 !currentAccess || !currentAccess.hasPassword || sessionStorage.getItem('sise_pw_verified') === '1'
             );
+            const [adminAuthenticated, setAdminAuthenticated] = useState(
+                !currentAccess ? AuthManager.isAuthenticated() : true
+            );
 
-            // パスワードロック画面を表示（Appの前に判定し、Hooks順序を壊さない）
+            // 認証切れイベントのリスナー
+            useEffect(() => {
+                const handler = () => { setAdminAuthenticated(false); setPasswordVerified(false); };
+                window.addEventListener('sise-auth-expired', handler);
+                return () => window.removeEventListener('sise-auth-expired', handler);
+            }, []);
+
+            // スタッフモードでパスワード未設定: 自動ログインしてトークンを取得
+            useEffect(() => {
+                if (currentAccess && !currentAccess.hasPassword && !AuthManager.isAuthenticated()) {
+                    AuthManager.login(currentAccess.staffId, '').catch(() => {});
+                }
+            }, []);
+
+            // 管理者モード（URLトークンなし）: 管理者ログインが必要
+            if (!currentAccess && !adminAuthenticated) {
+                return <AdminLoginScreen onLogin={() => setAdminAuthenticated(true)} />;
+            }
+
+            // スタッフモード: パスワードロック
             if (currentAccess && currentAccess.hasPassword && !passwordVerified) {
                 return <PasswordLockScreen access={currentAccess} onUnlock={() => setPasswordVerified(true)} />;
             }

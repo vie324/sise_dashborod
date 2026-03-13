@@ -73,8 +73,136 @@ const SHEETS = {
   STAFF: 'スタッフ管理',
   STORES: '店舗管理',
   DASH_CONFIG: 'ダッシュボード設定',
-  HPB: 'HPBデータ'
+  HPB: 'HPBデータ',
+  AUTH_CONFIG: '認証設定'
 };
+
+// ============================================================
+// 認証・セキュリティ
+// ============================================================
+
+// HMAC署名シークレット（ダッシュボード設定シートから取得、なければ自動生成）
+function getAuthSecret() {
+  var sheet = ensureDashConfigSheet();
+  var rows = sheet.getDataRange().getValues();
+  for (var i = 1; i < rows.length; i++) {
+    if (String(rows[i][0]) === '_auth_secret') {
+      return String(rows[i][1]);
+    }
+  }
+  // 初回: ランダムなシークレットを生成・保存
+  var secret = Utilities.getUuid() + '-' + Utilities.getUuid();
+  sheet.appendRow(['_auth_secret', secret]);
+  return secret;
+}
+
+// 管理者パスワード取得（ダッシュボード設定から）
+function getAdminPasswordHash() {
+  var sheet = ensureDashConfigSheet();
+  var rows = sheet.getDataRange().getValues();
+  for (var i = 1; i < rows.length; i++) {
+    if (String(rows[i][0]) === '_admin_password_hash') {
+      return String(rows[i][1]);
+    }
+  }
+  return ''; // 未設定
+}
+
+// SHA-256ハッシュ
+function sha256(input) {
+  var rawHash = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, input, Utilities.Charset.UTF_8);
+  return rawHash.map(function(b) {
+    return ('0' + ((b < 0 ? b + 256 : b)).toString(16)).slice(-2);
+  }).join('');
+}
+
+// HMAC-SHA256署名
+function hmacSign(message, secret) {
+  var rawSig = Utilities.computeHmacSha256Signature(message, secret, Utilities.Charset.UTF_8);
+  return rawSig.map(function(b) {
+    return ('0' + ((b < 0 ? b + 256 : b)).toString(16)).slice(-2);
+  }).join('');
+}
+
+// トークン検証（HMAC署名 + 有効期限チェック）
+// トークン形式: base64(JSON{staffId, role, storeIds, exp}) + '.' + hmac_signature
+function verifyAuthToken(token) {
+  if (!token) return { valid: false, error: '認証トークンがありません' };
+
+  var parts = token.split('.');
+  if (parts.length !== 2) return { valid: false, error: 'トークン形式が不正です' };
+
+  var payload = parts[0];
+  var signature = parts[1];
+
+  // HMAC検証
+  var secret = getAuthSecret();
+  var expected = hmacSign(payload, secret);
+  if (signature !== expected) {
+    return { valid: false, error: '署名が不正です' };
+  }
+
+  // ペイロードデコード
+  try {
+    var decoded = JSON.parse(Utilities.newBlob(Utilities.base64Decode(payload)).getDataAsString());
+  } catch (e) {
+    return { valid: false, error: 'ペイロードのデコードに失敗しました' };
+  }
+
+  // 有効期限チェック（24時間）
+  if (decoded.exp && decoded.exp < Date.now()) {
+    return { valid: false, error: 'トークンの有効期限が切れています' };
+  }
+
+  // スタッフの存在確認（アクティブかどうか）
+  if (decoded.staffId) {
+    var staff = findStaffById(decoded.staffId);
+    if (!staff) return { valid: false, error: 'スタッフが見つかりません' };
+    if (staff.status === 'inactive') return { valid: false, error: 'このアカウントは無効です' };
+  }
+
+  return {
+    valid: true,
+    staffId: decoded.staffId || '',
+    role: decoded.role || 'staff',
+    storeIds: decoded.storeIds || [],
+    isAdmin: decoded.isAdmin === true
+  };
+}
+
+// スタッフIDで検索
+function findStaffById(staffId) {
+  var sheet = ensureStaffSheet();
+  var rows = sheet.getDataRange().getValues();
+  for (var i = 1; i < rows.length; i++) {
+    if (String(rows[i][0]) === String(staffId)) {
+      return {
+        id: String(rows[i][0]),
+        name: String(rows[i][1] || ''),
+        role: String(rows[i][2] || 'staff'),
+        passwordHash: String(rows[i][3] || ''),
+        storeIds: parseMultiSelect(rows[i][4]),
+        status: String(rows[i][6] || 'active')
+      };
+    }
+  }
+  return null;
+}
+
+// リクエストからトークンを抽出して認証
+// GET: ?auth=TOKEN, POST: body.auth=TOKEN
+function authenticateRequest(params, body) {
+  var token = '';
+  if (params && params.auth) token = params.auth;
+  else if (body && body.auth) token = body.auth;
+
+  if (!token) return { valid: false, error: '認証トークンがありません' };
+  return verifyAuthToken(token);
+}
+
+// 認証不要のエンドポイント
+var PUBLIC_ENDPOINTS_GET = ['authInfo'];
+var PUBLIC_ENDPOINTS_POST = ['auth'];
 
 const COUNSELING_STORES = {
   honatsugi: 'カウンセリング回答_本厚木店',
@@ -170,15 +298,22 @@ function doGet(e) {
     const params = e ? (e.parameter || {}) : {};
     const type = params.type || 'report';
 
+    // 認証不要のエンドポイント
+    if (type === 'authInfo') return jsonResponse(handleAuthInfo());
+
+    // 認証チェック
+    var auth = authenticateRequest(params, null);
+    if (!auth.valid) return jsonResponse({ error: auth.error, authRequired: true });
+
     switch (type) {
-      case 'report':     return jsonResponse(handleReportGet(params));
-      case 'counseling': return jsonResponse(handleCounselingGet(params));
+      case 'report':     return jsonResponse(handleReportGet(params, auth));
+      case 'counseling': return jsonResponse(handleCounselingGet(params, auth));
       case 'usage':      return jsonResponse(handleUsageGet(params));
       case 'ticket':     return jsonResponse(handleTicketGet(params));
       case 'members':    return jsonResponse(handleMembersGet(params));
       case 'cashbook':   return jsonResponse(handleCashbookGet(params));
       case 'stores':     return jsonResponse(handleStoresGet());
-      case 'staff':       return jsonResponse(handleStaffGet(params));
+      case 'staff':       return jsonResponse(handleStaffGet(params, auth));
       case 'storeManage': return jsonResponse(handleStoreManageGet(params));
       case 'dashConfig':  return jsonResponse(handleDashConfigGet(params));
       case 'hpb':         return jsonResponse(handleHpbGet(params));
@@ -194,6 +329,19 @@ function doPost(e) {
     const body = JSON.parse(e.postData.contents);
     const type = body.type || '';
 
+    // 認証系エンドポイント（認証不要）
+    if (type === 'auth') return jsonResponse(handleAuthPost(body));
+
+    // 認証チェック
+    var auth = authenticateRequest(null, body);
+    if (!auth.valid) return jsonResponse({ error: auth.error, authRequired: true });
+
+    // 管理者限定エンドポイント
+    var adminOnlyTypes = ['staff', 'storeManage', 'dashConfig'];
+    if (adminOnlyTypes.indexOf(type) !== -1 && !auth.isAdmin && auth.role !== 'headquarter') {
+      return jsonResponse({ error: '管理者権限が必要です' });
+    }
+
     switch (type) {
       case 'usage':    return jsonResponse(handleUsagePost(body));
       case 'ticket':   return jsonResponse(handleTicketPost(body));
@@ -208,6 +356,141 @@ function doPost(e) {
   } catch (error) {
     return jsonResponse({ error: error.message }, 500);
   }
+}
+
+// ============================================================
+// 認証エンドポイント
+// ============================================================
+
+// 認証情報取得（認証不要 - 初期設定状態を返す）
+function handleAuthInfo() {
+  var adminHash = getAdminPasswordHash();
+  var secret = getAuthSecret();
+  return {
+    adminPasswordSet: !!adminHash,
+    authEnabled: true,
+    // シークレットは返さない（フロントエンド側でトークン生成に必要だが、
+    // 管理者パスワード認証後にのみ返す）
+  };
+}
+
+// 認証POST（ログイン・トークン発行・管理者パスワード設定）
+function handleAuthPost(body) {
+  var action = body.action || '';
+
+  switch (action) {
+    case 'login': {
+      // スタッフログイン: staffId + password → 署名済みトークン発行
+      var staffId = body.staffId || '';
+      var password = body.password || '';
+      if (!staffId) return { error: 'スタッフIDが必要です' };
+
+      var staff = findStaffById(staffId);
+      if (!staff) return { error: 'スタッフが見つかりません' };
+      if (staff.status === 'inactive') return { error: 'このアカウントは無効です' };
+
+      // パスワード検証（ハッシュ化済みの場合はハッシュ比較、未設定は通過）
+      if (staff.passwordHash) {
+        var inputHash = sha256(password);
+        if (staff.passwordHash !== inputHash && staff.passwordHash !== password) {
+          // 旧平文パスワードとの互換性チェック
+          if (sha256(staff.passwordHash) !== inputHash) {
+            return { error: 'パスワードが正しくありません' };
+          }
+        }
+      }
+
+      // 署名済みトークン生成（24時間有効）
+      var token = generateSignedToken(staff.id, staff.role, staff.storeIds, false);
+      return { success: true, token: token, name: staff.name, role: staff.role, storeIds: staff.storeIds };
+    }
+
+    case 'adminLogin': {
+      // 管理者ログイン: password → 管理者トークン発行
+      var adminHash = getAdminPasswordHash();
+      if (!adminHash) return { error: '管理者パスワードが未設定です。初回設定が必要です' };
+
+      var inputHash = sha256(body.password || '');
+      if (inputHash !== adminHash) {
+        return { error: 'パスワードが正しくありません' };
+      }
+
+      // 管理者トークン生成（24時間有効）
+      var token = generateSignedToken('admin', 'admin', [], true);
+      return { success: true, token: token, isAdmin: true, secret: getAuthSecret() };
+    }
+
+    case 'setAdminPassword': {
+      // 管理者パスワード初回設定（既存パスワードがない場合のみ）
+      var existingHash = getAdminPasswordHash();
+      if (existingHash) {
+        // 既存パスワードがある場合は現在のパスワードも必要
+        var currentHash = sha256(body.currentPassword || '');
+        if (currentHash !== existingHash) {
+          return { error: '現在のパスワードが正しくありません' };
+        }
+      }
+
+      var newPassword = body.newPassword || '';
+      if (newPassword.length < 6) return { error: 'パスワードは6文字以上必要です' };
+
+      var hash = sha256(newPassword);
+      setDashConfig('_admin_password_hash', hash);
+
+      // 管理者トークン発行
+      var token = generateSignedToken('admin', 'admin', [], true);
+      return { success: true, token: token, isAdmin: true, secret: getAuthSecret() };
+    }
+
+    case 'getSecret': {
+      // 管理者トークンでシークレットを取得（トークン生成用）
+      var auth = verifyAuthToken(body.adminToken || '');
+      if (!auth.valid || !auth.isAdmin) return { error: '管理者権限が必要です' };
+      return { success: true, secret: getAuthSecret() };
+    }
+
+    case 'migratePasswords': {
+      // 既存の平文パスワードをハッシュ化（管理者のみ）
+      var auth = verifyAuthToken(body.auth || '');
+      if (!auth.valid || !auth.isAdmin) return { error: '管理者権限が必要です' };
+      return migratePasswordsToHash();
+    }
+
+    default:
+      return { error: '不明なauth action: ' + action };
+  }
+}
+
+// 署名済みトークン生成
+function generateSignedToken(staffId, role, storeIds, isAdmin) {
+  var payload = {
+    staffId: staffId,
+    role: role,
+    storeIds: storeIds || [],
+    isAdmin: !!isAdmin,
+    exp: Date.now() + (24 * 60 * 60 * 1000), // 24時間
+    iat: Date.now()
+  };
+  var payloadB64 = Utilities.base64Encode(JSON.stringify(payload), Utilities.Charset.UTF_8);
+  var secret = getAuthSecret();
+  var signature = hmacSign(payloadB64, secret);
+  return payloadB64 + '.' + signature;
+}
+
+// 平文パスワードをハッシュ化（マイグレーション用）
+function migratePasswordsToHash() {
+  var sheet = ensureStaffSheet();
+  var rows = sheet.getDataRange().getValues();
+  var migrated = 0;
+  for (var i = 1; i < rows.length; i++) {
+    var pw = String(rows[i][3] || '');
+    if (pw && pw.length < 64) { // 64文字未満なら平文と判定（SHA-256は64文字）
+      var hashed = sha256(pw);
+      sheet.getRange(i + 1, 4).setValue(hashed);
+      migrated++;
+    }
+  }
+  return { success: true, migrated: migrated };
 }
 
 // ============================================================
@@ -227,7 +510,7 @@ function handleStoresGet() {
 // 日報（読み取り専用 - Googleフォーム入力）
 // ============================================================
 
-function handleReportGet(params) {
+function handleReportGet(params, auth) {
   const sheet = getSheet(SHEETS.REPORT);
   if (!sheet) return { error: 'シート "' + SHEETS.REPORT + '" が見つかりません' };
 
@@ -289,7 +572,7 @@ function handleReportGet(params) {
 // カウンセリング（読み取り専用 - Googleフォーム入力）
 // ============================================================
 
-function handleCounselingGet(params) {
+function handleCounselingGet(params, auth) {
   const action = params.action || 'list';
 
   // 店舗一覧
@@ -301,6 +584,16 @@ function handleCounselingGet(params) {
   const storeKey = params.store || '';
   if (!storeKey || !COUNSELING_STORES[storeKey]) {
     return { error: '店舗を指定してください（store=' + Object.keys(COUNSELING_STORES).join('|') + '）' };
+  }
+
+  // サーバー側店舗アクセス制御: スタッフ/マネージャーは許可された店舗のみ
+  if (auth && !auth.isAdmin && auth.storeIds && auth.storeIds.length > 0) {
+    // auth.storeIdsはSquare IDの場合があるので、カウンセリング店舗名でもチェック
+    var storeName = COUNSELING_STORES[storeKey].replace('カウンセリング回答_', '');
+    var allowed = auth.storeIds.indexOf(storeKey) !== -1 || auth.storeIds.indexOf(storeName) !== -1;
+    if (!allowed) {
+      return { error: 'この店舗へのアクセス権限がありません', store: storeKey };
+    }
   }
 
   const sheetName = COUNSELING_STORES[storeKey];
@@ -813,7 +1106,12 @@ function ensureStaffSheet() {
   return sheet;
 }
 
-function handleStaffGet(params) {
+function handleStaffGet(params, auth) {
+  // 管理者のみスタッフ一覧を取得可能
+  if (!auth || (!auth.isAdmin && auth.role !== 'headquarter')) {
+    return { error: '管理者権限が必要です' };
+  }
+
   var includeInactive = params.includeInactive === 'true' || params.includeInactive === '1';
   var sheet = ensureStaffSheet();
   var rows = sheet.getDataRange().getValues();
@@ -829,7 +1127,7 @@ function handleStaffGet(params) {
       id: String(r[0]),
       name: String(r[1] || ''),
       role: String(r[2] || 'staff'),
-      password: String(r[3] || ''),
+      hasPassword: !!r[3], // パスワードの有無のみ返す（平文は返さない）
       storeIds: parseMultiSelect(r[4]),
       createdAt: formatDate(r[5]),
       status: status
@@ -856,11 +1154,14 @@ function saveStaffList(staffArr) {
     sheet.getRange(2, 1, lastRow - 1, 7).clearContent();
   }
   var rows = staffArr.map(function(s) {
+    // パスワードをハッシュ化（64文字未満なら平文と判定）
+    var pw = s.password || '';
+    if (pw && pw.length < 64) pw = sha256(pw);
     return [
       s.id || '',
       s.name || '',
       s.role || 'staff',
-      s.password || '',
+      pw,
       (s.storeIds || []).join(','),
       s.createdAt || new Date(),
       s.status || 'active'
@@ -878,10 +1179,15 @@ function updateSingleStaff(staffId, updates) {
   var rows = sheet.getDataRange().getValues();
   for (var i = 1; i < rows.length; i++) {
     if (String(rows[i][0]) === String(staffId)) {
-      // B=名前, C=役割, D=パスワード, E=店舗IDs
+      // B=名前, C=役割, D=パスワード(ハッシュ), E=店舗IDs
       if (updates.name !== undefined)     sheet.getRange(i + 1, 2).setValue(updates.name);
       if (updates.role !== undefined)     sheet.getRange(i + 1, 3).setValue(updates.role);
-      if (updates.password !== undefined) sheet.getRange(i + 1, 4).setValue(updates.password);
+      if (updates.password !== undefined) {
+        // パスワードをハッシュ化して保存（空の場合はそのまま）
+        var pw = updates.password;
+        if (pw && pw.length < 64) pw = sha256(pw);
+        sheet.getRange(i + 1, 4).setValue(pw);
+      }
       if (updates.storeIds !== undefined) sheet.getRange(i + 1, 5).setValue((updates.storeIds || []).join(','));
       return { success: true, staffId: staffId };
     }
