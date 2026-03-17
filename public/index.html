@@ -944,6 +944,8 @@
         .cf-scenario-msg.c-orange{background:#fdf5e8;border-left:3px solid #d68c1a}
         .cf-scenario-msg.c-teal{background:#edf7f9;border-left:3px solid #2a8fa0}
         .cf-scenario-msg.c-blue{background:#eef3fc;border-left:3px solid #4a78c9}
+        .cf-scenario-msg.c-gray{background:#f5f5f5;border-left:3px solid #999}
+        .cf-ci.active.c-gray{border-color:#999;background:#f5f5f5;color:#666}
         .cf-flow-inline{display:inline-flex;align-items:center;gap:5px;margin-top:8px;flex-wrap:wrap}
         .cf-flow-chip{font-size:11px;font-weight:600;padding:3px 10px;border-radius:6px;white-space:nowrap}
         .cf-fc-red{background:#fdf0f1;color:#d94050}.cf-fc-teal{background:#edf7f9;color:#2a8fa0}.cf-fc-green{background:#edf8f1;color:#2a9d5e}.cf-fc-gray{background:#eee;color:#888}
@@ -1044,6 +1046,105 @@
         .cf-note-box h4{font-size:14px;font-weight:700;margin-bottom:8px;color:#1d6641;display:flex;align-items:center;gap:6px}
         .cf-note-box p{font-size:12px;color:#6b6b6b;line-height:2}
         @media(max-width:768px){.cf-check-grid,.cf-concept-panels,.cf-plans-grid,.cf-plans-bottom{grid-template-columns:1fr}.cf-rec-grid{grid-template-columns:1fr}.cf-control-row{flex-direction:column}.cf-ci{width:100%}.cf-emphasis-box,.cf-benefit-item,.cf-offer-item{flex-direction:column;gap:10px}.cf-sol-grid{grid-template-columns:1fr}}
+
+        /* =============================================
+           iPad横向き用 文字サイズ拡大
+           ============================================= */
+        .cf-customer-info{padding:18px 22px;gap:14px}
+        .cf-info-chip{font-size:16px;padding:8px 16px;border-radius:10px}
+        .cf-info-chip strong{font-size:17px}
+        .cf-info-chip.cf-info-name{font-size:20px;padding:10px 20px;background:linear-gradient(135deg,#e8f7ee,#d0f0db);color:#1d6641;border:1.5px solid #88d1a8}
+        .cf-info-chip.cf-info-name strong{font-size:22px;color:#1a5136}
+        .cf-info-chip.cf-info-wide{width:100%;flex-basis:100%}
+        .cf-section-header h3{font-size:22px}
+        .cf-section-body{padding:24px 28px}
+        .cf-section-body p{font-size:16px}
+        .cf-step{font-size:16px}
+        .cf-step-num{width:32px;height:32px;font-size:15px}
+        .cf-step-connector{width:50px;margin:0 12px}
+        .cf-check-card h4{font-size:18px}
+        .cf-chk{font-size:17px;padding:10px 14px}
+        .cf-chk-box{width:24px;height:24px}
+        .cf-tag{font-size:13px;padding:3px 10px}
+        .cf-rec-plan-name{font-size:22px}
+        .cf-rec-plan-freq{font-size:17px}
+        .cf-rec-plan-desc{font-size:16px}
+        .cf-rec-rank{padding:12px 18px;font-size:14px}
+        .cf-plan-name{font-size:24px}
+        .cf-plan-base-price{font-size:16px}
+        .cf-plan-types{font-size:15px}
+        .cf-freq-badge{font-size:17px;padding:6px 16px}
+        .cf-price-original{font-size:17px}
+        .cf-price-final{font-size:26px}
+        .cf-price-yen{font-size:17px}
+        .cf-benefit-content h4{font-size:19px}
+        .cf-benefit-content p{font-size:16px}
+        .cf-offer-content h4{font-size:19px}
+        .cf-offer-content p{font-size:16px}
+        .cf-emphasis-text{font-size:17px}
+        .cf-emphasis-icon{width:50px;height:50px;font-size:22px}
+        .cf-note-box h4{font-size:18px}
+        .cf-note-box p{font-size:16px}
+        .cf-scenario-msg{font-size:17px;padding:18px 22px}
+        .cf-ci{font-size:16px;padding:10px 18px}
+        .cf-control-label{font-size:15px}
+        .cf-concept-block-title{font-size:20px}
+        .cf-concept-block-badge{font-size:13px;padding:5px 14px}
+        .cf-stage-card{padding:14px 16px;font-size:17px}
+        .cf-stage-num{width:28px;height:28px;font-size:14px}
+        .cf-branch-text{font-size:13px;padding:5px 12px}
+        .cf-branch-tag{font-size:10px;padding:2px 8px}
+        .cf-loop-text{font-size:14px}
+        .cf-sol-card-text{font-size:16px}
+        .cf-sol-card-num{width:32px;height:32px;font-size:15px}
+        .cf-sol-card.sol-root .cf-sol-card-num{width:36px;height:36px;font-size:18px}
+        .cf-conclusion-title{font-size:20px}
+        .cf-conclusion-sub{font-size:15px}
+        .cf-customer-bar input[type="text"]{font-size:16px;padding:12px 16px}
+        .cf-customer-bar select{font-size:16px;padding:12px 16px}
+        .cf-customer-bar .cf-btn{font-size:16px;padding:12px 24px}
+        .cf-concept-toggle{font-size:16px;padding:10px 18px}
+        .cf-qr-btn{font-size:16px;padding:14px 0}
+        .cf-flow-chip{font-size:14px;padding:5px 14px}
+
+        /* =============================================
+           si'se解決カード 動的強調アニメーション
+           ============================================= */
+        @keyframes cfSolBounceIn{
+            0%{opacity:0;transform:translateY(20px) scale(0.92)}
+            60%{opacity:1;transform:translateY(-6px) scale(1.03)}
+            100%{opacity:1;transform:translateY(0) scale(1)}
+        }
+        @keyframes cfSolGlow{
+            0%,100%{box-shadow:0 0 0 0 rgba(51,160,101,0)}
+            50%{box-shadow:0 0 16px 4px rgba(51,160,101,.25)}
+        }
+        .cf-sol-animate{animation:cfSolBounceIn .6s ease-out both}
+        .cf-sol-num-glow{animation:cfSolGlow 2.5s ease infinite 1s}
+
+        /* =============================================
+           当日契約特典 動的強調アニメーション
+           ============================================= */
+        @keyframes cfOfferSlideIn{
+            0%{opacity:0;transform:translateX(-30px)}
+            60%{opacity:1;transform:translateX(5px)}
+            100%{opacity:1;transform:translateX(0)}
+        }
+        @keyframes cfOfferNumPulse{
+            0%,100%{transform:scale(1);box-shadow:0 0 0 0 rgba(184,164,114,0)}
+            50%{transform:scale(1.1);box-shadow:0 0 14px 3px rgba(184,164,114,.35)}
+        }
+        @keyframes cfAccentFlash{
+            0%,100%{color:#d94050;text-shadow:0 0 0 transparent}
+            50%{color:#ff1a35;text-shadow:0 0 8px rgba(217,64,80,.35)}
+        }
+        .cf-offer-animate{animation:cfOfferSlideIn .6s ease-out both}
+        .cf-offer-num-glow{animation:cfOfferNumPulse 2.5s ease infinite 1s}
+        .cf-accent-flash{animation:cfAccentFlash 2s ease infinite 1.5s}
+        .cf-today-special{border:2.5px solid rgba(184,164,114,.4);background:linear-gradient(180deg,#fffdf8,#fff);box-shadow:0 4px 24px rgba(184,164,114,.12)}
+        .cf-today-header{background:linear-gradient(135deg,#fffcf5,#fff8eb)}
+        .cf-today-badge{display:inline-block;background:linear-gradient(135deg,#b8a472,#96844a);color:#fff;font-size:14px;font-weight:800;padding:5px 16px;border-radius:20px;margin-right:10px;letter-spacing:1px;text-shadow:0 1px 2px rgba(0,0,0,.15);animation:cfOfferNumPulse 3s ease infinite}
+        .cf-today-star{color:#b8a472;font-size:1.3em;margin-left:6px;animation:cfAccentFlash 2s ease infinite}
     </style>
 
     <script type="text/babel">
@@ -3899,8 +4000,26 @@
                                 </div>
                                 <div>
                                     <label className="block text-xs font-medium text-slate-600 mb-1">プラン名</label>
-                                    <input type="text" value={newManualMember.planName} onChange={e => setNewManualMember(p => ({...p, planName: e.target.value}))}
-                                        placeholder="例: 月4回プラン" className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm outline-none" />
+                                    <select value={newManualMember.planName} onChange={e => {
+                                        const selected = CF_PLAN_CATALOG.find(p => p.key === e.target.value);
+                                        if (selected) {
+                                            setNewManualMember(p => ({...p, planName: selected.name + ' ' + selected.freqLabel, monthlyPrice: String(selected.price)}));
+                                        } else if (e.target.value === '__custom__') {
+                                            setNewManualMember(p => ({...p, planName: '', monthlyPrice: ''}));
+                                        } else {
+                                            setNewManualMember(p => ({...p, planName: '', monthlyPrice: ''}));
+                                        }
+                                    }} className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm outline-none bg-white">
+                                        <option value="">-- プランを選択 --</option>
+                                        {CF_PLAN_CATALOG.map(p => (
+                                            <option key={p.key} value={p.key}>{p.name} {p.freqLabel} — ¥{p.price.toLocaleString()}</option>
+                                        ))}
+                                        <option value="__custom__">その他（手入力）</option>
+                                    </select>
+                                    {(newManualMember.planName === '' || !CF_PLAN_CATALOG.some(p => (p.name + ' ' + p.freqLabel) === newManualMember.planName)) && newManualMember.planName !== '' && (
+                                        <input type="text" value={newManualMember.planName} onChange={e => setNewManualMember(p => ({...p, planName: e.target.value}))}
+                                            placeholder="プラン名を入力" className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm outline-none mt-2" />
+                                    )}
                                 </div>
                                 <div>
                                     <label className="block text-xs font-medium text-slate-600 mb-1">月額料金（円）</label>
@@ -8672,6 +8791,7 @@
                     { id:'l3', c:'#d68c1a', w:2.8, v:[{freq:4,months:3},{freq:1,months:3}], b:[385,280,195,130,140,148,152], a:[40,32,24,16,20,22,22], at:3, atxt:'月1回へ', recFreq:4 },
                     { id:'l4', c:'#2a8fa0', w:2.8, gl:true, v:[{freq:2,months:6}], b:[385,325,270,225,195,170,155], a:[35,28,22,18,15,13,11], recFreq:2, primary:true },
                     { id:'l5', c:'#4a78c9', w:2.8, v:[{freq:2,months:3},{freq:1,months:3}], b:[385,325,270,225,240,248,252], a:[35,28,22,18,22,24,24], at:3, atxt:'月1回へ', recFreq:2 },
+                    { id:'l6', c:'#999999', w:2.5, gl:false, isRevert:true, recFreq:0 },
                 ];
 
                 return { dl, mx, X0, XE, MW, YB, YS, YG, YG2, lines, genWave };
@@ -8710,11 +8830,18 @@
             // 顧客情報表示
             const customerInfoSection = selectedCustomer ? (
                 <div className="cf-customer-info">
-                    <div className="cf-info-chip"><strong>{selectedCustomer.name}</strong></div>
+                    <div className="cf-info-chip cf-info-name"><strong>{selectedCustomer.name}</strong></div>
                     {selectedCustomer.birthday && <div className="cf-info-chip">生年月日: <strong>{selectedCustomer.birthday}</strong></div>}
                     {selectedCustomer.occupation && <div className="cf-info-chip">職業: <strong>{selectedCustomer.occupation}</strong></div>}
+                    {selectedCustomer.address && <div className="cf-info-chip">お住まい: <strong>{selectedCustomer.address}</strong></div>}
                     {selectedCustomer.improvementTimeline && <div className="cf-info-chip">目標時期: <strong>{selectedCustomer.improvementTimeline}</strong></div>}
-                    {selectedCustomer.treatmentRequest && <div className="cf-info-chip">リクエスト: <strong>{selectedCustomer.treatmentRequest}</strong></div>}
+                    {selectedCustomer.treatmentRequest && <div className="cf-info-chip cf-info-wide">施術に関するご要望: <strong>{selectedCustomer.treatmentRequest}</strong></div>}
+                    {selectedCustomer.treatmentExperience && selectedCustomer.treatmentExperience.length > 0 && (
+                        <div className="cf-info-chip cf-info-wide" style={{background:'#e4f4f7',color:'#1a7a8a'}}>ご利用経験のある施術: <strong>{selectedCustomer.treatmentExperience.join('、')}</strong></div>
+                    )}
+                    {selectedCustomer.visitPurpose && selectedCustomer.visitPurpose.length > 0 && (
+                        <div className="cf-info-chip cf-info-wide" style={{background:'#f5f0e0',color:'#8a7540'}}>ご来店きっかけ: <strong>{selectedCustomer.visitPurpose.join('、')}</strong></div>
+                    )}
                     {selectedCustomer.surgeryHistory && selectedCustomer.surgeryHistory !== 'いいえ' && selectedCustomer.surgeryHistory !== 'なし' && (
                         <div className="cf-info-chip" style={{background:'#fdf0f1',color:'#d94050'}}>手術歴: <strong>{selectedCustomer.surgeryHistory}</strong></div>
                     )}
@@ -8723,6 +8850,12 @@
                     )}
                     {selectedCustomer.allergy && selectedCustomer.allergy !== 'いいえ' && selectedCustomer.allergy !== 'なし' && (
                         <div className="cf-info-chip" style={{background:'#fdf0f1',color:'#d94050'}}>アレルギー: <strong>{selectedCustomer.allergy}</strong></div>
+                    )}
+                    {selectedCustomer.cosmeticSurgery && selectedCustomer.cosmeticSurgery !== 'いいえ' && selectedCustomer.cosmeticSurgery !== 'なし' && (
+                        <div className="cf-info-chip" style={{background:'#f5f0e0',color:'#8a7540'}}>美容整形: <strong>{selectedCustomer.cosmeticSurgery}</strong></div>
+                    )}
+                    {selectedCustomer.pregnancyCheck && selectedCustomer.pregnancyCheck !== 'いいえ' && selectedCustomer.pregnancyCheck !== 'なし' && selectedCustomer.pregnancyCheck !== '該当なし' && (
+                        <div className="cf-info-chip" style={{background:'#fdf5e8',color:'#d68c1a'}}>妊娠・授乳: <strong>{selectedCustomer.pregnancyCheck}</strong></div>
                     )}
                 </div>
             ) : null;
@@ -8770,10 +8903,10 @@
                                 </div>
                                 <div className="cf-sol-wrap">
                                     <div className="cf-sol-grid">
-                                        <div className="cf-sol-card sol-root"><div className="cf-sol-card-num">✦</div><div className="cf-sol-card-text"><strong>正しい姿勢指導</strong><br/>根本から改善し<br/>繰り返さない身体へ</div></div>
-                                        <div className="cf-sol-card"><div className="cf-sol-card-num">2</div><div className="cf-sol-card-text">ソフトな手技で<br/><strong>安心安全な骨格矯正</strong></div></div>
-                                        <div className="cf-sol-card"><div className="cf-sol-card-num">3</div><div className="cf-sol-card-text">矯正精度を上げる<br/><strong>ボディケア</strong></div></div>
-                                        <div className="cf-sol-card"><div className="cf-sol-card-num">4</div><div className="cf-sol-card-text">セルフケア指導で<br/><strong>自身で身体のケア</strong></div></div>
+                                        <div className="cf-sol-card sol-root cf-sol-animate" style={{animationDelay:'0s'}}><div className="cf-sol-card-num cf-sol-num-glow">✦</div><div className="cf-sol-card-text"><strong>正しい姿勢指導</strong><br/>根本から改善し<br/>繰り返さない身体へ</div></div>
+                                        <div className="cf-sol-card cf-sol-animate" style={{animationDelay:'0.15s'}}><div className="cf-sol-card-num cf-sol-num-glow">2</div><div className="cf-sol-card-text">ソフトな手技で<br/><strong>安心安全な骨格矯正</strong></div></div>
+                                        <div className="cf-sol-card cf-sol-animate" style={{animationDelay:'0.3s'}}><div className="cf-sol-card-num cf-sol-num-glow">3</div><div className="cf-sol-card-text">矯正精度を上げる<br/><strong>ボディケア</strong></div></div>
+                                        <div className="cf-sol-card cf-sol-animate" style={{animationDelay:'0.45s'}}><div className="cf-sol-card-num cf-sol-num-glow">4</div><div className="cf-sol-card-text">セルフケア指導で<br/><strong>自身で身体のケア</strong></div></div>
                                     </div>
                                 </div>
                             </div>
@@ -8817,6 +8950,7 @@
                 { id:'l3', cls:'c-orange', title:'月4回 → 4ヶ月目から月1回に切替', desc:'3ヶ月集中後、月1回で維持。やめるよりは月1回でも継続が大切。', flow:[{label:'月4回 × 3ヶ月',cls:'cf-fc-red'},{label:'月1回',cls:'cf-fc-green'}] },
                 { id:'l4', cls:'c-teal', title:'月2回 → そのまま月2回で継続', desc:'セルフケア併用で着実に改善。無理なく続けやすいペース。', flow:[{label:'月2回で継続',cls:'cf-fc-teal'},{label:'セルフケア',cls:'cf-fc-gray'}] },
                 { id:'l5', cls:'c-blue', title:'月2回 → 4ヶ月目から月1回に切替', desc:'月2回で3ヶ月通い、その後は月1回に。', flow:[{label:'月2回 × 3ヶ月',cls:'cf-fc-teal'},{label:'月1回',cls:'cf-fc-green'}] },
+                { id:'l6', cls:'c-gray', title:'今日の施術結果（継続なし）', desc:'施術直後は改善を実感できますが、約2週間で元の状態に戻ってしまいます。継続が改善の鍵です。', flow:[{label:'施術1回のみ',cls:'cf-fc-gray'},{label:'≈2週間で元に戻る',cls:'cf-fc-gray'}] },
             ];
 
             // グラフ線データ
@@ -8829,6 +8963,9 @@
                 { group: '月2回スタート', dotColor: '#2a8fa0', items: [
                     { id:'l4', cls:'c-teal', color:'#2a8fa0', label:'月2回 → そのまま継続', recFreq:2, primary:true },
                     { id:'l5', cls:'c-blue', color:'#4a78c9', label:'月2回 → 月1回に切替', recFreq:2 },
+                ]},
+                { group: '施術1回のみ', dotColor: '#999999', items: [
+                    { id:'l6', cls:'c-gray', color:'#999999', label:'今日の施術結果（継続なし）', recFreq:0 },
                 ]},
             ];
 
@@ -8926,16 +9063,6 @@
                         </div>
                     </div>
 
-                    {/* コンセプトトグル */}
-                    <div style={{textAlign:'right',marginBottom:4}}>
-                        <button className={'cf-concept-toggle ' + (showConcept ? 'active' : '')} onClick={() => setShowConcept(!showConcept)}>
-                            <Icon name="help-circle" size={14} />
-                            コンセプト説明
-                        </button>
-                    </div>
-
-                    {conceptSection}
-
                     {/* 01 ヒアリング＆プラン診断 */}
                     <div className="cf-section-card">
                         <div className="cf-section-header">
@@ -9024,6 +9151,16 @@
                         </div>
                     </div>
 
+                    {/* コンセプト説明（01ヒアリングの下に配置） */}
+                    <div style={{textAlign:'right',marginBottom:4}}>
+                        <button className={'cf-concept-toggle ' + (showConcept ? 'active' : '')} onClick={() => setShowConcept(!showConcept)}>
+                            <Icon name="help-circle" size={14} />
+                            コンセプト説明
+                        </button>
+                    </div>
+
+                    {conceptSection}
+
                     {/* 02 改善シミュレーション */}
                     <div className="cf-section-card">
                         <div className="cf-section-header">
@@ -9090,6 +9227,25 @@
                                         <circle cx={graphData.X0} cy={graphData.YS} r="5" fill="white" stroke="#666" strokeWidth="2"/>
                                         {/* Lines */}
                                         {graphData.lines.map(l => {
+                                            if (l.isRevert) {
+                                                // 施術1回のみ→約2週間で元に戻る線
+                                                const startX = graphData.X0;
+                                                const startY = graphData.YS;
+                                                const dipX = startX + graphData.MW * 0.05;
+                                                const dipY = startY - 60;
+                                                const midX = startX + graphData.MW * 0.35;
+                                                const midY = startY - 30;
+                                                const endRX = startX + graphData.MW * 0.55;
+                                                const endRY = startY + 5;
+                                                const revertD = `M ${startX},${startY} C ${dipX},${dipY} ${dipX},${dipY} ${startX + graphData.MW * 0.15},${dipY + 10} C ${midX - 20},${dipY + 25} ${midX},${midY} ${midX + 20},${midY + 25} C ${endRX - 15},${endRY - 10} ${endRX},${endRY} ${endRX + 10},${endRY}`;
+                                                return (
+                                                    <g key={l.id} className={'line-group ' + (activeLines[l.id] ? 'visible' : '')} style={{opacity: activeLines[l.id] ? 1 : 0}}>
+                                                        <path d={revertD} fill="none" stroke={l.c} strokeWidth={l.w} strokeLinecap="round" strokeDasharray="8,5" />
+                                                        <circle cx={endRX + 10} cy={endRY} r="4" fill="white" stroke={l.c} strokeWidth="2" />
+                                                        <text x={endRX + 24} y={endRY + 4} fontSize="11" fill={l.c} fontWeight="700">≈ 2週間で元に戻る</text>
+                                                    </g>
+                                                );
+                                            }
                                             const d = graphData.genWave(l.v, l.b, l.a);
                                             const lastMatch = d.match(/([\d.]+),([\d.]+)\s*$/);
                                             const endX = lastMatch ? +lastMatch[1] : 0;
@@ -9311,23 +9467,23 @@
                     </div>
 
                     {/* 当日契約で3つの特典 */}
-                    <div className="cf-section-card">
-                        <div className="cf-section-header">
-                            <h3><span style={{display:'inline-block',background:'linear-gradient(135deg,#fff8e8,#fff0cc)',border:'1.5px solid #d4c99a',color:'#b8a472',fontSize:11,fontWeight:700,padding:'3px 12px',borderRadius:16,marginRight:8}}>TODAY'S SPECIAL</span> 当日契約で3つの特典<span style={{color:'#b8a472',fontSize:'1.1em',marginLeft:4}}>★</span></h3>
+                    <div className="cf-section-card cf-today-special">
+                        <div className="cf-section-header cf-today-header">
+                            <h3><span className="cf-today-badge">TODAY'S SPECIAL</span> 当日契約で3つの特典<span className="cf-today-star">★</span></h3>
                         </div>
                         <div className="cf-section-body">
                             <div className="cf-offer-grid">
-                                <div className="cf-offer-item">
-                                    <div className="cf-offer-num">①</div>
-                                    <div className="cf-offer-content"><h4>入会費用5,000円が<span className="accent">無料（0円）</span>に！</h4><p>はじめてサブスク会員に登録いただく方は初回5,000円頂戴しておりますが、<strong>当日のご契約で無料に！</strong></p></div>
+                                <div className="cf-offer-item cf-offer-animate" style={{animationDelay:'0s'}}>
+                                    <div className="cf-offer-num cf-offer-num-glow">①</div>
+                                    <div className="cf-offer-content"><h4>入会費用5,000円が<span className="accent cf-accent-flash">無料（0円）</span>に！</h4><p>はじめてサブスク会員に登録いただく方は初回5,000円頂戴しておりますが、<strong>当日のご契約で無料に！</strong></p></div>
                                 </div>
-                                <div className="cf-offer-item">
-                                    <div className="cf-offer-num">②</div>
-                                    <div className="cf-offer-content"><h4>解約費<span className="accent">無料</span>！翌月プラン変更・解約可能！</h4><p>通常しっかり効果を感じていただくために3ヶ月以内の解約は解約金をいただいております。<br/><strong>リニューアル記念で解約金も0円</strong>で翌月から解約OK！</p></div>
+                                <div className="cf-offer-item cf-offer-animate" style={{animationDelay:'0.15s'}}>
+                                    <div className="cf-offer-num cf-offer-num-glow">②</div>
+                                    <div className="cf-offer-content"><h4>解約費<span className="accent cf-accent-flash">無料</span>！翌月プラン変更・解約可能！</h4><p>通常しっかり効果を感じていただくために3ヶ月以内の解約は解約金をいただいております。<br/><strong>リニューアル記念で解約金も0円</strong>で翌月から解約OK！</p></div>
                                 </div>
-                                <div className="cf-offer-item">
-                                    <div className="cf-offer-num">③</div>
-                                    <div className="cf-offer-content"><h4>当日契約限定で指名料が<span className="accent">ずっと無料</span>に！</h4><p>施術の体感があうセラピストの指名予約が<strong>永年無料</strong>に！<br/>身体の状態をより深く理解した担当者による施術で効果も◎</p></div>
+                                <div className="cf-offer-item cf-offer-animate" style={{animationDelay:'0.3s'}}>
+                                    <div className="cf-offer-num cf-offer-num-glow">③</div>
+                                    <div className="cf-offer-content"><h4>当日契約限定で指名料が<span className="accent cf-accent-flash">ずっと無料</span>に！</h4><p>施術の体感があうセラピストの指名予約が<strong>永年無料</strong>に！<br/>身体の状態をより深く理解した担当者による施術で効果も◎</p></div>
                                 </div>
                             </div>
                         </div>
