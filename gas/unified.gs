@@ -124,8 +124,8 @@ const COUNSELING_HEADER_KEYWORDS = {
   CURRENT_TREATMENT:    ['通院', '治療中'],
   ALLERGY:              ['アレルギー'],
   COSMETIC_SURGERY:     ['美容整形', '美容外科', '美容医療'],
-  PREGNANCY_CHECK:      ['妊娠', '授乳'],
-  DISCLAIMER:           ['同意', '注意事項', '免責', '確認事項']
+  PREGNANCY_CHECK:      ['妊娠', '授乳', '特定疾患'],
+  DISCLAIMER:           ['同意', '注意事項', '免責', '確認事項', '確認いたしました', '確認しました']
 };
 
 // ヘッダー行から動的にカラムマッピングを構築
@@ -357,6 +357,17 @@ function colVal(row, colIndex) {
   return row[colIndex];
 }
 
+// 医療系フィールドから免責・同意系の誤検出値を除外
+var DISCLAIMER_VALUES = ['確認いたしました', '確認しました', '同意します', '同意しました', '同意いたします', '了承しました', '了承いたしました', '承知しました'];
+function sanitizeMedicalField(val) {
+  var s = String(val || '').trim();
+  if (!s) return '';
+  for (var i = 0; i < DISCLAIMER_VALUES.length; i++) {
+    if (s.indexOf(DISCLAIMER_VALUES[i]) !== -1) return '';
+  }
+  return s;
+}
+
 // フォールバック: 全列をスキャンしてお悩みデータを含むセルを探す
 var CONCERN_SCAN_KEYWORDS = ['肩こり', '腰痛', '頭痛', '猫背', '骨盤', 'むくみ', '冷え', '眼精疲労',
   'ストレートネック', '反り腰', '股関節', '姿勢', '食いしばり', '頬のたるみ', '生理痛', '下半身',
@@ -443,8 +454,8 @@ function counselingDetail(data, C, name, index) {
       surgeryHistory: String(colVal(row, C.SURGERY_HISTORY) || '').trim(),
       currentTreatment: String(colVal(row, C.CURRENT_TREATMENT) || '').trim(),
       allergy: String(colVal(row, C.ALLERGY) || '').trim(),
-      cosmeticSurgery: String(colVal(row, C.COSMETIC_SURGERY) || '').trim(),
-      pregnancyCheck: String(colVal(row, C.PREGNANCY_CHECK) || '').trim(),
+      cosmeticSurgery: sanitizeMedicalField(colVal(row, C.COSMETIC_SURGERY)),
+      pregnancyCheck: sanitizeMedicalField(colVal(row, C.PREGNANCY_CHECK)),
       _rawConcerns: String(rawConcerns || '').substring(0, 100)
     }
   };
