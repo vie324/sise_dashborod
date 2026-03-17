@@ -8835,9 +8835,11 @@
                     {selectedCustomer.occupation && <div className="cf-info-chip">職業: <strong>{selectedCustomer.occupation}</strong></div>}
                     {selectedCustomer.address && <div className="cf-info-chip">お住まい: <strong>{selectedCustomer.address}</strong></div>}
                     {selectedCustomer.improvementTimeline && <div className="cf-info-chip">目標時期: <strong>{selectedCustomer.improvementTimeline}</strong></div>}
-                    {selectedCustomer.treatmentRequest && <div className="cf-info-chip cf-info-wide">施術に関するご要望: <strong>{selectedCustomer.treatmentRequest}</strong></div>}
                     {selectedCustomer.treatmentExperience && selectedCustomer.treatmentExperience.length > 0 && (
-                        <div className="cf-info-chip cf-info-wide" style={{background:'#e4f4f7',color:'#1a7a8a'}}>ご利用経験のある施術: <strong>{selectedCustomer.treatmentExperience.join('、')}</strong></div>
+                        <div className="cf-info-chip cf-info-wide">施術に関するご要望: <strong>{selectedCustomer.treatmentExperience.join('、')}</strong></div>
+                    )}
+                    {selectedCustomer.treatmentRequest && (
+                        <div className="cf-info-chip cf-info-wide" style={{background:'#e4f4f7',color:'#1a7a8a'}}>ご利用経験のある施術: <strong>{selectedCustomer.treatmentRequest}</strong></div>
                     )}
                     {selectedCustomer.visitPurpose && selectedCustomer.visitPurpose.length > 0 && (
                         <div className="cf-info-chip cf-info-wide" style={{background:'#f5f0e0',color:'#8a7540'}}>ご来店きっかけ: <strong>{selectedCustomer.visitPurpose.join('、')}</strong></div>
@@ -8851,11 +8853,11 @@
                     {selectedCustomer.allergy && selectedCustomer.allergy !== 'いいえ' && selectedCustomer.allergy !== 'なし' && (
                         <div className="cf-info-chip" style={{background:'#fdf0f1',color:'#d94050'}}>アレルギー: <strong>{selectedCustomer.allergy}</strong></div>
                     )}
-                    {selectedCustomer.cosmeticSurgery && selectedCustomer.cosmeticSurgery !== 'いいえ' && selectedCustomer.cosmeticSurgery !== 'なし' && (
-                        <div className="cf-info-chip" style={{background:'#f5f0e0',color:'#8a7540'}}>美容整形: <strong>{selectedCustomer.cosmeticSurgery}</strong></div>
+                    {selectedCustomer.pregnancyCheck && selectedCustomer.pregnancyCheck !== 'いいえ' && selectedCustomer.pregnancyCheck !== 'なし' && (
+                        <div className="cf-info-chip" style={{background:'#f5f0e0',color:'#8a7540'}}>美容整形: <strong>{selectedCustomer.pregnancyCheck}</strong></div>
                     )}
-                    {selectedCustomer.pregnancyCheck && selectedCustomer.pregnancyCheck !== 'いいえ' && selectedCustomer.pregnancyCheck !== 'なし' && selectedCustomer.pregnancyCheck !== '該当なし' && (
-                        <div className="cf-info-chip" style={{background:'#fdf5e8',color:'#d68c1a'}}>妊娠・授乳: <strong>{selectedCustomer.pregnancyCheck}</strong></div>
+                    {selectedCustomer.cosmeticSurgery && selectedCustomer.cosmeticSurgery !== 'いいえ' && selectedCustomer.cosmeticSurgery !== 'なし' && selectedCustomer.cosmeticSurgery !== '該当なし' && (
+                        <div className="cf-info-chip" style={{background:'#fdf5e8',color:'#d68c1a'}}>妊娠・授乳: <strong>{selectedCustomer.cosmeticSurgery}</strong></div>
                     )}
                 </div>
             ) : null;
@@ -9228,21 +9230,23 @@
                                         {/* Lines */}
                                         {graphData.lines.map(l => {
                                             if (l.isRevert) {
-                                                // 施術1回のみ→約2週間で元に戻る線
-                                                const startX = graphData.X0;
-                                                const startY = graphData.YS;
-                                                const dipX = startX + graphData.MW * 0.05;
-                                                const dipY = startY - 60;
-                                                const midX = startX + graphData.MW * 0.35;
-                                                const midY = startY - 30;
-                                                const endRX = startX + graphData.MW * 0.55;
-                                                const endRY = startY + 5;
-                                                const revertD = `M ${startX},${startY} C ${dipX},${dipY} ${dipX},${dipY} ${startX + graphData.MW * 0.15},${dipY + 10} C ${midX - 20},${dipY + 25} ${midX},${midY} ${midX + 20},${midY + 25} C ${endRX - 15},${endRY - 10} ${endRX},${endRY} ${endRX + 10},${endRY}`;
+                                                // 施術1回のみ→約2週間で元に戻る滑らかな曲線
+                                                const sx = graphData.X0;
+                                                const sy = graphData.YS;
+                                                const mw = graphData.MW;
+                                                // ピーク: 施術直後（数日後）に改善を実感
+                                                const peakX = sx + mw * 0.12;
+                                                const peakY = sy - 80;
+                                                // 終点: 約2週間（半月）で元に戻る
+                                                const endX = sx + mw * 0.5;
+                                                const endY = sy;
+                                                // 滑らかなベジェ: 急上昇→ゆるやかに戻る非対称カーブ
+                                                const revertD = `M ${sx},${sy} C ${sx},${peakY - 10} ${peakX - 10},${peakY} ${peakX},${peakY} S ${endX - mw * 0.05},${endY} ${endX},${endY}`;
                                                 return (
                                                     <g key={l.id} className={'line-group ' + (activeLines[l.id] ? 'visible' : '')} style={{opacity: activeLines[l.id] ? 1 : 0}}>
                                                         <path d={revertD} fill="none" stroke={l.c} strokeWidth={l.w} strokeLinecap="round" strokeDasharray="8,5" />
-                                                        <circle cx={endRX + 10} cy={endRY} r="4" fill="white" stroke={l.c} strokeWidth="2" />
-                                                        <text x={endRX + 24} y={endRY + 4} fontSize="11" fill={l.c} fontWeight="700">≈ 2週間で元に戻る</text>
+                                                        <circle cx={endX} cy={endY} r="4" fill="white" stroke={l.c} strokeWidth="2" />
+                                                        <text x={endX + 12} y={endY - 8} fontSize="12" fill={l.c} fontWeight="700">≈ 2週間で元に戻る</text>
                                                     </g>
                                                 );
                                             }
