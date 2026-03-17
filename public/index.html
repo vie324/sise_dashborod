@@ -2812,12 +2812,26 @@
             // GASに保存
             const saveToGAS = useCallback(async (members) => {
                 if (MANUAL_MEMBERS_GAS_URL !== 'YOUR_UNIFIED_GAS_URL') {
-                    await fetch(MANUAL_MEMBERS_GAS_URL, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ type: 'members', action: 'saveManualMembers', members })
-                    }).catch(() => {});
+                    setSaving(true);
+                    try {
+                        const res = await fetch(MANUAL_MEMBERS_GAS_URL, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ type: 'members', action: 'saveManualMembers', members })
+                        });
+                        if (!res.ok) throw new Error('HTTP ' + res.status);
+                        const data = await res.json();
+                        if (data.error) throw new Error(data.error);
+                        setLastSynced(new Date());
+                        return true;
+                    } catch (e) {
+                        console.error('[会員管理] GAS保存エラー:', e);
+                        return false;
+                    } finally {
+                        setSaving(false);
+                    }
                 }
+                return false;
             }, []);
 
             // 会員追加（入会）
@@ -2841,7 +2855,10 @@
                 setManualMembers(prev => {
                     const updated = [newMember, ...prev];
                     saveLocal(updated);
-                    saveToGAS(updated);
+                    saveToGAS(updated).then(ok => {
+                        if (ok) showToast(newMember.name + 'さんを登録・スプシ保存しました', 'success');
+                        else showToast(newMember.name + 'さんを登録しました（スプシ保存失敗）', 'error');
+                    });
                     return updated;
                 });
                 return newMember;
@@ -2860,7 +2877,9 @@
                         };
                     });
                     saveLocal(updated);
-                    saveToGAS(updated);
+                    saveToGAS(updated).then(ok => {
+                        if (ok) showToast('退会処理をスプシに保存しました', 'success');
+                    });
                     return updated;
                 });
             }, [saveLocal, saveToGAS]);
@@ -2878,7 +2897,9 @@
                         };
                     });
                     saveLocal(updated);
-                    saveToGAS(updated);
+                    saveToGAS(updated).then(ok => {
+                        if (ok) showToast('再入会をスプシに保存しました', 'success');
+                    });
                     return updated;
                 });
             }, [saveLocal, saveToGAS]);
@@ -2897,7 +2918,9 @@
                         };
                     });
                     saveLocal(updated);
-                    saveToGAS(updated);
+                    saveToGAS(updated).then(ok => {
+                        if (ok) showToast('プラン変更をスプシに保存しました', 'success');
+                    });
                     return updated;
                 });
             }, [saveLocal, saveToGAS]);
@@ -2917,7 +2940,9 @@
                 setManualMembers(prev => {
                     const updated = prev.filter(m => m.id !== memberId);
                     saveLocal(updated);
-                    saveToGAS(updated);
+                    saveToGAS(updated).then(ok => {
+                        if (ok) showToast('会員削除をスプシに保存しました', 'success');
+                    });
                     return updated;
                 });
             }, [saveLocal, saveToGAS]);
@@ -2940,7 +2965,9 @@
                         return { ...m, payments: [...(m.payments || []), newPayment] };
                     });
                     saveLocal(updated);
-                    saveToGAS(updated);
+                    saveToGAS(updated).then(ok => {
+                        if (ok) showToast('入金記録をスプシに保存しました', 'success');
+                    });
                     return updated;
                 });
             }, [saveLocal, saveToGAS]);
@@ -2953,7 +2980,9 @@
                         return { ...m, payments: (m.payments || []).filter(p => p.id !== paymentId) };
                     });
                     saveLocal(updated);
-                    saveToGAS(updated);
+                    saveToGAS(updated).then(ok => {
+                        if (ok) showToast('入金削除をスプシに保存しました', 'success');
+                    });
                     return updated;
                 });
             }, [saveLocal, saveToGAS]);
@@ -2961,7 +2990,7 @@
             return {
                 manualMembers, addMember, cancelMember, reactivateMember,
                 changePlan, updateMember, deleteMember, addPayment, removePayment,
-                syncFromGAS, lastSynced, saving
+                syncFromGAS, saveToGAS, lastSynced, saving
             };
         };
 
@@ -3864,7 +3893,7 @@
 
         // QR・現金決済 会員管理セクションコンポーネント
         const ManualMembersSection = ({ manualMembersHook, squareMembers }) => {
-            const { manualMembers, addMember, cancelMember, reactivateMember, changePlan, deleteMember, addPayment, removePayment } = manualMembersHook;
+            const { manualMembers, addMember, cancelMember, reactivateMember, changePlan, deleteMember, addPayment, removePayment, syncFromGAS, lastSynced, saving } = manualMembersHook;
             const [showManualAddForm, setShowManualAddForm] = useState(false);
             const [manualFilter, setManualFilter] = useState('all');
             const [manualSearch, setManualSearch] = useState('');
@@ -3940,6 +3969,28 @@
                         <div className="flex items-center gap-2">
                             <span className="text-xs bg-sise-50 text-sise-700 px-2 py-1 rounded-lg font-bold">{formatCurrency(manualRevenue)}/月</span>
                             <button
+                                onClick={async () => {
+                                    const ok = await manualMembersHook.saveToGAS(manualMembers);
+                                    if (ok) showToast('スプレッドシートに保存しました', 'success');
+                                    else showToast('スプレッドシートへの保存に失敗しました', 'error');
+                                }}
+                                disabled={saving}
+                                className="flex items-center px-3 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-xl text-sm font-medium shadow-lg shadow-blue-500/25 transition-all active:scale-95 disabled:opacity-50"
+                            >
+                                <Icon name={saving ? "loader" : "save"} size={16} className={saving ? "mr-1.5 animate-spin" : "mr-1.5"} />
+                                {saving ? '保存中...' : 'スプシ保存'}
+                            </button>
+                            <button
+                                onClick={async () => {
+                                    await syncFromGAS();
+                                    showToast('スプレッドシートから同期しました', 'success');
+                                }}
+                                className="flex items-center px-2.5 py-2 bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 rounded-xl text-sm font-medium transition-all active:scale-95"
+                                title="スプレッドシートから同期"
+                            >
+                                <Icon name="refresh-cw" size={15} />
+                            </button>
+                            <button
                                 onClick={() => setShowManualAddForm(!showManualAddForm)}
                                 className="flex items-center px-3 py-2 bg-sise-500 hover:bg-sise-600 text-white rounded-xl text-sm font-medium shadow-lg shadow-sise-500/25 transition-all active:scale-95"
                             >
@@ -3948,6 +3999,13 @@
                             </button>
                         </div>
                     </div>
+                    {/* 同期ステータス */}
+                    {lastSynced && (
+                        <div className="flex items-center gap-1.5 mb-3 text-xs text-slate-400">
+                            <Icon name="cloud" size={12} />
+                            <span>最終同期: {lastSynced.toLocaleString('ja-JP')}</span>
+                        </div>
+                    )}
 
                     {/* KPI小カード */}
                     <div className="grid grid-cols-3 gap-2 mb-4">
