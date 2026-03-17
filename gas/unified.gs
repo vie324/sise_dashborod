@@ -722,13 +722,16 @@ function handleMembersGet(params) {
 function handleMembersPost(body) {
   const sheet = getOrCreateSheet(SHEETS.MEMBERS, ['JSON']);
   const lastRow = sheet.getLastRow();
-  if (lastRow >= 2) sheet.getRange(2, 1, lastRow - 1, 1).clearContent();
+  if (lastRow >= 2) {
+    sheet.deleteRows(2, lastRow - 1);
+  }
 
-  (body.members || []).forEach(m => {
+  var members = body.members || [];
+  members.forEach(m => {
     sheet.appendRow([JSON.stringify(m)]);
   });
 
-  return { success: true };
+  return { success: true, count: members.length, savedAt: new Date().toISOString() };
 }
 
 // ============================================================
