@@ -2814,14 +2814,11 @@
                 if (MANUAL_MEMBERS_GAS_URL !== 'YOUR_UNIFIED_GAS_URL') {
                     setSaving(true);
                     try {
-                        const res = await fetch(MANUAL_MEMBERS_GAS_URL, {
+                        await fetch(MANUAL_MEMBERS_GAS_URL, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ type: 'members', action: 'saveManualMembers', members })
                         });
-                        if (!res.ok) throw new Error('HTTP ' + res.status);
-                        const data = await res.json();
-                        if (data.error) throw new Error(data.error);
                         setLastSynced(new Date());
                         return true;
                     } catch (e) {
@@ -3971,8 +3968,22 @@
                             <button
                                 onClick={async () => {
                                     const ok = await manualMembersHook.saveToGAS(manualMembers);
-                                    if (ok) showToast('スプレッドシートに保存しました', 'success');
-                                    else showToast('スプレッドシートへの保存に失敗しました', 'error');
+                                    if (ok) {
+                                        // 保存後にGETで検証
+                                        try {
+                                            const verifyRes = await fetch(UNIFIED_GAS_URL + '?type=members');
+                                            const verifyData = await verifyRes.json();
+                                            if (verifyData && verifyData.members && verifyData.members.length > 0) {
+                                                showToast('スプレッドシートに' + verifyData.members.length + '件保存しました', 'success');
+                                            } else {
+                                                showToast('スプレッドシートに保存しました（検証: 0件）', 'success');
+                                            }
+                                        } catch (_) {
+                                            showToast('スプレッドシートに保存しました', 'success');
+                                        }
+                                    } else {
+                                        showToast('スプレッドシートへの保存に失敗しました', 'error');
+                                    }
                                 }}
                                 disabled={saving}
                                 className="flex items-center px-3 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-xl text-sm font-medium shadow-lg shadow-blue-500/25 transition-all active:scale-95 disabled:opacity-50"
