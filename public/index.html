@@ -3889,7 +3889,7 @@
         // ========================================
 
         // QR・現金決済 会員管理セクションコンポーネント
-        const ManualMembersSection = ({ manualMembersHook, squareMembers }) => {
+        const ManualMembersSection = ({ manualMembersHook, squareMembers, stores }) => {
             const { manualMembers, addMember, cancelMember, reactivateMember, changePlan, deleteMember, addPayment, removePayment, syncFromGAS, lastSynced, saving } = manualMembersHook;
             const [showManualAddForm, setShowManualAddForm] = useState(false);
             const [manualFilter, setManualFilter] = useState('all');
@@ -4096,6 +4096,16 @@
                                         placeholder="10000" className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm outline-none" />
                                 </div>
                                 <div>
+                                    <label className="block text-xs font-medium text-slate-600 mb-1">所属店舗</label>
+                                    <select value={newManualMember.storeName} onChange={e => setNewManualMember(p => ({...p, storeName: e.target.value}))}
+                                        className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm outline-none bg-white">
+                                        <option value="">-- 店舗を選択 --</option>
+                                        {(stores || []).filter(s => s.status !== 'inactive').map(s => (
+                                            <option key={s.id} value={s.name}>{s.name}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                                <div>
                                     <label className="block text-xs font-medium text-slate-600 mb-1">入会日</label>
                                     <input type="date" value={newManualMember.startDate} onChange={e => setNewManualMember(p => ({...p, startDate: e.target.value}))}
                                         className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm outline-none" />
@@ -4173,6 +4183,7 @@
                                                 {member.source === 'square' ? 'Square' : member.paymentMethod === 'QR' ? 'QR' : '現金'}
                                             </span>
                                             {member.planName && <span className="text-[10px] text-slate-400 truncate">{member.planName}</span>}
+                                            {member.storeName && <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">{member.storeName}</span>}
                                         </div>
                                     </div>
                                     <span className="text-sm font-bold text-slate-700">{formatCurrency(member.monthlyPrice || 0)}</span>
@@ -4218,6 +4229,7 @@
                                                                 {member.status === 'ACTIVE' ? 'アクティブ' : '退会'}
                                                             </span>
                                                             {member.planName && <span className="text-[10px] text-slate-400">{member.planName}</span>}
+                                                            {member.storeName && <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">{member.storeName}</span>}
                                                         </div>
                                                     </div>
                                                 </div>
@@ -4235,6 +4247,7 @@
                                             <div className="px-3 pb-3 border-t border-slate-100 animate-scale-in">
                                                 {/* 基本情報 */}
                                                 <div className="grid grid-cols-2 md:grid-cols-4 gap-2 py-3 text-xs">
+                                                    {member.storeName && <div><span className="text-slate-400">店舗:</span> <span className="font-medium text-slate-700">{member.storeName}</span></div>}
                                                     <div><span className="text-slate-400">入会日:</span> <span className="font-medium text-slate-700">{member.startDate}</span></div>
                                                     {member.canceledDate && <div><span className="text-slate-400">退会日:</span> <span className="font-medium text-red-500">{member.canceledDate}</span></div>}
                                                     {member.phone && member.phone !== '-' && (
@@ -5450,7 +5463,7 @@
                     )}
 
                     {/* QR・現金決済会員管理セクション */}
-                    {manualMembersHook && <ManualMembersSection manualMembersHook={manualMembersHook} squareMembers={memberData.members} />}
+                    {manualMembersHook && <ManualMembersSection manualMembersHook={manualMembersHook} squareMembers={memberData.members} stores={memberData.stores || []} />}
 
                     {/* 設定情報 */}
                     <Card className="bg-slate-50 border-slate-300">
