@@ -1160,7 +1160,7 @@
         let serverStores = [];
 
         // 統合 Google Apps Script URL（全機能で共有・1つのスプレッドシートで管理）
-        const UNIFIED_GAS_URL = localStorage.getItem('sise_unified_gas_url') || 'https://script.google.com/macros/s/AKfycbwuRYK8zSVri6jipLbJYKv_LMi0520g5fr--LYjQFbckznMuMx3Jlspse69pFZqXxYKqQ/exec';
+        const UNIFIED_GAS_URL = localStorage.getItem('sise_unified_gas_url') || 'https://script.google.com/macros/s/AKfycbwxFQPO335ZQLRBVEjeIcwHXjFy-rE9AAUt0IqG3La8LAGxJyKEECGTKDC0nQE77yzP/exec';
 
         // API設定（サーバーサイドプロキシ経由）
         // APIキーはVercel環境変数で管理、フロントエンドには露出しない
@@ -8904,11 +8904,11 @@
                     {selectedCustomer.occupation && <div className="cf-info-chip">職業: <strong>{selectedCustomer.occupation}</strong></div>}
                     {selectedCustomer.address && <div className="cf-info-chip">お住まい: <strong>{selectedCustomer.address}</strong></div>}
                     {selectedCustomer.improvementTimeline && <div className="cf-info-chip">目標時期: <strong>{selectedCustomer.improvementTimeline}</strong></div>}
-                    {selectedCustomer.treatmentExperience && selectedCustomer.treatmentExperience.length > 0 && (
-                        <div className="cf-info-chip cf-info-wide">施術に関するご要望: <strong>{selectedCustomer.treatmentExperience.join('、')}</strong></div>
-                    )}
                     {selectedCustomer.treatmentRequest && (
-                        <div className="cf-info-chip cf-info-wide" style={{background:'#e4f4f7',color:'#1a7a8a'}}>ご利用経験のある施術: <strong>{selectedCustomer.treatmentRequest}</strong></div>
+                        <div className="cf-info-chip cf-info-wide">施術に関するご要望: <strong>{selectedCustomer.treatmentRequest}</strong></div>
+                    )}
+                    {selectedCustomer.treatmentExperience && selectedCustomer.treatmentExperience.length > 0 && (
+                        <div className="cf-info-chip cf-info-wide" style={{background:'#e4f4f7',color:'#1a7a8a'}}>ご利用経験のある施術: <strong>{selectedCustomer.treatmentExperience.join('、')}</strong></div>
                     )}
                     {selectedCustomer.visitPurpose && selectedCustomer.visitPurpose.length > 0 && (
                         <div className="cf-info-chip cf-info-wide" style={{background:'#f5f0e0',color:'#8a7540'}}>ご来店きっかけ: <strong>{selectedCustomer.visitPurpose.join('、')}</strong></div>
@@ -8922,11 +8922,11 @@
                     {selectedCustomer.allergy && selectedCustomer.allergy !== 'いいえ' && selectedCustomer.allergy !== 'なし' && (
                         <div className="cf-info-chip" style={{background:'#fdf0f1',color:'#d94050'}}>アレルギー: <strong>{selectedCustomer.allergy}</strong></div>
                     )}
-                    {selectedCustomer.cosmeticSurgery && selectedCustomer.cosmeticSurgery !== 'いいえ' && selectedCustomer.cosmeticSurgery !== 'なし' && (
-                        <div className="cf-info-chip" style={{background:'#f5f0e0',color:'#8a7540'}}>美容整形: <strong>{selectedCustomer.cosmeticSurgery}</strong></div>
+                    {selectedCustomer.pregnancyCheck && selectedCustomer.pregnancyCheck !== 'いいえ' && selectedCustomer.pregnancyCheck !== 'なし' && (
+                        <div className="cf-info-chip" style={{background:'#f5f0e0',color:'#8a7540'}}>美容整形: <strong>{selectedCustomer.pregnancyCheck}</strong></div>
                     )}
-                    {selectedCustomer.pregnancyCheck && selectedCustomer.pregnancyCheck !== 'いいえ' && selectedCustomer.pregnancyCheck !== 'なし' && selectedCustomer.pregnancyCheck !== '該当なし' && (
-                        <div className="cf-info-chip" style={{background:'#fdf5e8',color:'#d68c1a'}}>妊娠・特定疾患: <strong>{selectedCustomer.pregnancyCheck}</strong></div>
+                    {selectedCustomer.cosmeticSurgery && selectedCustomer.cosmeticSurgery !== 'いいえ' && selectedCustomer.cosmeticSurgery !== 'なし' && selectedCustomer.cosmeticSurgery !== '該当なし' && (
+                        <div className="cf-info-chip" style={{background:'#fdf5e8',color:'#d68c1a'}}>妊娠・特定疾患: <strong>{selectedCustomer.cosmeticSurgery}</strong></div>
                     )}
                 </div>
             ) : null;
@@ -9303,14 +9303,14 @@
                                                 const sx = graphData.X0;
                                                 const sy = graphData.YS;
                                                 const mw = graphData.MW;
-                                                // ピーク: 1回の施術効果（他プランの1セッション分と同等の小さな改善）
-                                                const peakX = sx + mw * 0.12;
-                                                const peakY = sy - 30;
-                                                // 終点: 約2週間（半月）で元に戻る
+                                                // ピーク: 施術直後の改善（急速に上がる）
+                                                const peakX = sx + mw * 0.15;
+                                                const peakY = sy - 80;
+                                                // 終点: 約2週間で元に戻る
                                                 const endX = sx + mw * 0.5;
                                                 const endY = sy;
-                                                // 滑らかなベジェ: 小さく上昇→ゆるやかに戻る
-                                                const revertD = `M ${sx},${sy} C ${sx},${peakY - 5} ${peakX - 10},${peakY} ${peakX},${peakY} S ${endX - mw * 0.05},${endY} ${endX},${endY}`;
+                                                // 滑らかなベジェ: 急上昇→ゆるやかに元へ戻る
+                                                const revertD = `M ${sx},${sy} C ${sx + mw * 0.03},${sy - 40} ${peakX - mw * 0.06},${peakY} ${peakX},${peakY} S ${endX - mw * 0.1},${endY + 2} ${endX},${endY}`;
                                                 return (
                                                     <g key={l.id} className={'line-group ' + (activeLines[l.id] ? 'visible' : '')} style={{opacity: activeLines[l.id] ? 1 : 0}}>
                                                         <path d={revertD} fill="none" stroke={l.c} strokeWidth={l.w} strokeLinecap="round" strokeDasharray="8,5" />
