@@ -7302,16 +7302,24 @@
         // ========================================
 
         const CashbookView = ({ cashbookHook, memberData, manualMembersHook, activeStoreId }) => {
-            const { entries: rawEntries, addEntry: rawAddEntry, updateEntry, deleteEntry } = cashbookHook;
+            const { entries: rawEntries, addEntry: rawAddEntry, updateEntry, deleteEntry, saving } = cashbookHook;
+            const stores = memberData?.stores || [];
+            const activeStores = stores.filter(s => s.status !== 'inactive');
 
-            // 権限のある店舗のみ表示（storeフィールドがあればフィルタ、なければ非staffモードのみ表示）
+            // 店舗フィルタ
+            const [filterStore, setFilterStore] = useState('all');
+
+            // 権限のある店舗のみ表示
             const entries = useMemo(() => {
-                if (!currentAccess) return rawEntries; // 管理者は全件表示
-                return (rawEntries || []).filter(e => {
-                    if (!e.store) return true; // store未設定の既存データは表示（後方互換）
-                    return currentAccess.storeIds.includes(e.store);
-                });
-            }, [rawEntries]);
+                let filtered = rawEntries || [];
+                if (currentAccess) {
+                    filtered = filtered.filter(e => !e.store || currentAccess.storeIds.includes(e.store));
+                }
+                if (filterStore !== 'all') {
+                    filtered = filtered.filter(e => e.store === filterStore);
+                }
+                return filtered;
+            }, [rawEntries, filterStore]);
 
             // 新規エントリーに店舗IDを自動付与
             const addEntry = useCallback((entry) => {
@@ -7320,10 +7328,17 @@
                     store: entry.store || activeStoreId || (currentAccess && currentAccess.storeIds.length === 1 ? currentAccess.storeIds[0] : 'all')
                 });
             }, [rawAddEntry, activeStoreId]);
+
             const [showForm, setShowForm] = useState(false);
             const [selectedDate, setSelectedDate] = useState(new Date().toISOString().slice(0, 10));
             const [viewMonth, setViewMonth] = useState(new Date().toISOString().slice(0, 7));
             const [editingId, setEditingId] = useState(null);
+            const [showCashCheck, setShowCashCheck] = useState(false);
+            const [cashCheckAmount, setCashCheckAmount] = useState('');
+            const [cashCheckStore, setCashCheckStore] = useState('');
+            const [gasLastSynced, setGasLastSynced] = useState(null);
+            const [gasSyncing, setGasSyncing] = useState(false);
+
             const [formData, setFormData] = useState({
                 date: new Date().toISOString().slice(0, 10),
                 type: 'income',
@@ -7333,6 +7348,8 @@
                 customerName: '',
                 treatmentCount: '1',
                 paymentMethod: 'CASH',
+                store: activeStoreId || '',
+                recorder: '',
                 notes: ''
             });
 
@@ -7343,7 +7360,7 @@
             const monthEntries = useMemo(() => {
                 return (entries || [])
                     .filter(e => e.date && e.date.startsWith(viewMonth))
-                    .sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt));
+                    .sort((a, b) => b.date.localeCompare(a.date) || (b.createdAt || '').localeCompare(a.createdAt || ''));
             }, [entries, viewMonth]);
 
             // 日別グループ
@@ -7356,21 +7373,39 @@
                 return Object.entries(groups).sort((a, b) => b[0].localeCompare(a[0]));
             }, [monthEntries]);
 
+            // 現金残高計算（全期間・店舗別）
+            const cashBalance = useMemo(() => {
+                const all = (rawEntries || []).filter(e => {
+                    if (currentAccess && e.store && !currentAccess.storeIds.includes(e.store)) return false;
+                    return true;
+                });
+                // 全体
+                const totalIn = all.filter(e => e.type === 'income' && e.paymentMethod === 'CASH').reduce((s, e) => s + e.amount, 0);
+                const totalOut = all.filter(e => e.type === 'expense' && e.paymentMethod === 'CASH').reduce((s, e) => s + e.amount, 0);
+                // 店舗別
+                const byStore = {};
+                activeStores.forEach(st => {
+                    const stEntries = all.filter(e => e.store === st.id);
+                    const stIn = stEntries.filter(e => e.type === 'income' && e.paymentMethod === 'CASH').reduce((s, e) => s + e.amount, 0);
+                    const stOut = stEntries.filter(e => e.type === 'expense' && e.paymentMethod === 'CASH').reduce((s, e) => s + e.amount, 0);
+                    byStore[st.id] = { name: st.name, balance: stIn - stOut, income: stIn, expense: stOut };
+                });
+                return { total: totalIn - totalOut, byStore };
+            }, [rawEntries, activeStores]);
+
             // 月間集計
             const monthSummary = useMemo(() => {
+                const cashIn = monthEntries.filter(e => e.type === 'income' && e.paymentMethod === 'CASH').reduce((s, e) => s + e.amount, 0);
+                const cashOut = monthEntries.filter(e => e.type === 'expense' && e.paymentMethod === 'CASH').reduce((s, e) => s + e.amount, 0);
                 const income = monthEntries.filter(e => e.type === 'income').reduce((s, e) => s + e.amount, 0);
                 const expense = monthEntries.filter(e => e.type === 'expense').reduce((s, e) => s + e.amount, 0);
                 const totalTreatments = monthEntries.reduce((s, e) => s + (e.treatmentCount || 0), 0);
-                const totalCustomers = new Set(monthEntries.filter(e => e.customerName).map(e => e.customerName)).size;
-
-                // カテゴリ別集計
                 const byCategory = {};
                 monthEntries.forEach(e => {
                     if (!byCategory[e.category]) byCategory[e.category] = 0;
                     byCategory[e.category] += e.amount;
                 });
-
-                return { income, expense, profit: income - expense, totalTreatments, totalCustomers, byCategory };
+                return { income, expense, cashIn, cashOut, totalTreatments, byCategory };
             }, [monthEntries]);
 
             // 日別集計
@@ -7389,6 +7424,13 @@
                 return [...names].filter(Boolean).sort((a, b) => a.localeCompare(b, 'ja'));
             }, [memberData?.members, manualMembersHook?.manualMembers]);
 
+            // 店舗名取得ヘルパー
+            const getStoreName = (storeId) => {
+                if (!storeId || storeId === 'all') return '';
+                const s = activeStores.find(st => st.id === storeId);
+                return s ? s.name : storeId;
+            };
+
             const resetForm = () => {
                 setFormData({
                     date: selectedDate,
@@ -7399,6 +7441,8 @@
                     customerName: '',
                     treatmentCount: '1',
                     paymentMethod: 'CASH',
+                    store: filterStore !== 'all' ? filterStore : (activeStoreId || ''),
+                    recorder: '',
                     notes: ''
                 });
                 setEditingId(null);
@@ -7433,6 +7477,8 @@
                     customerName: entry.customerName || '',
                     treatmentCount: String(entry.treatmentCount || 0),
                     paymentMethod: entry.paymentMethod || 'CASH',
+                    store: entry.store || '',
+                    recorder: entry.recorder || '',
                     notes: entry.notes || ''
                 });
                 setEditingId(entry.id);
@@ -7445,33 +7491,224 @@
                 setViewMonth(d.toISOString().slice(0, 7));
             };
 
+            // スプシ保存
+            const handleGasSave = async () => {
+                if (UNIFIED_GAS_URL === 'YOUR_UNIFIED_GAS_URL') return;
+                setGasSyncing(true);
+                try {
+                    await fetch(UNIFIED_GAS_URL, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'text/plain' },
+                        body: JSON.stringify({ type: 'cashbook', action: 'saveCashbook', entries: rawEntries })
+                    });
+                    setGasLastSynced(new Date());
+                    showToast('出納帳をスプシに保存しました', 'success');
+                } catch (e) {
+                    showToast('スプシ保存に失敗しました', 'error');
+                } finally {
+                    setGasSyncing(false);
+                }
+            };
+
+            // スプシ読込
+            const handleGasLoad = async () => {
+                if (UNIFIED_GAS_URL === 'YOUR_UNIFIED_GAS_URL') return;
+                setGasSyncing(true);
+                try {
+                    const res = await fetch(UNIFIED_GAS_URL + '?type=cashbook');
+                    const data = await res.json();
+                    if (data && data.entries && data.entries.length > 0) {
+                        // rawEntriesを上書き（hookのsetEntriesを直接使う）
+                        cashbookHook.entries.splice(0);
+                        data.entries.forEach(e => cashbookHook.entries.push(e));
+                        try { localStorage.setItem('sise_cashbook_entries', JSON.stringify(data.entries)); } catch(e) {}
+                        setGasLastSynced(new Date());
+                        showToast(data.entries.length + '件をスプシから読み込みました', 'success');
+                        window.location.reload();
+                    } else {
+                        showToast('スプシにデータがありません', 'info');
+                    }
+                } catch (e) {
+                    showToast('スプシ読込に失敗しました', 'error');
+                } finally {
+                    setGasSyncing(false);
+                }
+            };
+
+            // レジ金チェック
+            const handleCashCheck = () => {
+                const actual = parseInt(cashCheckAmount) || 0;
+                const storeId = cashCheckStore || filterStore;
+                let expected = cashBalance.total;
+                if (storeId && storeId !== 'all' && cashBalance.byStore[storeId]) {
+                    expected = cashBalance.byStore[storeId].balance;
+                }
+                const diff = actual - expected;
+                const storeName = getStoreName(storeId) || '全店舗';
+                // 差異を記録として残す
+                if (diff !== 0) {
+                    addEntry({
+                        date: new Date().toISOString().slice(0, 10),
+                        type: diff > 0 ? 'income' : 'expense',
+                        category: diff > 0 ? 'その他収入' : 'その他経費',
+                        description: 'レジ金チェック差異（' + storeName + '）実残高:' + formatCurrency(actual) + ' / 理論:' + formatCurrency(expected),
+                        amount: Math.abs(diff),
+                        paymentMethod: 'CASH',
+                        store: storeId !== 'all' ? storeId : '',
+                        recorder: 'レジ金チェック'
+                    });
+                    showToast('差異 ' + (diff > 0 ? '+' : '') + formatCurrency(diff) + ' を記録しました（' + storeName + '）', diff === 0 ? 'success' : 'error');
+                } else {
+                    showToast(storeName + '：レジ金一致（' + formatCurrency(actual) + '）', 'success');
+                }
+                setShowCashCheck(false);
+                setCashCheckAmount('');
+            };
+
             return (
                 <div className="space-y-5 md:space-y-6 animate-fade-in">
-                    <SectionHeader title="出納帳" subtitle="CASH BOOK" icon="book-open">
-                        <button
-                            onClick={() => { resetForm(); setFormData(p => ({...p, date: selectedDate})); setShowForm(!showForm); }}
-                            className="flex items-center px-4 py-2.5 btn-gradient rounded-xl font-medium text-sm transition-all active:scale-95"
-                        >
-                            <Icon name="plus" size={16} className="mr-1.5" />
-                            記帳する
-                        </button>
+                    <SectionHeader title="出納帳" subtitle="CASH MANAGEMENT" icon="book-open">
+                        <div className="flex items-center gap-2">
+                            <button onClick={handleGasSave} disabled={gasSyncing}
+                                className="flex items-center px-3 py-2 bg-sise-500 hover:bg-sise-600 text-white rounded-xl text-xs font-medium transition-all active:scale-95 disabled:opacity-50">
+                                <Icon name="upload-cloud" size={14} className="mr-1" />
+                                {gasSyncing ? '同期中...' : 'スプシ保存'}
+                            </button>
+                            <button onClick={handleGasLoad} disabled={gasSyncing}
+                                className="flex items-center px-3 py-2 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-xl text-xs font-medium transition-all active:scale-95 disabled:opacity-50">
+                                <Icon name="download-cloud" size={14} className="mr-1" />
+                                スプシ読込
+                            </button>
+                            <button
+                                onClick={() => { resetForm(); setFormData(p => ({...p, date: selectedDate})); setShowForm(!showForm); }}
+                                className="flex items-center px-4 py-2.5 btn-gradient rounded-xl font-medium text-sm transition-all active:scale-95"
+                            >
+                                <Icon name="plus" size={16} className="mr-1.5" />
+                                記帳する
+                            </button>
+                        </div>
                     </SectionHeader>
 
-                    {/* 月間サマリ KPI */}
+                    {gasLastSynced && (
+                        <p className="text-[11px] text-slate-400 text-right -mt-4">最終同期: {gasLastSynced.toLocaleString('ja-JP')}</p>
+                    )}
+
+                    {/* 現金残高カード（店舗別） */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                        {/* 全体残高 */}
+                        <div className="glass-card !rounded-2xl p-4 border-2 border-sise-200 bg-gradient-to-br from-sise-50 to-white">
+                            <div className="flex items-center justify-between mb-2">
+                                <span className="text-xs font-semibold text-sise-600 flex items-center"><Icon name="wallet" size={14} className="mr-1" /> 現金残高（全店舗）</span>
+                                <button onClick={() => { setShowCashCheck(true); setCashCheckStore('all'); }}
+                                    className="text-[11px] bg-sise-100 text-sise-700 px-2 py-1 rounded-lg font-semibold hover:bg-sise-200 transition-colors">
+                                    <Icon name="check-circle" size={12} className="inline mr-0.5 -mt-0.5" />レジ金チェック
+                                </button>
+                            </div>
+                            <p className="text-2xl font-extrabold text-slate-800">{formatCurrency(cashBalance.total)}</p>
+                            <div className="flex gap-3 mt-2 text-[11px]">
+                                <span className="text-sise-600">月入金: <strong>{formatCurrency(monthSummary.cashIn)}</strong></span>
+                                <span className="text-red-500">月出金: <strong>{formatCurrency(monthSummary.cashOut)}</strong></span>
+                            </div>
+                        </div>
+                        {/* 店舗別残高 */}
+                        {Object.entries(cashBalance.byStore).map(([storeId, data]) => (
+                            <div key={storeId} className={`glass-card !rounded-2xl p-4 cursor-pointer transition-all ${filterStore === storeId ? 'border-2 border-sise-400 bg-sise-50/30' : 'border border-slate-200 hover:border-sise-200'}`}
+                                onClick={() => setFilterStore(filterStore === storeId ? 'all' : storeId)}>
+                                <div className="flex items-center justify-between mb-2">
+                                    <span className="text-xs font-semibold text-slate-600 flex items-center">
+                                        <Icon name="map-pin" size={13} className="mr-1" /> {data.name}
+                                    </span>
+                                    <button onClick={(ev) => { ev.stopPropagation(); setShowCashCheck(true); setCashCheckStore(storeId); }}
+                                        className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-medium hover:bg-slate-200 transition-colors">
+                                        チェック
+                                    </button>
+                                </div>
+                                <p className="text-xl font-extrabold text-slate-800">{formatCurrency(data.balance)}</p>
+                                <div className="flex gap-3 mt-1 text-[10px] text-slate-400">
+                                    <span>入金: {formatCurrency(data.income)}</span>
+                                    <span>出金: {formatCurrency(data.expense)}</span>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+
+                    {/* 店舗フィルタ */}
+                    {activeStores.length > 1 && (
+                        <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-xs text-slate-400 font-medium">店舗:</span>
+                            <button onClick={() => setFilterStore('all')}
+                                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${filterStore === 'all' ? 'bg-sise-500 text-white shadow' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>全店舗</button>
+                            {activeStores.map(s => (
+                                <button key={s.id} onClick={() => setFilterStore(s.id)}
+                                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${filterStore === s.id ? 'bg-sise-500 text-white shadow' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>{s.name}</button>
+                            ))}
+                        </div>
+                    )}
+
+                    {/* レジ金チェックモーダル */}
+                    {showCashCheck && (
+                        <Card className="animate-scale-in !border-amber-300 !bg-amber-50/30">
+                            <h4 className="font-bold text-slate-800 mb-3 flex items-center">
+                                <Icon name="check-circle" size={18} className="mr-2 text-amber-500" />
+                                レジ金チェック — {getStoreName(cashCheckStore) || '全店舗'}
+                            </h4>
+                            <p className="text-xs text-slate-500 mb-3">レジの実際の現金を数えて入力してください。理論残高と照合します。</p>
+                            <div className="flex items-end gap-3">
+                                <div className="flex-1">
+                                    <label className="block text-xs font-medium text-slate-600 mb-1">実際のレジ金額（円）</label>
+                                    <input type="number" value={cashCheckAmount} onChange={e => setCashCheckAmount(e.target.value)}
+                                        placeholder="例: 50000" className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm outline-none text-lg font-bold" autoFocus />
+                                </div>
+                                <div className="text-center pb-2">
+                                    <p className="text-[11px] text-slate-400">理論残高</p>
+                                    <p className="text-lg font-extrabold text-slate-700">
+                                        {formatCurrency(cashCheckStore && cashCheckStore !== 'all' && cashBalance.byStore[cashCheckStore] ? cashBalance.byStore[cashCheckStore].balance : cashBalance.total)}
+                                    </p>
+                                </div>
+                            </div>
+                            {cashCheckAmount && (
+                                <div className="mt-3 p-3 rounded-xl bg-white border border-slate-200">
+                                    {(() => {
+                                        const actual = parseInt(cashCheckAmount) || 0;
+                                        const expected = cashCheckStore && cashCheckStore !== 'all' && cashBalance.byStore[cashCheckStore] ? cashBalance.byStore[cashCheckStore].balance : cashBalance.total;
+                                        const diff = actual - expected;
+                                        return (
+                                            <div className="flex items-center justify-between">
+                                                <span className="text-sm font-medium text-slate-600">差異:</span>
+                                                <span className={`text-lg font-extrabold ${diff === 0 ? 'text-green-600' : diff > 0 ? 'text-blue-600' : 'text-red-600'}`}>
+                                                    {diff === 0 ? '一致' : (diff > 0 ? '+' : '') + formatCurrency(diff)}
+                                                </span>
+                                            </div>
+                                        );
+                                    })()}
+                                </div>
+                            )}
+                            <div className="flex justify-end gap-2 mt-4">
+                                <button onClick={() => { setShowCashCheck(false); setCashCheckAmount(''); }}
+                                    className="px-4 py-2.5 text-sm text-slate-600 hover:bg-slate-100 rounded-xl">キャンセル</button>
+                                <button onClick={handleCashCheck} disabled={!cashCheckAmount}
+                                    className="px-5 py-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-sm font-medium disabled:opacity-50">
+                                    確定する
+                                </button>
+                            </div>
+                        </Card>
+                    )}
+
+                    {/* KPI（現金管理向け） */}
                     <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 md:gap-4">
-                        <KpiCard title="売上（収入）" value={formatCurrency(monthSummary.income)} icon="trending-up"
+                        <KpiCard title="月間入金（現金）" value={formatCurrency(monthSummary.cashIn)} icon="arrow-down-left"
                             gradientFrom="from-sise-400" gradientTo="to-sise-600"
-                            subValue={`${Object.keys(monthSummary.byCategory).filter(c => incomeCategories.includes(c)).length}カテゴリ`} />
-                        <KpiCard title="経費（支出）" value={formatCurrency(monthSummary.expense)} icon="trending-down"
+                            subValue={`全決済: ${formatCurrency(monthSummary.income)}`} />
+                        <KpiCard title="月間出金（現金）" value={formatCurrency(monthSummary.cashOut)} icon="arrow-up-right"
                             gradientFrom="from-red-400" gradientTo="to-red-600"
-                            subValue={`${Object.keys(monthSummary.byCategory).filter(c => expenseCategories.includes(c)).length}カテゴリ`} />
-                        <KpiCard title="利益" value={formatCurrency(monthSummary.profit)} icon="wallet"
-                            gradientFrom={monthSummary.profit >= 0 ? "from-emerald-400" : "from-red-400"}
-                            gradientTo={monthSummary.profit >= 0 ? "to-emerald-600" : "to-red-600"}
-                            subValue={monthSummary.income > 0 ? `利益率: ${((monthSummary.profit / monthSummary.income) * 100).toFixed(1)}%` : ''} />
+                            subValue={`全決済: ${formatCurrency(monthSummary.expense)}`} />
+                        <KpiCard title="月間現金収支" value={formatCurrency(monthSummary.cashIn - monthSummary.cashOut)} icon="trending-up"
+                            gradientFrom={monthSummary.cashIn - monthSummary.cashOut >= 0 ? "from-emerald-400" : "from-red-400"}
+                            gradientTo={monthSummary.cashIn - monthSummary.cashOut >= 0 ? "to-emerald-600" : "to-red-600"}
+                            subValue={monthEntries.length + '件の記録'} />
                         <KpiCard title="施術回数" value={monthSummary.totalTreatments} icon="activity"
                             gradientFrom="from-blue-400" gradientTo="to-blue-600"
-                            subValue={`${monthSummary.totalCustomers}名の顧客`} />
+                            subValue={`${Object.keys(monthSummary.byCategory).length}カテゴリ`} />
                     </div>
 
                     {/* 記帳フォーム */}
@@ -7486,15 +7723,25 @@
                             <div className="flex gap-2 mb-4">
                                 <button onClick={() => setFormData(p => ({...p, type: 'income', category: '施術売上'}))}
                                     className={`flex-1 py-2.5 rounded-xl border-2 font-semibold text-sm transition-all ${formData.type === 'income' ? 'bg-sise-50 border-sise-400 text-sise-700' : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'}`}>
-                                    <Icon name="arrow-down-left" size={14} className="inline mr-1 -mt-0.5" /> 収入
+                                    <Icon name="arrow-down-left" size={14} className="inline mr-1 -mt-0.5" /> 入金
                                 </button>
                                 <button onClick={() => setFormData(p => ({...p, type: 'expense', category: '消耗品'}))}
                                     className={`flex-1 py-2.5 rounded-xl border-2 font-semibold text-sm transition-all ${formData.type === 'expense' ? 'bg-red-50 border-red-400 text-red-700' : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'}`}>
-                                    <Icon name="arrow-up-right" size={14} className="inline mr-1 -mt-0.5" /> 支出
+                                    <Icon name="arrow-up-right" size={14} className="inline mr-1 -mt-0.5" /> 出金
                                 </button>
                             </div>
 
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                                <div>
+                                    <label className="block text-xs font-medium text-slate-600 mb-1">店舗 *</label>
+                                    <select value={formData.store} onChange={e => setFormData(p => ({...p, store: e.target.value}))}
+                                        className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm outline-none bg-white">
+                                        <option value="">-- 店舗を選択 --</option>
+                                        {activeStores.map(s => (
+                                            <option key={s.id} value={s.id}>{s.name}</option>
+                                        ))}
+                                    </select>
+                                </div>
                                 <div>
                                     <label className="block text-xs font-medium text-slate-600 mb-1">日付 *</label>
                                     <input type="date" value={formData.date} onChange={e => setFormData(p => ({...p, date: e.target.value}))}
@@ -7514,6 +7761,22 @@
                                     <input type="number" value={formData.amount} onChange={e => setFormData(p => ({...p, amount: e.target.value}))}
                                         placeholder="0" className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm outline-none" />
                                 </div>
+                                <div>
+                                    <label className="block text-xs font-medium text-slate-600 mb-1">支払方法</label>
+                                    <select value={formData.paymentMethod} onChange={e => setFormData(p => ({...p, paymentMethod: e.target.value}))}
+                                        className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm outline-none">
+                                        <option value="CASH">現金</option>
+                                        <option value="QR">QR決済</option>
+                                        <option value="CARD">カード</option>
+                                        <option value="SQUARE">Square</option>
+                                        <option value="TRANSFER">振込</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-medium text-slate-600 mb-1">記録者</label>
+                                    <input type="text" value={formData.recorder} onChange={e => setFormData(p => ({...p, recorder: e.target.value}))}
+                                        placeholder="スタッフ名" className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm outline-none" />
+                                </div>
                                 {formData.type === 'income' && (
                                     <>
                                         <div>
@@ -7532,18 +7795,7 @@
                                         </div>
                                     </>
                                 )}
-                                <div>
-                                    <label className="block text-xs font-medium text-slate-600 mb-1">支払方法</label>
-                                    <select value={formData.paymentMethod} onChange={e => setFormData(p => ({...p, paymentMethod: e.target.value}))}
-                                        className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm outline-none">
-                                        <option value="CASH">現金</option>
-                                        <option value="QR">QR決済</option>
-                                        <option value="CARD">カード</option>
-                                        <option value="SQUARE">Square</option>
-                                        <option value="TRANSFER">振込</option>
-                                    </select>
-                                </div>
-                                <div className={formData.type === 'income' ? '' : 'md:col-span-2'}>
+                                <div className={formData.type === 'income' ? 'lg:col-span-3' : 'md:col-span-2'}>
                                     <label className="block text-xs font-medium text-slate-600 mb-1">摘要・メモ</label>
                                     <input type="text" value={formData.description} onChange={e => setFormData(p => ({...p, description: e.target.value}))}
                                         placeholder="内容を入力..." className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm outline-none" />
@@ -7582,7 +7834,7 @@
                         <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl mb-4">
                             <div className="flex-1">
                                 <div className="flex justify-between text-xs mb-1">
-                                    <span className="text-sise-600 font-semibold">収入</span>
+                                    <span className="text-sise-600 font-semibold">入金</span>
                                     <span className="font-bold text-sise-700">{formatCurrency(monthSummary.income)}</span>
                                 </div>
                                 <div className="h-2 bg-slate-200 rounded-full overflow-hidden">
@@ -7591,14 +7843,14 @@
                                 </div>
                             </div>
                             <div className="text-center px-3">
-                                <p className={`text-sm font-extrabold ${monthSummary.profit >= 0 ? 'text-sise-600' : 'text-red-600'}`}>
-                                    {monthSummary.profit >= 0 ? '+' : ''}{formatCurrency(monthSummary.profit)}
+                                <p className="text-sm font-extrabold text-slate-700">
+                                    {formatCurrency(cashBalance.total)}
                                 </p>
-                                <p className="text-[11px] text-slate-400">利益</p>
+                                <p className="text-[11px] text-slate-400">現金残高</p>
                             </div>
                             <div className="flex-1">
                                 <div className="flex justify-between text-xs mb-1">
-                                    <span className="text-red-500 font-semibold">支出</span>
+                                    <span className="text-red-500 font-semibold">出金</span>
                                     <span className="font-bold text-red-600">{formatCurrency(monthSummary.expense)}</span>
                                 </div>
                                 <div className="h-2 bg-slate-200 rounded-full overflow-hidden">
@@ -7658,7 +7910,7 @@
 
                                                     {/* 内容 */}
                                                     <div className="ml-2.5 flex-1 min-w-0">
-                                                        <div className="flex items-center gap-1.5">
+                                                        <div className="flex items-center gap-1.5 flex-wrap">
                                                             <span className="text-sm font-semibold text-slate-800 truncate">{entry.category}</span>
                                                             {entry.customerName && (
                                                                 <span className="text-[11px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-medium truncate">{entry.customerName}</span>
@@ -7666,8 +7918,14 @@
                                                             {entry.treatmentCount > 0 && (
                                                                 <span className="text-[11px] bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded font-semibold">{entry.treatmentCount}回</span>
                                                             )}
+                                                            {getStoreName(entry.store) && (
+                                                                <span className="text-[10px] bg-slate-50 text-slate-400 px-1.5 py-0.5 rounded">{getStoreName(entry.store)}</span>
+                                                            )}
                                                         </div>
-                                                        {entry.description && <p className="text-[11px] text-slate-400 truncate mt-0.5">{entry.description}</p>}
+                                                        <div className="flex items-center gap-2 mt-0.5">
+                                                            {entry.description && <p className="text-[11px] text-slate-400 truncate">{entry.description}</p>}
+                                                            {entry.recorder && <span className="text-[10px] text-slate-300">by {entry.recorder}</span>}
+                                                        </div>
                                                     </div>
 
                                                     {/* 金額 */}
@@ -7713,9 +7971,9 @@
                                 カテゴリ別集計
                             </h4>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                {/* 収入 */}
+                                {/* 入金 */}
                                 <div>
-                                    <p className="text-xs font-semibold text-sise-600 mb-2">収入</p>
+                                    <p className="text-xs font-semibold text-sise-600 mb-2">入金</p>
                                     <div className="space-y-1.5">
                                         {Object.entries(monthSummary.byCategory)
                                             .filter(([cat]) => incomeCategories.includes(cat))
@@ -7731,9 +7989,9 @@
                                         )}
                                     </div>
                                 </div>
-                                {/* 支出 */}
+                                {/* 出金 */}
                                 <div>
-                                    <p className="text-xs font-semibold text-red-500 mb-2">支出</p>
+                                    <p className="text-xs font-semibold text-red-500 mb-2">出金</p>
                                     <div className="space-y-1.5">
                                         {Object.entries(monthSummary.byCategory)
                                             .filter(([cat]) => expenseCategories.includes(cat))
