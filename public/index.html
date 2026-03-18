@@ -7220,29 +7220,39 @@
                 try {
                     // キャンペーン一覧
                     const campRes = await fetch(`${META_PROXY_BASE}/campaigns?fields=name,status,objective,daily_budget,lifetime_budget&limit=50`);
-                    const campData = campRes.ok ? await campRes.json() : { data: [] };
+                    const campData = await campRes.json();
+                    if (campData.error) {
+                        setMetaData(prev => ({ ...prev, loading: false, error: `キャンペーン取得エラー: ${campData.error.message || JSON.stringify(campData.error)}` }));
+                        return;
+                    }
 
                     // インサイト取得
                     const insightRes = await fetch(
                         `${META_PROXY_BASE}/insights?fields=impressions,clicks,ctr,spend,actions,cost_per_action_type,cpc,cpm,reach,frequency&date_preset=${datePreset}&level=account`
                     );
-                    const insightData = insightRes.ok ? await insightRes.json() : { data: [] };
+                    const insightData = await insightRes.json();
+                    if (insightData.error) {
+                        setMetaData(prev => ({ ...prev, loading: false, error: `インサイト取得エラー: ${insightData.error.message || JSON.stringify(insightData.error)}` }));
+                        return;
+                    }
 
                     // キャンペーン別インサイト
                     const campInsightRes = await fetch(
                         `${META_PROXY_BASE}/insights?fields=campaign_name,impressions,clicks,ctr,spend,actions,cost_per_action_type&date_preset=${datePreset}&level=campaign&limit=50`
                     );
-                    const campInsightData = campInsightRes.ok ? await campInsightRes.json() : { data: [] };
+                    const campInsightData = await campInsightRes.json();
 
                     setMetaData({
                         campaigns: campData.data || [],
                         insights: (insightData.data || [])[0] || null,
                         campaignInsights: campInsightData.data || [],
                         loading: false,
-                        error: null
+                        error: (campData.data || []).length === 0 && !(insightData.data || [])[0]
+                            ? 'データが見つかりません。広告アカウントID（META_AD_ACCOUNT_ID）が正しいか確認してください。広告マネージャーのURL内「act=XXXXX」の数字部分です。'
+                            : null
                     });
                 } catch (error) {
-                    setMetaData(prev => ({ ...prev, loading: false, error: error.message }));
+                    setMetaData(prev => ({ ...prev, loading: false, error: 'API通信エラー: ' + error.message }));
                 }
             }, [metaConfig.configured]);
 
