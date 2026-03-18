@@ -1253,7 +1253,7 @@
             try {
                 const resp = await fetch(gasUrl, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'text/plain' },
                     body: JSON.stringify(body)
                 });
                 return await resp.json();
@@ -2454,7 +2454,7 @@
                     if (MEMBER_USAGE_GAS_URL !== 'YOUR_UNIFIED_GAS_URL') {
                         fetch(MEMBER_USAGE_GAS_URL, {
                             method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
+                            headers: { 'Content-Type': 'text/plain' },
                             body: JSON.stringify({
                                 type: 'usage', action: 'saveUsage',
                                 data: [{ memberId, month: currentMonth, periodKey: periodKey || '', count: Math.max(0, count), updatedAt: new Date().toISOString() }]
@@ -2491,7 +2491,7 @@
                         });
                         await fetch(MEMBER_USAGE_GAS_URL, {
                             method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
+                            headers: { 'Content-Type': 'text/plain' },
                             body: JSON.stringify({ type: 'usage', action: 'saveUsage', data: payload })
                         });
                     }
@@ -2713,7 +2713,7 @@
                     if (TICKET_GAS_URL !== 'YOUR_UNIFIED_GAS_URL') {
                         await fetch(TICKET_GAS_URL, {
                             method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
+                            headers: { 'Content-Type': 'text/plain' },
                             body: JSON.stringify({ type: 'ticket', action: 'saveTickets', plans: ticketPlans, tickets: customerTickets })
                         });
                     }
@@ -2816,7 +2816,7 @@
                     try {
                         await fetch(MANUAL_MEMBERS_GAS_URL, {
                             method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
+                            headers: { 'Content-Type': 'text/plain' },
                             body: JSON.stringify({ type: 'members', action: 'saveManualMembers', members })
                         });
                         setLastSynced(new Date());
@@ -3029,7 +3029,7 @@
                 if (CASHBOOK_GAS_URL !== 'YOUR_UNIFIED_GAS_URL') {
                     await fetch(CASHBOOK_GAS_URL, {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
+                        headers: { 'Content-Type': 'text/plain' },
                         body: JSON.stringify({ type: 'cashbook', action: 'saveCashbook', entries: data })
                     }).catch(() => {});
                 }
