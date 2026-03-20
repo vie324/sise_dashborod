@@ -23,6 +23,9 @@ export default function handler(req, res) {
 
   const stores = [];
 
+  // Debug: show which env var keys exist matching LINE_STORE pattern
+  const debugKeys = Object.keys(process.env).filter(k => k.startsWith('LINE'));
+
   for (let i = 1; i <= 20; i++) {
     const { token, secret, name } = getLineEnv(i);
     if (token && secret) {
@@ -33,5 +36,9 @@ export default function handler(req, res) {
   return res.status(200).json({
     configured: stores.length > 0,
     stores,
+    _debug: {
+      lineEnvKeys: debugKeys.map(k => k.replace(/=.*/, '')),
+      hint: 'Vercelに設定されているLINE関連の環境変数キー一覧（値は非表示）',
+    },
   });
 }
