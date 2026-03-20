@@ -1160,7 +1160,7 @@
         let serverStores = [];
 
         // 統合 Google Apps Script URL（全機能で共有・1つのスプレッドシートで管理）
-        const UNIFIED_GAS_URL = localStorage.getItem('sise_unified_gas_url') || 'https://script.google.com/macros/s/AKfycbwxFQPO335ZQLRBVEjeIcwHXjFy-rE9AAUt0IqG3La8LAGxJyKEECGTKDC0nQE77yzP/exec';
+        const UNIFIED_GAS_URL = localStorage.getItem('sise_unified_gas_url') || 'https://script.google.com/macros/s/AKfycbzEVvDqMrYC8QkWgHisvP_LXbjWigCfpqB2eHOzCBoFaf1B_5ANnEU48LGaZ83VMnY1TA/exec';
 
         // API設定（サーバーサイドプロキシ経由）
         // APIキーはVercel環境変数で管理、フロントエンドには露出しない
@@ -3260,13 +3260,22 @@
             // スレッド一覧を取得
             const fetchThreads = useCallback(async (storeId) => {
                 const sid = storeId || lineStoreId;
-                if (!sid || UNIFIED_GAS_URL === 'YOUR_UNIFIED_GAS_URL') return;
+                console.log('[LINE] fetchThreads called, sid:', sid, 'lineStoreId:', lineStoreId);
+                if (!sid || UNIFIED_GAS_URL === 'YOUR_UNIFIED_GAS_URL') {
+                    console.warn('[LINE] fetchThreads skipped: sid=' + sid + ', GAS_URL set=' + (UNIFIED_GAS_URL !== 'YOUR_UNIFIED_GAS_URL'));
+                    return;
+                }
                 setLoading(true);
                 try {
+                    const gasThreadsUrl = UNIFIED_GAS_URL + '?type=lineMessages&store=' + sid;
+                    const gasProfilesUrl = UNIFIED_GAS_URL + '?type=lineProfiles&store=' + sid;
+                    console.log('[LINE] GASリクエスト:', gasThreadsUrl);
                     const [threadsRes, profilesRes] = await Promise.all([
-                        fetch(UNIFIED_GAS_URL + '?type=lineMessages&store=' + sid).then(r => r.json()),
-                        fetch(UNIFIED_GAS_URL + '?type=lineProfiles&store=' + sid).then(r => r.json()),
+                        fetch(gasThreadsUrl).then(r => r.json()),
+                        fetch(gasProfilesUrl).then(r => r.json()),
                     ]);
+                    console.log('[LINE] GASレスポンス threads:', threadsRes);
+                    console.log('[LINE] GASレスポンス profiles:', profilesRes);
                     if (threadsRes.threads) setThreads(threadsRes.threads);
                     if (profilesRes.profiles) {
                         const map = {};
@@ -3274,7 +3283,7 @@
                         setProfiles(map);
                     }
                 } catch (e) {
-                    console.error('LINE スレッド取得エラー:', e);
+                    console.error('[LINE] スレッド取得エラー:', e);
                 } finally {
                     setLoading(false);
                 }
@@ -3282,6 +3291,7 @@
 
             // 店舗変更時にスレッド再取得
             useEffect(() => {
+                console.log('[LINE] lineStoreId changed:', lineStoreId);
                 if (lineStoreId) {
                     fetchThreads(lineStoreId);
                 }
