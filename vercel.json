@@ -10,6 +10,7 @@
     { "source": "/api/tiktok/:path*", "destination": "/api/tiktok/proxy?path=:path*" },
     { "source": "/api/line/config", "destination": "/api/line/config" },
     { "source": "/api/line/webhook", "destination": "/api/line/webhook" },
+    { "source": "/api/line/broadcast", "destination": "/api/line/broadcast" },
     { "source": "/api/line/:path*", "destination": "/api/line/proxy?path=:path*" }
   ],
   "headers": [

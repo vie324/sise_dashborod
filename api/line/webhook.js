@@ -127,6 +127,68 @@ export default async function handler(req, res) {
     }
   }
 
+  // Auto-reply: check rules and reply if matched
+  for (const event of messageEvents) {
+    if (event.type !== 'message' || !event.replyToken) continue;
+    const messageText = event.message?.text || '';
+    if (!messageText) continue;
+
+    try {
+      // Fetch auto-reply rules from GAS
+      const gasUrl = process.env.GAS_WEBHOOK_URL;
+      if (!gasUrl) continue;
+
+      const rulesRes = await fetch(gasUrl + '?type=lineAutoReplies&store=' + storeId);
+      if (!rulesRes.ok) continue;
+      const rulesData = await rulesRes.json();
+      const rules = (rulesData.rules || []).filter(r => r.enabled);
+
+      // Find matching rule
+      let matchedRule = null;
+      for (const rule of rules) {
+        if (rule.matchMethod === 'exact' && messageText === rule.keyword) {
+          matchedRule = rule;
+          break;
+        } else if (rule.matchMethod === 'contains' && messageText.includes(rule.keyword)) {
+          matchedRule = rule;
+          break;
+        } else if (rule.matchMethod === 'regex') {
+          try {
+            if (new RegExp(rule.keyword).test(messageText)) {
+              matchedRule = rule;
+              break;
+            }
+          } catch (e) { /* invalid regex, skip */ }
+        }
+      }
+
+      if (matchedRule) {
+        // Use replyToken to reply (free, no messaging cost)
+        const replyMessages = [{ type: matchedRule.replyType || 'text', text: matchedRule.replyContent }];
+        // If replyType is 'flex', parse the content as JSON
+        if (matchedRule.replyType === 'flex') {
+          try {
+            replyMessages[0] = { type: 'flex', altText: matchedRule.keyword, contents: JSON.parse(matchedRule.replyContent) };
+          } catch (e) {
+            replyMessages[0] = { type: 'text', text: matchedRule.replyContent };
+          }
+        }
+
+        await fetch('https://api.line.me/v2/bot/message/reply', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${lineConfig.token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ replyToken: event.replyToken, messages: replyMessages }),
+        });
+        console.log('Auto-reply sent for keyword:', matchedRule.keyword);
+      }
+    } catch (err) {
+      console.error('Auto-reply error:', err);
+    }
+  }
+
   // Also fetch user profiles for new messages and store them
   for (const event of messageEvents) {
     if (event.source?.userId && gasUrl) {
