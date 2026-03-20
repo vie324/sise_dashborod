@@ -7,7 +7,10 @@
     { "source": "/api/meta/config", "destination": "/api/meta/config" },
     { "source": "/api/meta/:path*", "destination": "/api/meta/proxy?path=:path*" },
     { "source": "/api/tiktok/config", "destination": "/api/tiktok/config" },
-    { "source": "/api/tiktok/:path*", "destination": "/api/tiktok/proxy?path=:path*" }
+    { "source": "/api/tiktok/:path*", "destination": "/api/tiktok/proxy?path=:path*" },
+    { "source": "/api/line/config", "destination": "/api/line/config" },
+    { "source": "/api/line/webhook", "destination": "/api/line/webhook" },
+    { "source": "/api/line/:path*", "destination": "/api/line/proxy?path=:path*" }
   ],
   "headers": [
     {

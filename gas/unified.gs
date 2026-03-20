@@ -73,7 +73,9 @@ const SHEETS = {
   STAFF: 'スタッフ管理',
   STORES: '店舗管理',
   DASH_CONFIG: 'ダッシュボード設定',
-  HPB: 'HPBデータ'
+  HPB: 'HPBデータ',
+  LINE_MESSAGES: 'LINEメッセージ',
+  LINE_PROFILES: 'LINEプロフィール'
 };
 
 const COUNSELING_STORES = {
@@ -182,6 +184,8 @@ function doGet(e) {
       case 'storeManage': return jsonResponse(handleStoreManageGet(params));
       case 'dashConfig':  return jsonResponse(handleDashConfigGet(params));
       case 'hpb':         return jsonResponse(handleHpbGet(params));
+      case 'lineMessages': return jsonResponse(handleLineMessagesGet(params));
+      case 'lineProfiles': return jsonResponse(handleLineProfilesGet(params));
       default:            return jsonResponse({ error: '不明なtype: ' + type }, 400);
     }
   } catch (error) {
@@ -203,6 +207,9 @@ function doPost(e) {
       case 'storeManage': return jsonResponse(handleStoreManagePost(body));
       case 'dashConfig':  return jsonResponse(handleDashConfigPost(body));
       case 'hpb':         return jsonResponse(handleHpbPost(body));
+      case 'lineWebhook':  return jsonResponse(handleLineWebhookPost(body));
+      case 'lineProfile':  return jsonResponse(handleLineProfilePost(body));
+      case 'lineSend':     return jsonResponse(handleLineSendPost(body));
       default:         return jsonResponse({ error: '不明なtype: ' + type }, 400);
     }
   } catch (error) {
@@ -1230,6 +1237,191 @@ function deleteHpbMonth(yearMonth) {
     }
   }
   return { error: 'データが見つかりません: ' + yearMonth };
+}
+
+// ============================================================
+// LINE メッセージ管理
+// ============================================================
+
+// LINEメッセージシート: [タイムスタンプ, 店舗ID, ユーザーID, 方向, メッセージ種別, メッセージ内容, メッセージID]
+// 方向: "received" (ユーザー→店舗) / "sent" (店舗→ユーザー)
+function ensureLineMessagesSheet() {
+  return getOrCreateSheet(SHEETS.LINE_MESSAGES, [
+    'タイムスタンプ', '店舗ID', 'ユーザーID', '方向', 'メッセージ種別', 'メッセージ内容', 'メッセージID'
+  ]);
+}
+
+// LINEプロフィールシート: [ユーザーID, 店舗ID, 表示名, プロフィール画像URL, 最終更新]
+function ensureLineProfilesSheet() {
+  return getOrCreateSheet(SHEETS.LINE_PROFILES, [
+    'ユーザーID', '店舗ID', '表示名', 'プロフィール画像URL', '最終更新'
+  ]);
+}
+
+// Webhook受信: メッセージを保存
+function handleLineWebhookPost(body) {
+  var sheet = ensureLineMessagesSheet();
+  var storeId = body.storeId || '';
+  var events = body.events || [];
+  var count = 0;
+
+  for (var i = 0; i < events.length; i++) {
+    var ev = events[i];
+    if (ev.type === 'message') {
+      sheet.appendRow([
+        new Date(ev.timestamp),
+        storeId,
+        ev.userId || '',
+        'received',
+        ev.messageType || 'text',
+        ev.messageText || '',
+        ev.messageId || ''
+      ]);
+      count++;
+    }
+    // follow/unfollowイベントも記録
+    if (ev.type === 'follow' || ev.type === 'unfollow') {
+      sheet.appendRow([
+        new Date(ev.timestamp),
+        storeId,
+        ev.userId || '',
+        'received',
+        ev.type,
+        ev.type === 'follow' ? '友だち追加' : 'ブロック',
+        ''
+      ]);
+      count++;
+    }
+  }
+
+  return { success: true, stored: count };
+}
+
+// プロフィール保存（upsert）
+function handleLineProfilePost(body) {
+  var sheet = ensureLineProfilesSheet();
+  var userId = body.userId || '';
+  var storeId = body.storeId || '';
+  if (!userId) return { error: 'userIdが必要です' };
+
+  var rows = sheet.getDataRange().getValues();
+  for (var i = 1; i < rows.length; i++) {
+    if (String(rows[i][0]) === userId && String(rows[i][1]) === storeId) {
+      // Update existing
+      sheet.getRange(i + 1, 3).setValue(body.displayName || '');
+      sheet.getRange(i + 1, 4).setValue(body.pictureUrl || '');
+      sheet.getRange(i + 1, 5).setValue(new Date());
+      return { success: true, action: 'updated' };
+    }
+  }
+  // Insert new
+  sheet.appendRow([userId, storeId, body.displayName || '', body.pictureUrl || '', new Date()]);
+  return { success: true, action: 'added' };
+}
+
+// 送信メッセージを記録
+function handleLineSendPost(body) {
+  var sheet = ensureLineMessagesSheet();
+  var storeId = body.storeId || '';
+  var userId = body.userId || '';
+  var messageText = body.messageText || '';
+  if (!userId || !messageText) return { error: 'userId と messageText が必要です' };
+
+  sheet.appendRow([
+    new Date(),
+    storeId,
+    userId,
+    'sent',
+    'text',
+    messageText,
+    ''
+  ]);
+  return { success: true };
+}
+
+// メッセージ取得（店舗別、ユーザー別）
+function handleLineMessagesGet(params) {
+  var sheet = getSheet(SHEETS.LINE_MESSAGES);
+  if (!sheet) return { messages: [], threads: [] };
+
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return { messages: [], threads: [] };
+
+  var data = sheet.getRange(2, 1, lastRow - 1, 7).getValues();
+  var storeId = params.store || '';
+  var userId = params.userId || '';
+  var limit = parseInt(params.limit) || 100;
+
+  var messages = [];
+  for (var i = 0; i < data.length; i++) {
+    var row = data[i];
+    if (storeId && String(row[1]) !== storeId) continue;
+    if (userId && String(row[2]) !== userId) continue;
+    messages.push({
+      timestamp: row[0] instanceof Date ? row[0].toISOString() : String(row[0]),
+      storeId: String(row[1]),
+      userId: String(row[2]),
+      direction: String(row[3]),
+      messageType: String(row[4]),
+      messageText: String(row[5]),
+      messageId: String(row[6])
+    });
+  }
+
+  // 最新順にソート
+  messages.sort(function(a, b) { return new Date(b.timestamp) - new Date(a.timestamp); });
+
+  // ユーザー指定の場合はメッセージ一覧を返す（時系列順）
+  if (userId) {
+    messages.reverse(); // 古い順に
+    return { messages: messages.slice(-limit) };
+  }
+
+  // ユーザー未指定の場合はスレッド一覧を返す（最新メッセージ付き）
+  var threadMap = {};
+  for (var j = 0; j < messages.length; j++) {
+    var msg = messages[j];
+    var key = msg.storeId + ':' + msg.userId;
+    if (!threadMap[key]) {
+      threadMap[key] = {
+        storeId: msg.storeId,
+        userId: msg.userId,
+        lastMessage: msg,
+        unread: 0
+      };
+    }
+  }
+  var threads = Object.keys(threadMap).map(function(k) { return threadMap[k]; });
+  threads.sort(function(a, b) { return new Date(b.lastMessage.timestamp) - new Date(a.lastMessage.timestamp); });
+
+  return { threads: threads.slice(0, limit) };
+}
+
+// プロフィール取得
+function handleLineProfilesGet(params) {
+  var sheet = getSheet(SHEETS.LINE_PROFILES);
+  if (!sheet) return { profiles: [] };
+
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return { profiles: [] };
+
+  var data = sheet.getRange(2, 1, lastRow - 1, 5).getValues();
+  var storeId = params.store || '';
+
+  var profiles = [];
+  for (var i = 0; i < data.length; i++) {
+    var row = data[i];
+    if (storeId && String(row[1]) !== storeId) continue;
+    profiles.push({
+      userId: String(row[0]),
+      storeId: String(row[1]),
+      displayName: String(row[2]),
+      pictureUrl: String(row[3]),
+      updatedAt: row[4] instanceof Date ? row[4].toISOString() : String(row[4])
+    });
+  }
+
+  return { profiles: profiles };
 }
 
 function jsonResponse(data) {

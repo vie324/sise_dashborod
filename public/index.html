@@ -3223,6 +3223,146 @@
         };
 
         // ========================================
+        // LINE チャット管理
+        // ========================================
+
+        const useLineChat = () => {
+            const [lineConfig, setLineConfig] = useState({ configured: false, stores: [] });
+            const [threads, setThreads] = useState([]);
+            const [profiles, setProfiles] = useState({});
+            const [messages, setMessages] = useState([]);
+            const [selectedThread, setSelectedThread] = useState(null);
+            const [lineStoreId, setLineStoreId] = useState('');
+            const [loading, setLoading] = useState(false);
+            const [sending, setSending] = useState(false);
+
+            // LINE設定を取得
+            useEffect(() => {
+                fetch('/api/line/config')
+                    .then(r => r.json())
+                    .then(data => {
+                        setLineConfig(data);
+                        if (data.stores && data.stores.length > 0 && !lineStoreId) {
+                            setLineStoreId(data.stores[0].id);
+                        }
+                    })
+                    .catch(() => {});
+            }, []);
+
+            // スレッド一覧を取得
+            const fetchThreads = useCallback(async (storeId) => {
+                const sid = storeId || lineStoreId;
+                if (!sid || UNIFIED_GAS_URL === 'YOUR_UNIFIED_GAS_URL') return;
+                setLoading(true);
+                try {
+                    const [threadsRes, profilesRes] = await Promise.all([
+                        fetch(UNIFIED_GAS_URL + '?type=lineMessages&store=' + sid).then(r => r.json()),
+                        fetch(UNIFIED_GAS_URL + '?type=lineProfiles&store=' + sid).then(r => r.json()),
+                    ]);
+                    if (threadsRes.threads) setThreads(threadsRes.threads);
+                    if (profilesRes.profiles) {
+                        const map = {};
+                        profilesRes.profiles.forEach(p => { map[p.userId] = p; });
+                        setProfiles(map);
+                    }
+                } catch (e) {
+                    console.error('LINE スレッド取得エラー:', e);
+                } finally {
+                    setLoading(false);
+                }
+            }, [lineStoreId]);
+
+            // 店舗変更時にスレッド再取得
+            useEffect(() => {
+                if (lineStoreId) {
+                    fetchThreads(lineStoreId);
+                }
+            }, [lineStoreId]);
+
+            // メッセージ取得
+            const fetchMessages = useCallback(async (userId) => {
+                if (!lineStoreId || !userId || UNIFIED_GAS_URL === 'YOUR_UNIFIED_GAS_URL') return;
+                setLoading(true);
+                try {
+                    const res = await fetch(UNIFIED_GAS_URL + '?type=lineMessages&store=' + lineStoreId + '&userId=' + encodeURIComponent(userId) + '&limit=200');
+                    const data = await res.json();
+                    if (data.messages) setMessages(data.messages);
+                } catch (e) {
+                    console.error('LINE メッセージ取得エラー:', e);
+                } finally {
+                    setLoading(false);
+                }
+            }, [lineStoreId]);
+
+            // メッセージ送信
+            const sendMessage = useCallback(async (userId, text) => {
+                if (!lineStoreId || !userId || !text) return false;
+                setSending(true);
+                try {
+                    // LINE APIでプッシュ送信
+                    const pushRes = await fetch('/api/line/message/push', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'X-Store-Id': lineStoreId },
+                        body: JSON.stringify({
+                            to: userId,
+                            messages: [{ type: 'text', text }],
+                        }),
+                    });
+
+                    if (!pushRes.ok) {
+                        const err = await pushRes.json().catch(() => ({}));
+                        console.error('LINE送信エラー:', err);
+                        return false;
+                    }
+
+                    // GASに送信記録を保存
+                    if (UNIFIED_GAS_URL !== 'YOUR_UNIFIED_GAS_URL') {
+                        await fetch(UNIFIED_GAS_URL, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'text/plain' },
+                            body: JSON.stringify({
+                                type: 'lineSend',
+                                storeId: lineStoreId,
+                                userId,
+                                messageText: text,
+                            }),
+                        }).catch(() => {});
+                    }
+
+                    // メッセージ一覧を更新
+                    setMessages(prev => [...prev, {
+                        timestamp: new Date().toISOString(),
+                        storeId: lineStoreId,
+                        userId,
+                        direction: 'sent',
+                        messageType: 'text',
+                        messageText: text,
+                        messageId: '',
+                    }]);
+
+                    return true;
+                } catch (e) {
+                    console.error('LINE送信エラー:', e);
+                    return false;
+                } finally {
+                    setSending(false);
+                }
+            }, [lineStoreId]);
+
+            // スレッドを開く
+            const openThread = useCallback((thread) => {
+                setSelectedThread(thread);
+                fetchMessages(thread.userId);
+            }, [fetchMessages]);
+
+            return {
+                lineConfig, threads, profiles, messages, selectedThread,
+                lineStoreId, setLineStoreId, loading, sending,
+                fetchThreads, openThread, setSelectedThread, sendMessage, fetchMessages
+            };
+        };
+
+        // ========================================
         // ダッシュボードメインビュー
         // ========================================
 
@@ -8028,6 +8168,264 @@
         // マーケティングビュー
         // ========================================
 
+        // ========================================
+        // LINE チャットビュー
+        // ========================================
+
+        const LineChatView = ({ lineChatHook }) => {
+            const {
+                lineConfig, threads, profiles, messages, selectedThread,
+                lineStoreId, setLineStoreId, loading, sending,
+                fetchThreads, openThread, setSelectedThread, sendMessage, fetchMessages
+            } = lineChatHook;
+            const [inputText, setInputText] = useState('');
+            const messagesEndRef = React.useRef(null);
+
+            // 自動スクロール
+            useEffect(() => {
+                if (messagesEndRef.current) {
+                    messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+                }
+            }, [messages]);
+
+            // 定期更新（30秒ごと）
+            useEffect(() => {
+                if (!lineStoreId) return;
+                const interval = setInterval(() => {
+                    if (selectedThread) {
+                        fetchMessages(selectedThread.userId);
+                    } else {
+                        fetchThreads(lineStoreId);
+                    }
+                }, 30000);
+                return () => clearInterval(interval);
+            }, [lineStoreId, selectedThread]);
+
+            const handleSend = async () => {
+                if (!inputText.trim() || !selectedThread) return;
+                const text = inputText.trim();
+                setInputText('');
+                const ok = await sendMessage(selectedThread.userId, text);
+                if (!ok) {
+                    showToast('送信に失敗しました', 'error');
+                }
+            };
+
+            const handleKeyDown = (e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSend();
+                }
+            };
+
+            const formatTime = (ts) => {
+                const d = new Date(ts);
+                const now = new Date();
+                const isToday = d.toDateString() === now.toDateString();
+                if (isToday) return d.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+                const yesterday = new Date(now);
+                yesterday.setDate(yesterday.getDate() - 1);
+                if (d.toDateString() === yesterday.toDateString()) return '昨日 ' + d.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+                return d.toLocaleDateString('ja-JP', { month: 'short', day: 'numeric' }) + ' ' + d.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+            };
+
+            if (!lineConfig.configured) {
+                return (
+                    <div className="flex flex-col items-center justify-center py-20 text-center">
+                        <div className="w-16 h-16 rounded-2xl bg-green-50 flex items-center justify-center mb-4">
+                            <Icon name="message-circle" size={32} className="text-green-500" />
+                        </div>
+                        <h3 className="text-lg font-bold text-slate-700 mb-2">LINE連携が未設定です</h3>
+                        <p className="text-sm text-slate-500 max-w-md">
+                            Vercel環境変数に LINE_STORE_*_CHANNEL_ACCESS_TOKEN と LINE_STORE_*_CHANNEL_SECRET を設定してください。
+                        </p>
+                    </div>
+                );
+            }
+
+            // スレッド選択中 → チャット画面
+            if (selectedThread) {
+                const profile = profiles[selectedThread.userId] || {};
+                const displayName = profile.displayName || selectedThread.userId.slice(0, 8) + '...';
+
+                return (
+                    <div className="flex flex-col h-[calc(100vh-8rem)] md:h-[calc(100vh-7rem)]">
+                        {/* チャットヘッダー */}
+                        <div className="flex items-center gap-3 p-3 border-b border-slate-200 bg-white rounded-t-2xl">
+                            <button
+                                onClick={() => { setSelectedThread(null); fetchThreads(lineStoreId); }}
+                                className="p-2 rounded-xl hover:bg-slate-100 transition-colors active:scale-90"
+                            >
+                                <Icon name="arrow-left" size={20} className="text-slate-500" />
+                            </button>
+                            {profile.pictureUrl ? (
+                                <img src={profile.pictureUrl} alt="" className="w-10 h-10 rounded-full object-cover" />
+                            ) : (
+                                <div className="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center">
+                                    <Icon name="user" size={20} className="text-green-600" />
+                                </div>
+                            )}
+                            <div className="flex-1 min-w-0">
+                                <p className="font-semibold text-slate-800 truncate">{displayName}</p>
+                                <p className="text-xs text-slate-400">
+                                    {lineConfig.stores.find(s => s.id === lineStoreId)?.name || ''}
+                                </p>
+                            </div>
+                            <button
+                                onClick={() => fetchMessages(selectedThread.userId)}
+                                className="p-2 rounded-xl hover:bg-slate-100 transition-colors"
+                                title="更新"
+                            >
+                                <Icon name="refresh-cw" size={18} className={`text-slate-400 ${loading ? 'animate-spin' : ''}`} />
+                            </button>
+                        </div>
+
+                        {/* メッセージ一覧 */}
+                        <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50">
+                            {messages.length === 0 && !loading && (
+                                <p className="text-center text-slate-400 text-sm py-8">メッセージはありません</p>
+                            )}
+                            {messages.map((msg, idx) => (
+                                <div key={idx} className={`flex ${msg.direction === 'sent' ? 'justify-end' : 'justify-start'}`}>
+                                    <div className={`max-w-[75%] ${msg.direction === 'sent'
+                                        ? 'bg-green-500 text-white rounded-2xl rounded-br-md'
+                                        : 'bg-white text-slate-800 rounded-2xl rounded-bl-md shadow-sm border border-slate-100'
+                                    } px-4 py-2.5`}>
+                                        {msg.messageType === 'follow' || msg.messageType === 'unfollow' ? (
+                                            <p className="text-xs text-center italic opacity-70">{msg.messageText}</p>
+                                        ) : (
+                                            <p className="text-sm whitespace-pre-wrap break-words">{msg.messageText}</p>
+                                        )}
+                                        <p className={`text-[10px] mt-1 ${msg.direction === 'sent' ? 'text-green-100' : 'text-slate-400'} text-right`}>
+                                            {formatTime(msg.timestamp)}
+                                        </p>
+                                    </div>
+                                </div>
+                            ))}
+                            <div ref={messagesEndRef} />
+                        </div>
+
+                        {/* 入力エリア */}
+                        <div className="p-3 border-t border-slate-200 bg-white rounded-b-2xl">
+                            <div className="flex gap-2 items-end">
+                                <textarea
+                                    value={inputText}
+                                    onChange={(e) => setInputText(e.target.value)}
+                                    onKeyDown={handleKeyDown}
+                                    placeholder="メッセージを入力..."
+                                    rows={1}
+                                    className="flex-1 resize-none rounded-xl border border-slate-200 px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/30 focus:border-green-400 transition-all"
+                                    style={{ maxHeight: '120px' }}
+                                    onInput={(e) => {
+                                        e.target.style.height = 'auto';
+                                        e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px';
+                                    }}
+                                />
+                                <button
+                                    onClick={handleSend}
+                                    disabled={!inputText.trim() || sending}
+                                    className="p-2.5 rounded-xl bg-green-500 text-white hover:bg-green-600 disabled:opacity-40 disabled:cursor-not-allowed transition-all active:scale-90 shadow-sm"
+                                >
+                                    <Icon name={sending ? 'loader' : 'send'} size={20} className={sending ? 'animate-spin' : ''} />
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                );
+            }
+
+            // スレッド一覧
+            return (
+                <div>
+                    {/* ヘッダー */}
+                    <div className="flex items-center justify-between mb-4">
+                        <div>
+                            <h2 className="text-xl font-bold text-slate-800">LINE チャット</h2>
+                            <p className="text-xs text-slate-500 mt-0.5">お客様とのLINEメッセージ</p>
+                        </div>
+                        <button
+                            onClick={() => fetchThreads(lineStoreId)}
+                            className="p-2.5 rounded-xl hover:bg-slate-100 transition-colors"
+                        >
+                            <Icon name="refresh-cw" size={18} className={`text-slate-400 ${loading ? 'animate-spin' : ''}`} />
+                        </button>
+                    </div>
+
+                    {/* 店舗選択 */}
+                    {lineConfig.stores.length > 1 && (
+                        <div className="flex gap-2 mb-4 overflow-x-auto pb-1" style={{scrollbarWidth: 'none'}}>
+                            {lineConfig.stores.map(store => (
+                                <button
+                                    key={store.id}
+                                    onClick={() => setLineStoreId(store.id)}
+                                    className={`px-4 py-2 rounded-xl text-sm font-semibold whitespace-nowrap transition-all ${
+                                        lineStoreId === store.id
+                                            ? 'bg-green-500 text-white shadow-md shadow-green-500/20'
+                                            : 'bg-white text-slate-600 hover:bg-green-50 border border-slate-200'
+                                    }`}
+                                >
+                                    {store.name}
+                                </button>
+                            ))}
+                        </div>
+                    )}
+
+                    {/* スレッド一覧 */}
+                    <div className="space-y-2">
+                        {loading && threads.length === 0 && (
+                            <div className="flex items-center justify-center py-12">
+                                <Icon name="loader" size={24} className="text-green-500 animate-spin" />
+                            </div>
+                        )}
+
+                        {!loading && threads.length === 0 && (
+                            <div className="text-center py-12">
+                                <div className="w-14 h-14 rounded-2xl bg-green-50 flex items-center justify-center mx-auto mb-3">
+                                    <Icon name="message-circle" size={28} className="text-green-400" />
+                                </div>
+                                <p className="text-sm text-slate-500">まだメッセージがありません</p>
+                                <p className="text-xs text-slate-400 mt-1">LINEからメッセージが届くとここに表示されます</p>
+                            </div>
+                        )}
+
+                        {threads.map((thread, idx) => {
+                            const profile = profiles[thread.userId] || {};
+                            const displayName = profile.displayName || thread.userId.slice(0, 8) + '...';
+                            const lastMsg = thread.lastMessage;
+
+                            return (
+                                <button
+                                    key={thread.userId + '-' + idx}
+                                    onClick={() => openThread(thread)}
+                                    className="w-full flex items-center gap-3 p-3 rounded-2xl bg-white hover:bg-green-50/50 border border-slate-100 hover:border-green-200 transition-all active:scale-[0.98] text-left"
+                                >
+                                    {profile.pictureUrl ? (
+                                        <img src={profile.pictureUrl} alt="" className="w-12 h-12 rounded-full object-cover flex-shrink-0" />
+                                    ) : (
+                                        <div className="w-12 h-12 rounded-full bg-green-100 flex items-center justify-center flex-shrink-0">
+                                            <Icon name="user" size={22} className="text-green-600" />
+                                        </div>
+                                    )}
+                                    <div className="flex-1 min-w-0">
+                                        <div className="flex items-center justify-between">
+                                            <p className="font-semibold text-slate-800 truncate">{displayName}</p>
+                                            <span className="text-[10px] text-slate-400 flex-shrink-0 ml-2">
+                                                {lastMsg ? formatTime(lastMsg.timestamp) : ''}
+                                            </span>
+                                        </div>
+                                        <p className="text-xs text-slate-500 truncate mt-0.5">
+                                            {lastMsg ? (lastMsg.direction === 'sent' ? '自分: ' : '') + (lastMsg.messageText || `[${lastMsg.messageType}]`) : ''}
+                                        </p>
+                                    </div>
+                                    <Icon name="chevron-right" size={16} className="text-slate-300 flex-shrink-0" />
+                                </button>
+                            );
+                        })}
+                    </div>
+                </div>
+            );
+        };
+
         const MarketingView = ({ marketingHook }) => {
             const {
                 metaConfig, tiktokConfig,
@@ -10499,6 +10897,8 @@
             const marketingHook = useMarketingData();
             // カウンセリングデータ管理
             const counselingHook = useCounselingData();
+            // LINEチャット管理
+            const lineChatHook = useLineChat();
 
             // ダークモード切り替え
             useEffect(() => {
@@ -10563,6 +10963,7 @@
                 { id: 'usage', label: '利用管理', icon: 'clipboard-check', mobileLabel: '利用' },
                 { id: 'tickets', label: '回数券', icon: 'ticket', mobileLabel: '回数券' },
                 { id: 'counseling', label: 'カウンセリング', icon: 'heart-handshake', mobileLabel: '案内' },
+                { id: 'line', label: 'LINEチャット', icon: 'message-circle', mobileLabel: 'LINE' },
                 ...(!isStaffMode || (currentAccess && currentAccess.role === 'headquarter') ? [{ id: 'marketing', label: 'マーケティング', icon: 'megaphone', mobileLabel: '広告' }] : []),
                 ...(!isStaffMode ? [{ id: 'settings', label: '設定', icon: 'settings', mobileLabel: '設定' }] : []),
             ];
@@ -10589,6 +10990,8 @@
                         return <TicketManagementView ticketHook={ticketHook} />;
                     case 'counseling':
                         return <ConceptFormView counselingHook={counselingHook} activeStoreId={activeStoreId} memberData={memberData} />;
+                    case 'line':
+                        return <LineChatView lineChatHook={lineChatHook} />;
                     case 'marketing':
                         // マーケティングは本部のみアクセス可
                         if (isStaffMode && (!currentAccess || currentAccess.role !== 'headquarter')) {
