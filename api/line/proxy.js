@@ -16,8 +16,8 @@ const ALLOWED_ENDPOINTS = [
 function getLineConfig(storeId) {
   if (!storeId) return null;
   const prefix = `LINE_STORE_${storeId}`;
-  const token = process.env[`${prefix}_CHANNEL_ACCESS_TOKEN`];
-  const secret = process.env[`${prefix}_CHANNEL_SECRET`];
+  const token = process.env[`${prefix}_CHANNEL_ACCESS_TOKEN`] || process.env[`${prefix}_ACCESS_TOKEN`];
+  const secret = process.env[`${prefix}_CHANNEL_SECRET`] || process.env[`${prefix}_SECRET`];
   if (!token || !secret) return null;
   return {
     token,
