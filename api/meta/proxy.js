@@ -68,6 +68,16 @@ export default async function handler(req, res) {
     const data = await response.json();
 
     if (!response.ok) {
+      // Add helpful hints for common Meta API errors
+      if (data.error) {
+        const code = data.error.code;
+        const msg = (data.error.message || '').toLowerCase();
+        if (code === 190 || msg.includes('expired') || msg.includes('invalid')) {
+          data.error._hint = 'アクセストークンが無効または期限切れです。Meta Graph API Explorerで新しいトークンを発行してください。';
+        } else if (msg.includes('blocked')) {
+          data.error._hint = 'APIアクセスがブロックされています。アクセストークンの更新またはアプリの権限を確認してください。';
+        }
+      }
       return res.status(response.status).json(data);
     }
 

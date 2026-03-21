@@ -7532,7 +7532,12 @@
                     const campRes = await fetch(`${META_PROXY_BASE}/campaigns?fields=name,status,objective,daily_budget,lifetime_budget&limit=50`);
                     const campData = await campRes.json();
                     if (campData.error) {
-                        setMetaData(prev => ({ ...prev, loading: false, error: `キャンペーン取得エラー: ${campData.error.message || JSON.stringify(campData.error)}` }));
+                        const errMsg = campData.error.message || JSON.stringify(campData.error);
+                        const isBlocked = errMsg.toLowerCase().includes('blocked') || errMsg.toLowerCase().includes('expired') || (campData.error.code === 190);
+                        const hint = isBlocked
+                            ? '\n\n【対処法】Meta Business Suite → 設定 → アクセストークン で新しいトークンを発行し、Vercel環境変数の META_ACCESS_TOKEN を更新してください。トークンの有効期限が切れている可能性があります。'
+                            : '';
+                        setMetaData(prev => ({ ...prev, loading: false, error: `キャンペーン取得エラー: ${errMsg}${hint}` }));
                         return;
                     }
 
