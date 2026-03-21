@@ -3260,22 +3260,13 @@
             // スレッド一覧を取得
             const fetchThreads = useCallback(async (storeId) => {
                 const sid = storeId || lineStoreId;
-                console.log('[LINE] fetchThreads called, sid:', sid, 'lineStoreId:', lineStoreId);
-                if (!sid || UNIFIED_GAS_URL === 'YOUR_UNIFIED_GAS_URL') {
-                    console.warn('[LINE] fetchThreads skipped: sid=' + sid + ', GAS_URL set=' + (UNIFIED_GAS_URL !== 'YOUR_UNIFIED_GAS_URL'));
-                    return;
-                }
+                if (!sid || UNIFIED_GAS_URL === 'YOUR_UNIFIED_GAS_URL') return;
                 setLoading(true);
                 try {
-                    const gasThreadsUrl = UNIFIED_GAS_URL + '?type=lineMessages&store=' + sid;
-                    const gasProfilesUrl = UNIFIED_GAS_URL + '?type=lineProfiles&store=' + sid;
-                    console.log('[LINE] GASリクエスト:', gasThreadsUrl);
                     const [threadsRes, profilesRes] = await Promise.all([
-                        fetch(gasThreadsUrl).then(r => r.json()),
-                        fetch(gasProfilesUrl).then(r => r.json()),
+                        fetch(UNIFIED_GAS_URL + '?type=lineMessages&store=' + sid).then(r => r.json()),
+                        fetch(UNIFIED_GAS_URL + '?type=lineProfiles&store=' + sid).then(r => r.json()),
                     ]);
-                    console.log('[LINE] GASレスポンス threads:', threadsRes);
-                    console.log('[LINE] GASレスポンス profiles:', profilesRes);
                     if (threadsRes.threads) setThreads(threadsRes.threads);
                     if (profilesRes.profiles) {
                         const map = {};
@@ -3291,10 +3282,7 @@
 
             // 店舗変更時にスレッド再取得
             useEffect(() => {
-                console.log('[LINE] lineStoreId changed:', lineStoreId);
-                if (lineStoreId) {
-                    fetchThreads(lineStoreId);
-                }
+                if (lineStoreId) fetchThreads(lineStoreId);
             }, [lineStoreId]);
 
             // メッセージ取得
@@ -3373,10 +3361,148 @@
                 fetchMessages(thread.userId);
             }, [fetchMessages]);
 
+            // === 一斉配信 ===
+            const [broadcasts, setBroadcasts] = useState([]);
+            const [broadcastSending, setBroadcastSending] = useState(false);
+
+            const fetchBroadcasts = useCallback(async () => {
+                if (!lineStoreId || UNIFIED_GAS_URL === 'YOUR_UNIFIED_GAS_URL') return;
+                try {
+                    const res = await fetch(UNIFIED_GAS_URL + '?type=lineBroadcasts&store=' + lineStoreId);
+                    const data = await res.json();
+                    if (data.broadcasts) setBroadcasts(data.broadcasts);
+                } catch (e) { console.error('[LINE] 配信履歴取得エラー:', e); }
+            }, [lineStoreId]);
+
+            const sendBroadcast = useCallback(async (messageText, userIds) => {
+                if (!lineStoreId || !messageText) return false;
+                setBroadcastSending(true);
+                try {
+                    const msgs = [{ type: 'text', text: messageText }];
+                    const body = userIds && userIds.length > 0
+                        ? { messages: msgs, userIds, type: 'multicast' }
+                        : { messages: msgs, type: 'broadcast' };
+                    const res = await fetch('/api/line/broadcast', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'X-Store-Id': lineStoreId },
+                        body: JSON.stringify(body),
+                    });
+                    if (!res.ok) { const err = await res.json().catch(() => ({})); console.error('配信エラー:', err); return false; }
+                    await fetchBroadcasts();
+                    return true;
+                } catch (e) { console.error('配信エラー:', e); return false; }
+                finally { setBroadcastSending(false); }
+            }, [lineStoreId, fetchBroadcasts]);
+
+            // === テンプレート ===
+            const [templates, setTemplates] = useState([]);
+
+            const fetchTemplates = useCallback(async () => {
+                if (!lineStoreId || UNIFIED_GAS_URL === 'YOUR_UNIFIED_GAS_URL') return;
+                try {
+                    const res = await fetch(UNIFIED_GAS_URL + '?type=lineTemplates&store=' + lineStoreId);
+                    const data = await res.json();
+                    if (data.templates) setTemplates(data.templates);
+                } catch (e) { console.error('[LINE] テンプレート取得エラー:', e); }
+            }, [lineStoreId]);
+
+            const saveTemplate = useCallback(async (tmplData) => {
+                if (UNIFIED_GAS_URL === 'YOUR_UNIFIED_GAS_URL') return false;
+                try {
+                    await fetch(UNIFIED_GAS_URL, {
+                        method: 'POST', headers: { 'Content-Type': 'text/plain' },
+                        body: JSON.stringify({ type: 'lineTemplate', storeId: lineStoreId, ...tmplData }),
+                    });
+                    await fetchTemplates();
+                    return true;
+                } catch (e) { console.error('テンプレート保存エラー:', e); return false; }
+            }, [lineStoreId, fetchTemplates]);
+
+            // === 自動応答 ===
+            const [autoReplies, setAutoReplies] = useState([]);
+
+            const fetchAutoReplies = useCallback(async () => {
+                if (!lineStoreId || UNIFIED_GAS_URL === 'YOUR_UNIFIED_GAS_URL') return;
+                try {
+                    const res = await fetch(UNIFIED_GAS_URL + '?type=lineAutoReplies&store=' + lineStoreId);
+                    const data = await res.json();
+                    if (data.rules) setAutoReplies(data.rules);
+                } catch (e) { console.error('[LINE] 自動応答取得エラー:', e); }
+            }, [lineStoreId]);
+
+            const saveAutoReply = useCallback(async (ruleData) => {
+                if (UNIFIED_GAS_URL === 'YOUR_UNIFIED_GAS_URL') return false;
+                try {
+                    await fetch(UNIFIED_GAS_URL, {
+                        method: 'POST', headers: { 'Content-Type': 'text/plain' },
+                        body: JSON.stringify({ type: 'lineAutoReply', storeId: lineStoreId, ...ruleData }),
+                    });
+                    await fetchAutoReplies();
+                    return true;
+                } catch (e) { console.error('自動応答保存エラー:', e); return false; }
+            }, [lineStoreId, fetchAutoReplies]);
+
+            // === タグ ===
+            const [tags, setTags] = useState([]);
+            const [userTags, setUserTags] = useState([]);
+
+            const fetchTags = useCallback(async () => {
+                if (!lineStoreId || UNIFIED_GAS_URL === 'YOUR_UNIFIED_GAS_URL') return;
+                try {
+                    const [tagsRes, utRes] = await Promise.all([
+                        fetch(UNIFIED_GAS_URL + '?type=lineTags&store=' + lineStoreId).then(r => r.json()),
+                        fetch(UNIFIED_GAS_URL + '?type=lineUserTags&store=' + lineStoreId).then(r => r.json()),
+                    ]);
+                    if (tagsRes.tags) setTags(tagsRes.tags);
+                    if (utRes.userTags) setUserTags(utRes.userTags);
+                } catch (e) { console.error('[LINE] タグ取得エラー:', e); }
+            }, [lineStoreId]);
+
+            const saveTag = useCallback(async (tagData) => {
+                if (UNIFIED_GAS_URL === 'YOUR_UNIFIED_GAS_URL') return false;
+                try {
+                    await fetch(UNIFIED_GAS_URL, {
+                        method: 'POST', headers: { 'Content-Type': 'text/plain' },
+                        body: JSON.stringify({ type: 'lineTag', storeId: lineStoreId, ...tagData }),
+                    });
+                    await fetchTags();
+                    return true;
+                } catch (e) { console.error('タグ保存エラー:', e); return false; }
+            }, [lineStoreId, fetchTags]);
+
+            const saveUserTag = useCallback(async (utData) => {
+                if (UNIFIED_GAS_URL === 'YOUR_UNIFIED_GAS_URL') return false;
+                try {
+                    await fetch(UNIFIED_GAS_URL, {
+                        method: 'POST', headers: { 'Content-Type': 'text/plain' },
+                        body: JSON.stringify({ type: 'lineUserTag', storeId: lineStoreId, ...utData }),
+                    });
+                    await fetchTags();
+                    return true;
+                } catch (e) { console.error('ユーザータグ保存エラー:', e); return false; }
+            }, [lineStoreId, fetchTags]);
+
+            // === 分析 ===
+            const [analytics, setAnalytics] = useState(null);
+
+            const fetchAnalytics = useCallback(async () => {
+                if (!lineStoreId || UNIFIED_GAS_URL === 'YOUR_UNIFIED_GAS_URL') return;
+                try {
+                    const res = await fetch(UNIFIED_GAS_URL + '?type=lineAnalytics&store=' + lineStoreId);
+                    const data = await res.json();
+                    if (data.analytics) setAnalytics(data.analytics);
+                } catch (e) { console.error('[LINE] 分析取得エラー:', e); }
+            }, [lineStoreId]);
+
             return {
                 lineConfig, threads, profiles, messages, selectedThread,
                 lineStoreId, setLineStoreId, loading, sending, configError,
-                fetchThreads, openThread, setSelectedThread, sendMessage, fetchMessages
+                fetchThreads, openThread, setSelectedThread, sendMessage, fetchMessages,
+                broadcasts, broadcastSending, fetchBroadcasts, sendBroadcast,
+                templates, fetchTemplates, saveTemplate,
+                autoReplies, fetchAutoReplies, saveAutoReply,
+                tags, userTags, fetchTags, saveTag, saveUserTag,
+                analytics, fetchAnalytics
             };
         };
 
@@ -8194,8 +8320,15 @@
             const {
                 lineConfig, threads, profiles, messages, selectedThread,
                 lineStoreId, setLineStoreId, loading, sending, configError,
-                fetchThreads, openThread, setSelectedThread, sendMessage, fetchMessages
+                fetchThreads, openThread, setSelectedThread, sendMessage, fetchMessages,
+                broadcasts, broadcastSending, fetchBroadcasts, sendBroadcast,
+                templates, fetchTemplates, saveTemplate,
+                autoReplies, fetchAutoReplies, saveAutoReply,
+                tags, userTags, fetchTags, saveTag, saveUserTag,
+                analytics, fetchAnalytics
             } = lineChatHook;
+            const [lineTab, setLineTab] = useState('chat');
+            const [showTemplatePanel, setShowTemplatePanel] = useState(false);
             const [inputText, setInputText] = useState('');
             const messagesEndRef = React.useRef(null);
 
@@ -8272,6 +8405,355 @@
                 );
             }
 
+            // タブナビゲーション
+            const LINE_TABS = [
+                { id: 'chat', label: 'チャット', icon: 'message-circle' },
+                { id: 'broadcast', label: '一斉配信', icon: 'send' },
+                { id: 'templates', label: 'テンプレート', icon: 'file-text' },
+                { id: 'autoreply', label: '自動応答', icon: 'zap' },
+                { id: 'analytics', label: '分析', icon: 'bar-chart-2' },
+            ];
+
+            // タブ切替時にデータ取得
+            useEffect(() => {
+                if (!lineStoreId) return;
+                if (lineTab === 'broadcast') fetchBroadcasts();
+                if (lineTab === 'templates') fetchTemplates();
+                if (lineTab === 'autoreply') fetchAutoReplies();
+                if (lineTab === 'analytics') fetchAnalytics();
+            }, [lineTab, lineStoreId]);
+
+            // チャットタブ以外 → タブコンテンツを表示
+            if (lineTab !== 'chat' || !selectedThread) {
+                // ヘッダー + タブバー共通
+                const tabHeader = (
+                    <div className="mb-4">
+                        <div className="flex items-center justify-between mb-3">
+                            <div>
+                                <h2 className="text-xl font-bold text-slate-800">LINE</h2>
+                                <p className="text-xs text-slate-500 mt-0.5">{lineConfig.stores.find(s => s.id === lineStoreId)?.name || ''}</p>
+                            </div>
+                        </div>
+                        <div className="flex gap-1 overflow-x-auto pb-1" style={{scrollbarWidth: 'none'}}>
+                            {LINE_TABS.map(tab => (
+                                <button key={tab.id} onClick={() => { setLineTab(tab.id); if (tab.id === 'chat') setSelectedThread(null); }}
+                                    className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition-all ${
+                                        lineTab === tab.id ? 'bg-green-500 text-white shadow-md shadow-green-500/20' : 'text-slate-500 hover:bg-green-50'
+                                    }`}>
+                                    <Icon name={tab.icon} size={14} />
+                                    {tab.label}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                );
+
+                // === 一斉配信タブ ===
+                if (lineTab === 'broadcast') {
+                    const BroadcastTab = () => {
+                        const [bcText, setBcText] = useState('');
+                        const handleBroadcast = async () => {
+                            if (!bcText.trim()) return;
+                            const ok = await sendBroadcast(bcText.trim());
+                            if (ok) { setBcText(''); showToast('配信しました', 'success'); }
+                            else showToast('配信に失敗しました', 'error');
+                        };
+                        return (
+                            <div>
+                                {tabHeader}
+                                <div className="bg-white rounded-2xl border border-slate-100 p-4 mb-4">
+                                    <h3 className="text-sm font-bold text-slate-700 mb-3">新規配信</h3>
+                                    <textarea value={bcText} onChange={e => setBcText(e.target.value)}
+                                        placeholder="全友だちに送信するメッセージを入力..."
+                                        rows={4} className="w-full resize-none rounded-xl border border-slate-200 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/30 focus:border-green-400 mb-3" />
+                                    <div className="flex items-center justify-between">
+                                        <p className="text-xs text-slate-400">全友だちに配信されます</p>
+                                        <button onClick={handleBroadcast} disabled={!bcText.trim() || broadcastSending}
+                                            className="px-5 py-2 rounded-xl bg-green-500 text-white text-sm font-semibold hover:bg-green-600 disabled:opacity-40 transition-all">
+                                            {broadcastSending ? '送信中...' : '配信する'}
+                                        </button>
+                                    </div>
+                                </div>
+                                <h3 className="text-sm font-bold text-slate-700 mb-2">配信履歴</h3>
+                                {broadcasts.length === 0 ? (
+                                    <p className="text-xs text-slate-400 text-center py-8">まだ配信履歴がありません</p>
+                                ) : (
+                                    <div className="space-y-2">
+                                        {broadcasts.map((bc, i) => {
+                                            let content = bc.messageContent;
+                                            try { const parsed = JSON.parse(content); content = parsed[0]?.text || content; } catch(e) {}
+                                            return (
+                                                <div key={i} className="bg-white rounded-xl border border-slate-100 p-3">
+                                                    <div className="flex items-center justify-between mb-1">
+                                                        <span className="text-xs font-semibold text-green-600">{bc.broadcastType === 'multicast' ? 'セグメント配信' : '全体配信'}</span>
+                                                        <span className="text-[10px] text-slate-400">{formatTime(bc.timestamp)}</span>
+                                                    </div>
+                                                    <p className="text-sm text-slate-700 line-clamp-2">{content}</p>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                )}
+                            </div>
+                        );
+                    };
+                    return <BroadcastTab />;
+                }
+
+                // === テンプレートタブ ===
+                if (lineTab === 'templates') {
+                    const TemplateTab = () => {
+                        const [showForm, setShowForm] = useState(false);
+                        const [editTmpl, setEditTmpl] = useState(null);
+                        const [tmplName, setTmplName] = useState('');
+                        const [tmplCategory, setTmplCategory] = useState('');
+                        const [tmplContent, setTmplContent] = useState('');
+                        const categories = ['挨拶', '営業時間', '料金', 'キャンセル', 'お礼', 'その他'];
+
+                        const handleSave = async () => {
+                            if (!tmplName.trim() || !tmplContent.trim()) return;
+                            const data = editTmpl
+                                ? { action: 'update', templateId: editTmpl.templateId, name: tmplName, category: tmplCategory, messageContent: tmplContent }
+                                : { action: 'create', name: tmplName, category: tmplCategory, messageContent: tmplContent };
+                            const ok = await saveTemplate(data);
+                            if (ok) { setShowForm(false); setEditTmpl(null); setTmplName(''); setTmplCategory(''); setTmplContent(''); showToast('保存しました', 'success'); }
+                        };
+                        const handleEdit = (t) => { setEditTmpl(t); setTmplName(t.name); setTmplCategory(t.category); setTmplContent(t.messageContent); setShowForm(true); };
+                        const handleDelete = async (t) => { await saveTemplate({ action: 'delete', templateId: t.templateId }); showToast('削除しました', 'success'); };
+
+                        return (
+                            <div>
+                                {tabHeader}
+                                <div className="flex items-center justify-between mb-3">
+                                    <h3 className="text-sm font-bold text-slate-700">テンプレート一覧</h3>
+                                    <button onClick={() => { setShowForm(!showForm); setEditTmpl(null); setTmplName(''); setTmplCategory(''); setTmplContent(''); }}
+                                        className="px-3 py-1.5 rounded-lg bg-green-500 text-white text-xs font-semibold hover:bg-green-600 transition-all">
+                                        {showForm ? 'キャンセル' : '+ 新規作成'}
+                                    </button>
+                                </div>
+                                {showForm && (
+                                    <div className="bg-white rounded-2xl border border-slate-100 p-4 mb-4">
+                                        <input value={tmplName} onChange={e => setTmplName(e.target.value)} placeholder="テンプレート名"
+                                            className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm mb-2 focus:outline-none focus:ring-2 focus:ring-green-500/30" />
+                                        <select value={tmplCategory} onChange={e => setTmplCategory(e.target.value)}
+                                            className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm mb-2 focus:outline-none focus:ring-2 focus:ring-green-500/30">
+                                            <option value="">カテゴリ選択</option>
+                                            {categories.map(c => <option key={c} value={c}>{c}</option>)}
+                                        </select>
+                                        <textarea value={tmplContent} onChange={e => setTmplContent(e.target.value)} placeholder="メッセージ内容"
+                                            rows={4} className="w-full resize-none rounded-xl border border-slate-200 px-3 py-2 text-sm mb-3 focus:outline-none focus:ring-2 focus:ring-green-500/30" />
+                                        <button onClick={handleSave} disabled={!tmplName.trim() || !tmplContent.trim()}
+                                            className="w-full py-2 rounded-xl bg-green-500 text-white text-sm font-semibold hover:bg-green-600 disabled:opacity-40 transition-all">
+                                            {editTmpl ? '更新する' : '保存する'}
+                                        </button>
+                                    </div>
+                                )}
+                                {templates.length === 0 && !showForm ? (
+                                    <p className="text-xs text-slate-400 text-center py-8">テンプレートがありません</p>
+                                ) : (
+                                    <div className="space-y-2">
+                                        {templates.map(t => (
+                                            <div key={t.templateId} className="bg-white rounded-xl border border-slate-100 p-3">
+                                                <div className="flex items-center justify-between mb-1">
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="text-sm font-semibold text-slate-700">{t.name}</span>
+                                                        {t.category && <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-50 text-green-600">{t.category}</span>}
+                                                    </div>
+                                                    <div className="flex gap-1">
+                                                        <button onClick={() => handleEdit(t)} className="p-1 rounded hover:bg-slate-100"><Icon name="edit-2" size={14} className="text-slate-400" /></button>
+                                                        <button onClick={() => handleDelete(t)} className="p-1 rounded hover:bg-red-50"><Icon name="trash-2" size={14} className="text-red-400" /></button>
+                                                    </div>
+                                                </div>
+                                                <p className="text-xs text-slate-500 line-clamp-2">{t.messageContent}</p>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        );
+                    };
+                    return <TemplateTab />;
+                }
+
+                // === 自動応答タブ ===
+                if (lineTab === 'autoreply') {
+                    const AutoReplyTab = () => {
+                        const [showForm, setShowForm] = useState(false);
+                        const [editRule, setEditRule] = useState(null);
+                        const [keyword, setKeyword] = useState('');
+                        const [matchMethod, setMatchMethod] = useState('contains');
+                        const [replyContent, setReplyContent] = useState('');
+                        const [priority, setPriority] = useState(0);
+
+                        const handleSave = async () => {
+                            if (!keyword.trim() || !replyContent.trim()) return;
+                            const data = editRule
+                                ? { action: 'update', ruleId: editRule.ruleId, keyword, matchMethod, replyContent, priority: Number(priority) }
+                                : { action: 'create', keyword, matchMethod, replyContent, priority: Number(priority) };
+                            const ok = await saveAutoReply(data);
+                            if (ok) { setShowForm(false); setEditRule(null); setKeyword(''); setMatchMethod('contains'); setReplyContent(''); setPriority(0); showToast('保存しました', 'success'); }
+                        };
+                        const handleEdit = (r) => { setEditRule(r); setKeyword(r.keyword); setMatchMethod(r.matchMethod); setReplyContent(r.replyContent); setPriority(r.priority); setShowForm(true); };
+                        const handleDelete = async (r) => { await saveAutoReply({ action: 'delete', ruleId: r.ruleId }); showToast('削除しました', 'success'); };
+                        const handleToggle = async (r) => { await saveAutoReply({ action: 'update', ruleId: r.ruleId, keyword: r.keyword, matchMethod: r.matchMethod, replyContent: r.replyContent, priority: r.priority, enabled: !r.enabled }); };
+
+                        return (
+                            <div>
+                                {tabHeader}
+                                <div className="flex items-center justify-between mb-3">
+                                    <div>
+                                        <h3 className="text-sm font-bold text-slate-700">自動応答ルール</h3>
+                                        <p className="text-[10px] text-slate-400 mt-0.5">キーワードに一致するメッセージに自動返信します</p>
+                                    </div>
+                                    <button onClick={() => { setShowForm(!showForm); setEditRule(null); setKeyword(''); setMatchMethod('contains'); setReplyContent(''); setPriority(0); }}
+                                        className="px-3 py-1.5 rounded-lg bg-green-500 text-white text-xs font-semibold hover:bg-green-600 transition-all">
+                                        {showForm ? 'キャンセル' : '+ 新規作成'}
+                                    </button>
+                                </div>
+                                {showForm && (
+                                    <div className="bg-white rounded-2xl border border-slate-100 p-4 mb-4">
+                                        <div className="grid grid-cols-2 gap-2 mb-2">
+                                            <input value={keyword} onChange={e => setKeyword(e.target.value)} placeholder="キーワード（例: 営業時間）"
+                                                className="rounded-xl border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/30" />
+                                            <select value={matchMethod} onChange={e => setMatchMethod(e.target.value)}
+                                                className="rounded-xl border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/30">
+                                                <option value="contains">部分一致</option>
+                                                <option value="exact">完全一致</option>
+                                                <option value="regex">正規表現</option>
+                                            </select>
+                                        </div>
+                                        <textarea value={replyContent} onChange={e => setReplyContent(e.target.value)} placeholder="自動返信メッセージ"
+                                            rows={3} className="w-full resize-none rounded-xl border border-slate-200 px-3 py-2 text-sm mb-2 focus:outline-none focus:ring-2 focus:ring-green-500/30" />
+                                        <div className="flex items-center gap-2 mb-3">
+                                            <label className="text-xs text-slate-500">優先度:</label>
+                                            <input type="number" value={priority} onChange={e => setPriority(e.target.value)} min={0} max={100}
+                                                className="w-20 rounded-lg border border-slate-200 px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/30" />
+                                            <span className="text-[10px] text-slate-400">（数値が大きいほど優先）</span>
+                                        </div>
+                                        <button onClick={handleSave} disabled={!keyword.trim() || !replyContent.trim()}
+                                            className="w-full py-2 rounded-xl bg-green-500 text-white text-sm font-semibold hover:bg-green-600 disabled:opacity-40 transition-all">
+                                            {editRule ? '更新する' : '保存する'}
+                                        </button>
+                                    </div>
+                                )}
+                                {autoReplies.length === 0 && !showForm ? (
+                                    <p className="text-xs text-slate-400 text-center py-8">自動応答ルールがありません</p>
+                                ) : (
+                                    <div className="space-y-2">
+                                        {autoReplies.map(r => (
+                                            <div key={r.ruleId} className={`bg-white rounded-xl border p-3 ${r.enabled ? 'border-slate-100' : 'border-slate-100 opacity-50'}`}>
+                                                <div className="flex items-center justify-between mb-1">
+                                                    <div className="flex items-center gap-2">
+                                                        <button onClick={() => handleToggle(r)} className={`w-8 h-5 rounded-full transition-colors ${r.enabled ? 'bg-green-500' : 'bg-slate-300'}`}>
+                                                            <div className={`w-3.5 h-3.5 rounded-full bg-white shadow-sm transition-transform ${r.enabled ? 'translate-x-3.5' : 'translate-x-0.5'}`} />
+                                                        </button>
+                                                        <span className="text-sm font-semibold text-slate-700">「{r.keyword}」</span>
+                                                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">
+                                                            {r.matchMethod === 'exact' ? '完全一致' : r.matchMethod === 'regex' ? '正規表現' : '部分一致'}
+                                                        </span>
+                                                    </div>
+                                                    <div className="flex gap-1">
+                                                        <button onClick={() => handleEdit(r)} className="p-1 rounded hover:bg-slate-100"><Icon name="edit-2" size={14} className="text-slate-400" /></button>
+                                                        <button onClick={() => handleDelete(r)} className="p-1 rounded hover:bg-red-50"><Icon name="trash-2" size={14} className="text-red-400" /></button>
+                                                    </div>
+                                                </div>
+                                                <p className="text-xs text-slate-500 line-clamp-2 ml-10">{r.replyContent}</p>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        );
+                    };
+                    return <AutoReplyTab />;
+                }
+
+                // === 分析タブ ===
+                if (lineTab === 'analytics') {
+                    return (
+                        <div>
+                            {tabHeader}
+                            {!analytics ? (
+                                <div className="flex items-center justify-center py-12">
+                                    <Icon name="loader" size={24} className="text-green-500 animate-spin" />
+                                </div>
+                            ) : (
+                                <div>
+                                    {/* 統計カード */}
+                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+                                        {[
+                                            { label: '受信メッセージ（7日）', value: analytics.last7Days?.received || 0, icon: 'inbox', color: 'green' },
+                                            { label: '送信メッセージ（7日）', value: analytics.last7Days?.sent || 0, icon: 'send', color: 'blue' },
+                                            { label: 'ユニークユーザー', value: analytics.uniqueUsers || 0, icon: 'users', color: 'purple' },
+                                            { label: '友だち追加', value: analytics.follows || 0, icon: 'user-plus', color: 'green' },
+                                        ].map((s, i) => (
+                                            <div key={i} className="bg-white rounded-xl border border-slate-100 p-3">
+                                                <div className="flex items-center gap-2 mb-1">
+                                                    <Icon name={s.icon} size={14} className={`text-${s.color}-500`} />
+                                                    <span className="text-[10px] text-slate-400">{s.label}</span>
+                                                </div>
+                                                <p className="text-xl font-bold text-slate-800">{s.value.toLocaleString()}</p>
+                                            </div>
+                                        ))}
+                                    </div>
+                                    {/* 30日メッセージ推移 */}
+                                    {analytics.dailyStats && analytics.dailyStats.length > 0 && (
+                                        <div className="bg-white rounded-2xl border border-slate-100 p-4 mb-4">
+                                            <h3 className="text-sm font-bold text-slate-700 mb-3">過去30日 メッセージ推移</h3>
+                                            <div style={{width:'100%',height:200}}>
+                                                <Recharts.ResponsiveContainer>
+                                                    <Recharts.BarChart data={analytics.dailyStats}>
+                                                        <Recharts.CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                                                        <Recharts.XAxis dataKey="date" tick={{fontSize:10}} tickFormatter={v => v.slice(5)} />
+                                                        <Recharts.YAxis tick={{fontSize:10}} />
+                                                        <Recharts.Tooltip />
+                                                        <Recharts.Bar dataKey="received" name="受信" fill="#06C755" radius={[2,2,0,0]} />
+                                                        <Recharts.Bar dataKey="sent" name="送信" fill="#3b82f6" radius={[2,2,0,0]} />
+                                                    </Recharts.BarChart>
+                                                </Recharts.ResponsiveContainer>
+                                            </div>
+                                        </div>
+                                    )}
+                                    {/* 時間帯別 */}
+                                    {analytics.hourlyStats && analytics.hourlyStats.length > 0 && (
+                                        <div className="bg-white rounded-2xl border border-slate-100 p-4">
+                                            <h3 className="text-sm font-bold text-slate-700 mb-3">時間帯別 メッセージ分布</h3>
+                                            <div style={{width:'100%',height:180}}>
+                                                <Recharts.ResponsiveContainer>
+                                                    <Recharts.BarChart data={analytics.hourlyStats}>
+                                                        <Recharts.CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                                                        <Recharts.XAxis dataKey="hour" tick={{fontSize:10}} tickFormatter={v => v + '時'} />
+                                                        <Recharts.YAxis tick={{fontSize:10}} />
+                                                        <Recharts.Tooltip />
+                                                        <Recharts.Bar dataKey="received" name="受信" fill="#06C755" radius={[2,2,0,0]} />
+                                                    </Recharts.BarChart>
+                                                </Recharts.ResponsiveContainer>
+                                            </div>
+                                        </div>
+                                    )}
+                                    {/* 累計 */}
+                                    <div className="grid grid-cols-3 gap-3 mt-4">
+                                        <div className="bg-white rounded-xl border border-slate-100 p-3 text-center">
+                                            <p className="text-[10px] text-slate-400">累計受信</p>
+                                            <p className="text-lg font-bold text-slate-800">{(analytics.total?.received || 0).toLocaleString()}</p>
+                                        </div>
+                                        <div className="bg-white rounded-xl border border-slate-100 p-3 text-center">
+                                            <p className="text-[10px] text-slate-400">累計送信</p>
+                                            <p className="text-lg font-bold text-slate-800">{(analytics.total?.sent || 0).toLocaleString()}</p>
+                                        </div>
+                                        <div className="bg-white rounded-xl border border-slate-100 p-3 text-center">
+                                            <p className="text-[10px] text-slate-400">ブロック</p>
+                                            <p className="text-lg font-bold text-red-500">{(analytics.unfollows || 0).toLocaleString()}</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    );
+                }
+            }
+
+            // === チャットタブ ===
             // スレッド選択中 → チャット画面
             if (selectedThread) {
                 const profile = profiles[selectedThread.userId] || {};
@@ -8334,9 +8816,27 @@
                             <div ref={messagesEndRef} />
                         </div>
 
+                        {/* テンプレート選択パネル */}
+                        {showTemplatePanel && templates.length > 0 && (
+                            <div className="border-t border-slate-100 bg-white p-2 max-h-40 overflow-y-auto">
+                                <div className="grid grid-cols-2 gap-1">
+                                    {templates.map(t => (
+                                        <button key={t.templateId} onClick={() => { setInputText(t.messageContent); setShowTemplatePanel(false); }}
+                                            className="text-left p-2 rounded-lg hover:bg-green-50 transition-colors">
+                                            <p className="text-xs font-semibold text-slate-700 truncate">{t.name}</p>
+                                            <p className="text-[10px] text-slate-400 truncate">{t.messageContent}</p>
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
                         {/* 入力エリア */}
                         <div className="p-3 border-t border-slate-200 bg-white rounded-b-2xl">
                             <div className="flex gap-2 items-end">
+                                <button onClick={() => { if (!templates.length) fetchTemplates(); setShowTemplatePanel(!showTemplatePanel); }}
+                                    className="p-2.5 rounded-xl hover:bg-slate-100 transition-colors" title="テンプレート">
+                                    <Icon name="file-text" size={20} className="text-slate-400" />
+                                </button>
                                 <textarea
                                     value={inputText}
                                     onChange={(e) => setInputText(e.target.value)}
@@ -8363,21 +8863,39 @@
                 );
             }
 
-            // スレッド一覧
+            // スレッド一覧（chatタブのデフォルト画面）
+            // Note: this is reached when lineTab === 'chat' && !selectedThread
+            // tabHeader is already rendered above by the if block
             return (
                 <div>
                     {/* ヘッダー */}
-                    <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center justify-between mb-3">
                         <div>
-                            <h2 className="text-xl font-bold text-slate-800">LINE チャット</h2>
-                            <p className="text-xs text-slate-500 mt-0.5">お客様とのLINEメッセージ</p>
+                            <h2 className="text-xl font-bold text-slate-800">LINE</h2>
+                            <p className="text-xs text-slate-500 mt-0.5">{lineConfig.stores.find(s => s.id === lineStoreId)?.name || ''}</p>
                         </div>
-                        <button
-                            onClick={() => fetchThreads(lineStoreId)}
-                            className="p-2.5 rounded-xl hover:bg-slate-100 transition-colors"
-                        >
+                        <button onClick={() => fetchThreads(lineStoreId)}
+                            className="p-2.5 rounded-xl hover:bg-slate-100 transition-colors">
                             <Icon name="refresh-cw" size={18} className={`text-slate-400 ${loading ? 'animate-spin' : ''}`} />
                         </button>
+                    </div>
+                    {/* タブナビゲーション */}
+                    <div className="flex gap-1 overflow-x-auto pb-1 mb-4" style={{scrollbarWidth: 'none'}}>
+                        {[
+                            { id: 'chat', label: 'チャット', icon: 'message-circle' },
+                            { id: 'broadcast', label: '一斉配信', icon: 'send' },
+                            { id: 'templates', label: 'テンプレート', icon: 'file-text' },
+                            { id: 'autoreply', label: '自動応答', icon: 'zap' },
+                            { id: 'analytics', label: '分析', icon: 'bar-chart-2' },
+                        ].map(tab => (
+                            <button key={tab.id} onClick={() => setLineTab(tab.id)}
+                                className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition-all ${
+                                    lineTab === tab.id ? 'bg-green-500 text-white shadow-md shadow-green-500/20' : 'text-slate-500 hover:bg-green-50'
+                                }`}>
+                                <Icon name={tab.icon} size={14} />
+                                {tab.label}
+                            </button>
+                        ))}
                     </div>
 
                     {/* 店舗選択 */}
