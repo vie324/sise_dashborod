@@ -10000,11 +10000,8 @@
                     contents: [
                         // ロゴ (#4) - HTTPSならimage、それ以外はテキスト
                         ...(logoUrl ? [{
-                            type: 'box', layout: 'vertical', alignItems: 'center', margin: 'none',
-                            contents: [{
-                                type: 'image', url: logoUrl, size: 'xxs',
-                                aspectMode: 'fit', aspectRatio: '3:1',
-                            }],
+                            type: 'image', url: logoUrl, size: 'sm',
+                            aspectMode: 'fit', aspectRatio: '1:1',
                         }] : [{
                             type: 'text', text: "si'se", size: 'xl', weight: 'bold', color: '#52856d', align: 'center',
                         }]),
