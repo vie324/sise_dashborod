@@ -3399,6 +3399,49 @@
                 }
             }, [lineStoreId]);
 
+            // Flex Message送信（施術レポート用）
+            const sendFlexMessage = useCallback(async (userId, flexMessage) => {
+                if (!lineStoreId || !userId || !flexMessage) return false;
+                setSending(true);
+                try {
+                    const pushRes = await fetch('/api/line/message/push', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'X-Store-Id': lineStoreId },
+                        body: JSON.stringify({
+                            to: userId,
+                            messages: [flexMessage],
+                        }),
+                    });
+
+                    if (!pushRes.ok) {
+                        const err = await pushRes.json().catch(() => ({}));
+                        console.error('LINE Flex送信エラー:', err);
+                        return false;
+                    }
+
+                    // GASに送信記録を保存
+                    if (UNIFIED_GAS_URL !== 'YOUR_UNIFIED_GAS_URL') {
+                        await fetch(UNIFIED_GAS_URL, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'text/plain' },
+                            body: JSON.stringify({
+                                type: 'lineSend',
+                                storeId: lineStoreId,
+                                userId,
+                                messageText: '[施術レポート] ' + (flexMessage.altText || ''),
+                            }),
+                        }).catch(() => {});
+                    }
+
+                    return true;
+                } catch (e) {
+                    console.error('LINE Flex送信エラー:', e);
+                    return false;
+                } finally {
+                    setSending(false);
+                }
+            }, [lineStoreId]);
+
             // スレッドを開く
             const openThread = useCallback((thread) => {
                 setSelectedThread(thread);
@@ -3538,7 +3581,7 @@
                 lineConfig, threads, profiles, messages, selectedThread,
                 lineStoreId, setLineStoreId, loading, sending, configError,
                 gasStatus, gasError,
-                fetchThreads, openThread, setSelectedThread, sendMessage, fetchMessages,
+                fetchThreads, openThread, setSelectedThread, sendMessage, sendFlexMessage, fetchMessages,
                 broadcasts, broadcastSending, fetchBroadcasts, sendBroadcast,
                 templates, fetchTemplates, saveTemplate,
                 autoReplies, fetchAutoReplies, saveAutoReply,
@@ -9764,6 +9807,162 @@
         ];
 
         // ==========================================
+        // 施術レポート: LINE Flex Message 生成
+        // ==========================================
+        const buildTreatmentFlexMessage = ({ customerName, visitDate, activeMenus, scores, coachComment, activeStretchList, customStretch, couponInfo, couponExpiry }) => {
+            const displayName = customerName ? (customerName.includes('様') ? customerName : customerName + ' 様') : '様';
+            const displayDate = visitDate ? visitDate.replace(/-/g, '.') : '';
+            const displayComment = coachComment || '本日はご来店ありがとうございました。\nお伝えしたストレッチを無理のない範囲で行ってみてください。';
+
+            // スコアラベル
+            const scoreLabels = { posture: '姿勢', pelvis: '骨盤', face: '顔・頭', flow: '代謝・巡り', flex: '柔軟・バランス' };
+
+            // スコアバー生成（★で表現）
+            const scoreRows = Object.entries(scores).map(([key, val]) => ({
+                type: 'box', layout: 'horizontal', spacing: 'sm',
+                contents: [
+                    { type: 'text', text: scoreLabels[key] || key, size: 'xs', color: '#52856d', flex: 4, weight: 'bold' },
+                    { type: 'text', text: '★'.repeat(Math.round(val)) + '☆'.repeat(5 - Math.round(val)), size: 'xs', color: '#6ca88a', flex: 5 },
+                    { type: 'text', text: val.toFixed(1), size: 'xs', color: '#888888', flex: 1, align: 'end' },
+                ],
+            }));
+
+            // メニュータグ
+            const menuContents = activeMenus.length > 0
+                ? activeMenus.map(m => ({
+                    type: 'box', layout: 'vertical', cornerRadius: 'md',
+                    backgroundColor: '#e1efe7', paddingAll: '6px', margin: 'sm',
+                    contents: [{ type: 'text', text: m, size: 'xs', color: '#345244', weight: 'bold', align: 'center' }],
+                }))
+                : [{ type: 'text', text: '施術内容なし', size: 'xs', color: '#9cc7b1', align: 'center' }];
+
+            // ストレッチリスト
+            const stretchContents = [];
+            if (activeStretchList.length > 0 || (customStretch && customStretch.trim())) {
+                activeStretchList.forEach(s => {
+                    stretchContents.push({
+                        type: 'box', layout: 'vertical', spacing: 'xs', margin: 'md',
+                        paddingAll: '12px', cornerRadius: 'md',
+                        backgroundColor: '#f2f8f5',
+                        contents: [
+                            { type: 'text', text: s.title, size: 'xs', weight: 'bold', color: '#345244' },
+                            { type: 'text', text: s.text.replace(/<br\s*\/?>/gi, '\n'), size: 'xxs', color: '#52856d', wrap: true },
+                        ],
+                    });
+                });
+                if (customStretch && customStretch.trim()) {
+                    stretchContents.push({
+                        type: 'box', layout: 'vertical', spacing: 'xs', margin: 'md',
+                        paddingAll: '12px', cornerRadius: 'md', backgroundColor: '#f2f8f5',
+                        contents: [
+                            { type: 'text', text: 'その他の宿題', size: 'xs', weight: 'bold', color: '#345244' },
+                            { type: 'text', text: customStretch.trim(), size: 'xxs', color: '#52856d', wrap: true },
+                        ],
+                    });
+                }
+            } else {
+                stretchContents.push({
+                    type: 'text', text: '本日の特別な宿題はありません\n水分をしっかり摂って休みましょう',
+                    size: 'xxs', color: '#9cc7b1', align: 'center', wrap: true, margin: 'md',
+                });
+            }
+
+            // メインバブル
+            const headerBubble = {
+                type: 'bubble', size: 'mega',
+                header: {
+                    type: 'box', layout: 'vertical', paddingAll: '20px',
+                    backgroundColor: '#f2f8f5',
+                    contents: [
+                        { type: 'text', text: 'Personal After Care Sheet', size: 'xxs', weight: 'bold', color: '#6ca88a', align: 'center', style: 'normal' },
+                        { type: 'text', text: displayName, size: 'xl', weight: 'bold', color: '#333333', align: 'center', margin: 'sm' },
+                        { type: 'text', text: displayDate, size: 'xs', color: '#9cc7b1', align: 'center', margin: 'xs' },
+                    ],
+                },
+                body: {
+                    type: 'box', layout: 'vertical', spacing: 'lg', paddingAll: '20px',
+                    contents: [
+                        // Today's Menu
+                        { type: 'text', text: "Today's Menu", size: 'xxs', weight: 'bold', color: '#9cc7b1', align: 'center' },
+                        { type: 'box', layout: 'horizontal', justifyContent: 'center', spacing: 'sm', contents: menuContents },
+                        { type: 'separator', color: '#e1efe7', margin: 'lg' },
+                        // Body Balance
+                        { type: 'text', text: 'Body Balance', size: 'xxs', weight: 'bold', color: '#9cc7b1', align: 'center', margin: 'lg' },
+                        { type: 'box', layout: 'vertical', spacing: 'sm', margin: 'md', contents: scoreRows },
+                        { type: 'separator', color: '#e1efe7', margin: 'lg' },
+                        // Feedback
+                        { type: 'text', text: 'Feedback & Goal', size: 'xxs', weight: 'bold', color: '#9cc7b1', align: 'center', margin: 'lg' },
+                        {
+                            type: 'box', layout: 'horizontal', margin: 'md',
+                            contents: [
+                                { type: 'box', layout: 'vertical', width: '3px', backgroundColor: '#9cc7b1', contents: [{ type: 'filler' }] },
+                                { type: 'text', text: displayComment, size: 'sm', color: '#555555', wrap: true, flex: 1, margin: 'md' },
+                            ],
+                        },
+                    ],
+                },
+            };
+
+            // ストレッチ・クーポンバブル
+            const careContents = [
+                { type: 'text', text: 'HOME CARE', size: 'sm', weight: 'bold', color: '#e1efe7', align: 'center' },
+                ...stretchContents,
+            ];
+
+            // クーポン追加
+            if (couponInfo) {
+                careContents.push({ type: 'separator', color: 'rgba(255,255,255,0.2)', margin: 'xl' });
+                careContents.push({
+                    type: 'box', layout: 'vertical', margin: 'lg', paddingAll: '16px',
+                    cornerRadius: 'lg', backgroundColor: '#fffbf0',
+                    borderWidth: '2px', borderColor: '#eab308',
+                    contents: [
+                        { type: 'text', text: 'SPECIAL COUPON', size: 'xxs', weight: 'bold', color: '#eab308', align: 'center' },
+                        { type: 'text', text: couponInfo.title, size: 'sm', weight: 'bold', color: '#333333', align: 'center', margin: 'sm', wrap: true },
+                        {
+                            type: 'box', layout: 'horizontal', justifyContent: 'center', spacing: 'md', margin: 'sm',
+                            contents: [
+                                { type: 'text', text: couponInfo.old, size: 'xs', color: '#999999', decoration: 'line-through', gravity: 'bottom' },
+                                { type: 'text', text: '→', size: 'sm', color: '#ef4444' },
+                                { type: 'text', text: couponInfo.price, size: 'xl', weight: 'bold', color: '#ef4444' },
+                            ],
+                        },
+                        { type: 'text', text: '有効期限: ' + couponExpiry + ' まで', size: 'xxs', color: '#ef4444', weight: 'bold', align: 'center', margin: 'sm' },
+                        { type: 'text', text: couponInfo.desc.replace(/<br\s*\/?>/gi, '\n'), size: 'xxs', color: '#888888', wrap: true, margin: 'sm' },
+                    ],
+                });
+            }
+
+            // フッター
+            careContents.push({
+                type: 'box', layout: 'vertical', margin: 'xl', paddingTop: '12px',
+                borderWidth: '1px', borderColor: 'rgba(255,255,255,0.15)',
+                contents: [
+                    { type: 'text', text: '美しさは日々の積み重ねから', size: 'xxs', color: '#c5e0d1', align: 'center', margin: 'md' },
+                    { type: 'text', text: 'ご不明点はLINEにていつでもご相談ください。', size: 'xxs', color: '#c5e0d1', align: 'center', margin: 'xs' },
+                ],
+            });
+
+            const careBubble = {
+                type: 'bubble', size: 'mega',
+                styles: { body: { backgroundColor: '#52856d' } },
+                body: {
+                    type: 'box', layout: 'vertical', paddingAll: '20px', spacing: 'sm',
+                    contents: careContents,
+                },
+            };
+
+            return {
+                type: 'flex',
+                altText: `${displayName}のアフターケアシート (${displayDate})`,
+                contents: {
+                    type: 'carousel',
+                    contents: [headerBubble, careBubble],
+                },
+            };
+        };
+
+        // ==========================================
         // 施術レポート: データ定義
         // ==========================================
         const TR_COMMENT_TEMPLATES = {
@@ -9867,8 +10066,14 @@
         // ==========================================
         // 施術レポート: TreatmentReportView コンポーネント
         // ==========================================
-        const TreatmentReportView = () => {
+        const TreatmentReportView = ({ lineChatHook }) => {
             const { useState, useEffect, useRef, useCallback } = React;
+
+            // --- LINE送信 State ---
+            const [lineModalOpen, setLineModalOpen] = useState(false);
+            const [lineSearchQuery, setLineSearchQuery] = useState('');
+            const [lineSelectedUser, setLineSelectedUser] = useState(null);
+            const [lineSendStatus, setLineSendStatus] = useState(''); // '' | 'sending' | 'sent' | 'error'
 
             // --- State ---
             const [customerName, setCustomerName] = useState('');
@@ -10014,6 +10219,65 @@
                     setTimeout(() => setSaveMsg(''), 2000);
                 }).catch(() => setSaveMsg('エラーが発生しました'));
             }, [customerName, visitDate]);
+
+            // --- LINE送信 ---
+            const openLineModal = useCallback(() => {
+                if (!lineChatHook || !lineChatHook.lineConfig?.configured) {
+                    alert('LINE連携が設定されていません。設定画面からLINE APIを設定してください。');
+                    return;
+                }
+                // 初回はスレッド取得
+                if (lineChatHook.lineStoreId) {
+                    lineChatHook.fetchThreads(lineChatHook.lineStoreId);
+                } else if (lineChatHook.lineConfig.stores.length > 0) {
+                    const firstStore = lineChatHook.lineConfig.stores[0].id;
+                    lineChatHook.setLineStoreId(firstStore);
+                    lineChatHook.fetchThreads(firstStore);
+                }
+                setLineSelectedUser(null);
+                setLineSearchQuery('');
+                setLineSendStatus('');
+                setLineModalOpen(true);
+            }, [lineChatHook]);
+
+            const handleLineSend = useCallback(async () => {
+                if (!lineSelectedUser || !lineChatHook) return;
+                setLineSendStatus('sending');
+
+                const activeMenusForFlex = Object.entries(menuChecks).filter(([, v]) => v).map(([k]) => k);
+                const activeStretchListForFlex = Object.keys(selectedStretches).map(fullKey => {
+                    const [cat, ...idParts] = fullKey.split('-');
+                    const id = idParts.join('-');
+                    const item = TR_STRETCH_DATA[cat]?.find(s => s.id === id);
+                    return item ? { ...item, cat } : null;
+                }).filter(Boolean);
+
+                const cInfo = coupon === 'c1'
+                    ? { title: '選べる美容矯正1種類＋ほぐし', old: '¥9,000', price: '¥6,500', desc: '※美容矯正は小顔矯正、姿勢矯正、骨盤矯正の中から選択可能\n※Quickプラン' }
+                    : coupon === 'c2'
+                    ? { title: '選べる美容矯正2種類＋ほぐし', old: '¥10,000', price: '¥7,500', desc: '※美容矯正は小顔矯正、姿勢矯正、骨盤矯正の中から選択可能\n※Standardプラン' }
+                    : null;
+
+                const cExpiry = (() => {
+                    if (!visitDate) return '日付未設定';
+                    const d = new Date(visitDate);
+                    if (isNaN(d)) return '日付未設定';
+                    d.setDate(d.getDate() + 21);
+                    return `${d.getFullYear()}.${String(d.getMonth()+1).padStart(2,'0')}.${String(d.getDate()).padStart(2,'0')}`;
+                })();
+
+                const flexMsg = buildTreatmentFlexMessage({
+                    customerName, visitDate, activeMenus: activeMenusForFlex, scores,
+                    coachComment, activeStretchList: activeStretchListForFlex,
+                    customStretch, couponInfo: cInfo, couponExpiry: cExpiry,
+                });
+
+                const ok = await lineChatHook.sendFlexMessage(lineSelectedUser.userId, flexMsg);
+                setLineSendStatus(ok ? 'sent' : 'error');
+                if (ok) {
+                    setTimeout(() => { setLineModalOpen(false); setLineSendStatus(''); }, 2000);
+                }
+            }, [lineSelectedUser, lineChatHook, customerName, visitDate, menuChecks, scores, coachComment, selectedStretches, customStretch, coupon]);
 
             // --- Derived values ---
             const activeMenus = Object.entries(menuChecks).filter(([, v]) => v).map(([k]) => k);
@@ -10204,15 +10468,19 @@
                         {/* RIGHT PANEL placeholder - Phase D */}
                         <main className={`w-full md:w-1/2 lg:w-7/12 bg-gray-100 h-full overflow-y-auto relative ${mobileTab === 'preview' ? '' : 'hidden'} md:block`}>
                             <div className="flex flex-col items-center justify-start min-h-full p-4 md:p-8 pb-20">
-                                {/* Download Button */}
-                                <div className="sticky top-0 z-50 w-full max-w-[400px] flex justify-end mb-2 pointer-events-none">
-                                    <div className="pointer-events-auto">
+                                {/* Action Buttons */}
+                                <div className="sticky top-0 z-50 w-full max-w-[400px] flex justify-end gap-2 mb-2 pointer-events-none">
+                                    <div className="pointer-events-auto flex gap-2 items-start">
+                                        <button onClick={openLineModal} className="flex items-center gap-2 bg-[#06C755] text-white px-4 py-2 rounded-full shadow-lg hover:bg-[#05b34c] hover:shadow-xl transition transform hover:-translate-y-0.5 font-bold text-sm border-2 border-white">
+                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor"><path d="M19.365 9.863c.349 0 .63.285.63.631 0 .345-.281.63-.63.63H17.61v1.125h1.755c.349 0 .63.283.63.63 0 .344-.281.629-.63.629h-2.386c-.345 0-.627-.285-.627-.629V8.108c0-.345.282-.63.63-.63h2.386c.346 0 .627.285.627.63 0 .349-.281.63-.63.63H17.61v1.125h1.755zm-3.855 3.016c0 .27-.174.51-.432.596-.064.021-.133.031-.199.031-.211 0-.391-.09-.51-.25l-2.443-3.317v2.94c0 .344-.279.629-.631.629-.346 0-.626-.285-.626-.629V8.108c0-.27.173-.51.43-.595.06-.023.136-.033.194-.033.195 0 .375.104.495.254l2.462 3.33V8.108c0-.345.282-.63.63-.63.345 0 .63.285.63.63v4.771zm-5.741 0c0 .344-.282.629-.631.629-.345 0-.627-.285-.627-.629V8.108c0-.345.282-.63.63-.63.346 0 .628.285.628.63v4.771zm-2.466.629H4.917c-.345 0-.63-.285-.63-.629V8.108c0-.345.285-.63.63-.63.348 0 .63.285.63.63v4.141h1.756c.348 0 .629.283.629.63 0 .344-.282.629-.629.629M24 10.314C24 4.943 18.615.572 12 .572S0 4.943 0 10.314c0 4.811 4.27 8.842 10.035 9.608.391.082.923.258 1.058.59.12.301.079.766.038 1.08l-.164 1.02c-.045.301-.24 1.186 1.049.645 1.291-.539 6.916-4.078 9.436-6.975C23.176 14.393 24 12.458 24 10.314"/></svg>
+                                            LINEで送信
+                                        </button>
                                         <button onClick={downloadImage} className="flex items-center gap-2 bg-green-700 text-white px-4 py-2 rounded-full shadow-lg hover:bg-green-600 hover:shadow-xl transition transform hover:-translate-y-0.5 font-bold text-sm border-2 border-white">
                                             <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
                                             画像を保存
                                         </button>
-                                        {saveMsg && <p className="text-xs text-green-700 text-center mt-1 bg-white/80 rounded px-1">{saveMsg}</p>}
                                     </div>
+                                    {saveMsg && <p className="text-xs text-green-700 text-center mt-1 bg-white/80 rounded px-1">{saveMsg}</p>}
                                 </div>
                                 {/* Phone Container (capture target) */}
                                 <div ref={captureRef} className="bg-white w-full max-w-[400px] shadow-2xl overflow-hidden relative text-gray-800" style={{ minHeight: '700px', borderRadius: '20px' }}>
@@ -10326,6 +10594,109 @@
                             </div>
                         </main>
                     </div>
+                    {/* LINE送信モーダル */}
+                    {lineModalOpen && (
+                        <div className="fixed inset-0 bg-black/50 z-[9999] flex items-center justify-center p-4" onClick={() => lineSendStatus !== 'sending' && setLineModalOpen(false)}>
+                            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[80vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+                                {/* Modal Header */}
+                                <div className="p-4 border-b bg-[#06C755] text-white flex items-center justify-between rounded-t-2xl">
+                                    <div className="flex items-center gap-2">
+                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor"><path d="M19.365 9.863c.349 0 .63.285.63.631 0 .345-.281.63-.63.63H17.61v1.125h1.755c.349 0 .63.283.63.63 0 .344-.281.629-.63.629h-2.386c-.345 0-.627-.285-.627-.629V8.108c0-.345.282-.63.63-.63h2.386c.346 0 .627.285.627.63 0 .349-.281.63-.63.63H17.61v1.125h1.755zm-3.855 3.016c0 .27-.174.51-.432.596-.064.021-.133.031-.199.031-.211 0-.391-.09-.51-.25l-2.443-3.317v2.94c0 .344-.279.629-.631.629-.346 0-.626-.285-.626-.629V8.108c0-.27.173-.51.43-.595.06-.023.136-.033.194-.033.195 0 .375.104.495.254l2.462 3.33V8.108c0-.345.282-.63.63-.63.345 0 .63.285.63.63v4.771zm-5.741 0c0 .344-.282.629-.631.629-.345 0-.627-.285-.627-.629V8.108c0-.345.282-.63.63-.63.346 0 .628.285.628.63v4.771zm-2.466.629H4.917c-.345 0-.63-.285-.63-.629V8.108c0-.345.285-.63.63-.63.348 0 .63.285.63.63v4.141h1.756c.348 0 .629.283.629.63 0 .344-.282.629-.629.629M24 10.314C24 4.943 18.615.572 12 .572S0 4.943 0 10.314c0 4.811 4.27 8.842 10.035 9.608.391.082.923.258 1.058.59.12.301.079.766.038 1.08l-.164 1.02c-.045.301-.24 1.186 1.049.645 1.291-.539 6.916-4.078 9.436-6.975C23.176 14.393 24 12.458 24 10.314"/></svg>
+                                        <span className="font-bold">LINEで送信</span>
+                                    </div>
+                                    <button onClick={() => setLineModalOpen(false)} className="text-white/80 hover:text-white text-xl leading-none">&times;</button>
+                                </div>
+
+                                {/* Store Selector */}
+                                {lineChatHook && lineChatHook.lineConfig.stores.length > 1 && (
+                                    <div className="px-4 pt-3 flex gap-2 flex-wrap">
+                                        {lineChatHook.lineConfig.stores.map(s => (
+                                            <button key={s.id} onClick={() => { lineChatHook.setLineStoreId(s.id); lineChatHook.fetchThreads(s.id); setLineSelectedUser(null); }}
+                                                className={`text-xs px-3 py-1 rounded-full border transition ${lineChatHook.lineStoreId === s.id ? 'bg-green-600 text-white border-green-600' : 'bg-white text-gray-600 border-gray-300 hover:border-green-400'}`}>
+                                                {s.name}
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
+
+                                {/* Search */}
+                                <div className="px-4 pt-3">
+                                    <input type="text" value={lineSearchQuery} onChange={e => setLineSearchQuery(e.target.value)}
+                                        placeholder="ユーザー名で検索..."
+                                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 outline-none" />
+                                </div>
+
+                                {/* Thread List */}
+                                <div className="flex-1 overflow-y-auto px-4 py-3 space-y-1">
+                                    {lineChatHook && lineChatHook.threads.length === 0 && (
+                                        <p className="text-center text-gray-400 text-sm py-8">
+                                            {lineChatHook.loading ? '読み込み中...' : 'LINEスレッドがありません'}
+                                        </p>
+                                    )}
+                                    {lineChatHook && lineChatHook.threads
+                                        .filter(t => {
+                                            if (!lineSearchQuery) return true;
+                                            const profile = lineChatHook.profiles[t.userId] || {};
+                                            return (profile.displayName || '').toLowerCase().includes(lineSearchQuery.toLowerCase());
+                                        })
+                                        .map(t => {
+                                            const profile = lineChatHook.profiles[t.userId] || {};
+                                            const isSelected = lineSelectedUser && lineSelectedUser.userId === t.userId;
+                                            return (
+                                                <button key={t.userId} onClick={() => setLineSelectedUser({ userId: t.userId, displayName: profile.displayName || t.userId })}
+                                                    className={`w-full flex items-center gap-3 p-3 rounded-xl text-left transition ${isSelected ? 'bg-green-50 border-2 border-green-500 shadow-sm' : 'hover:bg-gray-50 border-2 border-transparent'}`}>
+                                                    {profile.pictureUrl
+                                                        ? <img src={profile.pictureUrl} className="w-10 h-10 rounded-full object-cover border-2 border-gray-200" alt="" />
+                                                        : <div className="w-10 h-10 rounded-full bg-gray-300 flex items-center justify-center text-white text-sm font-bold">{(profile.displayName || '?')[0]}</div>
+                                                    }
+                                                    <div className="flex-1 min-w-0">
+                                                        <p className="font-bold text-sm text-gray-800 truncate">{profile.displayName || t.userId}</p>
+                                                        {t.lastMessage && <p className="text-xs text-gray-400 truncate">{t.lastMessage.messageText}</p>}
+                                                    </div>
+                                                    {isSelected && (
+                                                        <svg className="w-5 h-5 text-green-500 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
+                                                    )}
+                                                </button>
+                                            );
+                                        })
+                                    }
+                                </div>
+
+                                {/* Footer */}
+                                <div className="p-4 border-t bg-gray-50">
+                                    {lineSelectedUser && (
+                                        <p className="text-xs text-gray-500 mb-2 text-center">
+                                            送信先: <span className="font-bold text-gray-700">{lineSelectedUser.displayName}</span>
+                                        </p>
+                                    )}
+                                    {lineSendStatus === 'sent' && (
+                                        <div className="flex items-center justify-center gap-2 text-green-600 font-bold text-sm py-2">
+                                            <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
+                                            送信完了！
+                                        </div>
+                                    )}
+                                    {lineSendStatus === 'error' && (
+                                        <p className="text-center text-red-500 text-sm mb-2 font-bold">送信に失敗しました。再度お試しください。</p>
+                                    )}
+                                    {lineSendStatus !== 'sent' && (
+                                        <button onClick={handleLineSend} disabled={!lineSelectedUser || lineSendStatus === 'sending'}
+                                            className={`w-full py-3 rounded-xl font-bold text-white text-sm transition shadow-lg ${
+                                                lineSelectedUser && lineSendStatus !== 'sending'
+                                                    ? 'bg-[#06C755] hover:bg-[#05b34c] hover:shadow-xl'
+                                                    : 'bg-gray-300 cursor-not-allowed'
+                                            }`}>
+                                            {lineSendStatus === 'sending' ? (
+                                                <span className="flex items-center justify-center gap-2">
+                                                    <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+                                                    送信中...
+                                                </span>
+                                            ) : 'レポートをLINEで送信'}
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    )}
                 </div>
             );
         };
@@ -12200,7 +12571,7 @@
                     case 'counseling':
                         return <ConceptFormView counselingHook={counselingHook} activeStoreId={activeStoreId} memberData={memberData} />;
                     case 'treatment-report':
-                        return <TreatmentReportView />;
+                        return <TreatmentReportView lineChatHook={lineChatHook} />;
                     case 'line':
                         return <LineChatView lineChatHook={lineChatHook} />;
                     case 'marketing':
