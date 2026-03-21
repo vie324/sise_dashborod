@@ -10114,80 +10114,8 @@
                 carouselBubbles.push(careBubble1, careBubble2);
             }
 
-            // === クーポンバブル (#10 割引率バッジ追加) ===
-            if (couponInfo) {
-                // 割引率を計算 (#10)
-                const parsePrice = (s) => parseInt(String(s).replace(/[¥￥,，\s]/g, ''), 10);
-                const oldPrice = parsePrice(couponInfo.old);
-                const newPrice = parsePrice(couponInfo.price);
-                const discountPercent = (oldPrice && newPrice && oldPrice > newPrice)
-                    ? Math.round((1 - newPrice / oldPrice) * 100)
-                    : 0;
-
-                const priceBoxContents = [
-                    { type: 'text', text: couponInfo.old, size: 'sm', color: '#999999', decoration: 'line-through', align: 'center' },
-                    { type: 'text', text: couponInfo.price, size: '3xl', weight: 'bold', color: '#ef4444', align: 'center', margin: 'sm' },
-                ];
-
-                const couponBodyContents = [
-                    // バッジ: SPECIAL COUPON + 割引率を縦並び
-                    {
-                        type: 'box', layout: 'vertical', alignItems: 'center', spacing: 'sm',
-                        contents: [
-                            {
-                                type: 'box', layout: 'vertical', backgroundColor: '#eab308',
-                                cornerRadius: 'md', paddingAll: '6px', paddingStart: '20px', paddingEnd: '20px',
-                                contents: [{ type: 'text', text: 'SPECIAL COUPON', size: 'xs', weight: 'bold', color: '#ffffff', align: 'center' }],
-                            },
-                            ...(discountPercent > 0 ? [{
-                                type: 'box', layout: 'vertical', backgroundColor: '#ef4444',
-                                cornerRadius: 'md', paddingAll: '6px', paddingStart: '20px', paddingEnd: '20px',
-                                contents: [{ type: 'text', text: discountPercent + '% OFF', size: 'sm', weight: 'bold', color: '#ffffff', align: 'center' }],
-                            }] : []),
-                        ],
-                    },
-                    // タイトル
-                    { type: 'text', text: couponInfo.title, size: 'md', weight: 'bold', color: '#333333', align: 'center', margin: 'md', wrap: true },
-                    // 価格セクション
-                    {
-                        type: 'box', layout: 'vertical', margin: 'md', paddingAll: '14px',
-                        cornerRadius: 'lg', backgroundColor: '#ffffff',
-                        borderWidth: 'normal', borderColor: '#eab308',
-                        contents: priceBoxContents,
-                    },
-                    // 有効期限
-                    {
-                        type: 'box', layout: 'vertical', margin: 'md', paddingAll: '8px',
-                        cornerRadius: 'md', backgroundColor: '#fef2f2',
-                        borderWidth: 'light', borderColor: '#fecaca',
-                        contents: [
-                            { type: 'text', text: '有効期限: ' + couponExpiry + ' まで', size: 'xs', color: '#ef4444', weight: 'bold', align: 'center' },
-                        ],
-                    },
-                    // 注意事項
-                    {
-                        type: 'box', layout: 'vertical', margin: 'md', paddingAll: '10px',
-                        cornerRadius: 'md', backgroundColor: '#ffffff',
-                        contents: [
-                            { type: 'text', text: couponInfo.desc.replace(/<br\s*\/?>/gi, '\n'), size: 'xxs', color: '#888888', wrap: true },
-                        ],
-                    },
-                ];
-
-                const couponBubble = {
-                    type: 'bubble', size: 'mega',
-                    styles: { body: { backgroundColor: '#ffffff' } },
-                    body: {
-                        type: 'box', layout: 'vertical', paddingAll: '20px', spacing: 'sm',
-                        contents: couponBodyContents,
-                    },
-                };
-                carouselBubbles.push(couponBubble);
-            }
-
-            // === フッターを最後のバブルのみに集約 (#12) ===
-            const totalBubbles = carouselBubbles.length;
-            const lastBubble = carouselBubbles[totalBubbles - 1];
+            // === フッターを2枚目（最後のHOME CAREバブル）に必ず表示 ===
+            const lastCareBubble = carouselBubbles[carouselBubbles.length - 1]; // 最後のHOME CARE
             const footerBox = {
                 type: 'box', layout: 'vertical', margin: 'xl', paddingTop: '12px',
                 borderWidth: 'light', borderColor: '#e1efe7',
@@ -10196,11 +10124,95 @@
                     { type: 'text', text: 'ご不明点はLINEにていつでもご相談ください。', size: 'xxs', color: '#9cc7b1', align: 'center', margin: 'xs' },
                 ],
             };
-            lastBubble.body.contents.push(footerBox);
+            lastCareBubble.body.contents.push(footerBox);
+
+            // === クーポンバブル（華やかなクーポンデザイン） ===
+            if (couponInfo) {
+                const parsePrice = (s) => parseInt(String(s).replace(/[¥￥,，\s]/g, ''), 10);
+                const oldPrice = parsePrice(couponInfo.old);
+                const newPrice = parsePrice(couponInfo.price);
+                const discountPercent = (oldPrice && newPrice && oldPrice > newPrice)
+                    ? Math.round((1 - newPrice / oldPrice) * 100)
+                    : 0;
+
+                const couponBubble = {
+                    type: 'bubble', size: 'mega',
+                    styles: {
+                        header: { backgroundColor: '#ef4444' },
+                        body: { backgroundColor: '#ffffff' },
+                        footer: { backgroundColor: '#ffffff' },
+                    },
+                    header: {
+                        type: 'box', layout: 'vertical', paddingAll: '20px', paddingBottom: '16px',
+                        backgroundColor: '#ef4444',
+                        contents: [
+                            // 割引率を大きく
+                            ...(discountPercent > 0 ? [
+                                { type: 'text', text: discountPercent + '%', size: '4xl', weight: 'bold', color: '#ffffff', align: 'center' },
+                                { type: 'text', text: 'OFF', size: 'xl', weight: 'bold', color: '#ffffffcc', align: 'center', margin: 'none' },
+                            ] : [
+                                { type: 'text', text: 'SPECIAL', size: '3xl', weight: 'bold', color: '#ffffff', align: 'center' },
+                            ]),
+                            // COUPON バッジ
+                            {
+                                type: 'box', layout: 'vertical', alignItems: 'center', margin: 'md',
+                                contents: [{
+                                    type: 'box', layout: 'vertical',
+                                    backgroundColor: '#ffffff', cornerRadius: 'xl',
+                                    paddingAll: '6px', paddingStart: '24px', paddingEnd: '24px',
+                                    contents: [{ type: 'text', text: 'COUPON', size: 'sm', weight: 'bold', color: '#ef4444', align: 'center' }],
+                                }],
+                            },
+                        ],
+                    },
+                    body: {
+                        type: 'box', layout: 'vertical', paddingAll: '20px', spacing: 'md',
+                        contents: [
+                            // 切り取り線風の演出
+                            {
+                                type: 'box', layout: 'horizontal', justifyContent: 'center',
+                                contents: [
+                                    { type: 'text', text: '✂ - - - - - - - - - - - - - - - - - - - -', size: 'xxs', color: '#e0e0e0', align: 'center' },
+                                ],
+                            },
+                            // タイトル
+                            { type: 'text', text: couponInfo.title, size: 'md', weight: 'bold', color: '#333333', align: 'center', wrap: true, margin: 'md' },
+                            // 価格セクション
+                            {
+                                type: 'box', layout: 'vertical', margin: 'md', paddingAll: '16px',
+                                cornerRadius: 'xl', backgroundColor: '#fff5f5',
+                                contents: [
+                                    { type: 'text', text: couponInfo.old, size: 'sm', color: '#bbbbbb', decoration: 'line-through', align: 'center' },
+                                    { type: 'text', text: couponInfo.price, size: '3xl', weight: 'bold', color: '#ef4444', align: 'center', margin: 'xs' },
+                                ],
+                            },
+                            // 有効期限
+                            {
+                                type: 'box', layout: 'vertical', margin: 'md', paddingAll: '10px',
+                                cornerRadius: 'lg', backgroundColor: '#fef2f2',
+                                borderWidth: 'normal', borderColor: '#ef4444',
+                                contents: [
+                                    { type: 'text', text: '⏰ 有効期限: ' + couponExpiry + ' まで', size: 'xs', color: '#ef4444', weight: 'bold', align: 'center' },
+                                ],
+                            },
+                            // 注意事項
+                            {
+                                type: 'box', layout: 'vertical', margin: 'md',
+                                contents: [
+                                    { type: 'text', text: couponInfo.desc.replace(/<br\s*\/?>/gi, '\n'), size: 'xxs', color: '#999999', wrap: true },
+                                ],
+                            },
+                        ],
+                    },
+                };
+                carouselBubbles.push(couponBubble);
+            }
 
             // === 全バブルにページインジケータを追加 (#11) ===
+            const totalBubbles = carouselBubbles.length;
             carouselBubbles.forEach((bubble, idx) => {
-                bubble.body.contents.push(makePageDots(idx, totalBubbles, true));
+                const target = bubble.body || bubble;
+                target.contents.push(makePageDots(idx, totalBubbles, true));
             });
 
             return {
