@@ -126,13 +126,13 @@ const COUNSELING_HEADER_KEYWORDS = {
   CONCERNS:             ['お悩み', '気になる箇所', '気になる部位', '気になること', 'お身体のお悩み', 'お体のお悩み', 'お体で気になる', 'お身体で気になる', '不調', '症状', 'お困り'],
   IMPROVEMENT_TIMELINE: ['いつまでに', 'どのくらいの期間', '改善したい時期', '改善', '期間', 'いつ頃まで'],
   TREATMENT_REQUEST:    ['施術のご希望', '施術の希望', 'ご希望の施術', '施術についてのご要望', 'リクエスト', '希望する施術'],
-  TREATMENT_EXPERIENCE: ['整体', '受けたことが', '施術経験', '経験'],
+  TREATMENT_EXPERIENCE: ['整体', 'マッサージ', 'カイロ', 'ご利用経験', '利用経験', '受けたことが', '施術経験'],
   SURGERY_HISTORY:      ['手術', '外科'],
   CURRENT_TREATMENT:    ['通院', '治療中'],
   ALLERGY:              ['アレルギー'],
   COSMETIC_SURGERY:     ['美容整形', '美容外科', '美容医療'],
   PREGNANCY_CHECK:      ['妊娠', '授乳', '特定疾患'],
-  DISCLAIMER:           ['同意', '注意事項', '免責', '確認事項', '確認いたしました', '確認しました']
+  DISCLAIMER:           ['異議を申し立て', '上記の内容を理解', '同意します', '注意事項', '免責', '確認事項', '確認いたしました', '確認しました', '同意']
 };
 
 // ヘッダー行から動的にカラムマッピングを構築
@@ -473,7 +473,10 @@ function counselingDetail(data, C, name, index) {
       concerns: concerns,
       improvementTimeline: String(colVal(row, C.IMPROVEMENT_TIMELINE) || '').trim(),
       treatmentRequest: String(colVal(row, C.TREATMENT_REQUEST) || '').trim(),
-      treatmentExperience: parseMultiSelect(colVal(row, C.TREATMENT_EXPERIENCE)),
+      treatmentExperience: parseMultiSelect(colVal(row, C.TREATMENT_EXPERIENCE)).filter(function(v) {
+        // 免責事項テキストが混入した場合を除外
+        return v.indexOf('異議を申し立て') === -1 && v.indexOf('上記の内容を理解') === -1 && v.indexOf('同意します') === -1 && v.length < 30;
+      }),
       surgeryHistory: String(colVal(row, C.SURGERY_HISTORY) || '').trim(),
       currentTreatment: String(colVal(row, C.CURRENT_TREATMENT) || '').trim(),
       allergy: String(colVal(row, C.ALLERGY) || '').trim(),
