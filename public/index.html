@@ -9811,7 +9811,7 @@
         // ==========================================
         const buildTreatmentFlexMessage = ({ customerName, visitDate, activeMenus, scores, coachComment, activeStretchList, customStretch, couponInfo, couponExpiry }) => {
             const displayName = customerName ? (customerName.includes('様') ? customerName : customerName + ' 様') : '様';
-            const displayDate = visitDate ? visitDate.replace(/-/g, '.') : '';
+            const displayDate = visitDate ? visitDate.replace(/-/g, '.') : '-';
             const displayComment = coachComment || '本日はご来店ありがとうございました。\nお伝えしたストレッチを無理のない範囲で行ってみてください。';
 
             // スコアラベル
@@ -9874,7 +9874,7 @@
                     type: 'box', layout: 'vertical', paddingAll: '20px',
                     backgroundColor: '#f2f8f5',
                     contents: [
-                        { type: 'text', text: 'Personal After Care Sheet', size: 'xxs', weight: 'bold', color: '#6ca88a', align: 'center', style: 'normal' },
+                        { type: 'text', text: 'Personal After Care Sheet', size: 'xxs', weight: 'bold', color: '#6ca88a', align: 'center' },
                         { type: 'text', text: displayName, size: 'xl', weight: 'bold', color: '#333333', align: 'center', margin: 'sm' },
                         { type: 'text', text: displayDate, size: 'xs', color: '#9cc7b1', align: 'center', margin: 'xs' },
                     ],
@@ -9911,11 +9911,11 @@
 
             // クーポン追加
             if (couponInfo) {
-                careContents.push({ type: 'separator', color: 'rgba(255,255,255,0.2)', margin: 'xl' });
+                careContents.push({ type: 'separator', color: '#8aab98', margin: 'xl' });
                 careContents.push({
                     type: 'box', layout: 'vertical', margin: 'lg', paddingAll: '16px',
                     cornerRadius: 'lg', backgroundColor: '#fffbf0',
-                    borderWidth: '2px', borderColor: '#eab308',
+                    borderWidth: 'normal', borderColor: '#eab308',
                     contents: [
                         { type: 'text', text: 'SPECIAL COUPON', size: 'xxs', weight: 'bold', color: '#eab308', align: 'center' },
                         { type: 'text', text: couponInfo.title, size: 'sm', weight: 'bold', color: '#333333', align: 'center', margin: 'sm', wrap: true },
@@ -9936,7 +9936,7 @@
             // フッター
             careContents.push({
                 type: 'box', layout: 'vertical', margin: 'xl', paddingTop: '12px',
-                borderWidth: '1px', borderColor: 'rgba(255,255,255,0.15)',
+                borderWidth: 'light', borderColor: '#ffffff26',
                 contents: [
                     { type: 'text', text: '美しさは日々の積み重ねから', size: 'xxs', color: '#c5e0d1', align: 'center', margin: 'md' },
                     { type: 'text', text: 'ご不明点はLINEにていつでもご相談ください。', size: 'xxs', color: '#c5e0d1', align: 'center', margin: 'xs' },
