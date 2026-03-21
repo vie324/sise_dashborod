@@ -11,6 +11,11 @@ const ALLOWED_ENDPOINTS = [
   'profile/',
   'group/summary',
   'richmenu',
+  'user/all/richmenu',
+  'insight/followers',
+  'insight/message/delivery',
+  'insight/message/event',
+  'followers/ids',
 ];
 
 function getLineConfig(storeId) {
@@ -29,11 +34,11 @@ function getLineConfig(storeId) {
 export default async function handler(req, res) {
   const allowedOrigin = process.env.ALLOWED_ORIGIN || '*';
   res.setHeader('Access-Control-Allow-Origin', allowedOrigin);
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Store-Id');
 
   if (req.method === 'OPTIONS') return res.status(200).end();
-  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  if (!['GET', 'POST', 'DELETE'].includes(req.method)) return res.status(405).json({ error: 'Method not allowed' });
 
   const storeId = req.headers['x-store-id'] || req.query.store;
   if (!storeId) return res.status(400).json({ error: 'X-Store-Id header required' });
@@ -63,14 +68,19 @@ export default async function handler(req, res) {
   }
 
   try {
-    const response = await fetch(`${LINE_API_BASE}/${linePath}`, {
-      method: 'POST',
+    const fetchOptions = {
+      method: req.method,
       headers: {
         'Authorization': `Bearer ${config.token}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(req.body),
-    });
+    };
+
+    if (req.method !== 'GET') {
+      fetchOptions.body = JSON.stringify(req.body);
+    }
+
+    const response = await fetch(`${LINE_API_BASE}/${linePath}`, fetchOptions);
 
     if (response.status === 200) {
       const contentType = response.headers.get('content-type') || '';

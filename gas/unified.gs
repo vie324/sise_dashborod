@@ -75,7 +75,12 @@ const SHEETS = {
   DASH_CONFIG: 'ダッシュボード設定',
   HPB: 'HPBデータ',
   LINE_MESSAGES: 'LINEメッセージ',
-  LINE_PROFILES: 'LINEプロフィール'
+  LINE_PROFILES: 'LINEプロフィール',
+  LINE_BROADCASTS: 'LINE一斉配信',
+  LINE_TEMPLATES: 'LINEテンプレート',
+  LINE_AUTO_REPLIES: 'LINE自動応答',
+  LINE_TAGS: 'LINEタグ',
+  LINE_USER_TAGS: 'LINEユーザータグ'
 };
 
 const COUNSELING_STORES = {
@@ -186,6 +191,12 @@ function doGet(e) {
       case 'hpb':         return jsonResponse(handleHpbGet(params));
       case 'lineMessages': return jsonResponse(handleLineMessagesGet(params));
       case 'lineProfiles': return jsonResponse(handleLineProfilesGet(params));
+      case 'lineBroadcasts': return jsonResponse(handleLineBroadcastsGet(params));
+      case 'lineTemplates': return jsonResponse(handleLineTemplatesGet(params));
+      case 'lineAutoReplies': return jsonResponse(handleLineAutoRepliesGet(params));
+      case 'lineTags': return jsonResponse(handleLineTagsGet(params));
+      case 'lineUserTags': return jsonResponse(handleLineUserTagsGet(params));
+      case 'lineAnalytics': return jsonResponse(handleLineAnalyticsGet(params));
       default:            return jsonResponse({ error: '不明なtype: ' + type }, 400);
     }
   } catch (error) {
@@ -210,6 +221,11 @@ function doPost(e) {
       case 'lineWebhook':  return jsonResponse(handleLineWebhookPost(body));
       case 'lineProfile':  return jsonResponse(handleLineProfilePost(body));
       case 'lineSend':     return jsonResponse(handleLineSendPost(body));
+      case 'lineBroadcast': return jsonResponse(handleLineBroadcastPost(body));
+      case 'lineTemplate': return jsonResponse(handleLineTemplatePost(body));
+      case 'lineAutoReply': return jsonResponse(handleLineAutoReplyPost(body));
+      case 'lineTag': return jsonResponse(handleLineTagPost(body));
+      case 'lineUserTag': return jsonResponse(handleLineUserTagPost(body));
       default:         return jsonResponse({ error: '不明なtype: ' + type }, 400);
     }
   } catch (error) {
@@ -1422,6 +1438,431 @@ function handleLineProfilesGet(params) {
   }
 
   return { profiles: profiles };
+}
+
+// ============================================================
+// LINE 一斉配信管理
+// ============================================================
+
+function ensureLineBroadcastsSheet() {
+  return getOrCreateSheet(SHEETS.LINE_BROADCASTS, [
+    'タイムスタンプ', '店舗ID', '配信種別', 'メッセージ内容', '対象数', 'ステータス'
+  ]);
+}
+
+function handleLineBroadcastPost(body) {
+  var sheet = ensureLineBroadcastsSheet();
+  sheet.appendRow([
+    new Date(body.timestamp || new Date()),
+    body.storeId || '',
+    body.broadcastType || 'broadcast',
+    body.messageContent || '',
+    body.recipientCount || 0,
+    'sent'
+  ]);
+  return { success: true };
+}
+
+function handleLineBroadcastsGet(params) {
+  var sheet = getSheet(SHEETS.LINE_BROADCASTS);
+  if (!sheet) return { broadcasts: [] };
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return { broadcasts: [] };
+  var data = sheet.getRange(2, 1, lastRow - 1, 6).getValues();
+  var storeId = params.store || '';
+  var broadcasts = [];
+  for (var i = data.length - 1; i >= 0; i--) {
+    var row = data[i];
+    if (storeId && String(row[1]) !== storeId) continue;
+    broadcasts.push({
+      timestamp: row[0] instanceof Date ? row[0].toISOString() : String(row[0]),
+      storeId: String(row[1]),
+      broadcastType: String(row[2]),
+      messageContent: String(row[3]),
+      recipientCount: Number(row[4]),
+      status: String(row[5])
+    });
+  }
+  return { broadcasts: broadcasts.slice(0, 50) };
+}
+
+// ============================================================
+// LINE テンプレートメッセージ管理
+// ============================================================
+
+function ensureLineTemplatesSheet() {
+  return getOrCreateSheet(SHEETS.LINE_TEMPLATES, [
+    'テンプレートID', '店舗ID', 'テンプレート名', 'カテゴリ', 'メッセージ種別', 'メッセージ内容', '作成日', '更新日'
+  ]);
+}
+
+function handleLineTemplatePost(body) {
+  var sheet = ensureLineTemplatesSheet();
+  var action = body.action || 'create';
+
+  if (action === 'delete') {
+    var rows = sheet.getDataRange().getValues();
+    for (var i = 1; i < rows.length; i++) {
+      if (String(rows[i][0]) === body.templateId) {
+        sheet.deleteRow(i + 1);
+        return { success: true, action: 'deleted' };
+      }
+    }
+    return { error: 'テンプレートが見つかりません' };
+  }
+
+  if (action === 'update') {
+    var rows = sheet.getDataRange().getValues();
+    for (var i = 1; i < rows.length; i++) {
+      if (String(rows[i][0]) === body.templateId) {
+        sheet.getRange(i + 1, 3).setValue(body.name || '');
+        sheet.getRange(i + 1, 4).setValue(body.category || '');
+        sheet.getRange(i + 1, 5).setValue(body.messageType || 'text');
+        sheet.getRange(i + 1, 6).setValue(body.messageContent || '');
+        sheet.getRange(i + 1, 8).setValue(new Date());
+        return { success: true, action: 'updated' };
+      }
+    }
+    return { error: 'テンプレートが見つかりません' };
+  }
+
+  // create
+  var templateId = 'tmpl_' + new Date().getTime();
+  sheet.appendRow([
+    templateId,
+    body.storeId || '',
+    body.name || '',
+    body.category || '',
+    body.messageType || 'text',
+    body.messageContent || '',
+    new Date(),
+    new Date()
+  ]);
+  return { success: true, templateId: templateId, action: 'created' };
+}
+
+function handleLineTemplatesGet(params) {
+  var sheet = getSheet(SHEETS.LINE_TEMPLATES);
+  if (!sheet) return { templates: [] };
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return { templates: [] };
+  var data = sheet.getRange(2, 1, lastRow - 1, 8).getValues();
+  var storeId = params.store || '';
+  var templates = [];
+  for (var i = 0; i < data.length; i++) {
+    var row = data[i];
+    if (storeId && String(row[1]) !== storeId) continue;
+    templates.push({
+      templateId: String(row[0]),
+      storeId: String(row[1]),
+      name: String(row[2]),
+      category: String(row[3]),
+      messageType: String(row[4]),
+      messageContent: String(row[5]),
+      createdAt: row[6] instanceof Date ? row[6].toISOString() : String(row[6]),
+      updatedAt: row[7] instanceof Date ? row[7].toISOString() : String(row[7])
+    });
+  }
+  return { templates: templates };
+}
+
+// ============================================================
+// LINE 自動応答管理
+// ============================================================
+
+function ensureLineAutoRepliesSheet() {
+  return getOrCreateSheet(SHEETS.LINE_AUTO_REPLIES, [
+    'ルールID', '店舗ID', 'キーワード', 'マッチ方法', '応答メッセージ種別', '応答メッセージ内容', '優先順位', '有効フラグ', '作成日'
+  ]);
+}
+
+function handleLineAutoReplyPost(body) {
+  var sheet = ensureLineAutoRepliesSheet();
+  var action = body.action || 'create';
+
+  if (action === 'delete') {
+    var rows = sheet.getDataRange().getValues();
+    for (var i = 1; i < rows.length; i++) {
+      if (String(rows[i][0]) === body.ruleId) {
+        sheet.deleteRow(i + 1);
+        return { success: true, action: 'deleted' };
+      }
+    }
+    return { error: 'ルールが見つかりません' };
+  }
+
+  if (action === 'update') {
+    var rows = sheet.getDataRange().getValues();
+    for (var i = 1; i < rows.length; i++) {
+      if (String(rows[i][0]) === body.ruleId) {
+        sheet.getRange(i + 1, 3).setValue(body.keyword || '');
+        sheet.getRange(i + 1, 4).setValue(body.matchMethod || 'contains');
+        sheet.getRange(i + 1, 5).setValue(body.replyType || 'text');
+        sheet.getRange(i + 1, 6).setValue(body.replyContent || '');
+        sheet.getRange(i + 1, 7).setValue(body.priority || 0);
+        sheet.getRange(i + 1, 8).setValue(body.enabled !== false);
+        return { success: true, action: 'updated' };
+      }
+    }
+    return { error: 'ルールが見つかりません' };
+  }
+
+  // create
+  var ruleId = 'rule_' + new Date().getTime();
+  sheet.appendRow([
+    ruleId,
+    body.storeId || '',
+    body.keyword || '',
+    body.matchMethod || 'contains',
+    body.replyType || 'text',
+    body.replyContent || '',
+    body.priority || 0,
+    true,
+    new Date()
+  ]);
+  return { success: true, ruleId: ruleId, action: 'created' };
+}
+
+function handleLineAutoRepliesGet(params) {
+  var sheet = getSheet(SHEETS.LINE_AUTO_REPLIES);
+  if (!sheet) return { rules: [] };
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return { rules: [] };
+  var data = sheet.getRange(2, 1, lastRow - 1, 9).getValues();
+  var storeId = params.store || '';
+  var rules = [];
+  for (var i = 0; i < data.length; i++) {
+    var row = data[i];
+    if (storeId && String(row[1]) !== storeId) continue;
+    rules.push({
+      ruleId: String(row[0]),
+      storeId: String(row[1]),
+      keyword: String(row[2]),
+      matchMethod: String(row[3]),
+      replyType: String(row[4]),
+      replyContent: String(row[5]),
+      priority: Number(row[6]),
+      enabled: row[7] === true || row[7] === 'true',
+      createdAt: row[8] instanceof Date ? row[8].toISOString() : String(row[8])
+    });
+  }
+  rules.sort(function(a, b) { return b.priority - a.priority; });
+  return { rules: rules };
+}
+
+// ============================================================
+// LINE タグ管理
+// ============================================================
+
+function ensureLineTagsSheet() {
+  return getOrCreateSheet(SHEETS.LINE_TAGS, [
+    'タグID', '店舗ID', 'タグ名', 'タグ色', '作成日'
+  ]);
+}
+
+function ensureLineUserTagsSheet() {
+  return getOrCreateSheet(SHEETS.LINE_USER_TAGS, [
+    '店舗ID', 'ユーザーID', 'タグID', '付与日'
+  ]);
+}
+
+function handleLineTagPost(body) {
+  var sheet = ensureLineTagsSheet();
+  var action = body.action || 'create';
+
+  if (action === 'delete') {
+    var rows = sheet.getDataRange().getValues();
+    for (var i = 1; i < rows.length; i++) {
+      if (String(rows[i][0]) === body.tagId) {
+        sheet.deleteRow(i + 1);
+        // Also delete user-tag associations
+        var utSheet = getSheet(SHEETS.LINE_USER_TAGS);
+        if (utSheet) {
+          var utRows = utSheet.getDataRange().getValues();
+          for (var j = utRows.length - 1; j >= 1; j--) {
+            if (String(utRows[j][2]) === body.tagId) {
+              utSheet.deleteRow(j + 1);
+            }
+          }
+        }
+        return { success: true, action: 'deleted' };
+      }
+    }
+    return { error: 'タグが見つかりません' };
+  }
+
+  var tagId = 'tag_' + new Date().getTime();
+  sheet.appendRow([
+    tagId,
+    body.storeId || '',
+    body.name || '',
+    body.color || '#06C755',
+    new Date()
+  ]);
+  return { success: true, tagId: tagId, action: 'created' };
+}
+
+function handleLineTagsGet(params) {
+  var sheet = getSheet(SHEETS.LINE_TAGS);
+  if (!sheet) return { tags: [] };
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return { tags: [] };
+  var data = sheet.getRange(2, 1, lastRow - 1, 5).getValues();
+  var storeId = params.store || '';
+  var tags = [];
+  for (var i = 0; i < data.length; i++) {
+    var row = data[i];
+    if (storeId && String(row[1]) !== storeId) continue;
+    tags.push({
+      tagId: String(row[0]),
+      storeId: String(row[1]),
+      name: String(row[2]),
+      color: String(row[3]),
+      createdAt: row[4] instanceof Date ? row[4].toISOString() : String(row[4])
+    });
+  }
+  return { tags: tags };
+}
+
+function handleLineUserTagPost(body) {
+  var sheet = ensureLineUserTagsSheet();
+  var action = body.action || 'add';
+
+  if (action === 'remove') {
+    var rows = sheet.getDataRange().getValues();
+    for (var i = rows.length - 1; i >= 1; i--) {
+      if (String(rows[i][0]) === body.storeId && String(rows[i][1]) === body.userId && String(rows[i][2]) === body.tagId) {
+        sheet.deleteRow(i + 1);
+        return { success: true, action: 'removed' };
+      }
+    }
+    return { error: '該当タグが見つかりません' };
+  }
+
+  // Check for duplicate
+  var existing = sheet.getDataRange().getValues();
+  for (var i = 1; i < existing.length; i++) {
+    if (String(existing[i][0]) === body.storeId && String(existing[i][1]) === body.userId && String(existing[i][2]) === body.tagId) {
+      return { success: true, action: 'already_exists' };
+    }
+  }
+
+  sheet.appendRow([body.storeId || '', body.userId || '', body.tagId || '', new Date()]);
+  return { success: true, action: 'added' };
+}
+
+function handleLineUserTagsGet(params) {
+  var sheet = getSheet(SHEETS.LINE_USER_TAGS);
+  if (!sheet) return { userTags: [] };
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return { userTags: [] };
+  var data = sheet.getRange(2, 1, lastRow - 1, 4).getValues();
+  var storeId = params.store || '';
+  var userId = params.userId || '';
+  var userTags = [];
+  for (var i = 0; i < data.length; i++) {
+    var row = data[i];
+    if (storeId && String(row[0]) !== storeId) continue;
+    if (userId && String(row[1]) !== userId) continue;
+    userTags.push({
+      storeId: String(row[0]),
+      userId: String(row[1]),
+      tagId: String(row[2]),
+      assignedAt: row[3] instanceof Date ? row[3].toISOString() : String(row[3])
+    });
+  }
+  return { userTags: userTags };
+}
+
+// ============================================================
+// LINE 分析
+// ============================================================
+
+function handleLineAnalyticsGet(params) {
+  var sheet = getSheet(SHEETS.LINE_MESSAGES);
+  if (!sheet) return { analytics: {} };
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return { analytics: {} };
+  var data = sheet.getRange(2, 1, lastRow - 1, 7).getValues();
+  var storeId = params.store || '';
+
+  var now = new Date();
+  var thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+  var sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+
+  var totalReceived = 0, totalSent = 0;
+  var last30Received = 0, last30Sent = 0;
+  var last7Received = 0, last7Sent = 0;
+  var follows = 0, unfollows = 0;
+  var uniqueUsers = {};
+  var dailyStats = {};
+  var hourlyStats = {};
+
+  for (var i = 0; i < data.length; i++) {
+    var row = data[i];
+    if (storeId && String(row[1]) !== storeId) continue;
+
+    var ts = row[0] instanceof Date ? row[0] : new Date(row[0]);
+    var direction = String(row[3]);
+    var msgType = String(row[4]);
+    var userId = String(row[2]);
+
+    if (msgType === 'follow') { follows++; continue; }
+    if (msgType === 'unfollow') { unfollows++; continue; }
+
+    if (direction === 'received') {
+      totalReceived++;
+      uniqueUsers[userId] = true;
+      if (ts >= thirtyDaysAgo) last30Received++;
+      if (ts >= sevenDaysAgo) last7Received++;
+    } else {
+      totalSent++;
+      if (ts >= thirtyDaysAgo) last30Sent++;
+      if (ts >= sevenDaysAgo) last7Sent++;
+    }
+
+    // Daily stats (last 30 days)
+    if (ts >= thirtyDaysAgo) {
+      var dateKey = ts.toISOString().slice(0, 10);
+      if (!dailyStats[dateKey]) dailyStats[dateKey] = { received: 0, sent: 0 };
+      if (direction === 'received') dailyStats[dateKey].received++;
+      else dailyStats[dateKey].sent++;
+    }
+
+    // Hourly distribution
+    var hour = ts.getHours();
+    if (!hourlyStats[hour]) hourlyStats[hour] = { received: 0, sent: 0 };
+    if (direction === 'received') hourlyStats[hour].received++;
+    else hourlyStats[hour].sent++;
+  }
+
+  // Convert dailyStats to array
+  var dailyArray = Object.keys(dailyStats).sort().map(function(date) {
+    return { date: date, received: dailyStats[date].received, sent: dailyStats[date].sent };
+  });
+
+  // Convert hourlyStats to array
+  var hourlyArray = [];
+  for (var h = 0; h < 24; h++) {
+    hourlyArray.push({
+      hour: h,
+      received: (hourlyStats[h] || { received: 0 }).received,
+      sent: (hourlyStats[h] || { sent: 0 }).sent
+    });
+  }
+
+  return {
+    analytics: {
+      total: { received: totalReceived, sent: totalSent },
+      last30Days: { received: last30Received, sent: last30Sent },
+      last7Days: { received: last7Received, sent: last7Sent },
+      follows: follows,
+      unfollows: unfollows,
+      uniqueUsers: Object.keys(uniqueUsers).length,
+      dailyStats: dailyArray,
+      hourlyStats: hourlyArray
+    }
+  };
 }
 
 function jsonResponse(data) {
