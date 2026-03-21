@@ -3247,7 +3247,9 @@
                     .then(data => {
                         console.log('[LINE] config:', data);
                         setLineConfig(data);
+                        console.log('[LINE] stores:', data.stores, 'current lineStoreId:', lineStoreId);
                         if (data.stores && data.stores.length > 0 && !lineStoreId) {
+                            console.log('[LINE] setting lineStoreId to:', data.stores[0].id);
                             setLineStoreId(data.stores[0].id);
                         }
                     })
@@ -3260,13 +3262,21 @@
             // スレッド一覧を取得
             const fetchThreads = useCallback(async (storeId) => {
                 const sid = storeId || lineStoreId;
-                if (!sid || UNIFIED_GAS_URL === 'YOUR_UNIFIED_GAS_URL') return;
+                console.log('[LINE] fetchThreads called, sid:', sid, 'GAS_URL:', UNIFIED_GAS_URL.substring(0, 50) + '...');
+                if (!sid || UNIFIED_GAS_URL === 'YOUR_UNIFIED_GAS_URL') {
+                    console.warn('[LINE] fetchThreads skipped');
+                    return;
+                }
                 setLoading(true);
                 try {
+                    const gasUrl = UNIFIED_GAS_URL + '?type=lineMessages&store=' + sid;
+                    console.log('[LINE] fetching:', gasUrl);
                     const [threadsRes, profilesRes] = await Promise.all([
-                        fetch(UNIFIED_GAS_URL + '?type=lineMessages&store=' + sid).then(r => r.json()),
+                        fetch(gasUrl).then(r => r.json()),
                         fetch(UNIFIED_GAS_URL + '?type=lineProfiles&store=' + sid).then(r => r.json()),
                     ]);
+                    console.log('[LINE] threadsRes:', JSON.stringify(threadsRes).substring(0, 200));
+                    console.log('[LINE] profilesRes:', JSON.stringify(profilesRes).substring(0, 200));
                     if (threadsRes.threads) setThreads(threadsRes.threads);
                     if (profilesRes.profiles) {
                         const map = {};
@@ -3282,6 +3292,7 @@
 
             // 店舗変更時にスレッド再取得
             useEffect(() => {
+                console.log('[LINE] useEffect lineStoreId changed:', lineStoreId);
                 if (lineStoreId) fetchThreads(lineStoreId);
             }, [lineStoreId]);
 
