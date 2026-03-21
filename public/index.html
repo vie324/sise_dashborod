@@ -33,6 +33,11 @@
     <!-- QR Code Generator -->
     <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.0/build/qrcode.min.js"></script>
 
+    <!-- Chart.js (for Treatment Report radar chart) -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- html2canvas (for Treatment Report screenshot) -->
+    <script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
+
     <!-- Custom Config for Tailwind (si'se Theme - Enhanced) -->
     <script>
         tailwind.config = {
@@ -9758,6 +9763,573 @@
             { key:'Monthly-1',  id:'Monthly',  name:'月一フル', freq:1, freqLabel:'月1回',        types:'全種類対応',  desc:'月1回で全種類を無理なくメンテナンス', price:10000 },
         ];
 
+        // ==========================================
+        // 施術レポート: データ定義
+        // ==========================================
+        const TR_COMMENT_TEMPLATES = {
+            improvement: "姿勢改善に向けて現在頑張っていますが、状態はいかがでしょうか？\n本日は〇〇の位置が良くなっています。少し意識するだけでもより近づいていけますので、引き続き頑張っていきましょう！",
+            first: "立ち方（座り方、歩き方）はご自宅や職場でも意識できていますか？\nまずはご自身で「気づいた時に直す」範囲で大丈夫です。骨盤の使い方、肩首の位置など、次回またチェックさせていただきますね。",
+            scapula: "肩甲骨周りの硬さがありました。肩甲骨の可動域を広げると血行も良くなり、肩こり、背中のこりもスッキリしてきます。肩甲骨だけではなく、背中も丸いなと感じた時はこちらを行ってみてください。",
+            rolled_shoulder: "胸筋や上腕二頭筋がガチガチだとより巻き肩になりやすいです。また、肩こりなどの原因にも繋がっていきますので、お風呂上がりに筋肉も少し弛んでいる状態なので、やってみてください。",
+            straight_neck: "デスクワークやスマホなどが続くと首が自然と前に出てしまいます。肩甲骨から内側に寄せて、首と顎を引くよう意識してみてください。\nまた、デスクワークなどの合間にはこちらも行ってみてください。",
+            scapula_wing: "肩甲骨がしっかり出ることで肩こり、首こりも緩和され、綺麗な背中になったり、肩幅も狭くなっていきます！\nまずは1日5回から始めて徐々に回数を増やしてください。",
+            cold: "最近寒いですね。足のむくみや冷えを感じて肩に力が入ってしまいがちです。\n本日は骨盤矯正で土台を整えて循環をよくし、姿勢矯正で可動域を広げて巻き肩をケアしました。お風呂上がりなどにストレッチを行ってみてください。",
+            pelvis_distortion: "骨盤は骨格の土台ですので、歪むと腰痛や肩こり、内臓圧迫による不調の原因となり、バランスが崩れて体に負担がかかります。",
+            face: "本日は姿勢矯正で肩甲骨、肩まわりを動かして呼吸をしやすくし、小顔矯正で食いしばりや側頭筋などを弛めてお身体をスッキリさせました！\n顔周りの緊張が取れると睡眠の質も上がります。",
+            face_square: "本日もご来店頂きありがとうございます。エラ張りは噛み締めからくることがほとんどですので、普段からエラが張っているかを確認してみてください。",
+            double_chin: "本日もご来店頂きありがとうございます。デスクワークで下を向くことが多いと思いますので、休憩中でも構いませんので、ストレッチしてみてください。",
+            eye_level: "本日もご来店頂きありがとうございます。目の高さの違いが出ていましたので、毎日こちらを続けてみてください。",
+            face_width: "本日もご来店頂きありがとうございます。顔の横幅を変えるには毎日のケアが必要となりますので、こちらを参考にやってみてください。",
+            face_swelling: "本日もご来店頂きありがとうございます。顔のむくみには水分をしっかりと取って頂き、塩分の摂りすぎなどに注意してみてください。",
+            leg_swelling: "運動不足による筋肉量の低下や冷え・水分不足による循環機能の低下で老廃物が溜まりやすくなっていますので、こまめな水分補給としっかりとしたケアが必要です。\nまた、湯船に浸かれる時は浸かってください。",
+            calf: "本日は足の疲労がすごく、かたかったです！\n血行をよくするために足のトレーニングをお伝えします。",
+            hip_distortion: "日常動作で股関節を使えていない方が多く、腰から動いてしまっていることが腰痛や足の張りの原因になりやすいため、「股関節」から動かして体の負担を減らすことが大切です。",
+            lower_body: "お尻や太もも等の大きな筋肉が硬いと、代謝が落ちやすく血行不良やむくみに繋がりやすくなります。関節が歪むことでの影響も強いため、各関節を正しい位置に戻すことが大切です。",
+            balance: "体のバランスが保てないのは、骨盤や背骨の歪みも影響していますが、足首、股関節、体幹の意識も必要ですので、全体を整えていくことが大切です。"
+        };
+
+        const TR_STRETCH_DATA = {
+            posture: [
+                { id: "p1", title: "胸筋・二頭筋ストレッチ", text: "①壁の横に立つ ②壁側の手を斜め後ろ上につく ③体を反対側に向けて胸や腕を伸ばす (15秒)" },
+                { id: "p2", title: "前鋸筋ストレッチ(壁)", text: "①手を真上に伸ばす ②体を壁に密着させ、手のひらを前に向ける ③腕を真上に上げて脇の下を伸ばす" },
+                { id: "p3", title: "上腕三頭筋ストレッチ", text: "①肘を後に曲げる ②腕の位置は耳よりやや後ろへ ③二の腕や脇を伸ばす" },
+                { id: "p4", title: "肩回しエクササイズ", text: "①手を肩に置く ②大きく後ろから前へ回す ③反対回しも行う (ゴリゴリ鳴る場合はゆっくり動かす)" },
+                { id: "p5", title: "巻き肩ケア", text: "①肘を曲げ、上腕を脇につける ②前腕部分だけ後ろ回しをする (後ろの肩周りに効いていればOK)" },
+                { id: "p_scapula", title: "肩甲骨ケア", text: "①胸を開き肩甲骨を寄せる<br>②ゆっくり5秒キープして力を抜く<br>③5回" },
+                { id: "p_balance", title: "バランス・体幹", text: "・プランク→うつ伏せになり肘と足のつま先で支える頭からかかとまで一直線、腰を反らないように<br>・タオルギャザー→床にタオルを置き両足の指を使って手繰り寄せる<br>・デッドバグ→仰向けになり両手足を天井に上げ左右対称に上げ下げする" },
+                { id: "p_roll", title: "巻き肩(壁)", text: "壁を使ってストレッチ" },
+                { id: "p_neck", title: "ストレートネック", text: "真上を向く" },
+                { id: "p_hunch", title: "猫背リセット", text: "腕を後ろにして背中を縮めてからリラックス" },
+                { id: "p_wing", title: "肩甲骨出し", text: "バンザイをしてから背中で肘をつけるイメージでギュッと３秒力を入れてバンザイ" },
+                { id: "p_cold", title: "手先の冷え", text: "湯船に浸かっている状態で手をグーパーしてください。" },
+                { id: "p_shoulder_shrug", title: "肩周りケア", text: "・肩をすくめる<br>・ストンと力を抜く<br>・10回" },
+            ],
+            pelvis: [
+                { id: "l1", title: "お尻ストレッチ(椅子)", text: "①椅子に座り片足を上げる ②足首を反対の膝上に置く ③背筋を伸ばし上半身を前へ倒す" },
+                { id: "l2", title: "お尻ストレッチ(床)", text: "①椅子と同じ足の形を作る ②立てている膝を自分の方へ抱き寄せてお尻を伸ばす" },
+                { id: "l3", title: "裏モモ伸ばし", text: "①片足を台に乗せる ②膝を伸ばし足首を最大に曲げる ③膝が曲がらないよう体を前に倒す" },
+                { id: "l4", title: "内腿ほぐし", text: "①あぐらの状態で内腿を触る ②手のひらで内腿を覆い、体重をかけて押圧する" },
+                { id: "l_calf", title: "ふくらはぎ", text: "①壁や椅子につかまり、かかとをゆっくり上げ下げする<br>②反動を使わず、ゆっくり行う<br>③10回×2セット" },
+                { id: "l_pelvis", title: "骨盤の歪み", text: "・骨盤ゆらし→①仰向けで寝る。②腰幅に足を開く。③呼吸しながら足先をワイパーのように動かす。<br>・骨盤体操→①椅子に浅く座る。②腰幅に足を開く。③腰に手をやり、胸や背中一直線にし背中を曲げる、戻す事で骨盤をしっかり動かす。<br>・ブリッジ→①仰向けで膝を立てる。②背中〜お尻一直線意識し持ち上げる。" },
+                { id: "l_hip", title: "股関節の歪み", text: "・①仰向けね寝る。②片膝を抱え肩の方向に引き寄せる。③反対も行う。10〜15秒。<br>・①両膝を立て左右に倒す、まわす等。10回<br>・①階段1段くらいの高さで良いので片足を伸ばした状態でかかとをつける...（かかとから足裏にかけて伸びを感じたらok）" },
+                { id: "l_lower", title: "下半身ケア", text: "・スクワット、有酸素運動→ ①足を肩幅に広げる。②背筋を伸ばし、お尻を後ろに引くようにしゃがむ。③かかとで床を押しながらゆっくり上がる。<br>・もも前(クワドストレッチ)→①片足で立ちあげた足の足首か爪先を持ちお尻に向けて曲げて10秒キープ" },
+                { id: "l_swelling", title: "足のむくみ・冷え", text: "・つま先立ち運動→体一直線にしかかとを上げ下げやキープする<br>・足の指に手の指を入れまわす、伸ばす、曲げる<br>・膝窩をテニスボール等で流す" },
+                { id: "l_hip_lift", title: "ヒップリフト", text: "・仰向けでひざを立て、お尻を持ち上げる<br>・肩から膝が一直線になるように<br>・10回" },
+                { id: "l_chair_squat", title: "椅子スクワット", text: "・椅子に座る、立つを繰り返す<br>・膝はつま先より前に出しすぎない<br>・10回" },
+                { id: "l_inner_thigh", title: "内ももトレ", text: "・膝にクッションを挟む<br>・ぎゅっと締めて5秒キープ<br>・10回" },
+            ],
+            face: [
+                { id: "f1", title: "鎖骨・首ストレッチ", text: "①両手で鎖骨を下に引く ②首を後ろへ倒す ③口を「ウ」の形にして15秒キープ" },
+                { id: "f2", title: "咬筋（食いしばり）ケア", text: "①噛み締めると硬くなる部分(咬筋)を指で押さえる ②ゆっくり小刻みに揺らして緩める" },
+                { id: "f3", title: "耳回し", text: "①耳を持つ ②横にゆっくり引っ張ったり、回したりする (顔の血流UP)" },
+                { id: "f4", title: "後頭下筋リリース", text: "①仰向けで寝る ②後頭部のくぼみ(後頭下筋)に手を置く ③顎を少し上げゆっくり深呼吸" },
+                { id: "f_swelling", title: "顔のむくみ", text: "オイルやクリームを首筋に塗って頂き、首筋からフェイスラインに流すようにマッサージしてみてください。" },
+                { id: "f_square", title: "エラ張りケア", text: "手をぐーにして頬骨の下に当て口を軽く開けながら奥の筋肉をほぐすように左右に動かしながらほぐしていきましょう。" },
+                { id: "f_double", title: "二重顎ケア", text: "①顎先をなるべく天井に向けて上を向く ②喉から首が伸びているのを感じるくらい伸ばし20秒くらい続ける" },
+                { id: "f_eye", title: "目の左右差", text: "①耳の上に4本指を当て前回し30秒、後ろ回し30秒<br>②耳をチョキの指で根元から挟み大きく後ろ回し30秒、前回し30秒<br>③下がっている方の頬骨の下に手根を当てて斜め上に押し上げ(30秒)" },
+                { id: "f_width", title: "顔の横幅ケア", text: "①手をグーにして、頬骨の下に関節を当てて20秒押す<br>②頬骨に沿って内側に移動し、20秒押す<br>③手根を頬骨に当てて、両サイドからじんわり押す<br>④更に内側にずらし押す" },
+                { id: "f_neck_nod", title: "首ストレッチ", text: "・背筋を伸ばして座る<br>・ゆっくり頷くように、顎を軽く引く<br>・元に戻す(10回)" },
+            ]
+        };
+
+        const TR_TEMPLATE_OPTIONS = [
+            { group: "★姿勢", items: [
+                { value: "improvement", label: "【継続】姿勢改善・称賛パターン" },
+                { value: "first", label: "【初回/初期】立ち方・意識付けパターン" },
+                { value: "scapula", label: "【肩・背中】肩甲骨・猫背改善" },
+                { value: "rolled_shoulder", label: "【姿勢】巻き肩ケア" },
+                { value: "straight_neck", label: "【首】ストレートネック" },
+                { value: "scapula_wing", label: "【背中】肩甲骨出し・美背中" },
+            ]},
+            { group: "★骨盤", items: [
+                { value: "cold", label: "【季節】冷え・むくみケアパターン" },
+                { value: "pelvis_distortion", label: "【骨盤】歪み・バランス" },
+            ]},
+            { group: "★顔・頭", items: [
+                { value: "face", label: "【顔】小顔・食いしばりケアパターン" },
+                { value: "face_square", label: "【顔】エラ張り・食いしばり" },
+                { value: "double_chin", label: "【顔】二重顎・首元ケア" },
+                { value: "eye_level", label: "【顔】目の高さ・左右差" },
+                { value: "face_width", label: "【顔】横幅・小顔ケア" },
+            ]},
+            { group: "★代謝・巡り", items: [
+                { value: "face_swelling", label: "【顔】むくみケア" },
+                { value: "leg_swelling", label: "【足・末端】むくみ・冷え対策" },
+            ]},
+            { group: "★柔軟性・バランス", items: [
+                { value: "calf", label: "【足】ふくらはぎの疲労と張り" },
+                { value: "hip_distortion", label: "【下半身】股関節の柔軟性" },
+                { value: "lower_body", label: "【下半身】代謝・むくみ" },
+                { value: "balance", label: "【全身】バランス・体幹" },
+            ]},
+        ];
+
+        // ==========================================
+        // 施術レポート: TreatmentReportView コンポーネント
+        // ==========================================
+        const TreatmentReportView = () => {
+            const { useState, useEffect, useRef, useCallback } = React;
+
+            // --- State ---
+            const [customerName, setCustomerName] = useState('');
+            const [visitDate, setVisitDate] = useState(() => new Date().toISOString().split('T')[0]);
+            const [menuChecks, setMenuChecks] = useState({ '骨盤矯正': true, '姿勢矯正': true, '小顔矯正': false, 'ほぐし': false });
+            const [scores, setScores] = useState({ posture: 0, pelvis: 0, face: 0, flow: 0, flex: 0 });
+            const [photoData, setPhotoData] = useState(null);
+            const [photoName, setPhotoName] = useState('');
+            const [coachComment, setCoachComment] = useState('');
+            const [customStretch, setCustomStretch] = useState('');
+            const [selectedStretches, setSelectedStretches] = useState({});
+            const [coupon, setCoupon] = useState('none');
+            const [mobileTab, setMobileTab] = useState('edit');
+            const [saveMsg, setSaveMsg] = useState('');
+            const [templateKey, setTemplateKey] = useState('');
+
+            const chartRef = useRef(null);
+            const chartInstance = useRef(null);
+            const captureRef = useRef(null);
+
+            // --- Chart.js Init & Update ---
+            useEffect(() => {
+                if (!chartRef.current) return;
+                if (chartInstance.current) { chartInstance.current.destroy(); }
+                const ctx = chartRef.current.getContext('2d');
+                chartInstance.current = new Chart(ctx, {
+                    type: 'radar',
+                    data: {
+                        labels: ['姿勢', '骨盤', '顔・頭', '代謝・巡り', '柔軟・バランス'],
+                        datasets: [{
+                            label: 'Condition',
+                            data: [scores.posture, scores.pelvis, scores.face, scores.flow, scores.flex],
+                            backgroundColor: 'rgba(108, 168, 138, 0.4)',
+                            borderColor: '#6ca88a',
+                            pointBackgroundColor: '#fff',
+                            pointBorderColor: '#52856d',
+                            borderWidth: 2,
+                            pointRadius: 3,
+                        }]
+                    },
+                    options: {
+                        maintainAspectRatio: false,
+                        responsive: true,
+                        scales: {
+                            r: {
+                                angleLines: { color: '#e1efe7' },
+                                grid: { color: '#f2f8f5' },
+                                pointLabels: { font: { size: 10, weight: 'bold' }, color: '#52856d' },
+                                suggestedMin: 0, suggestedMax: 5,
+                                ticks: { display: false, stepSize: 1 },
+                            }
+                        },
+                        plugins: { legend: { display: false }, tooltip: { enabled: false } },
+                    }
+                });
+                return () => { if (chartInstance.current) chartInstance.current.destroy(); };
+            }, []);
+
+            useEffect(() => {
+                if (chartInstance.current) {
+                    chartInstance.current.data.datasets[0].data = [scores.posture, scores.pelvis, scores.face, scores.flow, scores.flex];
+                    chartInstance.current.update();
+                }
+            }, [scores]);
+
+            // --- Handlers ---
+            const handleScoreChange = useCallback((key, val) => {
+                setScores(prev => ({ ...prev, [key]: parseFloat(val) }));
+            }, []);
+
+            const handleMenuToggle = useCallback((menu) => {
+                setMenuChecks(prev => ({ ...prev, [menu]: !prev[menu] }));
+            }, []);
+
+            const handleStretchToggle = useCallback((catKey, stretchId) => {
+                const fullKey = catKey + '-' + stretchId;
+                setSelectedStretches(prev => {
+                    const next = { ...prev };
+                    if (next[fullKey]) { delete next[fullKey]; } else { next[fullKey] = true; }
+                    return next;
+                });
+            }, []);
+
+            const handlePhotoUpload = useCallback((e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                setPhotoName(file.name);
+                const reader = new FileReader();
+                reader.onload = (ev) => setPhotoData(ev.target.result);
+                reader.readAsDataURL(file);
+            }, []);
+
+            const clearPhoto = useCallback(() => {
+                setPhotoData(null);
+                setPhotoName('');
+            }, []);
+
+            const applyTemplate = useCallback((key) => {
+                setTemplateKey(key);
+                if (key && TR_COMMENT_TEMPLATES[key]) {
+                    setCoachComment(TR_COMMENT_TEMPLATES[key]);
+                }
+            }, []);
+
+            const resetForm = useCallback(() => {
+                if (!confirm('入力をリセットしますか？')) return;
+                setCustomerName('');
+                setVisitDate(new Date().toISOString().split('T')[0]);
+                setMenuChecks({ '骨盤矯正': false, '姿勢矯正': false, '小顔矯正': false, 'ほぐし': false });
+                setScores({ posture: 0, pelvis: 0, face: 0, flow: 0, flex: 0 });
+                setPhotoData(null); setPhotoName('');
+                setCoachComment(''); setCustomStretch('');
+                setSelectedStretches({}); setCoupon('none');
+                setTemplateKey('');
+            }, []);
+
+            // --- Download Image ---
+            const downloadImage = useCallback(() => {
+                if (!captureRef.current || typeof html2canvas === 'undefined') return;
+                setSaveMsg('生成中...');
+                html2canvas(captureRef.current, { scale: 2, backgroundColor: '#ffffff', useCORS: true }).then(canvas => {
+                    const name = customerName || 'Customer';
+                    const date = visitDate || 'Date';
+                    const totalHeight = canvas.height;
+                    const maxH = 3000;
+                    let numSplits = Math.min(3, Math.ceil(totalHeight / maxH));
+                    if (totalHeight <= maxH) numSplits = 1;
+                    const splitH = Math.ceil(totalHeight / numSplits);
+                    for (let i = 0; i < numSplits; i++) {
+                        const sc = document.createElement('canvas');
+                        sc.width = canvas.width;
+                        const startY = i * splitH;
+                        const curH = Math.min(splitH, totalHeight - startY);
+                        sc.height = curH;
+                        sc.getContext('2d').drawImage(canvas, 0, startY, canvas.width, curH, 0, 0, canvas.width, curH);
+                        const link = document.createElement('a');
+                        const suffix = numSplits > 1 ? `_part${i + 1}of${numSplits}` : '';
+                        link.download = `AfterCare_${name}_${date}${suffix}.png`;
+                        link.href = sc.toDataURL('image/png');
+                        link.click();
+                    }
+                    setSaveMsg(numSplits > 1 ? `${numSplits}枚保存しました！` : '保存しました！');
+                    setTimeout(() => setSaveMsg(''), 2000);
+                }).catch(() => setSaveMsg('エラーが発生しました'));
+            }, [customerName, visitDate]);
+
+            // --- Derived values ---
+            const activeMenus = Object.entries(menuChecks).filter(([, v]) => v).map(([k]) => k);
+            const displayName = customerName ? (customerName.includes('様') ? customerName : customerName + ' 様') : '様';
+            const displayDate = visitDate ? visitDate.replace(/-/g, '.') : '';
+            const displayComment = coachComment || "本日はご来店ありがとうございました。\nお伝えしたストレッチを無理のない範囲で行ってみてください。";
+
+            const activeStretchList = Object.keys(selectedStretches).map(fullKey => {
+                const [cat, ...idParts] = fullKey.split('-');
+                const id = idParts.join('-');
+                const item = TR_STRETCH_DATA[cat]?.find(s => s.id === id);
+                return item ? { ...item, cat } : null;
+            }).filter(Boolean);
+
+            const couponExpiry = (() => {
+                if (!visitDate) return '日付未設定';
+                const d = new Date(visitDate);
+                if (isNaN(d)) return '日付未設定';
+                d.setDate(d.getDate() + 21);
+                return `${d.getFullYear()}.${String(d.getMonth()+1).padStart(2,'0')}.${String(d.getDate()).padStart(2,'0')}`;
+            })();
+
+            const couponInfo = coupon === 'c1'
+                ? { title: '選べる美容矯正1種類＋ほぐし', old: '¥9,000', price: '¥6,500', desc: '※美容矯正は小顔矯正、姿勢矯正、骨盤矯正の中から選択可能<br>※Quickプラン' }
+                : coupon === 'c2'
+                ? { title: '選べる美容矯正2種類＋ほぐし', old: '¥10,000', price: '¥7,500', desc: '※美容矯正は小顔矯正、姿勢矯正、骨盤矯正の中から選択可能<br>※Standardプラン' }
+                : null;
+
+            // --- Mobile tab switch ---
+            const switchTab = useCallback((tab) => {
+                setMobileTab(tab);
+                if (tab === 'preview' && chartInstance.current) chartInstance.current.resize();
+            }, []);
+
+            // --- PLACEHOLDER: JSX will be added in Phase C & D ---
+            return (
+                <div className="text-gray-700 h-[calc(100vh-3.5rem)] md:h-[calc(100vh-4rem)] overflow-hidden flex flex-col" style={{ fontFamily: '"M PLUS 1p", "Noto Sans JP", sans-serif' }}>
+                    {/* Mobile Tabs */}
+                    <div className="md:hidden flex bg-white border-b border-green-200 z-50 shrink-0 shadow-sm">
+                        <button onClick={() => switchTab('edit')} className={`flex-1 py-3 text-sm font-bold transition-colors ${mobileTab === 'edit' ? 'text-green-700 border-b-4 border-green-500 bg-green-50' : 'text-gray-400 border-b-4 border-transparent'}`}>入力・編集</button>
+                        <button onClick={() => switchTab('preview')} className={`flex-1 py-3 text-sm font-bold transition-colors ${mobileTab === 'preview' ? 'text-green-700 border-b-4 border-green-500 bg-green-50' : 'text-gray-400 border-b-4 border-transparent'}`}>プレビュー確認</button>
+                    </div>
+                    {/* Main two-panel layout */}
+                    <div className="flex-1 flex flex-col md:flex-row overflow-hidden relative">
+                        {/* LEFT PANEL placeholder - Phase C */}
+                        <aside className={`w-full md:w-1/2 lg:w-5/12 bg-white border-r border-green-200 h-full flex flex-col shadow-lg z-10 ${mobileTab === 'edit' ? '' : 'hidden'} md:flex`}>
+                            <div className="p-4 bg-green-700 text-white flex justify-between items-center shadow-md shrink-0">
+                                <div>
+                                    <h1 className="font-bold text-lg">レポート作成</h1>
+                                    <p className="text-xs text-green-100 hidden md:block">設定後に右側で保存</p>
+                                    <p className="text-xs text-green-100 md:hidden">入力後に「プレビュー」へ</p>
+                                </div>
+                                <button onClick={resetForm} className="text-xs bg-green-900 px-3 py-1 rounded hover:bg-green-800 transition border border-green-600">リセット</button>
+                            </div>
+                            <div className="flex-1 overflow-y-auto p-6 space-y-8 pb-20 md:pb-6">
+                                {/* ① 基本情報 */}
+                                <section>
+                                    <h3 className="text-sm font-bold text-green-700 uppercase tracking-wide mb-3 border-b border-green-100 pb-1">① 基本情報</h3>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="block text-xs font-bold mb-1 text-gray-500">お客様名</label>
+                                            <input type="text" value={customerName} onChange={e => setCustomerName(e.target.value)} className="w-full border border-gray-300 rounded p-2 text-sm focus:ring-2 focus:ring-green-500 outline-none" placeholder="例: 山田 花子" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-bold mb-1 text-gray-500">来店日</label>
+                                            <input type="date" value={visitDate} onChange={e => setVisitDate(e.target.value)} className="w-full border border-gray-300 rounded p-2 text-sm focus:ring-2 focus:ring-green-500 outline-none" />
+                                        </div>
+                                    </div>
+                                </section>
+                                {/* ② 本日の施術 */}
+                                <section>
+                                    <h3 className="text-sm font-bold text-green-700 uppercase tracking-wide mb-3 border-b border-green-100 pb-1">② 本日の施術 (選択)</h3>
+                                    <div className="grid grid-cols-2 gap-2 text-sm">
+                                        {['骨盤矯正','姿勢矯正','小顔矯正','ほぐし'].map(m => (
+                                            <label key={m} className="flex items-center space-x-2 cursor-pointer bg-green-50 p-2 rounded border border-transparent hover:border-green-200 transition">
+                                                <input type="checkbox" checked={menuChecks[m]} onChange={() => handleMenuToggle(m)} className="form-checkbox text-green-600 accent-green-600" />
+                                                <span>{m}</span>
+                                            </label>
+                                        ))}
+                                    </div>
+                                </section>
+                                {/* ③ 現在の状態 */}
+                                <section>
+                                    <h3 className="text-sm font-bold text-green-700 uppercase tracking-wide mb-3 border-b border-green-100 pb-1">③ 現在の状態・課題 (0-5.0点)</h3>
+                                    <p className="text-xs text-gray-500 mb-2">※数値を変更するとレーダーチャートに反映されます (0.5刻み)</p>
+                                    <div className="space-y-4 bg-white p-2">
+                                        {[
+                                            { key: 'posture', label: '★姿勢', sub: '巻き肩、猫背、反り腰、立ち方、座り方' },
+                                            { key: 'pelvis', label: '★骨盤', sub: '足の左右差、産後骨盤、ヒップアップ、O脚Ｘ脚' },
+                                            { key: 'face', label: '★顔・頭', sub: 'フェイスライン、頬骨、ハチ、眼精疲労、左右差' },
+                                            { key: 'flow', label: '★代謝・巡り', sub: '代謝、むくみ、冷え' },
+                                            { key: 'flex', label: '★柔軟性・バランス', sub: '筋肉、関節、左右差、歩き方、体幹' },
+                                        ].map(item => (
+                                            <div key={item.key} className="flex flex-col gap-1">
+                                                <div className="flex justify-between items-center">
+                                                    <label className="text-sm font-bold text-gray-700">{item.label}</label>
+                                                    <span className="text-sm font-bold w-8 text-center text-green-700">{scores[item.key]}</span>
+                                                </div>
+                                                <p className="text-[10px] text-gray-400">{item.sub}</p>
+                                                <input type="range" min="0" max="5" step="0.5" value={scores[item.key]} onChange={e => handleScoreChange(item.key, e.target.value)} className="w-full accent-green-500" />
+                                            </div>
+                                        ))}
+                                    </div>
+                                </section>
+                                {/* ④ 写真 */}
+                                <section>
+                                    <h3 className="text-sm font-bold text-green-700 uppercase tracking-wide mb-3 border-b border-green-100 pb-1">④ 写真を追加 (任意)</h3>
+                                    <div className="bg-gray-50 border border-green-100 rounded-lg p-3 text-center">
+                                        <label className="cursor-pointer flex flex-col items-center justify-center gap-2">
+                                            <span className="bg-white border border-green-200 text-green-700 px-3 py-1 rounded-full text-xs font-bold shadow-sm hover:bg-green-50 transition">画像を選択</span>
+                                            <input type="file" accept="image/*" className="hidden" onChange={handlePhotoUpload} />
+                                            <span className="text-[10px] text-gray-400">{photoName || 'Before/Afterや姿勢写真など'}</span>
+                                        </label>
+                                        {photoData && <button onClick={clearPhoto} className="mt-2 text-[10px] text-red-400 underline">写真を削除</button>}
+                                    </div>
+                                </section>
+                                {/* ⑤ コメント */}
+                                <section>
+                                    <h3 className="text-sm font-bold text-green-700 uppercase tracking-wide mb-3 border-b border-green-100 pb-1">⑤ コメント / 次の目標</h3>
+                                    <div className="mb-3">
+                                        <label className="block text-xs font-bold mb-1 text-gray-500">テンプレート選択</label>
+                                        <select value={templateKey} onChange={e => applyTemplate(e.target.value)} className="w-full border border-gray-300 rounded p-2 text-sm bg-white text-gray-600">
+                                            <option value="">カスタム入力...</option>
+                                            {TR_TEMPLATE_OPTIONS.map(g => (
+                                                <optgroup key={g.group} label={g.group}>
+                                                    {g.items.map(it => <option key={it.value} value={it.value}>{it.label}</option>)}
+                                                </optgroup>
+                                            ))}
+                                        </select>
+                                    </div>
+                                    <textarea value={coachComment} onChange={e => setCoachComment(e.target.value)} className="w-full border border-gray-300 rounded p-2 text-sm h-24 focus:ring-2 focus:ring-green-500 outline-none resize-none" placeholder="ここにお客様へのフィードバックを入力..." />
+                                </section>
+                                {/* ⑥ 宿題ストレッチ */}
+                                <section>
+                                    <h3 className="text-sm font-bold text-green-700 uppercase tracking-wide mb-3 border-b border-green-100 pb-1">⑥ 宿題ストレッチ</h3>
+                                    <div className="space-y-4">
+                                        {[
+                                            { key: 'posture', label: '姿勢・上半身' },
+                                            { key: 'pelvis', label: '骨盤・下半身' },
+                                            { key: 'face', label: '顔・首・呼吸' },
+                                        ].map(cat => (
+                                            <details key={cat.key} className="group bg-white border border-green-100 rounded-lg">
+                                                <summary className="p-3 cursor-pointer font-bold text-xs text-green-700 bg-green-50 rounded-lg group-open:rounded-b-none group-open:border-b border-green-100 flex justify-between items-center transition hover:bg-green-100">
+                                                    {cat.label}
+                                                    <span className="text-green-400 text-[10px] transition-transform group-open:rotate-180">▼</span>
+                                                </summary>
+                                                <div className="p-2 grid grid-cols-1 gap-1">
+                                                    {TR_STRETCH_DATA[cat.key].map(s => (
+                                                        <label key={s.id} className="flex items-start space-x-2 p-2 rounded hover:bg-green-50 cursor-pointer text-xs border border-transparent hover:border-green-100 transition">
+                                                            <input type="checkbox" checked={!!selectedStretches[cat.key + '-' + s.id]} onChange={() => handleStretchToggle(cat.key, s.id)} className="mt-1 form-checkbox text-green-600 rounded focus:ring-green-500 accent-green-500" />
+                                                            <div>
+                                                                <span className="font-bold text-gray-700 block">{s.title}</span>
+                                                                <span className="text-[10px] text-gray-400 block mt-0.5">{s.text.replace(/<br>/g, ' ').substring(0, 30)}...</span>
+                                                            </div>
+                                                        </label>
+                                                    ))}
+                                                </div>
+                                            </details>
+                                        ))}
+                                    </div>
+                                    <div className="mt-4">
+                                        <label className="block text-xs font-bold mb-1 text-gray-500">自由記述（任意）</label>
+                                        <textarea value={customStretch} onChange={e => setCustomStretch(e.target.value)} className="w-full border border-gray-300 rounded p-2 text-sm h-20 focus:ring-2 focus:ring-green-500 outline-none resize-none" placeholder="フォーマット以外の宿題やストレッチを自由に記載できます..." />
+                                    </div>
+                                </section>
+                                {/* ⑦ クーポン */}
+                                <section>
+                                    <h3 className="text-sm font-bold text-green-700 uppercase tracking-wide mb-3 border-b border-green-100 pb-1">⑦ 次回クーポン (任意)</h3>
+                                    <div className="space-y-2 text-sm">
+                                        {[
+                                            { value: 'none', label: 'なし', desc: '' },
+                                            { value: 'c1', label: 'クーポン1 (1種+ほぐし)', desc: '9,000円 → 6,500円' },
+                                            { value: 'c2', label: 'クーポン2 (2種+ほぐし)', desc: '10,000円 → 7,500円' },
+                                        ].map(opt => (
+                                            <label key={opt.value} className="flex items-center space-x-2 cursor-pointer bg-gray-50 p-2 rounded hover:bg-green-50 border border-transparent hover:border-green-200">
+                                                <input type="radio" name="tr-coupon" checked={coupon === opt.value} onChange={() => setCoupon(opt.value)} className="form-radio text-green-600 focus:ring-green-500" />
+                                                <div>
+                                                    <span className="font-bold text-gray-700 block">{opt.label}</span>
+                                                    {opt.desc && <span className="text-xs text-green-700">{opt.desc}</span>}
+                                                </div>
+                                            </label>
+                                        ))}
+                                    </div>
+                                </section>
+                                <div className="h-10 md:hidden"></div>
+                            </div>
+                        </aside>
+                        {/* RIGHT PANEL placeholder - Phase D */}
+                        <main className={`w-full md:w-1/2 lg:w-7/12 bg-gray-100 h-full overflow-y-auto relative ${mobileTab === 'preview' ? '' : 'hidden'} md:block`}>
+                            <div className="flex flex-col items-center justify-start min-h-full p-4 md:p-8 pb-20">
+                                {/* Download Button */}
+                                <div className="sticky top-0 z-50 w-full max-w-[400px] flex justify-end mb-2 pointer-events-none">
+                                    <div className="pointer-events-auto">
+                                        <button onClick={downloadImage} className="flex items-center gap-2 bg-green-700 text-white px-4 py-2 rounded-full shadow-lg hover:bg-green-600 hover:shadow-xl transition transform hover:-translate-y-0.5 font-bold text-sm border-2 border-white">
+                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                                            画像を保存
+                                        </button>
+                                        {saveMsg && <p className="text-xs text-green-700 text-center mt-1 bg-white/80 rounded px-1">{saveMsg}</p>}
+                                    </div>
+                                </div>
+                                {/* Phone Container (capture target) */}
+                                <div ref={captureRef} className="bg-white w-full max-w-[400px] shadow-2xl overflow-hidden relative text-gray-800" style={{ minHeight: '700px', borderRadius: '20px' }}>
+                                    {/* Top Bar */}
+                                    <div className="h-3 w-full" style={{ background: 'linear-gradient(to right, #9cc7b1, #6ca88a)' }}></div>
+                                    {/* Header */}
+                                    <div className="p-6 pb-4 text-center" style={{ backgroundColor: 'rgba(242,248,245,0.5)' }}>
+                                        <p className="text-[10px] font-bold tracking-[0.2em] uppercase mb-1" style={{ color: '#6ca88a' }}>Personal After Care Sheet</p>
+                                        <h2 className="text-2xl font-bold text-gray-700 mb-1">{displayName}</h2>
+                                        <p className="text-xs font-medium" style={{ color: '#9cc7b1' }}>{displayDate}</p>
+                                    </div>
+                                    {/* Today's Menu */}
+                                    <div className="px-6 mb-6">
+                                        <div className="relative py-4">
+                                            <div className="absolute inset-0 flex items-center"><div className="w-full border-t" style={{ borderColor: '#e1efe7' }}></div></div>
+                                            <div className="relative flex justify-center"><span className="px-2 bg-white text-xs font-bold uppercase tracking-widest" style={{ color: '#9cc7b1' }}>Today's Menu</span></div>
+                                        </div>
+                                        <div className="flex flex-wrap justify-center gap-3">
+                                            {activeMenus.length === 0
+                                                ? <span className="text-xs" style={{ color: '#9cc7b1' }}>施術内容なし</span>
+                                                : activeMenus.map(m => (
+                                                    <div key={m} className="px-4 py-2 text-sm rounded-lg border-2 font-bold shadow-sm" style={{ backgroundColor: '#e1efe7', color: '#345244', borderColor: '#c5e0d1' }}>{m}</div>
+                                                ))
+                                            }
+                                        </div>
+                                    </div>
+                                    {/* Body Balance Chart */}
+                                    <div className="px-6 mb-6">
+                                        <h4 className="text-xs font-bold mb-2 text-center tracking-widest uppercase" style={{ color: '#9cc7b1' }}>Body Balance</h4>
+                                        <div className="rounded-2xl p-4 border shadow-[inset_0_2px_4px_rgba(0,0,0,0.02)]" style={{ backgroundColor: 'rgba(242,248,245,0.5)', borderColor: '#f2f8f5', position: 'relative', height: '250px', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+                                            <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+                                                <canvas ref={chartRef}></canvas>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    {/* Photo */}
+                                    {photoData && (
+                                        <div className="px-6 mb-6">
+                                            <h4 className="text-xs font-bold mb-2 text-center tracking-widest uppercase" style={{ color: '#9cc7b1' }}>Your Condition</h4>
+                                            <div className="rounded-xl overflow-hidden border shadow-sm" style={{ borderColor: '#e1efe7', backgroundColor: 'rgba(0,0,0,0.03)' }}>
+                                                <img src={photoData} alt="Condition" className="w-full h-auto object-contain max-h-[300px]" />
+                                            </div>
+                                        </div>
+                                    )}
+                                    {/* Coach Feedback */}
+                                    <div className="px-6 mb-8">
+                                        <h4 className="text-xs font-bold mb-3 text-center tracking-widest uppercase" style={{ color: '#9cc7b1' }}>Feedback &amp; Goal</h4>
+                                        <div className="bg-white relative">
+                                            <span className="absolute -top-2 -left-1 text-4xl opacity-50 font-serif leading-none" style={{ color: '#c5e0d1' }}>"</span>
+                                            <p className="text-sm leading-relaxed text-gray-600 whitespace-pre-wrap pl-6 border-l-2 py-1" style={{ borderColor: '#9cc7b1' }}>
+                                                {displayComment}
+                                            </p>
+                                        </div>
+                                    </div>
+                                    {/* Home Care (dark footer) */}
+                                    <div className="text-white p-6 pb-8 min-h-[200px]" style={{ background: 'linear-gradient(to bottom right, #52856d, #345244)' }}>
+                                        <div className="flex items-center justify-center gap-2 mb-6">
+                                            <h4 className="font-bold tracking-[0.2em] text-sm" style={{ color: '#e1efe7' }}>HOME CARE</h4>
+                                        </div>
+                                        <div className="space-y-4">
+                                            {activeStretchList.length === 0 && !customStretch.trim() ? (
+                                                <p className="text-xs text-center opacity-70" style={{ color: '#e1efe7' }}>本日の特別な宿題はありません<br/>水分をしっかり摂って休みましょう</p>
+                                            ) : (
+                                                <>
+                                                    {activeStretchList.map((s, i) => (
+                                                        <div key={i} className="p-4 rounded-xl border shadow-sm" style={{ backgroundColor: 'rgba(255,255,255,0.1)', backdropFilter: 'blur(12px)', borderColor: 'rgba(255,255,255,0.3)' }}>
+                                                            <div className="mb-2 border-b pb-2" style={{ borderColor: 'rgba(255,255,255,0.2)' }}>
+                                                                <h5 className="font-bold text-sm text-white tracking-wide">{s.title}</h5>
+                                                            </div>
+                                                            <p className="text-xs leading-relaxed opacity-95" style={{ color: '#f2f8f5' }} dangerouslySetInnerHTML={{ __html: s.text }}></p>
+                                                        </div>
+                                                    ))}
+                                                    {customStretch.trim() && (
+                                                        <div className="p-4 rounded-xl border shadow-sm" style={{ backgroundColor: 'rgba(255,255,255,0.1)', backdropFilter: 'blur(12px)', borderColor: 'rgba(255,255,255,0.3)' }}>
+                                                            <div className="mb-2 border-b pb-2" style={{ borderColor: 'rgba(255,255,255,0.2)' }}>
+                                                                <h5 className="font-bold text-sm text-white tracking-wide">その他の宿題</h5>
+                                                            </div>
+                                                            <p className="text-xs leading-relaxed opacity-95 whitespace-pre-wrap" style={{ color: '#f2f8f5' }}>{customStretch}</p>
+                                                        </div>
+                                                    )}
+                                                </>
+                                            )}
+                                        </div>
+                                        {/* Coupon */}
+                                        {couponInfo && (
+                                            <div className="mt-8 mx-2">
+                                                <div className="p-4 rounded-lg relative overflow-hidden text-center border-2 shadow-md" style={{ background: 'linear-gradient(135deg, #fffbf0 0%, #fff 50%, #fffbf0 100%)', borderColor: '#eab308' }}>
+                                                    <div className="absolute top-0 left-0 w-full h-1 bg-yellow-400"></div>
+                                                    <div className="inline-block bg-yellow-400 text-white text-[10px] font-bold px-3 py-0.5 rounded-b-md tracking-widest mb-3 shadow-sm">SPECIAL COUPON</div>
+                                                    <h5 className="text-sm font-bold mb-1 text-gray-800 leading-tight">{couponInfo.title}</h5>
+                                                    <div className="flex items-end justify-center gap-2 mb-2">
+                                                        <span className="text-xs text-gray-400 line-through mb-1">{couponInfo.old}</span>
+                                                        <span className="text-lg font-bold text-red-500">→</span>
+                                                        <span className="text-2xl font-black text-red-500 drop-shadow-sm">{couponInfo.price}</span>
+                                                    </div>
+                                                    <div className="bg-red-50 border border-red-100 rounded py-1 px-2 mb-2 inline-block">
+                                                        <p className="text-[10px] text-red-500 font-bold">有効期限: <span className="text-red-600 text-xs">{couponExpiry}</span> まで</p>
+                                                    </div>
+                                                    <p className="text-[9px] text-gray-500 text-left bg-white/60 p-2 rounded border border-yellow-100" dangerouslySetInnerHTML={{ __html: couponInfo.desc }}></p>
+                                                </div>
+                                            </div>
+                                        )}
+                                        {/* Footer message */}
+                                        <div className="mt-8 text-center border-t pt-4" style={{ borderColor: 'rgba(255,255,255,0.1)' }}>
+                                            <p className="text-[10px] opacity-90" style={{ color: '#c5e0d1' }}>
+                                                美しさは日々の積み重ねから<br/>ご不明点はLINEにていつでもご相談ください。
+                                            </p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </main>
+                    </div>
+                </div>
+            );
+        };
+
         const ConceptFormView = ({ counselingHook, activeStoreId, memberData }) => {
             const { customers, selectedCustomer, loading, fetchCustomerDetail, searchCustomers, fetchCustomerList, counselingStore, setCounselingStore } = counselingHook;
             const [searchInput, setSearchInput] = useState('');
@@ -11599,6 +12171,7 @@
                 { id: 'usage', label: '利用管理', icon: 'clipboard-check', mobileLabel: '利用' },
                 { id: 'tickets', label: '回数券', icon: 'ticket', mobileLabel: '回数券' },
                 { id: 'counseling', label: 'カウンセリング', icon: 'heart-handshake', mobileLabel: '案内' },
+                { id: 'treatment-report', label: '施術レポート', icon: 'file-heart', mobileLabel: 'レポ' },
                 { id: 'line', label: 'LINEチャット', icon: 'message-circle', mobileLabel: 'LINE' },
                 ...(!isStaffMode || (currentAccess && currentAccess.role === 'headquarter') ? [{ id: 'marketing', label: 'マーケティング', icon: 'megaphone', mobileLabel: '広告' }] : []),
                 ...(!isStaffMode ? [{ id: 'settings', label: '設定', icon: 'settings', mobileLabel: '設定' }] : []),
@@ -11626,6 +12199,8 @@
                         return <TicketManagementView ticketHook={ticketHook} />;
                     case 'counseling':
                         return <ConceptFormView counselingHook={counselingHook} activeStoreId={activeStoreId} memberData={memberData} />;
+                    case 'treatment-report':
+                        return <TreatmentReportView />;
                     case 'line':
                         return <LineChatView lineChatHook={lineChatHook} />;
                     case 'marketing':
@@ -11649,6 +12224,8 @@
                 }
             };
 
+            const isFullscreenView = currentView === 'counseling' || currentView === 'treatment-report';
+
             return (
                 <div className="min-h-screen bg-slate-50 bg-mesh relative">
                     {/* トースト通知 */}
@@ -11664,7 +12241,7 @@
                     <header className="fixed top-0 left-0 right-0 z-50 glass-panel safe-top">
                         <div className="flex items-center justify-between px-4 md:px-5 h-14 md:h-16">
                             <div className="flex items-center">
-                                {currentView === 'counseling' ? (
+                                {isFullscreenView ? (
                                     <button
                                         onClick={() => setCurrentView('dashboard')}
                                         className="p-2.5 rounded-xl bg-sise-100 border border-sise-300 hover:bg-sise-200 mr-1 transition-colors active:scale-90 shadow-sm"
@@ -11699,20 +12276,20 @@
                                 </div>
                             </div>
                             <div className="flex items-center gap-1">
-                                {currentView === 'counseling' ? (
+                                {isFullscreenView ? (
                                     <span className="text-xs font-semibold text-sise-500 px-3 py-1.5 bg-sise-50/80 border border-sise-200 rounded-xl">
-                                        カウンセリング中
+                                        {currentView === 'counseling' ? 'カウンセリング中' : '施術レポート作成中'}
                                     </span>
                                 ) : null}
                                 {/* スタッフ表示 */}
-                                {currentView !== 'counseling' && isStaffMode && (
+                                {!isFullscreenView && isStaffMode && (
                                     <div className="flex items-center px-2 md:px-3 py-1.5 bg-sise-50/80 border border-sise-200 rounded-xl hide-mobile">
                                         <Icon name={currentAccess.role === 'headquarter' ? 'building' : currentAccess.role === 'manager' ? 'shield' : 'user'} size={13} className="text-sise-500 mr-1" />
                                         <span className="text-xs font-semibold text-sise-700">{currentAccess.name}</span>
                                     </div>
                                 )}
-                                {/* 以下はカウンセリング中は非表示 */}
-                                {currentView !== 'counseling' && (
+                                {/* 以下はフルスクリーンビュー中は非表示 */}
+                                {!isFullscreenView && (
                                     <>
                                         {/* 店舗セレクター */}
                                         {(() => {
@@ -11770,7 +12347,7 @@
                     </div>
 
                     {/* Sidebar Overlay (Mobile) */}
-                    {isSidebarOpen && currentView !== 'counseling' && (
+                    {isSidebarOpen && !isFullscreenView && (
                         <div
                             className="fixed inset-0 bg-black/40 backdrop-blur-sm z-40 lg:hidden animate-fade-in"
                             onClick={() => setIsSidebarOpen(false)}
@@ -11778,7 +12355,7 @@
                     )}
 
                     {/* Sidebar (Desktop) - カウンセリング中は非表示 */}
-                    <aside className={`fixed top-14 md:top-16 left-0 bottom-0 w-56 glass-panel z-40 transform transition-transform duration-300 ease-out ${currentView === 'counseling' ? '-translate-x-full' : 'lg:translate-x-0'} ${isSidebarOpen && currentView !== 'counseling' ? 'translate-x-0' : '-translate-x-full'}`}>
+                    <aside className={`fixed top-14 md:top-16 left-0 bottom-0 w-56 glass-panel z-40 transform transition-transform duration-300 ease-out ${isFullscreenView ? '-translate-x-full' : 'lg:translate-x-0'} ${isSidebarOpen && !isFullscreenView ? 'translate-x-0' : '-translate-x-full'}`}>
                         <nav className="p-3 space-y-0.5 mt-2">
                             {navItems.map((item) => (
                                 <button
@@ -11824,7 +12401,7 @@
                     </aside>
 
                     {/* Bottom Navigation (Mobile) - カウンセリング中は非表示 */}
-                    <nav className="bottom-nav hide-desktop" style={currentView === 'counseling' ? {display:'none'} : undefined}>
+                    <nav className="bottom-nav hide-desktop" style={isFullscreenView ? {display:'none'} : undefined}>
                         <div
                             ref={(el) => {
                                 if (el) {
@@ -11855,8 +12432,8 @@
                     </nav>
 
                     {/* Main Content */}
-                    <main className={`pt-14 md:pt-16 min-h-screen relative z-10 transition-all duration-300 ${currentView === 'counseling' ? '' : 'lg:pl-56'}`}>
-                        <div className={`px-3 py-2 md:p-5 lg:p-8 max-w-7xl mx-auto ${currentView === 'counseling' ? 'pb-4' : 'pb-24 md:pb-8'}`}>
+                    <main className={`pt-14 md:pt-16 min-h-screen relative z-10 transition-all duration-300 ${isFullscreenView ? '' : 'lg:pl-56'}`}>
+                        <div className={`${isFullscreenView ? 'p-0' : 'px-3 py-2 md:p-5 lg:p-8'} max-w-7xl mx-auto ${isFullscreenView ? 'pb-4' : 'pb-24 md:pb-8'}`}>
                             <ViewTransition viewKey={currentView}>
                                 {renderView()}
                             </ViewTransition>
