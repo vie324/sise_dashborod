@@ -33,6 +33,11 @@
     <!-- QR Code Generator -->
     <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.0/build/qrcode.min.js"></script>
 
+    <!-- Chart.js (for Treatment Report radar chart) -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- html2canvas (for Treatment Report screenshot) -->
+    <script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
+
     <!-- Custom Config for Tailwind (si'se Theme - Enhanced) -->
     <script>
         tailwind.config = {
@@ -11599,6 +11604,7 @@
                 { id: 'usage', label: '利用管理', icon: 'clipboard-check', mobileLabel: '利用' },
                 { id: 'tickets', label: '回数券', icon: 'ticket', mobileLabel: '回数券' },
                 { id: 'counseling', label: 'カウンセリング', icon: 'heart-handshake', mobileLabel: '案内' },
+                { id: 'treatment-report', label: '施術レポート', icon: 'file-heart', mobileLabel: 'レポ' },
                 { id: 'line', label: 'LINEチャット', icon: 'message-circle', mobileLabel: 'LINE' },
                 ...(!isStaffMode || (currentAccess && currentAccess.role === 'headquarter') ? [{ id: 'marketing', label: 'マーケティング', icon: 'megaphone', mobileLabel: '広告' }] : []),
                 ...(!isStaffMode ? [{ id: 'settings', label: '設定', icon: 'settings', mobileLabel: '設定' }] : []),
@@ -11626,6 +11632,8 @@
                         return <TicketManagementView ticketHook={ticketHook} />;
                     case 'counseling':
                         return <ConceptFormView counselingHook={counselingHook} activeStoreId={activeStoreId} memberData={memberData} />;
+                    case 'treatment-report':
+                        return <TreatmentReportView />;
                     case 'line':
                         return <LineChatView lineChatHook={lineChatHook} />;
                     case 'marketing':
@@ -11649,6 +11657,8 @@
                 }
             };
 
+            const isFullscreenView = currentView === 'counseling' || currentView === 'treatment-report';
+
             return (
                 <div className="min-h-screen bg-slate-50 bg-mesh relative">
                     {/* トースト通知 */}
@@ -11664,7 +11674,7 @@
                     <header className="fixed top-0 left-0 right-0 z-50 glass-panel safe-top">
                         <div className="flex items-center justify-between px-4 md:px-5 h-14 md:h-16">
                             <div className="flex items-center">
-                                {currentView === 'counseling' ? (
+                                {isFullscreenView ? (
                                     <button
                                         onClick={() => setCurrentView('dashboard')}
                                         className="p-2.5 rounded-xl bg-sise-100 border border-sise-300 hover:bg-sise-200 mr-1 transition-colors active:scale-90 shadow-sm"
@@ -11699,20 +11709,20 @@
                                 </div>
                             </div>
                             <div className="flex items-center gap-1">
-                                {currentView === 'counseling' ? (
+                                {isFullscreenView ? (
                                     <span className="text-xs font-semibold text-sise-500 px-3 py-1.5 bg-sise-50/80 border border-sise-200 rounded-xl">
-                                        カウンセリング中
+                                        {currentView === 'counseling' ? 'カウンセリング中' : '施術レポート作成中'}
                                     </span>
                                 ) : null}
                                 {/* スタッフ表示 */}
-                                {currentView !== 'counseling' && isStaffMode && (
+                                {!isFullscreenView && isStaffMode && (
                                     <div className="flex items-center px-2 md:px-3 py-1.5 bg-sise-50/80 border border-sise-200 rounded-xl hide-mobile">
                                         <Icon name={currentAccess.role === 'headquarter' ? 'building' : currentAccess.role === 'manager' ? 'shield' : 'user'} size={13} className="text-sise-500 mr-1" />
                                         <span className="text-xs font-semibold text-sise-700">{currentAccess.name}</span>
                                     </div>
                                 )}
-                                {/* 以下はカウンセリング中は非表示 */}
-                                {currentView !== 'counseling' && (
+                                {/* 以下はフルスクリーンビュー中は非表示 */}
+                                {!isFullscreenView && (
                                     <>
                                         {/* 店舗セレクター */}
                                         {(() => {
@@ -11770,7 +11780,7 @@
                     </div>
 
                     {/* Sidebar Overlay (Mobile) */}
-                    {isSidebarOpen && currentView !== 'counseling' && (
+                    {isSidebarOpen && !isFullscreenView && (
                         <div
                             className="fixed inset-0 bg-black/40 backdrop-blur-sm z-40 lg:hidden animate-fade-in"
                             onClick={() => setIsSidebarOpen(false)}
@@ -11778,7 +11788,7 @@
                     )}
 
                     {/* Sidebar (Desktop) - カウンセリング中は非表示 */}
-                    <aside className={`fixed top-14 md:top-16 left-0 bottom-0 w-56 glass-panel z-40 transform transition-transform duration-300 ease-out ${currentView === 'counseling' ? '-translate-x-full' : 'lg:translate-x-0'} ${isSidebarOpen && currentView !== 'counseling' ? 'translate-x-0' : '-translate-x-full'}`}>
+                    <aside className={`fixed top-14 md:top-16 left-0 bottom-0 w-56 glass-panel z-40 transform transition-transform duration-300 ease-out ${isFullscreenView ? '-translate-x-full' : 'lg:translate-x-0'} ${isSidebarOpen && !isFullscreenView ? 'translate-x-0' : '-translate-x-full'}`}>
                         <nav className="p-3 space-y-0.5 mt-2">
                             {navItems.map((item) => (
                                 <button
@@ -11824,7 +11834,7 @@
                     </aside>
 
                     {/* Bottom Navigation (Mobile) - カウンセリング中は非表示 */}
-                    <nav className="bottom-nav hide-desktop" style={currentView === 'counseling' ? {display:'none'} : undefined}>
+                    <nav className="bottom-nav hide-desktop" style={isFullscreenView ? {display:'none'} : undefined}>
                         <div
                             ref={(el) => {
                                 if (el) {
@@ -11855,8 +11865,8 @@
                     </nav>
 
                     {/* Main Content */}
-                    <main className={`pt-14 md:pt-16 min-h-screen relative z-10 transition-all duration-300 ${currentView === 'counseling' ? '' : 'lg:pl-56'}`}>
-                        <div className={`px-3 py-2 md:p-5 lg:p-8 max-w-7xl mx-auto ${currentView === 'counseling' ? 'pb-4' : 'pb-24 md:pb-8'}`}>
+                    <main className={`pt-14 md:pt-16 min-h-screen relative z-10 transition-all duration-300 ${isFullscreenView ? '' : 'lg:pl-56'}`}>
+                        <div className={`${isFullscreenView ? 'p-0' : 'px-3 py-2 md:p-5 lg:p-8'} max-w-7xl mx-auto ${isFullscreenView ? 'pb-4' : 'pb-24 md:pb-8'}`}>
                             <ViewTransition viewKey={currentView}>
                                 {renderView()}
                             </ViewTransition>
