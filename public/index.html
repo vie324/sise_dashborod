@@ -9903,45 +9903,20 @@
                 },
             };
 
-            // ストレッチ・クーポンバブル
+            // ストレッチバブル（HOME CARE のみ）
             const careContents = [
                 { type: 'text', text: 'HOME CARE', size: 'sm', weight: 'bold', color: '#e1efe7', align: 'center' },
                 ...stretchContents,
-            ];
-
-            // クーポン追加
-            if (couponInfo) {
-                careContents.push({ type: 'separator', color: '#8aab98', margin: 'xl' });
-                careContents.push({
-                    type: 'box', layout: 'vertical', margin: 'lg', paddingAll: '16px',
-                    cornerRadius: 'lg', backgroundColor: '#fffbf0',
-                    borderWidth: 'normal', borderColor: '#eab308',
+                // フッター
+                {
+                    type: 'box', layout: 'vertical', margin: 'xl', paddingTop: '12px',
+                    borderWidth: 'light', borderColor: '#ffffff26',
                     contents: [
-                        { type: 'text', text: 'SPECIAL COUPON', size: 'xxs', weight: 'bold', color: '#eab308', align: 'center' },
-                        { type: 'text', text: couponInfo.title, size: 'sm', weight: 'bold', color: '#333333', align: 'center', margin: 'sm', wrap: true },
-                        {
-                            type: 'box', layout: 'horizontal', justifyContent: 'center', spacing: 'md', margin: 'sm',
-                            contents: [
-                                { type: 'text', text: couponInfo.old, size: 'xs', color: '#999999', decoration: 'line-through', gravity: 'bottom' },
-                                { type: 'text', text: '→', size: 'sm', color: '#ef4444' },
-                                { type: 'text', text: couponInfo.price, size: 'xl', weight: 'bold', color: '#ef4444' },
-                            ],
-                        },
-                        { type: 'text', text: '有効期限: ' + couponExpiry + ' まで', size: 'xxs', color: '#ef4444', weight: 'bold', align: 'center', margin: 'sm' },
-                        { type: 'text', text: couponInfo.desc.replace(/<br\s*\/?>/gi, '\n'), size: 'xxs', color: '#888888', wrap: true, margin: 'sm' },
+                        { type: 'text', text: '美しさは日々の積み重ねから', size: 'xxs', color: '#c5e0d1', align: 'center', margin: 'md' },
+                        { type: 'text', text: 'ご不明点はLINEにていつでもご相談ください。', size: 'xxs', color: '#c5e0d1', align: 'center', margin: 'xs' },
                     ],
-                });
-            }
-
-            // フッター
-            careContents.push({
-                type: 'box', layout: 'vertical', margin: 'xl', paddingTop: '12px',
-                borderWidth: 'light', borderColor: '#ffffff26',
-                contents: [
-                    { type: 'text', text: '美しさは日々の積み重ねから', size: 'xxs', color: '#c5e0d1', align: 'center', margin: 'md' },
-                    { type: 'text', text: 'ご不明点はLINEにていつでもご相談ください。', size: 'xxs', color: '#c5e0d1', align: 'center', margin: 'xs' },
-                ],
-            });
+                },
+            ];
 
             const careBubble = {
                 type: 'bubble', size: 'mega',
@@ -9952,12 +9927,69 @@
                 },
             };
 
+            // クーポンバブル（独立した3枚目カード）
+            let couponBubble = null;
+            if (couponInfo) {
+                couponBubble = {
+                    type: 'bubble', size: 'mega',
+                    styles: { body: { backgroundColor: '#fffbf0' } },
+                    body: {
+                        type: 'box', layout: 'vertical', paddingAll: '24px', spacing: 'md',
+                        justifyContent: 'center',
+                        contents: [
+                            // ヘッダーバッジ
+                            {
+                                type: 'box', layout: 'vertical', alignItems: 'center',
+                                contents: [{
+                                    type: 'box', layout: 'vertical', backgroundColor: '#eab308',
+                                    cornerRadius: 'md', paddingAll: '6px', paddingStart: '16px', paddingEnd: '16px',
+                                    contents: [{ type: 'text', text: 'SPECIAL COUPON', size: 'xs', weight: 'bold', color: '#ffffff', align: 'center' }],
+                                }],
+                            },
+                            // タイトル
+                            { type: 'text', text: couponInfo.title, size: 'lg', weight: 'bold', color: '#333333', align: 'center', margin: 'lg', wrap: true },
+                            // 価格セクション
+                            {
+                                type: 'box', layout: 'vertical', margin: 'lg', paddingAll: '16px',
+                                cornerRadius: 'lg', backgroundColor: '#ffffff',
+                                borderWidth: 'normal', borderColor: '#eab308',
+                                contents: [
+                                    { type: 'text', text: couponInfo.old, size: 'sm', color: '#999999', decoration: 'line-through', align: 'center' },
+                                    { type: 'text', text: couponInfo.price, size: '3xl', weight: 'bold', color: '#ef4444', align: 'center', margin: 'sm' },
+                                ],
+                            },
+                            // 有効期限
+                            {
+                                type: 'box', layout: 'vertical', margin: 'lg', paddingAll: '10px',
+                                cornerRadius: 'md', backgroundColor: '#fef2f2',
+                                borderWidth: 'light', borderColor: '#fecaca',
+                                contents: [
+                                    { type: 'text', text: '有効期限: ' + couponExpiry + ' まで', size: 'sm', color: '#ef4444', weight: 'bold', align: 'center' },
+                                ],
+                            },
+                            // 注意事項
+                            {
+                                type: 'box', layout: 'vertical', margin: 'lg', paddingAll: '12px',
+                                cornerRadius: 'md', backgroundColor: '#ffffff',
+                                contents: [
+                                    { type: 'text', text: couponInfo.desc.replace(/<br\s*\/?>/gi, '\n'), size: 'xs', color: '#888888', wrap: true },
+                                ],
+                            },
+                        ],
+                    },
+                };
+            }
+
+            // カルーセル構築
+            const carouselContents = [headerBubble, careBubble];
+            if (couponBubble) carouselContents.push(couponBubble);
+
             return {
                 type: 'flex',
                 altText: `${displayName}のアフターケアシート (${displayDate})`,
                 contents: {
                     type: 'carousel',
-                    contents: [headerBubble, careBubble],
+                    contents: carouselContents,
                 },
             };
         };
