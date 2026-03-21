@@ -1160,7 +1160,23 @@
         let serverStores = [];
 
         // 統合 Google Apps Script URL（全機能で共有・1つのスプレッドシートで管理）
-        const UNIFIED_GAS_URL = localStorage.getItem('sise_unified_gas_url') || 'https://script.google.com/macros/s/AKfycbzEVvDqMrYC8QkWgHisvP_LXbjWigCfpqB2eHOzCBoFaf1B_5ANnEU48LGaZ83VMnY1TA/exec';
+        const DEFAULT_GAS_URL = 'https://script.google.com/macros/s/AKfycbzEVvDqMrYC8QkWgHisvP_LXbjWigCfpqB2eHOzCBoFaf1B_5ANnEU48LGaZ83VMnY1TA/exec';
+        let UNIFIED_GAS_URL = localStorage.getItem('sise_unified_gas_url') || DEFAULT_GAS_URL;
+
+        // GASリクエストのラッパー: 「不明なtype」エラー時にデフォルトURLへフォールバック
+        const fetchGAS = async (queryString) => {
+            const res = await fetch(UNIFIED_GAS_URL + queryString);
+            const data = await res.json();
+            // 古いGASデプロイの場合、デフォルトURLでリトライ
+            if (data.error && typeof data.error === 'string' && data.error.includes('不明なtype') && UNIFIED_GAS_URL !== DEFAULT_GAS_URL) {
+                console.warn('[GAS] 古いデプロイを検出。デフォルトURLにフォールバック:', DEFAULT_GAS_URL.substring(0, 60) + '...');
+                UNIFIED_GAS_URL = DEFAULT_GAS_URL;
+                localStorage.setItem('sise_unified_gas_url', DEFAULT_GAS_URL);
+                const retryRes = await fetch(DEFAULT_GAS_URL + queryString);
+                return retryRes.json();
+            }
+            return data;
+        };
 
         // API設定（サーバーサイドプロキシ経由）
         // APIキーはVercel環境変数で管理、フロントエンドには露出しない
@@ -3273,11 +3289,10 @@
                 setGasStatus('checking');
                 setGasError(null);
                 try {
-                    const gasUrl = UNIFIED_GAS_URL + '?type=lineMessages&store=' + sid;
-                    console.log('[LINE] fetching:', gasUrl);
+                    console.log('[LINE] fetching threads, store:', sid);
                     const [threadsRes, profilesRes] = await Promise.all([
-                        fetch(gasUrl).then(r => r.json()),
-                        fetch(UNIFIED_GAS_URL + '?type=lineProfiles&store=' + sid).then(r => r.json()),
+                        fetchGAS('?type=lineMessages&store=' + sid),
+                        fetchGAS('?type=lineProfiles&store=' + sid),
                     ]);
                     console.log('[LINE] threadsRes:', JSON.stringify(threadsRes).substring(0, 200));
                     console.log('[LINE] profilesRes:', JSON.stringify(profilesRes).substring(0, 200));
@@ -3315,8 +3330,7 @@
                 if (!lineStoreId || !userId || UNIFIED_GAS_URL === 'YOUR_UNIFIED_GAS_URL') return;
                 setLoading(true);
                 try {
-                    const res = await fetch(UNIFIED_GAS_URL + '?type=lineMessages&store=' + lineStoreId + '&userId=' + encodeURIComponent(userId) + '&limit=200');
-                    const data = await res.json();
+                    const data = await fetchGAS('?type=lineMessages&store=' + lineStoreId + '&userId=' + encodeURIComponent(userId) + '&limit=200');
                     if (data.messages) setMessages(data.messages);
                 } catch (e) {
                     console.error('LINE メッセージ取得エラー:', e);
@@ -3393,8 +3407,7 @@
             const fetchBroadcasts = useCallback(async () => {
                 if (!lineStoreId || UNIFIED_GAS_URL === 'YOUR_UNIFIED_GAS_URL') return;
                 try {
-                    const res = await fetch(UNIFIED_GAS_URL + '?type=lineBroadcasts&store=' + lineStoreId);
-                    const data = await res.json();
+                    const data = await fetchGAS('?type=lineBroadcasts&store=' + lineStoreId);
                     if (data.broadcasts) setBroadcasts(data.broadcasts);
                 } catch (e) { console.error('[LINE] 配信履歴取得エラー:', e); }
             }, [lineStoreId]);
@@ -3425,8 +3438,7 @@
             const fetchTemplates = useCallback(async () => {
                 if (!lineStoreId || UNIFIED_GAS_URL === 'YOUR_UNIFIED_GAS_URL') return;
                 try {
-                    const res = await fetch(UNIFIED_GAS_URL + '?type=lineTemplates&store=' + lineStoreId);
-                    const data = await res.json();
+                    const data = await fetchGAS('?type=lineTemplates&store=' + lineStoreId);
                     if (data.templates) setTemplates(data.templates);
                 } catch (e) { console.error('[LINE] テンプレート取得エラー:', e); }
             }, [lineStoreId]);
@@ -3449,8 +3461,7 @@
             const fetchAutoReplies = useCallback(async () => {
                 if (!lineStoreId || UNIFIED_GAS_URL === 'YOUR_UNIFIED_GAS_URL') return;
                 try {
-                    const res = await fetch(UNIFIED_GAS_URL + '?type=lineAutoReplies&store=' + lineStoreId);
-                    const data = await res.json();
+                    const data = await fetchGAS('?type=lineAutoReplies&store=' + lineStoreId);
                     if (data.rules) setAutoReplies(data.rules);
                 } catch (e) { console.error('[LINE] 自動応答取得エラー:', e); }
             }, [lineStoreId]);
@@ -3475,8 +3486,8 @@
                 if (!lineStoreId || UNIFIED_GAS_URL === 'YOUR_UNIFIED_GAS_URL') return;
                 try {
                     const [tagsRes, utRes] = await Promise.all([
-                        fetch(UNIFIED_GAS_URL + '?type=lineTags&store=' + lineStoreId).then(r => r.json()),
-                        fetch(UNIFIED_GAS_URL + '?type=lineUserTags&store=' + lineStoreId).then(r => r.json()),
+                        fetchGAS('?type=lineTags&store=' + lineStoreId),
+                        fetchGAS('?type=lineUserTags&store=' + lineStoreId),
                     ]);
                     if (tagsRes.tags) setTags(tagsRes.tags);
                     if (utRes.userTags) setUserTags(utRes.userTags);
@@ -3513,8 +3524,7 @@
             const fetchAnalytics = useCallback(async () => {
                 if (!lineStoreId || UNIFIED_GAS_URL === 'YOUR_UNIFIED_GAS_URL') return;
                 try {
-                    const res = await fetch(UNIFIED_GAS_URL + '?type=lineAnalytics&store=' + lineStoreId);
-                    const data = await res.json();
+                    const data = await fetchGAS('?type=lineAnalytics&store=' + lineStoreId);
                     if (data.analytics) setAnalytics(data.analytics);
                 } catch (e) { console.error('[LINE] 分析取得エラー:', e); }
             }, [lineStoreId]);
@@ -11110,8 +11120,20 @@
             }, []);
 
             const handleSaveGas = () => {
-                localStorage.setItem('sise_unified_gas_url', unifiedGasUrl);
+                if (unifiedGasUrl && unifiedGasUrl.trim()) {
+                    localStorage.setItem('sise_unified_gas_url', unifiedGasUrl.trim());
+                } else {
+                    localStorage.removeItem('sise_unified_gas_url');
+                }
                 showToast('統合GAS URLを保存しました。リロードで全機能に反映されます。', 'success');
+                if (onSettingsSaved) onSettingsSaved();
+            };
+
+            const handleResetGas = () => {
+                localStorage.removeItem('sise_unified_gas_url');
+                setUnifiedGasUrl('');
+                UNIFIED_GAS_URL = DEFAULT_GAS_URL;
+                showToast('GAS URLをデフォルトにリセットしました。', 'success');
                 if (onSettingsSaved) onSettingsSaved();
             };
 
@@ -11243,10 +11265,17 @@
                                     >
                                         保存
                                     </button>
+                                    <button
+                                        onClick={handleResetGas}
+                                        className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl font-medium text-sm"
+                                    >
+                                        リセット
+                                    </button>
                                 </div>
                                 <p className="text-xs text-slate-400 mt-1.5">
                                     1つのスプレッドシートで全データを管理します（gas/unified.gs をデプロイ）。
                                     このURL1つで日報・カウンセリング・利用回数・回数券・会員・出納帳すべてに対応します。
+                                    空欄で保存またはリセットするとデフォルトURLが使用されます。
                                 </p>
                             </div>
 
