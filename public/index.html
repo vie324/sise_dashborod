@@ -9845,12 +9845,13 @@
         // ==========================================
         // 施術レポート: LINE Flex Message 生成
         // ==========================================
-        const buildTreatmentFlexMessage = ({ customerName, visitDate, activeMenus, scores, coachComment, activeStretchList, customStretch, couponInfo, couponExpiry }) => {
+        const buildTreatmentFlexMessage = ({ customerName, visitDate, activeMenus, scores, coachComment, staffName, activeStretchList, customStretch, couponInfo, couponExpiry }) => {
             const displayName = customerName ? (customerName.includes('様') ? customerName : customerName + ' 様') : '様';
             const displayDate = visitDate ? visitDate.replace(/-/g, '.') : '-';
             const displayComment = coachComment || '本日はご来店ありがとうございました。\nお伝えしたストレッチを無理のない範囲で行ってみてください。';
+            const displayStaff = staffName ? staffName + ' より' : '担当より';
 
-            // ロゴURL (#4)
+            // ロゴURL (#4) - 本番Vercel URLから取得
             const logoUrl = window.location.origin + '/images/logo.png';
 
             // ページインジケータ生成ヘルパー (#11)
@@ -9897,50 +9898,90 @@
                 : [{ type: 'text', text: '施術内容なし', size: 'xs', color: '#9cc7b1', align: 'center' }];
 
             // ストレッチ手順を番号付きステップに分割 (#6)
-            const buildStretchCard = (s) => {
+            const buildStretchCard = (s, index) => {
                 const rawText = s.text.replace(/<br\s*\/?>/gi, '\n');
                 // ①②③ or ・ で始まるステップを分割
                 const steps = rawText.split(/(?=①|②|③|④|⑤|・)/).map(st => st.trim()).filter(Boolean);
 
-                const stepContents = [
-                    { type: 'text', text: s.title, size: 'xs', weight: 'bold', color: '#345244', margin: 'none' },
-                ];
+                const stepContents = [];
 
                 if (steps.length > 1) {
-                    // 複数ステップ: 各ステップを個別行で表示
                     steps.forEach(step => {
                         stepContents.push({
-                            type: 'text', text: step, size: 'xxs', color: '#52856d', wrap: true, margin: 'xs',
+                            type: 'box', layout: 'horizontal', spacing: 'sm', margin: 'sm',
+                            contents: [
+                                { type: 'text', text: '▸', size: 'xxs', color: '#6ca88a', flex: 0 },
+                                { type: 'text', text: step, size: 'xxs', color: '#555555', wrap: true, flex: 1 },
+                            ],
                         });
                     });
                 } else {
-                    // 単一テキスト
                     stepContents.push({
-                        type: 'text', text: rawText, size: 'xxs', color: '#52856d', wrap: true, margin: 'xs',
+                        type: 'text', text: rawText, size: 'xxs', color: '#555555', wrap: true, margin: 'sm',
                     });
                 }
 
                 return {
-                    type: 'box', layout: 'vertical', spacing: 'none', margin: 'md',
-                    paddingAll: '12px', cornerRadius: 'md',
-                    backgroundColor: '#f2f8f5',
-                    contents: stepContents,
+                    type: 'box', layout: 'vertical', spacing: 'none', margin: 'lg',
+                    contents: [
+                        // タイトル行: 番号バッジ + タイトル
+                        {
+                            type: 'box', layout: 'horizontal', spacing: 'sm',
+                            contents: [
+                                {
+                                    type: 'box', layout: 'vertical',
+                                    width: '22px', height: '22px',
+                                    cornerRadius: '11px',
+                                    backgroundColor: '#52856d',
+                                    justifyContent: 'center', alignItems: 'center',
+                                    contents: [{ type: 'text', text: String(index + 1), size: 'xxs', color: '#ffffff', align: 'center', weight: 'bold' }],
+                                },
+                                { type: 'text', text: s.title, size: 'xs', weight: 'bold', color: '#345244', gravity: 'center', flex: 1 },
+                            ],
+                        },
+                        // ステップ内容（インデント付き）
+                        {
+                            type: 'box', layout: 'vertical', paddingStart: '30px',
+                            contents: stepContents,
+                        },
+                        // 区切り線
+                        { type: 'separator', color: '#e8f0ec', margin: 'lg' },
+                    ],
                 };
             };
 
             // ストレッチリスト生成
             const allStretchCards = [];
             if (activeStretchList.length > 0 || (customStretch && customStretch.trim())) {
-                activeStretchList.forEach(s => {
-                    allStretchCards.push(buildStretchCard(s));
+                activeStretchList.forEach((s, idx) => {
+                    allStretchCards.push(buildStretchCard(s, idx));
                 });
                 if (customStretch && customStretch.trim()) {
+                    const csIdx = activeStretchList.length;
                     allStretchCards.push({
-                        type: 'box', layout: 'vertical', spacing: 'xs', margin: 'md',
-                        paddingAll: '12px', cornerRadius: 'md', backgroundColor: '#f2f8f5',
+                        type: 'box', layout: 'vertical', spacing: 'none', margin: 'lg',
                         contents: [
-                            { type: 'text', text: 'その他の宿題', size: 'xs', weight: 'bold', color: '#345244' },
-                            { type: 'text', text: customStretch.trim(), size: 'xxs', color: '#52856d', wrap: true },
+                            {
+                                type: 'box', layout: 'horizontal', spacing: 'sm',
+                                contents: [
+                                    {
+                                        type: 'box', layout: 'vertical',
+                                        width: '22px', height: '22px',
+                                        cornerRadius: '11px',
+                                        backgroundColor: '#52856d',
+                                        justifyContent: 'center', alignItems: 'center',
+                                        contents: [{ type: 'text', text: String(csIdx + 1), size: 'xxs', color: '#ffffff', align: 'center', weight: 'bold' }],
+                                    },
+                                    { type: 'text', text: 'その他の宿題', size: 'xs', weight: 'bold', color: '#345244', gravity: 'center', flex: 1 },
+                                ],
+                            },
+                            {
+                                type: 'box', layout: 'vertical', paddingStart: '30px',
+                                contents: [
+                                    { type: 'text', text: customStretch.trim(), size: 'xxs', color: '#555555', wrap: true, margin: 'sm' },
+                                ],
+                            },
+                            { type: 'separator', color: '#e8f0ec', margin: 'lg' },
                         ],
                     });
                 }
@@ -9991,7 +10032,7 @@
                                     type: 'box', layout: 'horizontal', spacing: 'sm',
                                     contents: [
                                         { type: 'text', text: '💬', size: 'md' },
-                                        { type: 'text', text: '担当より', size: 'xxs', weight: 'bold', color: '#6ca88a', gravity: 'center' },
+                                        { type: 'text', text: displayStaff, size: 'xxs', weight: 'bold', color: '#6ca88a', gravity: 'center' },
                                     ],
                                 },
                                 { type: 'text', text: displayComment, size: 'sm', color: '#555555', wrap: true, margin: 'md' },
@@ -10003,33 +10044,39 @@
             };
             carouselBubbles.push(headerBubble);
 
+            // === HOME CARE ヘッダー生成 ===
+            const makeCareHeader = (subtitle) => ({
+                type: 'box', layout: 'vertical', paddingAll: '16px', paddingBottom: '12px',
+                backgroundColor: '#52856d', cornerRadius: 'md',
+                contents: [
+                    { type: 'text', text: '🏠 HOME CARE' + (subtitle ? '  ' + subtitle : ''), size: 'sm', weight: 'bold', color: '#ffffff', align: 'center' },
+                    { type: 'text', text: 'おうちでできるセルフケア', size: 'xxs', color: '#c5e0d1', align: 'center', margin: 'xs' },
+                ],
+            });
+
             // === バブル2+: HOME CARE (#8 3つ以上で分割) ===
             if (allStretchCards.length === 0) {
-                // ストレッチなし
                 const careBubble = {
                     type: 'bubble', size: 'mega',
-                    styles: { body: { backgroundColor: '#52856d' } },
                     body: {
-                        type: 'box', layout: 'vertical', paddingAll: '20px', spacing: 'sm',
+                        type: 'box', layout: 'vertical', paddingAll: '20px', spacing: 'md',
                         contents: [
-                            { type: 'text', text: 'HOME CARE', size: 'sm', weight: 'bold', color: '#e1efe7', align: 'center' },
+                            makeCareHeader(''),
                             {
-                                type: 'text', text: '本日の特別な宿題はありません\n水分をしっかり摂って休みましょう',
-                                size: 'xxs', color: '#9cc7b1', align: 'center', wrap: true, margin: 'md',
+                                type: 'text', text: '本日の特別な宿題はありません\n水分をしっかり摂って休みましょう 💧',
+                                size: 'xs', color: '#888888', align: 'center', wrap: true, margin: 'lg',
                             },
                         ],
                     },
                 };
                 carouselBubbles.push(careBubble);
             } else if (allStretchCards.length <= 2) {
-                // 2つ以下: 1バブル
                 const careBubble = {
                     type: 'bubble', size: 'mega',
-                    styles: { body: { backgroundColor: '#52856d' } },
                     body: {
                         type: 'box', layout: 'vertical', paddingAll: '20px', spacing: 'sm',
                         contents: [
-                            { type: 'text', text: 'HOME CARE', size: 'sm', weight: 'bold', color: '#e1efe7', align: 'center' },
+                            makeCareHeader(''),
                             ...allStretchCards,
                         ],
                     },
@@ -10043,22 +10090,20 @@
 
                 const careBubble1 = {
                     type: 'bubble', size: 'mega',
-                    styles: { body: { backgroundColor: '#52856d' } },
                     body: {
                         type: 'box', layout: 'vertical', paddingAll: '20px', spacing: 'sm',
                         contents: [
-                            { type: 'text', text: 'HOME CARE ①', size: 'sm', weight: 'bold', color: '#e1efe7', align: 'center' },
+                            makeCareHeader('①'),
                             ...firstHalf,
                         ],
                     },
                 };
                 const careBubble2 = {
                     type: 'bubble', size: 'mega',
-                    styles: { body: { backgroundColor: '#52856d' } },
                     body: {
                         type: 'box', layout: 'vertical', paddingAll: '20px', spacing: 'sm',
                         contents: [
-                            { type: 'text', text: 'HOME CARE ②', size: 'sm', weight: 'bold', color: '#e1efe7', align: 'center' },
+                            makeCareHeader('②'),
                             ...secondHalf,
                         ],
                     },
@@ -10142,21 +10187,19 @@
             // === フッターを最後のバブルのみに集約 (#12) ===
             const totalBubbles = carouselBubbles.length;
             const lastBubble = carouselBubbles[totalBubbles - 1];
-            const isLastDarkBg = lastBubble.styles && lastBubble.styles.body && lastBubble.styles.body.backgroundColor === '#52856d';
             const footerBox = {
                 type: 'box', layout: 'vertical', margin: 'xl', paddingTop: '12px',
-                borderWidth: 'light', borderColor: isLastDarkBg ? '#ffffff26' : '#e1efe7',
+                borderWidth: 'light', borderColor: '#e1efe7',
                 contents: [
-                    { type: 'text', text: '美しさは日々の積み重ねから', size: 'xxs', color: isLastDarkBg ? '#c5e0d1' : '#9cc7b1', align: 'center', margin: 'md' },
-                    { type: 'text', text: 'ご不明点はLINEにていつでもご相談ください。', size: 'xxs', color: isLastDarkBg ? '#c5e0d1' : '#9cc7b1', align: 'center', margin: 'xs' },
+                    { type: 'text', text: '美しさは日々の積み重ねから', size: 'xxs', color: '#9cc7b1', align: 'center', margin: 'md' },
+                    { type: 'text', text: 'ご不明点はLINEにていつでもご相談ください。', size: 'xxs', color: '#9cc7b1', align: 'center', margin: 'xs' },
                 ],
             };
             lastBubble.body.contents.push(footerBox);
 
             // === 全バブルにページインジケータを追加 (#11) ===
             carouselBubbles.forEach((bubble, idx) => {
-                const isDark = bubble.styles && bubble.styles.body && bubble.styles.body.backgroundColor === '#52856d';
-                bubble.body.contents.push(makePageDots(idx, totalBubbles, !isDark));
+                bubble.body.contents.push(makePageDots(idx, totalBubbles, true));
             });
 
             return {
@@ -10290,6 +10333,7 @@
             const [photoData, setPhotoData] = useState(null);
             const [photoName, setPhotoName] = useState('');
             const [coachComment, setCoachComment] = useState('');
+            const [staffName, setStaffName] = useState('');
             const [customStretch, setCustomStretch] = useState('');
             const [selectedStretches, setSelectedStretches] = useState({});
             const [coupon, setCoupon] = useState('none');
@@ -10392,7 +10436,7 @@
                 setMenuChecks({ '骨盤矯正': false, '姿勢矯正': false, '小顔矯正': false, 'ほぐし': false });
                 setScores({ posture: 0, pelvis: 0, face: 0, flow: 0, flex: 0 });
                 setPhotoData(null); setPhotoName('');
-                setCoachComment(''); setCustomStretch('');
+                setCoachComment(''); setCustomStretch(''); setStaffName('');
                 setSelectedStretches({}); setCoupon('none');
                 setTemplateKey('');
             }, []);
@@ -10475,7 +10519,7 @@
 
                 const flexMsg = buildTreatmentFlexMessage({
                     customerName, visitDate, activeMenus: activeMenusForFlex, scores,
-                    coachComment, activeStretchList: activeStretchListForFlex,
+                    coachComment, staffName, activeStretchList: activeStretchListForFlex,
                     customStretch, couponInfo: cInfo, couponExpiry: cExpiry,
                 });
 
@@ -10484,7 +10528,7 @@
                 if (ok) {
                     setTimeout(() => { setLineModalOpen(false); setLineSendStatus(''); }, 2000);
                 }
-            }, [lineSelectedUser, lineChatHook, customerName, visitDate, menuChecks, scores, coachComment, selectedStretches, customStretch, coupon]);
+            }, [lineSelectedUser, lineChatHook, customerName, visitDate, menuChecks, scores, coachComment, staffName, selectedStretches, customStretch, coupon]);
 
             // --- Derived values ---
             const activeMenus = Object.entries(menuChecks).filter(([, v]) => v).map(([k]) => k);
@@ -10543,10 +10587,14 @@
                                 {/* ① 基本情報 */}
                                 <section>
                                     <h3 className="text-sm font-bold text-green-700 uppercase tracking-wide mb-3 border-b border-green-100 pb-1">① 基本情報</h3>
-                                    <div className="grid grid-cols-2 gap-4">
+                                    <div className="grid grid-cols-3 gap-4">
                                         <div>
                                             <label className="block text-xs font-bold mb-1 text-gray-500">お客様名</label>
                                             <input type="text" value={customerName} onChange={e => setCustomerName(e.target.value)} className="w-full border border-gray-300 rounded p-2 text-sm focus:ring-2 focus:ring-green-500 outline-none" placeholder="例: 山田 花子" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-bold mb-1 text-gray-500">担当スタッフ</label>
+                                            <input type="text" value={staffName} onChange={e => setStaffName(e.target.value)} className="w-full border border-gray-300 rounded p-2 text-sm focus:ring-2 focus:ring-green-500 outline-none" placeholder="例: 田中" />
                                         </div>
                                         <div>
                                             <label className="block text-xs font-bold mb-1 text-gray-500">来店日</label>
@@ -12822,9 +12870,10 @@
                                 {isFullscreenView ? (
                                     <button
                                         onClick={() => setCurrentView('dashboard')}
-                                        className="p-2.5 rounded-xl bg-sise-100 border border-sise-300 hover:bg-sise-200 mr-1 transition-colors active:scale-90 shadow-sm"
+                                        className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-sise-100 border border-sise-300 hover:bg-sise-200 mr-1 transition-colors active:scale-90 shadow-sm"
                                     >
-                                        <Icon name="arrow-left" size={20} className="text-sise-700" />
+                                        <Icon name="arrow-left" size={16} className="text-sise-700" />
+                                        <span className="text-sm font-medium text-sise-700">戻る</span>
                                     </button>
                                 ) : (
                                     <button
