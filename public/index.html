@@ -9851,8 +9851,9 @@
             const displayComment = coachComment || '本日はご来店ありがとうございました。\nお伝えしたストレッチを無理のない範囲で行ってみてください。';
             const displayStaff = staffName ? staffName + ' より' : '担当より';
 
-            // ロゴURL (#4) - 本番Vercel URLから取得
-            const logoUrl = window.location.origin + '/images/logo.png';
+            // ロゴURL (#4) - HTTPS本番URLのみ有効（LINEはHTTPS必須）
+            const isHttps = window.location.protocol === 'https:';
+            const logoUrl = isHttps ? window.location.origin + '/images/logo.png' : null;
 
             // ページインジケータ生成ヘルパー (#11)
             const makePageDots = (currentIndex, totalCount, lightMode) => {
@@ -9997,14 +9998,16 @@
                     type: 'box', layout: 'vertical', paddingAll: '20px',
                     backgroundColor: '#f2f8f5',
                     contents: [
-                        // ロゴ (#4)
-                        {
+                        // ロゴ (#4) - HTTPSならimage、それ以外はテキスト
+                        ...(logoUrl ? [{
                             type: 'box', layout: 'vertical', alignItems: 'center', margin: 'none',
                             contents: [{
                                 type: 'image', url: logoUrl, size: 'xxs',
                                 aspectMode: 'fit', aspectRatio: '3:1',
                             }],
-                        },
+                        }] : [{
+                            type: 'text', text: "si'se", size: 'xl', weight: 'bold', color: '#52856d', align: 'center',
+                        }]),
                         { type: 'text', text: 'Personal After Care Sheet', size: 'xxs', weight: 'bold', color: '#6ca88a', align: 'center', margin: 'md' },
                         { type: 'text', text: displayName, size: 'xl', weight: 'bold', color: '#333333', align: 'center', margin: 'sm' },
                         { type: 'text', text: displayDate, size: 'xs', color: '#9cc7b1', align: 'center', margin: 'xs' },
@@ -10049,7 +10052,7 @@
                 type: 'box', layout: 'vertical', paddingAll: '16px', paddingBottom: '12px',
                 backgroundColor: '#52856d', cornerRadius: 'md',
                 contents: [
-                    { type: 'text', text: '🏠 HOME CARE' + (subtitle ? '  ' + subtitle : ''), size: 'sm', weight: 'bold', color: '#ffffff', align: 'center' },
+                    { type: 'text', text: 'HOME CARE' + (subtitle ? '  ' + subtitle : ''), size: 'sm', weight: 'bold', color: '#ffffff', align: 'center' },
                     { type: 'text', text: 'おうちでできるセルフケア', size: 'xxs', color: '#c5e0d1', align: 'center', margin: 'xs' },
                 ],
             });
@@ -10059,12 +10062,12 @@
                 const careBubble = {
                     type: 'bubble', size: 'mega',
                     body: {
-                        type: 'box', layout: 'vertical', paddingAll: '20px', spacing: 'md',
+                        type: 'box', layout: 'vertical', paddingAll: '16px', spacing: 'md',
                         contents: [
                             makeCareHeader(''),
                             {
-                                type: 'text', text: '本日の特別な宿題はありません\n水分をしっかり摂って休みましょう 💧',
-                                size: 'xs', color: '#888888', align: 'center', wrap: true, margin: 'lg',
+                                type: 'text', text: '本日の特別な宿題はありません\n水分をしっかり摂って休みましょう',
+                                size: 'xs', color: '#888888', align: 'center', wrap: true, margin: 'md',
                             },
                         ],
                     },
@@ -10074,7 +10077,7 @@
                 const careBubble = {
                     type: 'bubble', size: 'mega',
                     body: {
-                        type: 'box', layout: 'vertical', paddingAll: '20px', spacing: 'sm',
+                        type: 'box', layout: 'vertical', paddingAll: '16px', spacing: 'sm',
                         contents: [
                             makeCareHeader(''),
                             ...allStretchCards,
@@ -10091,7 +10094,7 @@
                 const careBubble1 = {
                     type: 'bubble', size: 'mega',
                     body: {
-                        type: 'box', layout: 'vertical', paddingAll: '20px', spacing: 'sm',
+                        type: 'box', layout: 'vertical', paddingAll: '16px', spacing: 'sm',
                         contents: [
                             makeCareHeader('①'),
                             ...firstHalf,
@@ -10101,7 +10104,7 @@
                 const careBubble2 = {
                     type: 'bubble', size: 'mega',
                     body: {
-                        type: 'box', layout: 'vertical', paddingAll: '20px', spacing: 'sm',
+                        type: 'box', layout: 'vertical', paddingAll: '16px', spacing: 'sm',
                         contents: [
                             makeCareHeader('②'),
                             ...secondHalf,
@@ -10127,57 +10130,55 @@
                 ];
 
                 const couponBodyContents = [
-                    // ヘッダーバッジ + 割引率
+                    // バッジ: SPECIAL COUPON + 割引率を縦並び
                     {
-                        type: 'box', layout: 'horizontal', justifyContent: 'center', spacing: 'md',
+                        type: 'box', layout: 'vertical', alignItems: 'center', spacing: 'sm',
                         contents: [
                             {
                                 type: 'box', layout: 'vertical', backgroundColor: '#eab308',
-                                cornerRadius: 'md', paddingAll: '6px', paddingStart: '16px', paddingEnd: '16px',
+                                cornerRadius: 'md', paddingAll: '6px', paddingStart: '20px', paddingEnd: '20px',
                                 contents: [{ type: 'text', text: 'SPECIAL COUPON', size: 'xs', weight: 'bold', color: '#ffffff', align: 'center' }],
                             },
-                            // 割引率バッジ (#10)
                             ...(discountPercent > 0 ? [{
                                 type: 'box', layout: 'vertical', backgroundColor: '#ef4444',
-                                cornerRadius: 'md', paddingAll: '6px', paddingStart: '12px', paddingEnd: '12px',
-                                contents: [{ type: 'text', text: discountPercent + '% OFF', size: 'xs', weight: 'bold', color: '#ffffff', align: 'center' }],
+                                cornerRadius: 'md', paddingAll: '6px', paddingStart: '20px', paddingEnd: '20px',
+                                contents: [{ type: 'text', text: discountPercent + '% OFF', size: 'sm', weight: 'bold', color: '#ffffff', align: 'center' }],
                             }] : []),
                         ],
                     },
                     // タイトル
-                    { type: 'text', text: couponInfo.title, size: 'lg', weight: 'bold', color: '#333333', align: 'center', margin: 'lg', wrap: true },
+                    { type: 'text', text: couponInfo.title, size: 'md', weight: 'bold', color: '#333333', align: 'center', margin: 'md', wrap: true },
                     // 価格セクション
                     {
-                        type: 'box', layout: 'vertical', margin: 'lg', paddingAll: '16px',
+                        type: 'box', layout: 'vertical', margin: 'md', paddingAll: '14px',
                         cornerRadius: 'lg', backgroundColor: '#ffffff',
                         borderWidth: 'normal', borderColor: '#eab308',
                         contents: priceBoxContents,
                     },
                     // 有効期限
                     {
-                        type: 'box', layout: 'vertical', margin: 'lg', paddingAll: '10px',
+                        type: 'box', layout: 'vertical', margin: 'md', paddingAll: '8px',
                         cornerRadius: 'md', backgroundColor: '#fef2f2',
                         borderWidth: 'light', borderColor: '#fecaca',
                         contents: [
-                            { type: 'text', text: '有効期限: ' + couponExpiry + ' まで', size: 'sm', color: '#ef4444', weight: 'bold', align: 'center' },
+                            { type: 'text', text: '有効期限: ' + couponExpiry + ' まで', size: 'xs', color: '#ef4444', weight: 'bold', align: 'center' },
                         ],
                     },
                     // 注意事項
                     {
-                        type: 'box', layout: 'vertical', margin: 'lg', paddingAll: '12px',
+                        type: 'box', layout: 'vertical', margin: 'md', paddingAll: '10px',
                         cornerRadius: 'md', backgroundColor: '#ffffff',
                         contents: [
-                            { type: 'text', text: couponInfo.desc.replace(/<br\s*\/?>/gi, '\n'), size: 'xs', color: '#888888', wrap: true },
+                            { type: 'text', text: couponInfo.desc.replace(/<br\s*\/?>/gi, '\n'), size: 'xxs', color: '#888888', wrap: true },
                         ],
                     },
                 ];
 
                 const couponBubble = {
                     type: 'bubble', size: 'mega',
-                    styles: { body: { backgroundColor: '#fffbf0' } },
+                    styles: { body: { backgroundColor: '#ffffff' } },
                     body: {
-                        type: 'box', layout: 'vertical', paddingAll: '24px', spacing: 'md',
-                        justifyContent: 'center',
+                        type: 'box', layout: 'vertical', paddingAll: '20px', spacing: 'sm',
                         contents: couponBodyContents,
                     },
                 };
