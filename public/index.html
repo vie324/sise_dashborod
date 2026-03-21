@@ -3213,6 +3213,13 @@
                     const data = await res.json();
                     console.log('[カウンセリング] GASレスポンス:', JSON.stringify(data._debug || {}));
                     if (data && data.customer) {
+                        // 免責事項テキストが treatmentExperience に混入している場合を除外
+                        if (data.customer.treatmentExperience) {
+                            data.customer.treatmentExperience = data.customer.treatmentExperience.filter(v =>
+                                !v.includes('異議を申し立て') && !v.includes('上記の内容を理解') &&
+                                !v.includes('同意します') && !v.includes('施術をうけ') && v.length < 30
+                            );
+                        }
                         setSelectedCustomer(data.customer);
                         return data.customer;
                     }

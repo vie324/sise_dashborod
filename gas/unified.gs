@@ -438,6 +438,38 @@ function counselingList(data, C) {
   return { customers, total: customers.length, lastUpdated: new Date().toISOString() };
 }
 
+// フォールバック: 全列をスキャンして施術経験データを含むセルを探す
+var TREATMENT_EXP_SCAN_KEYWORDS = ['整体', 'マッサージ', 'カイロ', '鍼灸', 'エステ', 'リラクゼーション', '接骨院', '整骨院', 'ストレッチ専門'];
+// 免責事項テキストの判定キーワード
+var DISCLAIMER_KEYWORDS = ['異議を申し立て', '上記の内容を理解', '施術をうけ', '同意します', '確認いたしました'];
+
+function isDisclaimerText(val) {
+  if (!val) return false;
+  var s = String(val);
+  for (var i = 0; i < DISCLAIMER_KEYWORDS.length; i++) {
+    if (s.indexOf(DISCLAIMER_KEYWORDS[i]) !== -1) return true;
+  }
+  return false;
+}
+
+function scanForTreatmentExperience(row, C) {
+  for (var ci = 0; ci < row.length; ci++) {
+    if (ci === C.NAME || ci === C.TIMESTAMP || ci === C.PHONE || ci === C.EMAIL || ci === C.ADDRESS || ci === C.BIRTHDAY) continue;
+    if (ci === C.CONCERNS || ci === C.DISCLAIMER) continue;
+    var cellVal = String(row[ci] || '').trim();
+    if (!cellVal || cellVal.length > 200) continue;
+    if (isDisclaimerText(cellVal)) continue;
+    var matchCount = 0;
+    for (var ck = 0; ck < TREATMENT_EXP_SCAN_KEYWORDS.length; ck++) {
+      if (cellVal.indexOf(TREATMENT_EXP_SCAN_KEYWORDS[ck]) !== -1) matchCount++;
+    }
+    if (matchCount >= 1) {
+      return parseMultiSelect(cellVal);
+    }
+  }
+  return [];
+}
+
 function counselingDetail(data, C, name, index) {
   let row = null, rowIndex = -1;
   if (index !== undefined && index !== '') {
@@ -473,10 +505,16 @@ function counselingDetail(data, C, name, index) {
       concerns: concerns,
       improvementTimeline: String(colVal(row, C.IMPROVEMENT_TIMELINE) || '').trim(),
       treatmentRequest: String(colVal(row, C.TREATMENT_REQUEST) || '').trim(),
-      treatmentExperience: parseMultiSelect(colVal(row, C.TREATMENT_EXPERIENCE)).filter(function(v) {
+      treatmentExperience: (function() {
+        var raw = parseMultiSelect(colVal(row, C.TREATMENT_EXPERIENCE));
         // 免責事項テキストが混入した場合を除外
-        return v.indexOf('異議を申し立て') === -1 && v.indexOf('上記の内容を理解') === -1 && v.indexOf('同意します') === -1 && v.length < 30;
-      }),
+        var filtered = raw.filter(function(v) { return !isDisclaimerText(v); });
+        // フォールバック: 除外で空になったら全列スキャンで正しいデータを探す
+        if (filtered.length === 0 && raw.length > 0) {
+          filtered = scanForTreatmentExperience(row, C);
+        }
+        return filtered;
+      })(),
       surgeryHistory: String(colVal(row, C.SURGERY_HISTORY) || '').trim(),
       currentTreatment: String(colVal(row, C.CURRENT_TREATMENT) || '').trim(),
       allergy: String(colVal(row, C.ALLERGY) || '').trim(),
