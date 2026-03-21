@@ -9850,6 +9850,30 @@
             const displayDate = visitDate ? visitDate.replace(/-/g, '.') : '-';
             const displayComment = coachComment || '本日はご来店ありがとうございました。\nお伝えしたストレッチを無理のない範囲で行ってみてください。';
 
+            // ロゴURL (#4)
+            const logoUrl = window.location.origin + '/images/logo.png';
+
+            // ページインジケータ生成ヘルパー (#11)
+            const makePageDots = (currentIndex, totalCount, lightMode) => {
+                const dots = [];
+                for (let i = 0; i < totalCount; i++) {
+                    dots.push({
+                        type: 'box', layout: 'vertical',
+                        width: i === currentIndex ? '18px' : '6px', height: '6px',
+                        cornerRadius: '3px',
+                        backgroundColor: i === currentIndex
+                            ? (lightMode ? '#52856d' : '#ffffff')
+                            : (lightMode ? '#d1e0d8' : '#ffffff60'),
+                        contents: [{ type: 'filler' }],
+                    });
+                }
+                return {
+                    type: 'box', layout: 'horizontal', justifyContent: 'center',
+                    spacing: 'xs', margin: 'xl', paddingTop: '8px',
+                    contents: dots,
+                };
+            };
+
             // スコアラベル
             const scoreLabels = { posture: '姿勢', pelvis: '骨盤', face: '顔・頭', flow: '代謝・巡り', flex: '柔軟・バランス' };
 
@@ -9872,22 +9896,46 @@
                 }))
                 : [{ type: 'text', text: '施術内容なし', size: 'xs', color: '#9cc7b1', align: 'center' }];
 
-            // ストレッチリスト
-            const stretchContents = [];
+            // ストレッチ手順を番号付きステップに分割 (#6)
+            const buildStretchCard = (s) => {
+                const rawText = s.text.replace(/<br\s*\/?>/gi, '\n');
+                // ①②③ or ・ で始まるステップを分割
+                const steps = rawText.split(/(?=①|②|③|④|⑤|・)/).map(st => st.trim()).filter(Boolean);
+
+                const stepContents = [
+                    { type: 'text', text: s.title, size: 'xs', weight: 'bold', color: '#345244', margin: 'none' },
+                ];
+
+                if (steps.length > 1) {
+                    // 複数ステップ: 各ステップを個別行で表示
+                    steps.forEach(step => {
+                        stepContents.push({
+                            type: 'text', text: step, size: 'xxs', color: '#52856d', wrap: true, margin: 'xs',
+                        });
+                    });
+                } else {
+                    // 単一テキスト
+                    stepContents.push({
+                        type: 'text', text: rawText, size: 'xxs', color: '#52856d', wrap: true, margin: 'xs',
+                    });
+                }
+
+                return {
+                    type: 'box', layout: 'vertical', spacing: 'none', margin: 'md',
+                    paddingAll: '12px', cornerRadius: 'md',
+                    backgroundColor: '#f2f8f5',
+                    contents: stepContents,
+                };
+            };
+
+            // ストレッチリスト生成
+            const allStretchCards = [];
             if (activeStretchList.length > 0 || (customStretch && customStretch.trim())) {
                 activeStretchList.forEach(s => {
-                    stretchContents.push({
-                        type: 'box', layout: 'vertical', spacing: 'xs', margin: 'md',
-                        paddingAll: '12px', cornerRadius: 'md',
-                        backgroundColor: '#f2f8f5',
-                        contents: [
-                            { type: 'text', text: s.title, size: 'xs', weight: 'bold', color: '#345244' },
-                            { type: 'text', text: s.text.replace(/<br\s*\/?>/gi, '\n'), size: 'xxs', color: '#52856d', wrap: true },
-                        ],
-                    });
+                    allStretchCards.push(buildStretchCard(s));
                 });
                 if (customStretch && customStretch.trim()) {
-                    stretchContents.push({
+                    allStretchCards.push({
                         type: 'box', layout: 'vertical', spacing: 'xs', margin: 'md',
                         paddingAll: '12px', cornerRadius: 'md', backgroundColor: '#f2f8f5',
                         contents: [
@@ -9896,21 +9944,27 @@
                         ],
                     });
                 }
-            } else {
-                stretchContents.push({
-                    type: 'text', text: '本日の特別な宿題はありません\n水分をしっかり摂って休みましょう',
-                    size: 'xxs', color: '#9cc7b1', align: 'center', wrap: true, margin: 'md',
-                });
             }
 
-            // メインバブル
+            // カルーセル全体を先に構築してからページドットを付与
+            const carouselBubbles = [];
+
+            // === バブル1: メインバブル ===
             const headerBubble = {
                 type: 'bubble', size: 'mega',
                 header: {
                     type: 'box', layout: 'vertical', paddingAll: '20px',
                     backgroundColor: '#f2f8f5',
                     contents: [
-                        { type: 'text', text: 'Personal After Care Sheet', size: 'xxs', weight: 'bold', color: '#6ca88a', align: 'center' },
+                        // ロゴ (#4)
+                        {
+                            type: 'box', layout: 'vertical', alignItems: 'center', margin: 'none',
+                            contents: [{
+                                type: 'image', url: logoUrl, size: 'xxs',
+                                aspectMode: 'fit', aspectRatio: '3:1',
+                            }],
+                        },
+                        { type: 'text', text: 'Personal After Care Sheet', size: 'xxs', weight: 'bold', color: '#6ca88a', align: 'center', margin: 'md' },
                         { type: 'text', text: displayName, size: 'xl', weight: 'bold', color: '#333333', align: 'center', margin: 'sm' },
                         { type: 'text', text: displayDate, size: 'xs', color: '#9cc7b1', align: 'center', margin: 'xs' },
                     ],
@@ -9926,106 +9980,191 @@
                         { type: 'text', text: 'Body Balance', size: 'xxs', weight: 'bold', color: '#9cc7b1', align: 'center', margin: 'lg' },
                         { type: 'box', layout: 'vertical', spacing: 'sm', margin: 'md', contents: scoreRows },
                         { type: 'separator', color: '#e1efe7', margin: 'lg' },
-                        // Feedback
+                        // Feedback (#3 吹き出し風)
                         { type: 'text', text: 'Feedback & Goal', size: 'xxs', weight: 'bold', color: '#9cc7b1', align: 'center', margin: 'lg' },
                         {
-                            type: 'box', layout: 'horizontal', margin: 'md',
+                            type: 'box', layout: 'vertical', margin: 'md',
+                            cornerRadius: 'xl', backgroundColor: '#f2f8f5',
+                            paddingAll: '16px',
                             contents: [
-                                { type: 'box', layout: 'vertical', width: '3px', backgroundColor: '#9cc7b1', contents: [{ type: 'filler' }] },
-                                { type: 'text', text: displayComment, size: 'sm', color: '#555555', wrap: true, flex: 1, margin: 'md' },
+                                {
+                                    type: 'box', layout: 'horizontal', spacing: 'sm',
+                                    contents: [
+                                        { type: 'text', text: '💬', size: 'md' },
+                                        { type: 'text', text: '担当より', size: 'xxs', weight: 'bold', color: '#6ca88a', gravity: 'center' },
+                                    ],
+                                },
+                                { type: 'text', text: displayComment, size: 'sm', color: '#555555', wrap: true, margin: 'md' },
                             ],
                         },
+                        // ページドット placeholder（後で差し替え）
                     ],
                 },
             };
+            carouselBubbles.push(headerBubble);
 
-            // ストレッチバブル（HOME CARE のみ）
-            const careContents = [
-                { type: 'text', text: 'HOME CARE', size: 'sm', weight: 'bold', color: '#e1efe7', align: 'center' },
-                ...stretchContents,
-                // フッター
-                {
-                    type: 'box', layout: 'vertical', margin: 'xl', paddingTop: '12px',
-                    borderWidth: 'light', borderColor: '#ffffff26',
-                    contents: [
-                        { type: 'text', text: '美しさは日々の積み重ねから', size: 'xxs', color: '#c5e0d1', align: 'center', margin: 'md' },
-                        { type: 'text', text: 'ご不明点はLINEにていつでもご相談ください。', size: 'xxs', color: '#c5e0d1', align: 'center', margin: 'xs' },
-                    ],
-                },
-            ];
+            // === バブル2+: HOME CARE (#8 3つ以上で分割) ===
+            if (allStretchCards.length === 0) {
+                // ストレッチなし
+                const careBubble = {
+                    type: 'bubble', size: 'mega',
+                    styles: { body: { backgroundColor: '#52856d' } },
+                    body: {
+                        type: 'box', layout: 'vertical', paddingAll: '20px', spacing: 'sm',
+                        contents: [
+                            { type: 'text', text: 'HOME CARE', size: 'sm', weight: 'bold', color: '#e1efe7', align: 'center' },
+                            {
+                                type: 'text', text: '本日の特別な宿題はありません\n水分をしっかり摂って休みましょう',
+                                size: 'xxs', color: '#9cc7b1', align: 'center', wrap: true, margin: 'md',
+                            },
+                        ],
+                    },
+                };
+                carouselBubbles.push(careBubble);
+            } else if (allStretchCards.length <= 2) {
+                // 2つ以下: 1バブル
+                const careBubble = {
+                    type: 'bubble', size: 'mega',
+                    styles: { body: { backgroundColor: '#52856d' } },
+                    body: {
+                        type: 'box', layout: 'vertical', paddingAll: '20px', spacing: 'sm',
+                        contents: [
+                            { type: 'text', text: 'HOME CARE', size: 'sm', weight: 'bold', color: '#e1efe7', align: 'center' },
+                            ...allStretchCards,
+                        ],
+                    },
+                };
+                carouselBubbles.push(careBubble);
+            } else {
+                // 3つ以上: 2バブルに分割 (#8)
+                const mid = Math.ceil(allStretchCards.length / 2);
+                const firstHalf = allStretchCards.slice(0, mid);
+                const secondHalf = allStretchCards.slice(mid);
 
-            const careBubble = {
-                type: 'bubble', size: 'mega',
-                styles: { body: { backgroundColor: '#52856d' } },
-                body: {
-                    type: 'box', layout: 'vertical', paddingAll: '20px', spacing: 'sm',
-                    contents: careContents,
-                },
-            };
+                const careBubble1 = {
+                    type: 'bubble', size: 'mega',
+                    styles: { body: { backgroundColor: '#52856d' } },
+                    body: {
+                        type: 'box', layout: 'vertical', paddingAll: '20px', spacing: 'sm',
+                        contents: [
+                            { type: 'text', text: 'HOME CARE ①', size: 'sm', weight: 'bold', color: '#e1efe7', align: 'center' },
+                            ...firstHalf,
+                        ],
+                    },
+                };
+                const careBubble2 = {
+                    type: 'bubble', size: 'mega',
+                    styles: { body: { backgroundColor: '#52856d' } },
+                    body: {
+                        type: 'box', layout: 'vertical', paddingAll: '20px', spacing: 'sm',
+                        contents: [
+                            { type: 'text', text: 'HOME CARE ②', size: 'sm', weight: 'bold', color: '#e1efe7', align: 'center' },
+                            ...secondHalf,
+                        ],
+                    },
+                };
+                carouselBubbles.push(careBubble1, careBubble2);
+            }
 
-            // クーポンバブル（独立した3枚目カード）
-            let couponBubble = null;
+            // === クーポンバブル (#10 割引率バッジ追加) ===
             if (couponInfo) {
-                couponBubble = {
+                // 割引率を計算 (#10)
+                const parsePrice = (s) => parseInt(String(s).replace(/[¥￥,，\s]/g, ''), 10);
+                const oldPrice = parsePrice(couponInfo.old);
+                const newPrice = parsePrice(couponInfo.price);
+                const discountPercent = (oldPrice && newPrice && oldPrice > newPrice)
+                    ? Math.round((1 - newPrice / oldPrice) * 100)
+                    : 0;
+
+                const priceBoxContents = [
+                    { type: 'text', text: couponInfo.old, size: 'sm', color: '#999999', decoration: 'line-through', align: 'center' },
+                    { type: 'text', text: couponInfo.price, size: '3xl', weight: 'bold', color: '#ef4444', align: 'center', margin: 'sm' },
+                ];
+
+                const couponBodyContents = [
+                    // ヘッダーバッジ + 割引率
+                    {
+                        type: 'box', layout: 'horizontal', justifyContent: 'center', spacing: 'md',
+                        contents: [
+                            {
+                                type: 'box', layout: 'vertical', backgroundColor: '#eab308',
+                                cornerRadius: 'md', paddingAll: '6px', paddingStart: '16px', paddingEnd: '16px',
+                                contents: [{ type: 'text', text: 'SPECIAL COUPON', size: 'xs', weight: 'bold', color: '#ffffff', align: 'center' }],
+                            },
+                            // 割引率バッジ (#10)
+                            ...(discountPercent > 0 ? [{
+                                type: 'box', layout: 'vertical', backgroundColor: '#ef4444',
+                                cornerRadius: 'md', paddingAll: '6px', paddingStart: '12px', paddingEnd: '12px',
+                                contents: [{ type: 'text', text: discountPercent + '% OFF', size: 'xs', weight: 'bold', color: '#ffffff', align: 'center' }],
+                            }] : []),
+                        ],
+                    },
+                    // タイトル
+                    { type: 'text', text: couponInfo.title, size: 'lg', weight: 'bold', color: '#333333', align: 'center', margin: 'lg', wrap: true },
+                    // 価格セクション
+                    {
+                        type: 'box', layout: 'vertical', margin: 'lg', paddingAll: '16px',
+                        cornerRadius: 'lg', backgroundColor: '#ffffff',
+                        borderWidth: 'normal', borderColor: '#eab308',
+                        contents: priceBoxContents,
+                    },
+                    // 有効期限
+                    {
+                        type: 'box', layout: 'vertical', margin: 'lg', paddingAll: '10px',
+                        cornerRadius: 'md', backgroundColor: '#fef2f2',
+                        borderWidth: 'light', borderColor: '#fecaca',
+                        contents: [
+                            { type: 'text', text: '有効期限: ' + couponExpiry + ' まで', size: 'sm', color: '#ef4444', weight: 'bold', align: 'center' },
+                        ],
+                    },
+                    // 注意事項
+                    {
+                        type: 'box', layout: 'vertical', margin: 'lg', paddingAll: '12px',
+                        cornerRadius: 'md', backgroundColor: '#ffffff',
+                        contents: [
+                            { type: 'text', text: couponInfo.desc.replace(/<br\s*\/?>/gi, '\n'), size: 'xs', color: '#888888', wrap: true },
+                        ],
+                    },
+                ];
+
+                const couponBubble = {
                     type: 'bubble', size: 'mega',
                     styles: { body: { backgroundColor: '#fffbf0' } },
                     body: {
                         type: 'box', layout: 'vertical', paddingAll: '24px', spacing: 'md',
                         justifyContent: 'center',
-                        contents: [
-                            // ヘッダーバッジ
-                            {
-                                type: 'box', layout: 'vertical', alignItems: 'center',
-                                contents: [{
-                                    type: 'box', layout: 'vertical', backgroundColor: '#eab308',
-                                    cornerRadius: 'md', paddingAll: '6px', paddingStart: '16px', paddingEnd: '16px',
-                                    contents: [{ type: 'text', text: 'SPECIAL COUPON', size: 'xs', weight: 'bold', color: '#ffffff', align: 'center' }],
-                                }],
-                            },
-                            // タイトル
-                            { type: 'text', text: couponInfo.title, size: 'lg', weight: 'bold', color: '#333333', align: 'center', margin: 'lg', wrap: true },
-                            // 価格セクション
-                            {
-                                type: 'box', layout: 'vertical', margin: 'lg', paddingAll: '16px',
-                                cornerRadius: 'lg', backgroundColor: '#ffffff',
-                                borderWidth: 'normal', borderColor: '#eab308',
-                                contents: [
-                                    { type: 'text', text: couponInfo.old, size: 'sm', color: '#999999', decoration: 'line-through', align: 'center' },
-                                    { type: 'text', text: couponInfo.price, size: '3xl', weight: 'bold', color: '#ef4444', align: 'center', margin: 'sm' },
-                                ],
-                            },
-                            // 有効期限
-                            {
-                                type: 'box', layout: 'vertical', margin: 'lg', paddingAll: '10px',
-                                cornerRadius: 'md', backgroundColor: '#fef2f2',
-                                borderWidth: 'light', borderColor: '#fecaca',
-                                contents: [
-                                    { type: 'text', text: '有効期限: ' + couponExpiry + ' まで', size: 'sm', color: '#ef4444', weight: 'bold', align: 'center' },
-                                ],
-                            },
-                            // 注意事項
-                            {
-                                type: 'box', layout: 'vertical', margin: 'lg', paddingAll: '12px',
-                                cornerRadius: 'md', backgroundColor: '#ffffff',
-                                contents: [
-                                    { type: 'text', text: couponInfo.desc.replace(/<br\s*\/?>/gi, '\n'), size: 'xs', color: '#888888', wrap: true },
-                                ],
-                            },
-                        ],
+                        contents: couponBodyContents,
                     },
                 };
+                carouselBubbles.push(couponBubble);
             }
 
-            // カルーセル構築
-            const carouselContents = [headerBubble, careBubble];
-            if (couponBubble) carouselContents.push(couponBubble);
+            // === フッターを最後のバブルのみに集約 (#12) ===
+            const totalBubbles = carouselBubbles.length;
+            const lastBubble = carouselBubbles[totalBubbles - 1];
+            const isLastDarkBg = lastBubble.styles && lastBubble.styles.body && lastBubble.styles.body.backgroundColor === '#52856d';
+            const footerBox = {
+                type: 'box', layout: 'vertical', margin: 'xl', paddingTop: '12px',
+                borderWidth: 'light', borderColor: isLastDarkBg ? '#ffffff26' : '#e1efe7',
+                contents: [
+                    { type: 'text', text: '美しさは日々の積み重ねから', size: 'xxs', color: isLastDarkBg ? '#c5e0d1' : '#9cc7b1', align: 'center', margin: 'md' },
+                    { type: 'text', text: 'ご不明点はLINEにていつでもご相談ください。', size: 'xxs', color: isLastDarkBg ? '#c5e0d1' : '#9cc7b1', align: 'center', margin: 'xs' },
+                ],
+            };
+            lastBubble.body.contents.push(footerBox);
+
+            // === 全バブルにページインジケータを追加 (#11) ===
+            carouselBubbles.forEach((bubble, idx) => {
+                const isDark = bubble.styles && bubble.styles.body && bubble.styles.body.backgroundColor === '#52856d';
+                bubble.body.contents.push(makePageDots(idx, totalBubbles, !isDark));
+            });
 
             return {
                 type: 'flex',
                 altText: `${displayName}のアフターケアシート (${displayDate})`,
                 contents: {
                     type: 'carousel',
-                    contents: carouselContents,
+                    contents: carouselBubbles,
                 },
             };
         };
