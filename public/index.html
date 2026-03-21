@@ -3236,6 +3236,8 @@
             const [loading, setLoading] = useState(false);
             const [sending, setSending] = useState(false);
             const [configError, setConfigError] = useState(null);
+            const [gasStatus, setGasStatus] = useState('checking'); // 'checking' | 'connected' | 'error'
+            const [gasError, setGasError] = useState(null);
 
             // LINE設定を取得
             useEffect(() => {
@@ -3268,6 +3270,8 @@
                     return;
                 }
                 setLoading(true);
+                setGasStatus('checking');
+                setGasError(null);
                 try {
                     const gasUrl = UNIFIED_GAS_URL + '?type=lineMessages&store=' + sid;
                     console.log('[LINE] fetching:', gasUrl);
@@ -3277,6 +3281,14 @@
                     ]);
                     console.log('[LINE] threadsRes:', JSON.stringify(threadsRes).substring(0, 200));
                     console.log('[LINE] profilesRes:', JSON.stringify(profilesRes).substring(0, 200));
+                    if (threadsRes.error || profilesRes.error) {
+                        const errMsg = threadsRes.error || profilesRes.error;
+                        setGasStatus('error');
+                        setGasError(errMsg);
+                        console.error('[LINE] GASエラー:', errMsg);
+                    } else {
+                        setGasStatus('connected');
+                    }
                     if (threadsRes.threads) setThreads(threadsRes.threads);
                     if (profilesRes.profiles) {
                         const map = {};
@@ -3285,6 +3297,8 @@
                     }
                 } catch (e) {
                     console.error('[LINE] スレッド取得エラー:', e);
+                    setGasStatus('error');
+                    setGasError(e.message || '接続エラー');
                 } finally {
                     setLoading(false);
                 }
@@ -3508,6 +3522,7 @@
             return {
                 lineConfig, threads, profiles, messages, selectedThread,
                 lineStoreId, setLineStoreId, loading, sending, configError,
+                gasStatus, gasError,
                 fetchThreads, openThread, setSelectedThread, sendMessage, fetchMessages,
                 broadcasts, broadcastSending, fetchBroadcasts, sendBroadcast,
                 templates, fetchTemplates, saveTemplate,
@@ -8331,6 +8346,7 @@
             const {
                 lineConfig, threads, profiles, messages, selectedThread,
                 lineStoreId, setLineStoreId, loading, sending, configError,
+                gasStatus, gasError,
                 fetchThreads, openThread, setSelectedThread, sendMessage, fetchMessages,
                 broadcasts, broadcastSending, fetchBroadcasts, sendBroadcast,
                 templates, fetchTemplates, saveTemplate,
@@ -8928,15 +8944,43 @@
                         </div>
                     )}
 
+                    {/* GAS接続ステータス */}
+                    {gasStatus !== 'checking' && (
+                        <div className={`flex items-center gap-2 px-3 py-2 rounded-xl mb-3 text-xs ${
+                            gasStatus === 'connected'
+                                ? 'bg-green-50 text-green-700'
+                                : 'bg-red-50 text-red-700'
+                        }`}>
+                            <span className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                                gasStatus === 'connected' ? 'bg-green-500' : 'bg-red-500'
+                            }`}></span>
+                            {gasStatus === 'connected' ? (
+                                <span>GAS接続OK — メッセージ {threads.length} 件</span>
+                            ) : (
+                                <div>
+                                    <span className="font-semibold">GAS接続エラー</span>
+                                    {gasError && <span className="ml-1">— {gasError}</span>}
+                                    <p className="mt-0.5 text-[10px] opacity-75">GASを最新のunified.gsで再デプロイしてください</p>
+                                </div>
+                            )}
+                        </div>
+                    )}
+                    {gasStatus === 'checking' && loading && (
+                        <div className="flex items-center gap-2 px-3 py-2 rounded-xl mb-3 text-xs bg-slate-50 text-slate-500">
+                            <Icon name="loader" size={12} className="animate-spin" />
+                            <span>GAS接続を確認中...</span>
+                        </div>
+                    )}
+
                     {/* スレッド一覧 */}
                     <div className="space-y-2">
-                        {loading && threads.length === 0 && (
+                        {loading && threads.length === 0 && gasStatus !== 'error' && (
                             <div className="flex items-center justify-center py-12">
                                 <Icon name="loader" size={24} className="text-green-500 animate-spin" />
                             </div>
                         )}
 
-                        {!loading && threads.length === 0 && (
+                        {!loading && threads.length === 0 && gasStatus !== 'error' && (
                             <div className="text-center py-12">
                                 <div className="w-14 h-14 rounded-2xl bg-green-50 flex items-center justify-center mx-auto mb-3">
                                     <Icon name="message-circle" size={28} className="text-green-400" />
