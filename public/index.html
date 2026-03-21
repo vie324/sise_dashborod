@@ -5208,6 +5208,9 @@
             const [actionLoading, setActionLoading] = useState(null); // 'cancel'|'pause'|'resume'
             const [actionMessage, setActionMessage] = useState(null); // { type, text }
             const [showSubscriptionLink, setShowSubscriptionLink] = useState(false);
+            const [currentPage, setCurrentPage] = useState(1);
+            const ITEMS_PER_PAGE = 30;
+            const ITEMS_PER_PAGE_MOBILE = 20;
 
             const handleRefresh = async () => {
                 setIsRefreshing(true);
@@ -5262,6 +5265,14 @@
 
                 return filtered;
             }, [memberData.members, filterStatus, searchQuery]);
+
+            // フィルタ変更時にページリセット
+            useEffect(() => { setCurrentPage(1); }, [filterStatus, searchQuery]);
+
+            const totalPages = Math.ceil(filteredMembers.length / ITEMS_PER_PAGE);
+            const totalPagesMobile = Math.ceil(filteredMembers.length / ITEMS_PER_PAGE_MOBILE);
+            const paginatedMembers = filteredMembers.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE);
+            const paginatedMembersMobile = filteredMembers.slice((currentPage - 1) * ITEMS_PER_PAGE_MOBILE, currentPage * ITEMS_PER_PAGE_MOBILE);
 
             // ステータスバッジの色
             const getStatusColor = (status) => {
@@ -5605,7 +5616,7 @@
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {filteredMembers.slice(0, 30).map((member) => (
+                                    {paginatedMembers.map((member) => (
                                         <tr key={member.id} className="border-b border-slate-100/40 table-row-hover cursor-pointer" onClick={() => setSelectedMember(member)}>
                                             <td className="py-3 px-3">
                                                 <div className="flex items-center">
@@ -5652,7 +5663,7 @@
 
                         {/* モバイル: カード表示 */}
                         {!memberData.loading && <div className="hide-desktop space-y-3">
-                            {filteredMembers.slice(0, 20).map((member) => (
+                            {paginatedMembersMobile.map((member) => (
                                 <div
                                     key={member.id}
                                     onClick={() => setSelectedMember(member)}
@@ -5677,9 +5688,26 @@
                             ))}
                         </div>}
 
-                        {!memberData.loading && filteredMembers.length > 30 && (
-                            <div className="text-center py-4 text-sm text-slate-400">
-                                {filteredMembers.length}件中30件を表示
+                        {!memberData.loading && filteredMembers.length > ITEMS_PER_PAGE_MOBILE && (
+                            <div className="flex items-center justify-center gap-2 py-4">
+                                <button
+                                    onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                                    disabled={currentPage === 1}
+                                    className="px-3 py-1.5 rounded-lg text-sm font-medium border border-slate-200 hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                                >
+                                    <Icon name="chevron-left" size={16} />
+                                </button>
+                                <span className="text-sm text-slate-500 mx-2">
+                                    {currentPage} / {window.innerWidth < 768 ? totalPagesMobile : totalPages} ページ
+                                    <span className="text-xs text-slate-400 ml-2">（全{filteredMembers.length}件）</span>
+                                </span>
+                                <button
+                                    onClick={() => setCurrentPage(p => p + 1)}
+                                    disabled={currentPage >= (window.innerWidth < 768 ? totalPagesMobile : totalPages)}
+                                    className="px-3 py-1.5 rounded-lg text-sm font-medium border border-slate-200 hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                                >
+                                    <Icon name="chevron-right" size={16} />
+                                </button>
                             </div>
                         )}
                         {!memberData.loading && filteredMembers.length === 0 && (
@@ -8855,9 +8883,10 @@
                         <div className="flex items-center gap-3 p-3 border-b border-slate-200 bg-white rounded-t-2xl">
                             <button
                                 onClick={() => { setSelectedThread(null); fetchThreads(lineStoreId); }}
-                                className="p-2 rounded-xl hover:bg-slate-100 transition-colors active:scale-90"
+                                className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl hover:bg-slate-100 transition-colors active:scale-95 text-slate-600"
                             >
-                                <Icon name="arrow-left" size={20} className="text-slate-500" />
+                                <Icon name="arrow-left" size={18} />
+                                <span className="text-xs font-semibold">戻る</span>
                             </button>
                             {profile.pictureUrl ? (
                                 <img src={profile.pictureUrl} alt="" className="w-10 h-10 rounded-full object-cover" />
