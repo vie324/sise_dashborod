@@ -70,6 +70,8 @@ const SHEETS = {
   TICKET_DATA: '回数券データ',
   MEMBERS: 'QR現金会員',
   CASHBOOK: '出納帳',
+  CASHBOOK_LOG: '出納帳ログ',
+  DAILY_CLOSE: '日次締め',
   STAFF: 'スタッフ管理',
   STORES: '店舗管理',
   DASH_CONFIG: 'ダッシュボード設定',
@@ -797,33 +799,318 @@ function handleMembersPost(body) {
 }
 
 // ============================================================
-// 出納帳（読み書き）
+// 出納帳（列ベース構造 + 監査ログ + 日次締め）
 // ============================================================
 
-function handleCashbookGet(params) {
-  const sheet = getOrCreateSheet(SHEETS.CASHBOOK, ['JSON']);
-  const lastRow = sheet.getLastRow();
-  if (lastRow < 2) return { entries: [] };
+var CASHBOOK_HEADERS = ['ID','日付','種別','カテゴリ','摘要','金額','顧客名','施術回数','支払方法','現金区分','会員ID','店舗ID','記帳者','備考','作成日時','更新日時','更新者','削除フラグ'];
+var CASHBOOK_LOG_HEADERS = ['日時','操作','エントリID','店舗ID','操作者','変更前','変更後'];
+var DAILY_CLOSE_HEADERS = ['日付','店舗ID','金庫残高','小口残高','レジ残高','締め者','締め日時','備考','ロック'];
 
-  const data = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
-  const entries = [];
-  data.forEach(row => {
-    try { if (row[0]) entries.push(JSON.parse(row[0])); } catch(e) {}
-  });
-
-  return { entries, lastUpdated: new Date().toISOString() };
+function ensureCashbookSheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEETS.CASHBOOK);
+  if (!sheet) {
+    sheet = ss.insertSheet(SHEETS.CASHBOOK);
+    sheet.getRange(1, 1, 1, CASHBOOK_HEADERS.length).setValues([CASHBOOK_HEADERS]);
+    sheet.getRange(1, 1, 1, CASHBOOK_HEADERS.length).setFontWeight('bold');
+    sheet.setFrozenRows(1);
+  } else {
+    // 旧JSONフォーマットからのマイグレーション
+    var h = sheet.getRange(1, 1).getValue();
+    if (h === 'JSON') {
+      migrateCashbookFromJson(sheet);
+    }
+  }
+  return sheet;
 }
 
-function handleCashbookPost(body) {
-  const sheet = getOrCreateSheet(SHEETS.CASHBOOK, ['JSON']);
-  const lastRow = sheet.getLastRow();
-  if (lastRow >= 2) sheet.getRange(2, 1, lastRow - 1, 1).clearContent();
+function migrateCashbookFromJson(sheet) {
+  var lastRow = sheet.getLastRow();
+  var oldEntries = [];
+  if (lastRow >= 2) {
+    var data = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+    data.forEach(function(row) {
+      try { if (row[0]) oldEntries.push(JSON.parse(row[0])); } catch(e) {}
+    });
+    sheet.clear();
+  }
+  sheet.getRange(1, 1, 1, CASHBOOK_HEADERS.length).setValues([CASHBOOK_HEADERS]);
+  sheet.getRange(1, 1, 1, CASHBOOK_HEADERS.length).setFontWeight('bold');
+  sheet.setFrozenRows(1);
+  oldEntries.forEach(function(e) {
+    sheet.appendRow([
+      e.id || '', e.date || '', e.type || '', e.category || '', e.description || '',
+      e.amount || 0, e.customerName || '', e.treatmentCount || 0, e.paymentMethod || 'CASH',
+      e.cashType || 'register', e.memberId || '', e.store || '', e.recorder || '',
+      e.notes || '', e.createdAt || new Date().toISOString(), '', '', ''
+    ]);
+  });
+}
 
-  (body.entries || []).forEach(entry => {
-    sheet.appendRow([JSON.stringify(entry)]);
+function ensureCashbookLogSheet() {
+  return getOrCreateSheet(SHEETS.CASHBOOK_LOG, CASHBOOK_LOG_HEADERS);
+}
+
+function ensureDailyCloseSheet() {
+  return getOrCreateSheet(SHEETS.DAILY_CLOSE, DAILY_CLOSE_HEADERS);
+}
+
+function appendCashbookLog(action, entryId, storeId, operator, before, after) {
+  var logSheet = ensureCashbookLogSheet();
+  logSheet.appendRow([
+    new Date().toISOString(), action, entryId || '', storeId || '',
+    operator || '', before ? JSON.stringify(before) : '', after ? JSON.stringify(after) : ''
+  ]);
+}
+
+function cashbookRowToEntry(row) {
+  return {
+    id: String(row[0] || ''), date: String(row[1] || ''), type: String(row[2] || ''),
+    category: String(row[3] || ''), description: String(row[4] || ''),
+    amount: toInt(row[5]), customerName: String(row[6] || ''),
+    treatmentCount: toInt(row[7]), paymentMethod: String(row[8] || 'CASH'),
+    cashType: String(row[9] || 'register'), memberId: String(row[10] || ''),
+    store: String(row[11] || ''), recorder: String(row[12] || ''),
+    notes: String(row[13] || ''), createdAt: String(row[14] || ''),
+    updatedAt: String(row[15] || ''), updatedBy: String(row[16] || ''),
+    deleted: String(row[17] || '') === 'true'
+  };
+}
+
+function entryToRow(e) {
+  return [
+    e.id, e.date, e.type, e.category, e.description || '',
+    e.amount || 0, e.customerName || '', e.treatmentCount || 0,
+    e.paymentMethod || 'CASH', e.cashType || 'register',
+    e.memberId || '', e.store || '', e.recorder || '',
+    e.notes || '', e.createdAt || new Date().toISOString(),
+    e.updatedAt || '', e.updatedBy || '', e.deleted ? 'true' : ''
+  ];
+}
+
+// GET: エントリ取得（店舗・月フィルタ対応）
+function handleCashbookGet(params) {
+  var sheet = ensureCashbookSheet();
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return { entries: [], dailyCloses: [], lastUpdated: new Date().toISOString() };
+
+  var data = sheet.getRange(2, 1, lastRow - 1, CASHBOOK_HEADERS.length).getValues();
+  var entries = [];
+  var storeFilter = params.store || '';
+  var monthFilter = params.month || '';
+
+  data.forEach(function(row) {
+    if (!row[0]) return;
+    var entry = cashbookRowToEntry(row);
+    if (entry.deleted) return;
+    if (storeFilter && entry.store !== storeFilter) return;
+    if (monthFilter && !entry.date.startsWith(monthFilter)) return;
+    entries.push(entry);
+  });
+
+  // 日次締めデータも返す
+  var dailyCloses = getDailyCloses(storeFilter);
+
+  // 監査ログ（直近100件）
+  var logs = [];
+  if (params.includeLogs === 'true') {
+    logs = getRecentLogs(100, storeFilter);
+  }
+
+  return { entries: entries, dailyCloses: dailyCloses, logs: logs, lastUpdated: new Date().toISOString() };
+}
+
+function getDailyCloses(storeFilter) {
+  var sheet = ensureDailyCloseSheet();
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return [];
+  var data = sheet.getRange(2, 1, lastRow - 1, DAILY_CLOSE_HEADERS.length).getValues();
+  var closes = [];
+  data.forEach(function(row) {
+    if (!row[0]) return;
+    if (storeFilter && String(row[1]) !== storeFilter) return;
+    closes.push({
+      date: formatDate(row[0]), storeId: String(row[1] || ''),
+      safeBalance: toInt(row[2]), pettyCashBalance: toInt(row[3]),
+      registerBalance: toInt(row[4]), closedBy: String(row[5] || ''),
+      closedAt: String(row[6] || ''), notes: String(row[7] || ''),
+      locked: String(row[8] || '') === 'true'
+    });
+  });
+  return closes;
+}
+
+function getRecentLogs(limit, storeFilter) {
+  var logSheet = ensureCashbookLogSheet();
+  var lastRow = logSheet.getLastRow();
+  if (lastRow < 2) return [];
+  var data = logSheet.getRange(2, 1, lastRow - 1, CASHBOOK_LOG_HEADERS.length).getValues();
+  var logs = [];
+  for (var i = data.length - 1; i >= 0 && logs.length < limit; i--) {
+    var row = data[i];
+    if (storeFilter && String(row[3]) !== storeFilter) continue;
+    logs.push({
+      timestamp: String(row[0] || ''), action: String(row[1] || ''),
+      entryId: String(row[2] || ''), storeId: String(row[3] || ''),
+      operator: String(row[4] || ''),
+      before: row[5] ? String(row[5]) : '', after: row[6] ? String(row[6]) : ''
+    });
+  }
+  return logs;
+}
+
+// POST: 各種操作
+function handleCashbookPost(body) {
+  var action = body.action || '';
+
+  // 後方互換: 旧saveCashbook（全件上書き）
+  if (action === 'saveCashbook' && body.entries) {
+    return handleCashbookBulkSave(body);
+  }
+
+  switch (action) {
+    case 'addEntry':    return handleCashbookAddEntry(body);
+    case 'updateEntry': return handleCashbookUpdateEntry(body);
+    case 'deleteEntry': return handleCashbookDeleteEntry(body);
+    case 'dailyClose':  return handleDailyClose(body);
+    case 'getDailyCloses': return { dailyCloses: getDailyCloses(body.store || '') };
+    case 'getLogs':     return { logs: getRecentLogs(body.limit || 100, body.store || '') };
+    default: return { error: '不明なaction: ' + action };
+  }
+}
+
+// 後方互換: 全件保存（ただしログは記録）
+function handleCashbookBulkSave(body) {
+  var sheet = ensureCashbookSheet();
+  var lastRow = sheet.getLastRow();
+  if (lastRow >= 2) sheet.getRange(2, 1, lastRow - 1, CASHBOOK_HEADERS.length).clearContent();
+  (body.entries || []).forEach(function(e) {
+    if (!e.cashType) e.cashType = 'register';
+    sheet.appendRow(entryToRow(e));
+  });
+  appendCashbookLog('bulkSave', '', '', body.operator || '', null, { count: (body.entries || []).length });
+  return { success: true };
+}
+
+// エントリ追加（個別・ログ付き）
+function handleCashbookAddEntry(body) {
+  var entry = body.entry || {};
+  // 日次締め済みチェック
+  if (isDayClosed(entry.date, entry.store)) {
+    return { error: 'この日は締め済みのため記帳できません', closed: true };
+  }
+  var sheet = ensureCashbookSheet();
+  if (!entry.id) entry.id = 'cb_' + new Date().getTime().toString(36) + Math.random().toString(36).slice(2, 5);
+  if (!entry.createdAt) entry.createdAt = new Date().toISOString();
+  if (!entry.cashType) entry.cashType = 'register';
+  sheet.appendRow(entryToRow(entry));
+  appendCashbookLog('add', entry.id, entry.store, body.operator || entry.recorder || '', null, entry);
+  return { success: true, entry: entry };
+}
+
+// エントリ更新（差分・ログ付き）
+function handleCashbookUpdateEntry(body) {
+  var entryId = body.entryId || '';
+  var updates = body.updates || {};
+  if (!entryId) return { error: 'entryId必須' };
+
+  var sheet = ensureCashbookSheet();
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return { error: 'エントリが見つかりません' };
+
+  var data = sheet.getRange(2, 1, lastRow - 1, CASHBOOK_HEADERS.length).getValues();
+  for (var i = 0; i < data.length; i++) {
+    if (String(data[i][0]) === entryId) {
+      var before = cashbookRowToEntry(data[i]);
+      // 日次締め済みチェック
+      if (isDayClosed(before.date, before.store)) {
+        return { error: 'この日は締め済みのため編集できません', closed: true };
+      }
+      var after = Object.assign({}, before, updates);
+      after.updatedAt = new Date().toISOString();
+      after.updatedBy = body.operator || '';
+      var newRow = entryToRow(after);
+      sheet.getRange(i + 2, 1, 1, newRow.length).setValues([newRow]);
+      appendCashbookLog('update', entryId, before.store, body.operator || '', before, after);
+      return { success: true, entry: after };
+    }
+  }
+  return { error: 'エントリが見つかりません' };
+}
+
+// エントリ削除（論理削除・ログ付き）
+function handleCashbookDeleteEntry(body) {
+  var entryId = body.entryId || '';
+  if (!entryId) return { error: 'entryId必須' };
+
+  var sheet = ensureCashbookSheet();
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return { error: 'エントリが見つかりません' };
+
+  var data = sheet.getRange(2, 1, lastRow - 1, CASHBOOK_HEADERS.length).getValues();
+  for (var i = 0; i < data.length; i++) {
+    if (String(data[i][0]) === entryId) {
+      var before = cashbookRowToEntry(data[i]);
+      if (isDayClosed(before.date, before.store)) {
+        return { error: 'この日は締め済みのため削除できません', closed: true };
+      }
+      // 論理削除
+      sheet.getRange(i + 2, 18).setValue('true'); // 削除フラグ列
+      sheet.getRange(i + 2, 16).setValue(new Date().toISOString()); // 更新日時
+      sheet.getRange(i + 2, 17).setValue(body.operator || ''); // 更新者
+      appendCashbookLog('delete', entryId, before.store, body.operator || '', before, null);
+      return { success: true };
+    }
+  }
+  return { error: 'エントリが見つかりません' };
+}
+
+// 日次締め
+function handleDailyClose(body) {
+  var date = body.date || '';
+  var storeId = body.storeId || '';
+  if (!date || !storeId) return { error: '日付と店舗IDが必須です' };
+
+  var sheet = ensureDailyCloseSheet();
+  // 既に締められていないかチェック
+  var lastRow = sheet.getLastRow();
+  if (lastRow >= 2) {
+    var data = sheet.getRange(2, 1, lastRow - 1, DAILY_CLOSE_HEADERS.length).getValues();
+    for (var i = 0; i < data.length; i++) {
+      if (formatDate(data[i][0]) === date && String(data[i][1]) === storeId && String(data[i][8]) === 'true') {
+        return { error: 'この日は既に締め済みです', closed: true };
+      }
+    }
+  }
+
+  sheet.appendRow([
+    date, storeId,
+    toInt(body.safeBalance), toInt(body.pettyCashBalance), toInt(body.registerBalance),
+    body.closedBy || '', new Date().toISOString(), body.notes || '', 'true'
+  ]);
+
+  appendCashbookLog('dailyClose', '', storeId, body.closedBy || '', null, {
+    date: date, safeBalance: body.safeBalance, pettyCashBalance: body.pettyCashBalance,
+    registerBalance: body.registerBalance
   });
 
   return { success: true };
+}
+
+function isDayClosed(date, storeId) {
+  if (!date || !storeId) return false;
+  var sheet;
+  try { sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEETS.DAILY_CLOSE); } catch(e) { return false; }
+  if (!sheet) return false;
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return false;
+  var data = sheet.getRange(2, 1, lastRow - 1, DAILY_CLOSE_HEADERS.length).getValues();
+  for (var i = 0; i < data.length; i++) {
+    if (formatDate(data[i][0]) === date && String(data[i][1]) === storeId && String(data[i][8]) === 'true') {
+      return true;
+    }
+  }
+  return false;
 }
 
 // ============================================================
