@@ -10776,6 +10776,548 @@
         ];
 
         // ==========================================
+        // 姿勢分析LINE Flexメッセージビルダー
+        // ==========================================
+        const buildPostureFlexMessage = ({ customerName, visitDate, viewMode, analysis, totalScore, staffName }) => {
+            const displayName = customerName ? (customerName.includes('様') ? customerName : customerName + ' 様') : '様';
+            const displayDate = visitDate ? visitDate.replace(/-/g, '.') : new Date().toISOString().split('T')[0].replace(/-/g, '.');
+            const displayStaff = staffName ? staffName + ' より' : '担当より';
+            const viewLabel = viewMode === 'front' ? '正面' : '側面';
+
+            const scoreColor = (s) => s >= 80 ? '#0F6E56' : s >= 60 ? '#639922' : s >= 40 ? '#EF9F27' : '#E24B4A';
+            const scoreLabel = (s) => s >= 80 ? '良好' : s >= 60 ? 'やや注意' : s >= 40 ? '要改善' : '要施術';
+            const barFill = (s) => {
+                const pct = Math.max(5, s);
+                return { type: 'box', layout: 'vertical', height: '8px', cornerRadius: '4px', backgroundColor: '#e8e8e8',
+                    contents: [{ type: 'box', layout: 'vertical', height: '8px', cornerRadius: '4px',
+                        backgroundColor: scoreColor(s), width: pct + '%', contents: [{ type: 'filler' }] }] };
+            };
+
+            const scoreRows = analysis.items.map(item => ({
+                type: 'box', layout: 'vertical', spacing: 'xs', margin: 'lg',
+                contents: [
+                    { type: 'box', layout: 'horizontal', contents: [
+                        { type: 'text', text: item.label, size: 'xs', weight: 'bold', color: '#333333', flex: 5 },
+                        { type: 'text', text: String(item.score), size: 'xs', weight: 'bold', color: scoreColor(item.score), flex: 1, align: 'end' },
+                    ]},
+                    barFill(item.score),
+                    { type: 'text', text: item.detail + ' — ' + item.value, size: 'xxs', color: '#888888', margin: 'xs' },
+                ],
+            }));
+
+            const adviceItems = analysis.items.filter(i => i.score < 70).map(item => ({
+                type: 'box', layout: 'horizontal', spacing: 'sm', margin: 'sm',
+                contents: [
+                    { type: 'text', text: item.score < 40 ? '⚠' : '▸', size: 'xs', color: scoreColor(item.score), flex: 0 },
+                    { type: 'text', text: item.label + '：' + item.detail, size: 'xs', color: '#555555', wrap: true, flex: 1 },
+                ],
+            }));
+
+            const totalColor = scoreColor(totalScore);
+
+            const bubble = {
+                type: 'bubble', size: 'mega',
+                header: {
+                    type: 'box', layout: 'vertical', paddingAll: '20px',
+                    backgroundColor: '#04342C',
+                    contents: [
+                        { type: 'text', text: "si'se 姿勢分析レポート", size: 'sm', weight: 'bold', color: '#5DCAA5', align: 'center' },
+                        { type: 'text', text: 'Posture Analysis Report', size: 'xxs', color: '#5DCAA580', align: 'center', margin: 'xs' },
+                        { type: 'separator', color: '#5DCAA530', margin: 'lg' },
+                        { type: 'text', text: displayName, size: 'xl', weight: 'bold', color: '#ffffff', align: 'center', margin: 'md' },
+                        { type: 'box', layout: 'horizontal', justifyContent: 'center', spacing: 'lg', margin: 'md', contents: [
+                            { type: 'text', text: '📅 ' + displayDate, size: 'xxs', color: '#5DCAA5' },
+                            { type: 'text', text: '📐 ' + viewLabel + '分析', size: 'xxs', color: '#5DCAA5' },
+                        ]},
+                    ],
+                },
+                body: {
+                    type: 'box', layout: 'vertical', spacing: 'lg', paddingAll: '20px',
+                    contents: [
+                        { type: 'box', layout: 'vertical', cornerRadius: 'xl', backgroundColor: totalScore >= 60 ? '#E1F5EE' : '#FAEEDA', paddingAll: '16px', alignItems: 'center',
+                            contents: [
+                                { type: 'text', text: viewLabel + '総合スコア', size: 'xs', weight: 'bold', color: '#666666' },
+                                { type: 'text', text: String(totalScore), size: '3xl', weight: 'bold', color: totalColor, margin: 'sm' },
+                                { type: 'text', text: scoreLabel(totalScore), size: 'sm', weight: 'bold', color: totalColor, margin: 'xs' },
+                            ],
+                        },
+                        { type: 'separator', color: '#e8e8e8', margin: 'lg' },
+                        { type: 'text', text: '各部位の分析結果', size: 'xs', weight: 'bold', color: '#04342C', margin: 'md' },
+                        ...scoreRows,
+                        ...(adviceItems.length > 0 ? [
+                            { type: 'separator', color: '#e8e8e8', margin: 'lg' },
+                            { type: 'text', text: '改善ポイント', size: 'xs', weight: 'bold', color: '#BA7517', margin: 'md' },
+                            ...adviceItems,
+                        ] : []),
+                    ],
+                },
+                footer: {
+                    type: 'box', layout: 'vertical', paddingAll: '16px', backgroundColor: '#f8f7f4',
+                    contents: [
+                        { type: 'text', text: displayStaff, size: 'xxs', color: '#888888', align: 'end' },
+                        { type: 'separator', color: '#e8e8e8', margin: 'md' },
+                        { type: 'text', text: '定期的な姿勢チェックで改善を実感しましょう', size: 'xxs', color: '#aaaaaa', align: 'center', margin: 'md' },
+                    ],
+                },
+            };
+
+            return { type: 'flex', altText: `姿勢分析レポート（${viewLabel}）— ${displayName}`, contents: bubble };
+        };
+
+        // ==========================================
+        // 姿勢分析: PostureAnalysisView コンポーネント
+        // ==========================================
+        const POSTURE_LM = {
+            NOSE:0,LEFT_EYE:1,RIGHT_EYE:2,LEFT_EAR:3,RIGHT_EAR:4,
+            LEFT_SHOULDER:11,RIGHT_SHOULDER:12,LEFT_HIP:23,RIGHT_HIP:24,
+            LEFT_KNEE:25,RIGHT_KNEE:26,LEFT_ANKLE:27,RIGHT_ANKLE:28,
+            LEFT_ELBOW:13,RIGHT_ELBOW:14,LEFT_WRIST:15,RIGHT_WRIST:16,
+        };
+        const POSTURE_CONNECTIONS = [
+            [11,12],[11,13],[13,15],[12,14],[14,16],
+            [11,23],[12,24],[23,24],[23,25],[24,26],[25,27],[26,28],
+        ];
+
+        function postureCalcAngle(a,b,c){
+            const ab={x:a.x-b.x,y:a.y-b.y},cb={x:c.x-b.x,y:c.y-b.y};
+            const dot=ab.x*cb.x+ab.y*cb.y;
+            const m1=Math.sqrt(ab.x**2+ab.y**2),m2=Math.sqrt(cb.x**2+cb.y**2);
+            if(!m1||!m2) return 0;
+            return Math.acos(Math.min(1,Math.max(-1,dot/(m1*m2))))*(180/Math.PI);
+        }
+        function postureMid(a,b){return{x:(a.x+b.x)/2,y:(a.y+b.y)/2};}
+        function postureScoreColor(s){return s>=80?'#0F6E56':s>=60?'#639922':s>=40?'#EF9F27':'#E24B4A';}
+        function postureScoreLabel(s){return s>=80?'良好':s>=60?'やや注意':s>=40?'要改善':'要施術';}
+        function postureScoreBg(s){return s>=80?'#E1F5EE':s>=60?'#EAF3DE':s>=40?'#FAEEDA':'#FCEBEB';}
+
+        function postureAnalyzeFront(lm){
+            const L=POSTURE_LM, ls=lm[L.LEFT_SHOULDER],rs=lm[L.RIGHT_SHOULDER];
+            const lh=lm[L.LEFT_HIP],rh=lm[L.RIGHT_HIP],nose=lm[L.NOSE];
+            const sDiff=Math.abs(ls.y-rs.y), sMid=postureMid(ls,rs), hMid=postureMid(lh,rh);
+            const hDiff=Math.abs(lh.y-rh.y), headTilt=Math.abs(nose.x-sMid.x);
+            const centerShift=Math.abs(sMid.x-hMid.x);
+            return {items:[
+                {key:'shoulder',label:'肩の左右バランス',score:Math.round(Math.max(0,100-sDiff*800)),
+                 detail:sDiff<0.01?'均等':ls.y<rs.y?'左肩が高い':'右肩が高い',value:(sDiff*100).toFixed(1)+'%偏差'},
+                {key:'hip',label:'骨盤の左右バランス',score:Math.round(Math.max(0,100-hDiff*800)),
+                 detail:hDiff<0.01?'均等':lh.y<rh.y?'左が高い':'右が高い',value:(hDiff*100).toFixed(1)+'%偏差'},
+                {key:'head',label:'頭部の傾き',score:Math.round(Math.max(0,100-headTilt*600)),
+                 detail:headTilt<0.015?'正中':nose.x<sMid.x?'左に傾斜':'右に傾斜',value:(headTilt*100).toFixed(1)+'%偏位'},
+                {key:'center',label:'重心の左右ズレ',score:Math.round(Math.max(0,100-centerShift*500)),
+                 detail:centerShift<0.015?'正中':sMid.x<hMid.x?'左にズレ':'右にズレ',value:(centerShift*100).toFixed(1)+'%偏位'},
+            ]};
+        }
+        function postureAnalyzeSide(lm){
+            const L=POSTURE_LM;
+            const ear=lm[L.LEFT_EAR],sh=lm[L.LEFT_SHOULDER];
+            const hip=lm[L.LEFT_HIP],knee=lm[L.LEFT_KNEE],ankle=lm[L.LEFT_ANKLE];
+            const headFwd=ear.x-sh.x;
+            const shAngle=postureCalcAngle(ear,sh,hip);
+            const hipAngle=postureCalcAngle(sh,hip,knee);
+            const kneeAngle=postureCalcAngle(hip,knee,ankle);
+            return {items:[
+                {key:'head',label:'頭部前方偏位',score:Math.round(Math.max(0,100-Math.abs(headFwd)*500)),
+                 detail:Math.abs(headFwd)<0.03?'正常':headFwd>0?'前方に偏位':'後方に偏位',value:(Math.abs(headFwd)*100).toFixed(1)+'%'},
+                {key:'shoulder',label:'巻き肩・猫背',score:Math.round(Math.max(0,Math.min(100,(shAngle-140)*2.5))),
+                 detail:shAngle>160?'正常':shAngle>145?'軽度の巻き肩':'巻き肩傾向',value:shAngle.toFixed(0)+'°'},
+                {key:'hip',label:'骨盤の前後傾斜',score:Math.round(Math.max(0,100-Math.abs(hipAngle-170)*5)),
+                 detail:Math.abs(hipAngle-170)<5?'正常':hipAngle>170?'後傾':'前傾',value:hipAngle.toFixed(0)+'°'},
+                {key:'knee',label:'膝の過伸展',score:Math.round(Math.max(0,100-Math.abs(kneeAngle-175)*4)),
+                 detail:Math.abs(kneeAngle-175)<5?'正常':kneeAngle>180?'過伸展':'やや屈曲',value:kneeAngle.toFixed(0)+'°'},
+            ]};
+        }
+        function postureGetTotal(a){ return Math.round(a.items.reduce((s,i)=>s+i.score,0)/a.items.length); }
+
+        const PostureAnalysisView = ({ lineChatHook }) => {
+            const { useState, useEffect, useRef, useCallback } = React;
+            const [viewMode, setViewMode] = useState('front');
+            const [phase, setPhase] = useState('idle'); // idle | loading | live | captured
+            const [errorMsg, setErrorMsg] = useState('');
+            const [landmarks, setLandmarks] = useState(null);
+            const [analysis, setAnalysis] = useState(null);
+            const [overlayOn, setOverlayOn] = useState(true);
+            const [capturedImage, setCapturedImage] = useState(null);
+
+            // LINE modal state
+            const [lineModalOpen, setLineModalOpen] = useState(false);
+            const [lineSearchQuery, setLineSearchQuery] = useState('');
+            const [lineSelectedUser, setLineSelectedUser] = useState(null);
+            const [lineSendStatus, setLineSendStatus] = useState('');
+
+            // Report fields
+            const [customerName, setCustomerName] = useState('');
+            const [staffName, setStaffName] = useState('');
+            const [visitDate, setVisitDate] = useState(() => new Date().toISOString().split('T')[0]);
+
+            const videoRef = useRef(null);
+            const streamRef = useRef(null);
+            const poseRef = useRef(null);
+            const animRef = useRef(null);
+            const svgRef = useRef(null);
+            const vpRef = useRef(null);
+
+            // Cleanup on unmount
+            useEffect(() => { return () => { stopCam(); }; }, []);
+
+            const stopCam = useCallback(() => {
+                if (animRef.current) cancelAnimationFrame(animRef.current);
+                if (streamRef.current) { streamRef.current.getTracks().forEach(t => t.stop()); streamRef.current = null; }
+                if (videoRef.current) videoRef.current.srcObject = null;
+            }, []);
+
+            const startCamera = useCallback(async () => {
+                setPhase('loading'); setErrorMsg(''); setAnalysis(null); setLandmarks(null);
+                setCapturedImage(null);
+                try {
+                    const s = await navigator.mediaDevices.getUserMedia({
+                        video: { width:{ideal:1080}, height:{ideal:1920}, facingMode:{ideal:'environment'} }
+                    });
+                    streamRef.current = s;
+                    const v = videoRef.current;
+                    v.srcObject = s; await v.play();
+
+                    if (!window.Pose) {
+                        await new Promise((res, rej) => {
+                            const sc = document.createElement('script');
+                            sc.src = 'https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5.1675469404/pose.js';
+                            sc.onload = res; sc.onerror = () => rej(new Error('MediaPipe読み込み失敗'));
+                            document.head.appendChild(sc);
+                        });
+                        await new Promise(r => setTimeout(r, 500));
+                    }
+                    if (!poseRef.current) {
+                        const pose = new window.Pose({
+                            locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5.1675469404/${f}`,
+                        });
+                        pose.setOptions({ modelComplexity:1, smoothLandmarks:true, enableSegmentation:false,
+                            minDetectionConfidence:0.5, minTrackingConfidence:0.5 });
+                        pose.onResults(r => { if (r.poseLandmarks) setLandmarks(r.poseLandmarks); });
+                        await pose.initialize();
+                        poseRef.current = pose;
+                    }
+                    setPhase('live');
+                    const detect = async () => {
+                        if (!streamRef.current) return;
+                        try { await poseRef.current.send({ image: v }); } catch(e){}
+                        animRef.current = requestAnimationFrame(detect);
+                    };
+                    detect();
+                } catch (e) {
+                    setPhase('idle'); setErrorMsg(e.message || 'カメラ起動失敗');
+                }
+            }, []);
+
+            const capture = useCallback(() => {
+                const v = videoRef.current;
+                const c = document.createElement('canvas');
+                c.width = v.videoWidth; c.height = v.videoHeight;
+                c.getContext('2d').drawImage(v, 0, 0);
+                setCapturedImage(c.toDataURL('image/jpeg', 0.92));
+                stopCam();
+                setPhase('captured');
+            }, [stopCam]);
+
+            const retake = useCallback(() => {
+                setCapturedImage(null); setAnalysis(null); setLandmarks(null);
+                startCamera();
+            }, [startCamera]);
+
+            const resetAll = useCallback(() => {
+                stopCam(); setCapturedImage(null); setAnalysis(null); setLandmarks(null);
+                setPhase('idle');
+            }, [stopCam]);
+
+            // Run analysis when landmarks change while captured
+            useEffect(() => {
+                if (!landmarks) return;
+                const a = viewMode === 'front' ? postureAnalyzeFront(landmarks) : postureAnalyzeSide(landmarks);
+                setAnalysis(a);
+            }, [landmarks, viewMode]);
+
+            // Draw skeleton overlay
+            useEffect(() => {
+                if (!landmarks || !svgRef.current || !vpRef.current) return;
+                const svg = svgRef.current;
+                const w = vpRef.current.clientWidth, h = vpRef.current.clientHeight;
+                svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+                let html = '';
+                POSTURE_CONNECTIONS.forEach(([a,b]) => {
+                    const la = landmarks[a], lb = landmarks[b];
+                    if (!la || !lb || la.visibility < 0.5 || lb.visibility < 0.5) return;
+                    const color = phase === 'captured' && analysis ? postureScoreColor(
+                        (analysis.items.find(i => {
+                            if (viewMode==='front') { if(i.key==='shoulder'&&(a===11||b===12)) return true; if(i.key==='hip'&&(a===23||b===24)) return true; }
+                            else { if(i.key==='shoulder'&&a===11&&b===23) return true; if(i.key==='hip'&&a===23&&b===25) return true; if(i.key==='knee'&&a===25&&b===27) return true; }
+                            return false;
+                        }) || {score:80}).score
+                    ) : 'rgba(15,110,86,0.7)';
+                    html += `<line x1="${la.x*w}" y1="${la.y*h}" x2="${lb.x*w}" y2="${lb.y*h}" stroke="${color}" stroke-width="2.5" stroke-linecap="round"/>`;
+                });
+                Object.values(POSTURE_LM).forEach(idx => {
+                    const l = landmarks[idx];
+                    if (!l || l.visibility < 0.5) return;
+                    html += `<circle cx="${l.x*w}" cy="${l.y*h}" r="5" fill="#0F6E56" stroke="#fff" stroke-width="1.5"/>`;
+                });
+                // Body axis
+                const ls=landmarks[11],rs=landmarks[12],lh=landmarks[23],rh=landmarks[24];
+                if(ls&&rs&&lh&&rh){
+                    const sm=postureMid(ls,rs), hm=postureMid(lh,rh);
+                    html += `<line x1="${sm.x*w}" y1="${sm.y*h}" x2="${hm.x*w}" y2="${hm.y*h}" stroke="rgba(255,255,255,0.7)" stroke-width="2" stroke-dasharray="6 4"/>`;
+                }
+                svg.innerHTML = html;
+            }, [landmarks, analysis, phase, viewMode, overlayOn]);
+
+            // LINE送信
+            const openLineModal = useCallback(() => {
+                if (!lineChatHook || !lineChatHook.lineConfig?.configured) {
+                    alert('LINE連携が設定されていません。設定画面からLINE APIを設定してください。'); return;
+                }
+                if (lineChatHook.lineStoreId) { lineChatHook.fetchThreads(lineChatHook.lineStoreId); }
+                else if (lineChatHook.lineConfig.stores.length > 0) {
+                    const fs = lineChatHook.lineConfig.stores[0].id;
+                    lineChatHook.setLineStoreId(fs); lineChatHook.fetchThreads(fs);
+                }
+                setLineSelectedUser(null); setLineSearchQuery(''); setLineSendStatus('');
+                setLineModalOpen(true);
+            }, [lineChatHook]);
+
+            const handleLineSend = useCallback(async () => {
+                if (!lineSelectedUser || !lineChatHook || !analysis) return;
+                setLineSendStatus('sending');
+                const total = postureGetTotal(analysis);
+                const flexMsg = buildPostureFlexMessage({ customerName, visitDate, viewMode, analysis, totalScore: total, staffName });
+                const ok = await lineChatHook.sendFlexMessage(lineSelectedUser.userId, flexMsg);
+                setLineSendStatus(ok ? 'sent' : 'error');
+                if (ok) setTimeout(() => { setLineModalOpen(false); setLineSendStatus(''); }, 2000);
+            }, [lineSelectedUser, lineChatHook, analysis, customerName, visitDate, viewMode, staffName]);
+
+            const total = analysis ? postureGetTotal(analysis) : null;
+
+            return (
+                <div className="h-[calc(100vh-3.5rem)] md:h-[calc(100vh-4rem)] overflow-y-auto" style={{background:'linear-gradient(135deg,#f8f7f4 0%,#f0efeb 100%)'}}>
+                    <div className="max-w-xl mx-auto p-4 pb-24 space-y-4">
+                        {/* Header */}
+                        <div className="rounded-2xl p-5 text-white" style={{background:'linear-gradient(135deg,#085041 0%,#0F6E56 50%,#1D9E75 100%)'}}>
+                            <div className="flex items-center gap-3">
+                                <div className="w-9 h-9 rounded-xl bg-white/15 flex items-center justify-center">
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                                        <path d="M12 2a4 4 0 014 4v1a4 4 0 01-8 0V6a4 4 0 014-4z"/><path d="M16 12v1a4 4 0 01-8 0v-1"/>
+                                        <line x1="12" y1="17" x2="12" y2="22"/><line x1="8" y1="22" x2="16" y2="22"/>
+                                    </svg>
+                                </div>
+                                <div><div className="font-bold text-lg">姿勢分析</div><div className="text-xs opacity-70">Posture Analysis — MediaPipe Pose</div></div>
+                            </div>
+                        </div>
+
+                        {/* Customer info (shown when captured) */}
+                        {phase === 'captured' && (
+                            <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100 space-y-3">
+                                <h3 className="text-sm font-bold text-teal-700">レポート情報</h3>
+                                <div className="grid grid-cols-3 gap-3">
+                                    <div><label className="block text-[10px] font-bold text-gray-400 mb-1">お客様名</label>
+                                        <input type="text" value={customerName} onChange={e=>setCustomerName(e.target.value)} className="w-full border rounded px-2 py-1.5 text-sm" placeholder="山田 花子"/></div>
+                                    <div><label className="block text-[10px] font-bold text-gray-400 mb-1">担当</label>
+                                        <input type="text" value={staffName} onChange={e=>setStaffName(e.target.value)} className="w-full border rounded px-2 py-1.5 text-sm" placeholder="田中"/></div>
+                                    <div><label className="block text-[10px] font-bold text-gray-400 mb-1">日付</label>
+                                        <input type="date" value={visitDate} onChange={e=>setVisitDate(e.target.value)} className="w-full border rounded px-2 py-1.5 text-sm"/></div>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* View toggle */}
+                        <div className="flex gap-1 p-1 rounded-xl" style={{background:'rgba(0,0,0,0.05)'}}>
+                            {['front','side'].map(m=>(
+                                <button key={m} onClick={()=>setViewMode(m)}
+                                    className={`flex-1 py-2 rounded-lg text-sm font-bold transition ${viewMode===m?'bg-white shadow text-teal-700':'text-gray-400'}`}>
+                                    {m==='front'?'正面 Front':'側面 Side'}
+                                </button>
+                            ))}
+                        </div>
+
+                        {/* Viewport */}
+                        <div ref={vpRef} className="relative rounded-2xl overflow-hidden bg-gray-900 shadow-lg" style={{aspectRatio:'9/16'}}>
+                            <video ref={videoRef} playsInline muted className="w-full h-full object-cover" style={{display:phase==='live'?'block':'none'}}/>
+                            {capturedImage && <img src={capturedImage} className="w-full h-full object-cover" alt="captured"/>}
+                            {phase==='idle' && (
+                                <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
+                                    <div className="w-16 h-16 rounded-full bg-white/10 flex items-center justify-center">
+                                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.5)" strokeWidth="1.5"><rect x="2" y="3" width="20" height="14" rx="2"/><circle cx="12" cy="10" r="3"/></svg>
+                                    </div>
+                                    <p className="text-white/40 text-xs text-center px-5">{viewMode==='front'?'背面カメラでお客様の正面全身を撮影します':'背面カメラでお客様の側面（左側）を撮影します'}</p>
+                                </div>
+                            )}
+                            {phase==='loading' && (
+                                <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-black/60 backdrop-blur-sm">
+                                    <div className="w-10 h-10 border-3 border-white/20 border-t-teal-400 rounded-full animate-spin" style={{borderWidth:'3px',borderTopColor:'#1D9E75'}}/>
+                                    <p className="text-white text-sm">カメラ・AI読み込み中...</p>
+                                </div>
+                            )}
+                            {(phase==='live'||phase==='captured') && overlayOn && (
+                                <svg ref={svgRef} className="absolute inset-0 w-full h-full pointer-events-none" style={{zIndex:3}} preserveAspectRatio="none"/>
+                            )}
+                            {phase==='live' && (
+                                <div className="absolute top-3 right-3 flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-black/50 backdrop-blur">
+                                    <div className="w-2 h-2 rounded-full bg-red-400 animate-pulse"/><span className="text-white text-xs font-bold">LIVE</span>
+                                </div>
+                            )}
+                            {phase==='captured' && (
+                                <div className="absolute top-3 right-3 px-2.5 py-1 rounded-full bg-black/50 backdrop-blur">
+                                    <span className="text-white text-xs font-bold">撮影済み</span>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Overlay toggle (when captured) */}
+                        {phase==='captured' && (
+                            <div className="flex items-center justify-between bg-white rounded-xl p-3 border border-gray-100">
+                                <span className="text-sm font-bold text-gray-700">骨格オーバーレイ</span>
+                                <button onClick={()=>setOverlayOn(!overlayOn)}
+                                    className={`w-11 h-6 rounded-full relative transition ${overlayOn?'bg-teal-400':'bg-gray-300'}`}>
+                                    <div className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${overlayOn?'left-[22px]':'left-0.5'}`}/>
+                                </button>
+                            </div>
+                        )}
+
+                        {errorMsg && <div className="bg-red-50 text-red-600 rounded-xl p-3 text-sm">{errorMsg}</div>}
+
+                        {/* Buttons */}
+                        <div className="flex gap-2">
+                            {phase==='idle' && <button onClick={startCamera} className="flex-1 py-3 rounded-xl text-white font-bold text-sm" style={{background:'linear-gradient(135deg,#0F6E56,#1D9E75)'}}>カメラを起動</button>}
+                            {phase==='live' && <>
+                                <button onClick={capture} className="flex-1 py-3 rounded-xl text-white font-bold text-sm" style={{background:'linear-gradient(135deg,#0F6E56,#1D9E75)'}}>撮影・分析を確定</button>
+                                <button onClick={()=>{stopCam();setPhase('idle');}} className="px-5 py-3 rounded-xl bg-white border text-gray-600 font-bold text-sm">停止</button>
+                            </>}
+                            {phase==='captured' && <>
+                                <button onClick={retake} className="flex-1 py-3 rounded-xl text-white font-bold text-sm" style={{background:'linear-gradient(135deg,#0F6E56,#1D9E75)'}}>再撮影</button>
+                                <button onClick={resetAll} className="px-5 py-3 rounded-xl bg-white border text-gray-600 font-bold text-sm">リセット</button>
+                            </>}
+                        </div>
+
+                        {/* Legend */}
+                        {phase==='captured' && analysis && (
+                            <div className="flex gap-3 flex-wrap bg-white/60 rounded-xl px-3 py-2 text-xs text-gray-500">
+                                {[{c:'#0F6E56',l:'良好'},{c:'#639922',l:'やや注意'},{c:'#EF9F27',l:'要改善'},{c:'#E24B4A',l:'要施術'}].map(x=>(
+                                    <span key={x.l} className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full inline-block" style={{background:x.c}}/>{x.l}</span>
+                                ))}
+                            </div>
+                        )}
+
+                        {/* Results */}
+                        {phase==='captured' && analysis && total !== null && (
+                            <div className="space-y-3">
+                                <div className="bg-white rounded-2xl p-5 shadow-sm flex items-center gap-5">
+                                    <svg width="100" height="100" style={{flexShrink:0}}>
+                                        <circle cx="50" cy="50" r="44" fill="none" stroke="rgba(128,128,128,0.12)" strokeWidth="8"/>
+                                        <circle cx="50" cy="50" r="44" fill="none" stroke={postureScoreColor(total)} strokeWidth="8"
+                                            strokeLinecap="round" strokeDasharray={2*Math.PI*44} strokeDashoffset={2*Math.PI*44*(1-total/100)}
+                                            style={{transform:'rotate(-90deg)',transformOrigin:'center',transition:'stroke-dashoffset 0.6s ease'}}/>
+                                        <text x="50" y="44" textAnchor="middle" dominantBaseline="central" style={{fontSize:'30px',fontWeight:700,fill:postureScoreColor(total)}}>{total}</text>
+                                        <text x="50" y="68" textAnchor="middle" dominantBaseline="central" style={{fontSize:'11px',fontWeight:500,fill:postureScoreColor(total)}}>{postureScoreLabel(total)}</text>
+                                    </svg>
+                                    <div>
+                                        <div className="font-bold text-sm mb-1">{viewMode==='front'?'正面':'側面'}総合スコア</div>
+                                        <div className="text-xs text-gray-400 leading-relaxed">
+                                            {total>=80?'姿勢は概ね良好です。':total>=60?'軽度の歪みが見られます。定期的なケアをおすすめします。':total>=40?'複数の項目で改善が必要です。':'姿勢の歪みが顕著です。早めの施術をおすすめします。'}
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="space-y-2">
+                                    {analysis.items.map(item=>(
+                                        <div key={item.key} className="flex items-center justify-between rounded-xl p-3" style={{background:postureScoreBg(item.score)}}>
+                                            <div><div className="text-sm font-bold">{item.label}</div><div className="text-xs text-gray-500 mt-0.5">{item.detail} — {item.value}</div></div>
+                                            <div className="min-w-[44px] h-7 rounded-full flex items-center justify-center text-white text-sm font-bold" style={{background:postureScoreColor(item.score)}}>{item.score}</div>
+                                        </div>
+                                    ))}
+                                </div>
+
+                                {/* LINE送信ボタン */}
+                                <div className="flex gap-2 pt-2">
+                                    <button onClick={openLineModal} className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-white font-bold text-sm shadow-lg" style={{background:'#06C755'}}>
+                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M24 10.314C24 4.943 18.615.572 12 .572S0 4.943 0 10.314c0 4.811 4.27 8.842 10.035 9.608.391.082.923.258 1.058.59.12.301.079.766.038 1.08l-.164 1.02c-.045.301-.24 1.186 1.049.645 1.291-.539 6.916-4.078 9.436-6.975C23.176 14.393 24 12.458 24 10.314"/></svg>
+                                        LINEで送信
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Guide card */}
+                        {phase!=='captured' && (
+                            <div className="bg-white rounded-xl p-4 border border-gray-100">
+                                <div className="font-bold text-sm mb-2">{viewMode==='front'?'正面':'側面'}撮影の撮影ガイド</div>
+                                <div className="text-xs text-gray-400 leading-relaxed" dangerouslySetInnerHTML={{__html:viewMode==='front'
+                                    ?'・お客様から約2m離れて背面カメラで撮影<br>・両腕は自然に体の横に下ろしてもらう<br>・足は肩幅に開いてリラックス<br>・頭頂部から足先まで全身が映るように調整'
+                                    :'・お客様の左側面から背面カメラで撮影<br>・両腕は自然に体の横に下ろしてもらう<br>・普段通りの姿勢でリラックス<br>・頭頂部から足先まで全身が映るように調整'
+                                }}/>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* LINE送信モーダル */}
+                    {lineModalOpen && (
+                        <div className="fixed inset-0 bg-black/50 z-[9999] flex items-center justify-center p-4" onClick={()=>lineSendStatus!=='sending'&&setLineModalOpen(false)}>
+                            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[80vh] flex flex-col overflow-hidden" onClick={e=>e.stopPropagation()}>
+                                <div className="p-4 border-b text-white flex items-center justify-between rounded-t-2xl" style={{background:'#06C755'}}>
+                                    <div className="flex items-center gap-2">
+                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M24 10.314C24 4.943 18.615.572 12 .572S0 4.943 0 10.314c0 4.811 4.27 8.842 10.035 9.608.391.082.923.258 1.058.59.12.301.079.766.038 1.08l-.164 1.02c-.045.301-.24 1.186 1.049.645 1.291-.539 6.916-4.078 9.436-6.975C23.176 14.393 24 12.458 24 10.314"/></svg>
+                                        <span className="font-bold">姿勢分析をLINEで送信</span>
+                                    </div>
+                                    <button onClick={()=>setLineModalOpen(false)} className="text-white/80 hover:text-white text-xl">&times;</button>
+                                </div>
+                                {lineChatHook && lineChatHook.lineConfig.stores.length > 1 && (
+                                    <div className="px-4 pt-3 flex gap-2 flex-wrap">
+                                        {lineChatHook.lineConfig.stores.map(s=>(
+                                            <button key={s.id} onClick={()=>{lineChatHook.setLineStoreId(s.id);lineChatHook.fetchThreads(s.id);setLineSelectedUser(null);}}
+                                                className={`text-xs px-3 py-1 rounded-full border transition ${lineChatHook.lineStoreId===s.id?'bg-green-600 text-white border-green-600':'bg-white text-gray-600 border-gray-300'}`}>{s.name}</button>
+                                        ))}
+                                    </div>
+                                )}
+                                <div className="px-4 pt-3">
+                                    <input type="text" value={lineSearchQuery} onChange={e=>setLineSearchQuery(e.target.value)} placeholder="ユーザー名で検索..."
+                                        className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 outline-none"/>
+                                </div>
+                                <div className="flex-1 overflow-y-auto px-4 py-3 space-y-1">
+                                    {lineChatHook && lineChatHook.threads.length===0 && (
+                                        <p className="text-center text-gray-400 text-sm py-8">{lineChatHook.loading?'読み込み中...':'LINEスレッドがありません'}</p>
+                                    )}
+                                    {lineChatHook && lineChatHook.threads
+                                        .filter(t=>!lineSearchQuery||(lineChatHook.profiles[t.userId]?.displayName||'').toLowerCase().includes(lineSearchQuery.toLowerCase()))
+                                        .map(t=>{
+                                            const pr=lineChatHook.profiles[t.userId]||{};
+                                            const sel=lineSelectedUser&&lineSelectedUser.userId===t.userId;
+                                            return (
+                                                <button key={t.userId} onClick={()=>setLineSelectedUser({userId:t.userId,displayName:pr.displayName||t.userId})}
+                                                    className={`w-full flex items-center gap-3 p-3 rounded-xl text-left transition ${sel?'bg-green-50 border-2 border-green-500':'hover:bg-gray-50 border-2 border-transparent'}`}>
+                                                    {pr.pictureUrl
+                                                        ?<img src={pr.pictureUrl} className="w-10 h-10 rounded-full object-cover border-2 border-gray-200" alt=""/>
+                                                        :<div className="w-10 h-10 rounded-full bg-gray-300 flex items-center justify-center text-white text-sm font-bold">{(pr.displayName||'?')[0]}</div>}
+                                                    <div className="flex-1 min-w-0">
+                                                        <p className="font-bold text-sm truncate">{pr.displayName||t.userId}</p>
+                                                        {t.lastMessage&&<p className="text-xs text-gray-400 truncate">{t.lastMessage.messageText}</p>}
+                                                    </div>
+                                                    {sel&&<svg className="w-5 h-5 text-green-500" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd"/></svg>}
+                                                </button>
+                                            );
+                                        })}
+                                </div>
+                                <div className="p-4 border-t bg-gray-50">
+                                    {lineSelectedUser&&<p className="text-xs text-gray-500 mb-2 text-center">送信先: <span className="font-bold text-gray-700">{lineSelectedUser.displayName}</span></p>}
+                                    {lineSendStatus==='sent'&&<div className="flex items-center justify-center gap-2 text-green-600 font-bold text-sm py-2"><svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd"/></svg>送信完了！</div>}
+                                    {lineSendStatus==='error'&&<p className="text-center text-red-500 text-sm mb-2 font-bold">送信に失敗しました。</p>}
+                                    {lineSendStatus!=='sent'&&(
+                                        <button onClick={handleLineSend} disabled={!lineSelectedUser||lineSendStatus==='sending'}
+                                            className={`w-full py-3 rounded-xl font-bold text-white text-sm transition shadow-lg ${lineSelectedUser&&lineSendStatus!=='sending'?'bg-[#06C755] hover:bg-[#05b34c]':'bg-gray-300 cursor-not-allowed'}`}>
+                                            {lineSendStatus==='sending'?'送信中...':'姿勢分析をLINEで送信'}
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        // ==========================================
         // 施術レポート: TreatmentReportView コンポーネント
         // ==========================================
         const TreatmentReportView = ({ lineChatHook }) => {
@@ -13260,6 +13802,7 @@
                 { id: 'tickets', label: '回数券', icon: 'ticket', mobileLabel: '回数券' },
                 { id: 'counseling', label: 'カウンセリング', icon: 'heart-handshake', mobileLabel: '案内' },
                 { id: 'treatment-report', label: '施術レポート', icon: 'file-heart', mobileLabel: 'レポ' },
+                { id: 'posture', label: '姿勢分析', icon: 'scan', mobileLabel: '姿勢' },
                 { id: 'line', label: 'LINEチャット', icon: 'message-circle', mobileLabel: 'LINE' },
                 ...(!isStaffMode || (currentAccess && currentAccess.role === 'headquarter') ? [{ id: 'marketing', label: 'マーケティング', icon: 'megaphone', mobileLabel: '広告' }] : []),
                 ...(!isStaffMode ? [{ id: 'settings', label: '設定', icon: 'settings', mobileLabel: '設定' }] : []),
@@ -13289,6 +13832,8 @@
                         return <ConceptFormView counselingHook={counselingHook} activeStoreId={activeStoreId} memberData={memberData} />;
                     case 'treatment-report':
                         return <TreatmentReportView lineChatHook={lineChatHook} />;
+                    case 'posture':
+                        return <PostureAnalysisView lineChatHook={lineChatHook} />;
                     case 'line':
                         return <LineChatView lineChatHook={lineChatHook} />;
                     case 'marketing':
