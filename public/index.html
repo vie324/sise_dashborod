@@ -3233,6 +3233,10 @@
                         showToast(date + ' の日次締めが完了しました', 'success');
                         return true;
                     }
+                    // GAS未設定時はローカルのみで締め処理
+                    setDailyCloses(prev => [...prev, { date, storeId, safeBalance: balances.safe || 0, pettyCashBalance: balances.pettyCash || 0, registerBalance: balances.register || 0, closedBy: getOperator(), closedAt: new Date().toISOString(), locked: true }]);
+                    showToast(date + ' の日次締めが完了しました（ローカル）', 'success');
+                    return true;
                 } catch (e) {
                     showToast('日次締めに失敗しました', 'error');
                     return false;
