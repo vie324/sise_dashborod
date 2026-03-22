@@ -11165,6 +11165,27 @@
                                     <span className="text-white text-xs font-bold">撮影済み</span>
                                 </div>
                             )}
+                            {/* Floating buttons inside viewport */}
+                            {phase==='live' && (
+                                <div className="absolute bottom-0 left-0 right-0 p-4 flex gap-2 z-10" style={{background:'linear-gradient(transparent, rgba(0,0,0,0.6))'}}>
+                                    <button onClick={capture} className="flex-1 py-3.5 rounded-xl text-white font-bold text-sm shadow-lg backdrop-blur" style={{background:'rgba(15,110,86,0.9)'}}>
+                                        撮影・分析を確定
+                                    </button>
+                                    <button onClick={()=>{stopCam();setPhase('idle');}} className="px-4 py-3.5 rounded-xl font-bold text-sm shadow-lg backdrop-blur" style={{background:'rgba(255,255,255,0.9)', color:'#555'}}>
+                                        停止
+                                    </button>
+                                </div>
+                            )}
+                            {phase==='captured' && (
+                                <div className="absolute bottom-0 left-0 right-0 p-4 flex gap-2 z-10" style={{background:'linear-gradient(transparent, rgba(0,0,0,0.6))'}}>
+                                    <button onClick={retake} className="flex-1 py-3.5 rounded-xl text-white font-bold text-sm shadow-lg backdrop-blur" style={{background:'rgba(15,110,86,0.9)'}}>
+                                        再撮影
+                                    </button>
+                                    <button onClick={resetAll} className="px-4 py-3.5 rounded-xl font-bold text-sm shadow-lg backdrop-blur" style={{background:'rgba(255,255,255,0.9)', color:'#555'}}>
+                                        リセット
+                                    </button>
+                                </div>
+                            )}
                         </div>
 
                         {/* Overlay toggle (when captured) */}
@@ -11180,18 +11201,10 @@
 
                         {errorMsg && <div className="bg-red-50 text-red-600 rounded-xl p-3 text-sm">{errorMsg}</div>}
 
-                        {/* Buttons */}
-                        <div className="flex gap-2">
-                            {phase==='idle' && <button onClick={startCamera} className="flex-1 py-3 rounded-xl text-white font-bold text-sm" style={{background:'linear-gradient(135deg,#0F6E56,#1D9E75)'}}>カメラを起動</button>}
-                            {phase==='live' && <>
-                                <button onClick={capture} className="flex-1 py-3 rounded-xl text-white font-bold text-sm" style={{background:'linear-gradient(135deg,#0F6E56,#1D9E75)'}}>撮影・分析を確定</button>
-                                <button onClick={()=>{stopCam();setPhase('idle');}} className="px-5 py-3 rounded-xl bg-white border text-gray-600 font-bold text-sm">停止</button>
-                            </>}
-                            {phase==='captured' && <>
-                                <button onClick={retake} className="flex-1 py-3 rounded-xl text-white font-bold text-sm" style={{background:'linear-gradient(135deg,#0F6E56,#1D9E75)'}}>再撮影</button>
-                                <button onClick={resetAll} className="px-5 py-3 rounded-xl bg-white border text-gray-600 font-bold text-sm">リセット</button>
-                            </>}
-                        </div>
+                        {/* Start button (only when idle - outside viewport) */}
+                        {phase==='idle' && (
+                            <button onClick={startCamera} className="w-full py-3 rounded-xl text-white font-bold text-sm" style={{background:'linear-gradient(135deg,#0F6E56,#1D9E75)'}}>カメラを起動</button>
+                        )}
 
                         {/* Legend */}
                         {phase==='captured' && analysis && (
@@ -11345,6 +11358,101 @@
             const [saveMsg, setSaveMsg] = useState('');
             const [templateKey, setTemplateKey] = useState('');
 
+            // --- 姿勢分析 State ---
+            const [postureModalOpen, setPostureModalOpen] = useState(false);
+            const [posturePhase, setPosturePhase] = useState('idle'); // idle|loading|live|captured
+            const [postureViewMode, setPostureViewMode] = useState('front');
+            const [postureLandmarks, setPostureLandmarks] = useState(null);
+            const [postureAnalysis, setPostureAnalysis] = useState(null);
+            const [postureImage, setPostureImage] = useState(null);
+            const postureVideoRef = useRef(null);
+            const postureStreamRef = useRef(null);
+            const posturePoseRef = useRef(null);
+            const postureAnimRef = useRef(null);
+            const postureSvgRef = useRef(null);
+            const postureVpRef = useRef(null);
+
+            const stopPostureCam = useCallback(() => {
+                if (postureAnimRef.current) cancelAnimationFrame(postureAnimRef.current);
+                if (postureStreamRef.current) { postureStreamRef.current.getTracks().forEach(t => t.stop()); postureStreamRef.current = null; }
+                if (postureVideoRef.current) postureVideoRef.current.srcObject = null;
+            }, []);
+
+            // Cleanup on unmount
+            useEffect(() => { return () => { stopPostureCam(); }; }, []);
+
+            const startPostureCam = useCallback(async () => {
+                setPosturePhase('loading'); setPostureAnalysis(null); setPostureLandmarks(null); setPostureImage(null);
+                try {
+                    const s = await navigator.mediaDevices.getUserMedia({ video: { width:{ideal:1080}, height:{ideal:1920}, facingMode:{ideal:'environment'} } });
+                    postureStreamRef.current = s;
+                    const v = postureVideoRef.current; v.srcObject = s; await v.play();
+                    if (!window.Pose) {
+                        await new Promise((res, rej) => { const sc = document.createElement('script'); sc.src = 'https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5.1675469404/pose.js'; sc.onload = res; sc.onerror = () => rej(new Error('MediaPipe読み込み失敗')); document.head.appendChild(sc); });
+                        await new Promise(r => setTimeout(r, 500));
+                    }
+                    if (!posturePoseRef.current) {
+                        const pose = new window.Pose({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5.1675469404/${f}` });
+                        pose.setOptions({ modelComplexity:1, smoothLandmarks:true, enableSegmentation:false, minDetectionConfidence:0.5, minTrackingConfidence:0.5 });
+                        pose.onResults(r => { if (r.poseLandmarks) setPostureLandmarks(r.poseLandmarks); });
+                        await pose.initialize();
+                        posturePoseRef.current = pose;
+                    }
+                    setPosturePhase('live');
+                    const detect = async () => { if (!postureStreamRef.current) return; try { await posturePoseRef.current.send({ image: v }); } catch(e){} postureAnimRef.current = requestAnimationFrame(detect); };
+                    detect();
+                } catch (e) { setPosturePhase('idle'); alert(e.message || 'カメラ起動失敗'); }
+            }, []);
+
+            const capturePosture = useCallback(() => {
+                const v = postureVideoRef.current;
+                const c = document.createElement('canvas'); c.width = v.videoWidth; c.height = v.videoHeight;
+                c.getContext('2d').drawImage(v, 0, 0);
+                setPostureImage(c.toDataURL('image/jpeg', 0.92));
+                stopPostureCam(); setPosturePhase('captured');
+            }, [stopPostureCam]);
+
+            // Posture analysis computation
+            useEffect(() => {
+                if (!postureLandmarks) return;
+                const a = postureViewMode === 'front' ? postureAnalyzeFront(postureLandmarks) : postureAnalyzeSide(postureLandmarks);
+                setPostureAnalysis(a);
+            }, [postureLandmarks, postureViewMode]);
+
+            // Posture skeleton drawing
+            useEffect(() => {
+                if (!postureLandmarks || !postureSvgRef.current || !postureVpRef.current) return;
+                const svg = postureSvgRef.current;
+                const w = postureVpRef.current.clientWidth, h = postureVpRef.current.clientHeight;
+                svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+                let html = '';
+                POSTURE_CONNECTIONS.forEach(([a,b]) => {
+                    const la = postureLandmarks[a], lb = postureLandmarks[b];
+                    if (!la || !lb || la.visibility < 0.5 || lb.visibility < 0.5) return;
+                    html += `<line x1="${la.x*w}" y1="${la.y*h}" x2="${lb.x*w}" y2="${lb.y*h}" stroke="rgba(15,110,86,0.7)" stroke-width="2.5" stroke-linecap="round"/>`;
+                });
+                Object.values(POSTURE_LM).forEach(idx => {
+                    const l = postureLandmarks[idx]; if (!l || l.visibility < 0.5) return;
+                    html += `<circle cx="${l.x*w}" cy="${l.y*h}" r="5" fill="#0F6E56" stroke="#fff" stroke-width="1.5"/>`;
+                });
+                const ls=postureLandmarks[11],rs=postureLandmarks[12],lh=postureLandmarks[23],rh=postureLandmarks[24];
+                if(ls&&rs&&lh&&rh){ const sm=postureMid(ls,rs),hm=postureMid(lh,rh); html+=`<line x1="${sm.x*w}" y1="${sm.y*h}" x2="${hm.x*w}" y2="${hm.y*h}" stroke="rgba(255,255,255,0.7)" stroke-width="2" stroke-dasharray="6 4"/>`; }
+                svg.innerHTML = html;
+            }, [postureLandmarks, posturePhase, postureViewMode]);
+
+            const applyPostureToReport = useCallback(() => {
+                if (!postureAnalysis || !postureImage) return;
+                // Set photo
+                setPhotoData(postureImage);
+                setPhotoName('姿勢分析_' + postureViewMode + '.jpg');
+                // Auto-set posture score (convert 0-100 to 0-5)
+                const total = postureGetTotal(postureAnalysis);
+                const postureScore5 = Math.round((total / 100) * 5 * 2) / 2; // 0.5 step
+                setScores(prev => ({ ...prev, posture: Math.min(5, Math.max(0, postureScore5)) }));
+                // Close modal
+                stopPostureCam(); setPostureModalOpen(false); setPosturePhase('idle');
+            }, [postureAnalysis, postureImage, postureViewMode, stopPostureCam]);
+
             const chartRef = useRef(null);
             const chartInstance = useRef(null);
             const captureRef = useRef(null);
@@ -11443,6 +11551,7 @@
                 setCoachComment(''); setCustomStretch(''); setStaffName('');
                 setSelectedStretches({}); setCoupon('none');
                 setTemplateKey('');
+                setPostureAnalysis(null); setPostureImage(null); setPostureLandmarks(null);
             }, []);
 
             // --- Download Image ---
@@ -11643,14 +11752,50 @@
                                 </section>
                                 {/* ④ 写真 */}
                                 <section>
-                                    <h3 className="text-sm font-bold text-green-700 uppercase tracking-wide mb-3 border-b border-green-100 pb-1">④ 写真を追加 (任意)</h3>
-                                    <div className="bg-gray-50 border border-green-100 rounded-lg p-3 text-center">
-                                        <label className="cursor-pointer flex flex-col items-center justify-center gap-2">
-                                            <span className="bg-white border border-green-200 text-green-700 px-3 py-1 rounded-full text-xs font-bold shadow-sm hover:bg-green-50 transition">画像を選択</span>
-                                            <input type="file" accept="image/*" className="hidden" onChange={handlePhotoUpload} />
-                                            <span className="text-[10px] text-gray-400">{photoName || 'Before/Afterや姿勢写真など'}</span>
-                                        </label>
-                                        {photoData && <button onClick={clearPhoto} className="mt-2 text-[10px] text-red-400 underline">写真を削除</button>}
+                                    <h3 className="text-sm font-bold text-green-700 uppercase tracking-wide mb-3 border-b border-green-100 pb-1">④ 写真・姿勢分析 (任意)</h3>
+                                    <div className="space-y-2">
+                                        {/* 姿勢分析カメラボタン */}
+                                        <button onClick={() => { setPostureModalOpen(true); setPosturePhase('idle'); }}
+                                            className="w-full flex items-center gap-3 p-3 rounded-lg border-2 border-teal-200 bg-teal-50 hover:bg-teal-100 transition text-left">
+                                            <div className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0" style={{background:'linear-gradient(135deg,#0F6E56,#1D9E75)'}}>
+                                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round">
+                                                    <path d="M12 2a4 4 0 014 4v1a4 4 0 01-8 0V6a4 4 0 014-4z"/><path d="M16 12v1a4 4 0 01-8 0v-1"/>
+                                                    <line x1="12" y1="17" x2="12" y2="22"/><line x1="8" y1="22" x2="16" y2="22"/>
+                                                </svg>
+                                            </div>
+                                            <div>
+                                                <span className="text-sm font-bold text-teal-800 block">姿勢分析カメラで撮影</span>
+                                                <span className="text-[10px] text-teal-600">AI骨格検出＋姿勢スコアを自動反映</span>
+                                            </div>
+                                            <svg className="w-4 h-4 text-teal-400 ml-auto flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>
+                                        </button>
+                                        {/* 通常の画像選択 */}
+                                        <div className="bg-gray-50 border border-green-100 rounded-lg p-3 text-center">
+                                            <label className="cursor-pointer flex flex-col items-center justify-center gap-2">
+                                                <span className="bg-white border border-green-200 text-green-700 px-3 py-1 rounded-full text-xs font-bold shadow-sm hover:bg-green-50 transition">画像を選択</span>
+                                                <input type="file" accept="image/*" className="hidden" onChange={handlePhotoUpload} />
+                                                <span className="text-[10px] text-gray-400">{photoName || 'Before/Afterや姿勢写真など'}</span>
+                                            </label>
+                                            {photoData && <button onClick={clearPhoto} className="mt-2 text-[10px] text-red-400 underline">写真を削除</button>}
+                                        </div>
+                                        {/* 姿勢分析結果サマリー（分析済みの場合表示） */}
+                                        {postureAnalysis && (
+                                            <div className="bg-white border border-teal-100 rounded-lg p-3">
+                                                <div className="flex items-center justify-between mb-2">
+                                                    <span className="text-xs font-bold text-teal-700">姿勢分析結果（{postureViewMode==='front'?'正面':'側面'}）</span>
+                                                    <span className="text-xs font-bold px-2 py-0.5 rounded-full text-white" style={{background:postureScoreColor(postureGetTotal(postureAnalysis))}}>{postureGetTotal(postureAnalysis)}点</span>
+                                                </div>
+                                                <div className="grid grid-cols-2 gap-1">
+                                                    {postureAnalysis.items.map(item => (
+                                                        <div key={item.key} className="flex items-center justify-between text-[10px] px-2 py-1 rounded" style={{background:postureScoreBg(item.score)}}>
+                                                            <span className="font-bold text-gray-700">{item.label}</span>
+                                                            <span className="font-bold" style={{color:postureScoreColor(item.score)}}>{item.score}</span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                                <p className="text-[9px] text-gray-400 mt-1">→ ★姿勢スコアに自動反映済み</p>
+                                            </div>
+                                        )}
                                     </div>
                                 </section>
                                 {/* ⑤ コメント */}
@@ -11953,6 +12098,94 @@
                                         </button>
                                     )}
                                 </div>
+                            </div>
+                        </div>
+                    )}
+                    {/* 姿勢分析カメラモーダル */}
+                    {postureModalOpen && (
+                        <div className="fixed inset-0 bg-black/70 z-[9999] flex items-center justify-center p-2" onClick={() => { if(posturePhase!=='loading'){stopPostureCam();setPostureModalOpen(false);setPosturePhase('idle');} }}>
+                            <div className="bg-gray-900 rounded-2xl shadow-2xl w-full max-w-md max-h-[95vh] flex flex-col overflow-hidden" onClick={e=>e.stopPropagation()}>
+                                {/* Modal header */}
+                                <div className="p-3 flex items-center justify-between shrink-0" style={{background:'linear-gradient(135deg,#085041,#0F6E56)'}}>
+                                    <div className="flex items-center gap-2 text-white">
+                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                                            <path d="M12 2a4 4 0 014 4v1a4 4 0 01-8 0V6a4 4 0 014-4z"/><path d="M16 12v1a4 4 0 01-8 0v-1"/>
+                                            <line x1="12" y1="17" x2="12" y2="22"/><line x1="8" y1="22" x2="16" y2="22"/>
+                                        </svg>
+                                        <span className="font-bold text-sm">姿勢分析カメラ</span>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        {/* View toggle */}
+                                        <div className="flex bg-white/10 rounded-lg p-0.5">
+                                            {['front','side'].map(m=>(
+                                                <button key={m} onClick={()=>setPostureViewMode(m)}
+                                                    className={`px-3 py-1 rounded-md text-xs font-bold transition ${postureViewMode===m?'bg-white/20 text-white':'text-white/50'}`}>
+                                                    {m==='front'?'正面':'側面'}
+                                                </button>
+                                            ))}
+                                        </div>
+                                        <button onClick={()=>{stopPostureCam();setPostureModalOpen(false);setPosturePhase('idle');}} className="text-white/70 hover:text-white text-xl leading-none ml-1">&times;</button>
+                                    </div>
+                                </div>
+                                {/* Camera viewport */}
+                                <div ref={postureVpRef} className="relative flex-1 min-h-0" style={{aspectRatio:'9/16',maxHeight:'65vh'}}>
+                                    <video ref={postureVideoRef} playsInline muted className="w-full h-full object-cover" style={{display:posturePhase==='live'?'block':'none'}}/>
+                                    {postureImage && <img src={postureImage} className="w-full h-full object-cover" alt=""/>}
+                                    {posturePhase==='idle' && (
+                                        <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-gray-900">
+                                            <div className="w-16 h-16 rounded-full bg-white/10 flex items-center justify-center">
+                                                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.5)" strokeWidth="1.5"><rect x="2" y="3" width="20" height="14" rx="2"/><circle cx="12" cy="10" r="3"/></svg>
+                                            </div>
+                                            <p className="text-white/40 text-xs text-center px-4">{postureViewMode==='front'?'正面全身を撮影':'左側面から撮影'}</p>
+                                            <button onClick={startPostureCam} className="px-6 py-2.5 rounded-xl text-white font-bold text-sm" style={{background:'linear-gradient(135deg,#0F6E56,#1D9E75)'}}>カメラ起動</button>
+                                        </div>
+                                    )}
+                                    {posturePhase==='loading' && (
+                                        <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-black/60 backdrop-blur-sm">
+                                            <div className="w-10 h-10 border-3 rounded-full animate-spin" style={{borderWidth:'3px',borderColor:'rgba(255,255,255,0.2)',borderTopColor:'#1D9E75'}}/><p className="text-white text-sm">読み込み中...</p>
+                                        </div>
+                                    )}
+                                    {(posturePhase==='live'||posturePhase==='captured') && (
+                                        <svg ref={postureSvgRef} className="absolute inset-0 w-full h-full pointer-events-none" style={{zIndex:3}} preserveAspectRatio="none"/>
+                                    )}
+                                    {posturePhase==='live' && (
+                                        <div className="absolute top-2 right-2 flex items-center gap-1.5 px-2 py-1 rounded-full bg-black/50 backdrop-blur z-10">
+                                            <div className="w-2 h-2 rounded-full bg-red-400 animate-pulse"/><span className="text-white text-[10px] font-bold">LIVE</span>
+                                        </div>
+                                    )}
+                                    {/* Floating buttons */}
+                                    {posturePhase==='live' && (
+                                        <div className="absolute bottom-0 left-0 right-0 p-3 flex gap-2 z-10" style={{background:'linear-gradient(transparent, rgba(0,0,0,0.7))'}}>
+                                            <button onClick={capturePosture} className="flex-1 py-3 rounded-xl text-white font-bold text-sm shadow-lg" style={{background:'rgba(15,110,86,0.9)'}}>撮影・分析確定</button>
+                                            <button onClick={()=>{stopPostureCam();setPosturePhase('idle');}} className="px-4 py-3 rounded-xl font-bold text-sm shadow-lg" style={{background:'rgba(255,255,255,0.9)',color:'#555'}}>停止</button>
+                                        </div>
+                                    )}
+                                </div>
+                                {/* Results & Apply */}
+                                {posturePhase==='captured' && postureAnalysis && (
+                                    <div className="p-3 space-y-2 bg-gray-800 shrink-0 overflow-y-auto" style={{maxHeight:'30vh'}}>
+                                        <div className="flex items-center justify-between">
+                                            <span className="text-white text-sm font-bold">{postureViewMode==='front'?'正面':'側面'}分析結果</span>
+                                            <span className="text-sm font-bold px-2 py-0.5 rounded-full text-white" style={{background:postureScoreColor(postureGetTotal(postureAnalysis))}}>{postureGetTotal(postureAnalysis)}点</span>
+                                        </div>
+                                        <div className="grid grid-cols-2 gap-1">
+                                            {postureAnalysis.items.map(item=>(
+                                                <div key={item.key} className="flex items-center justify-between text-xs px-2 py-1.5 rounded-lg" style={{background:'rgba(255,255,255,0.08)'}}>
+                                                    <span className="text-white/80">{item.label}</span>
+                                                    <span className="font-bold" style={{color:postureScoreColor(item.score)}}>{item.score}</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                        <div className="flex gap-2 pt-1">
+                                            <button onClick={applyPostureToReport} className="flex-1 py-2.5 rounded-xl text-white font-bold text-sm" style={{background:'linear-gradient(135deg,#0F6E56,#1D9E75)'}}>
+                                                レポートに反映
+                                            </button>
+                                            <button onClick={()=>{setPostureImage(null);setPostureAnalysis(null);setPostureLandmarks(null);startPostureCam();}} className="px-4 py-2.5 rounded-xl text-sm font-bold bg-white/10 text-white/80">
+                                                再撮影
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         </div>
                     )}
@@ -13747,6 +13980,22 @@
                 }
             }, [isDarkMode]);
 
+            // モバイルナビ: currentView変更時のみアクティブタブにスクロール
+            const bottomNavRef = React.useRef(null);
+            useEffect(() => {
+                const el = bottomNavRef.current;
+                if (!el) return;
+                // 少し遅延させてDOM反映を待つ
+                const timer = setTimeout(() => {
+                    const active = el.querySelector('.bottom-nav-item.active');
+                    if (active) {
+                        const scrollLeft = active.offsetLeft - (el.offsetWidth / 2) + (active.offsetWidth / 2);
+                        el.scrollTo({ left: scrollLeft, behavior: 'smooth' });
+                    }
+                }, 50);
+                return () => clearTimeout(timer);
+            }, [currentView]);
+
             // プルトゥリフレッシュ
             const [pullState, setPullState] = useState({ pulling: false, refreshing: false, distance: 0 });
             const pullStartY = React.useRef(0);
@@ -14037,15 +14286,7 @@
                     {/* Bottom Navigation (Mobile) - カウンセリング中は非表示 */}
                     <nav className="bottom-nav hide-desktop" style={isFullscreenView ? {display:'none'} : undefined}>
                         <div
-                            ref={(el) => {
-                                if (el) {
-                                    const active = el.querySelector('.bottom-nav-item.active');
-                                    if (active) {
-                                        const scrollLeft = active.offsetLeft - (el.offsetWidth / 2) + (active.offsetWidth / 2);
-                                        el.scrollTo({ left: scrollLeft, behavior: 'smooth' });
-                                    }
-                                }
-                            }}
+                            ref={bottomNavRef}
                             className="flex overflow-x-auto"
                             style={{scrollbarWidth: 'none', msOverflowStyle: 'none', WebkitOverflowScrolling: 'touch', scrollSnapType: 'x proximity'}}
                         >
