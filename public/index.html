@@ -3013,95 +3013,241 @@
         };
 
         // ========================================
-        // 出納帳（キャッシュブック）
+        // 出納帳（キャッシュブック）- スプレッドシートファースト
         // ========================================
 
-        const CASHBOOK_STORAGE_KEY = 'sise_cashbook';
-        const CASHBOOK_GAS_URL = UNIFIED_GAS_URL;
+        const CASHBOOK_CACHE_KEY = 'sise_cashbook_cache';
 
         const useCashbook = () => {
             const [entries, setEntries] = useState([]);
+            const [dailyCloses, setDailyCloses] = useState([]);
+            const [auditLogs, setAuditLogs] = useState([]);
             const [saving, setSaving] = useState(false);
+            const [loading, setLoading] = useState(true);
+            const [lastSynced, setLastSynced] = useState(null);
+            const [syncError, setSyncError] = useState(null);
+
+            // スプレッドシートからフェッチ（メイン）、キャッシュはフォールバック
+            const fetchFromGAS = useCallback(async (showLoading) => {
+                if (UNIFIED_GAS_URL === 'YOUR_UNIFIED_GAS_URL') { setLoading(false); return; }
+                if (showLoading) setLoading(true);
+                setSyncError(null);
+                try {
+                    const res = await fetch(UNIFIED_GAS_URL + '?type=cashbook&includeLogs=true');
+                    const data = await res.json();
+                    if (data && data.entries) {
+                        setEntries(data.entries);
+                        setDailyCloses(data.dailyCloses || []);
+                        setAuditLogs(data.logs || []);
+                        setLastSynced(new Date());
+                        try { localStorage.setItem(CASHBOOK_CACHE_KEY, JSON.stringify({ entries: data.entries, dailyCloses: data.dailyCloses || [], ts: Date.now() })); } catch(e) {}
+                    }
+                } catch (e) {
+                    setSyncError('スプレッドシートとの同期に失敗しました');
+                    // オフライン時はキャッシュから
+                    try {
+                        const cached = JSON.parse(localStorage.getItem(CASHBOOK_CACHE_KEY) || '{}');
+                        if (cached.entries) { setEntries(cached.entries); setDailyCloses(cached.dailyCloses || []); }
+                    } catch(e2) {}
+                } finally {
+                    setLoading(false);
+                }
+            }, []);
 
             // 初回ロード
             useEffect(() => {
+                // まずキャッシュから即時表示
                 try {
-                    const stored = JSON.parse(localStorage.getItem(CASHBOOK_STORAGE_KEY) || '[]');
-                    setEntries(stored);
-                } catch (e) {}
-                if (CASHBOOK_GAS_URL !== 'YOUR_UNIFIED_GAS_URL') {
-                    fetch(CASHBOOK_GAS_URL + '?type=cashbook')
-                        .then(r => r.json())
-                        .then(data => {
-                            if (data && data.entries) {
-                                setEntries(data.entries);
-                                try { localStorage.setItem(CASHBOOK_STORAGE_KEY, JSON.stringify(data.entries)); } catch(e) {}
-                            }
-                        })
-                        .catch(() => {});
+                    const cached = JSON.parse(localStorage.getItem(CASHBOOK_CACHE_KEY) || '{}');
+                    if (cached.entries) { setEntries(cached.entries); setDailyCloses(cached.dailyCloses || []); }
+                } catch(e) {}
+                // スプレッドシートから最新取得
+                fetchFromGAS(true);
+            }, []);
+
+            // 定期同期（60秒ごと）
+            useEffect(() => {
+                if (UNIFIED_GAS_URL === 'YOUR_UNIFIED_GAS_URL') return;
+                const interval = setInterval(() => fetchFromGAS(false), 60000);
+                return () => clearInterval(interval);
+            }, [fetchFromGAS]);
+
+            // 操作者名取得
+            const getOperator = useCallback(() => {
+                return currentAccess ? currentAccess.name : '不明';
+            }, []);
+
+            // 日次締めチェック
+            const isDayClosed = useCallback((date, storeId) => {
+                return dailyCloses.some(c => c.date === date && c.storeId === storeId && c.locked);
+            }, [dailyCloses]);
+
+            // エントリー追加（スプレッドシートファースト）
+            const addEntry = useCallback(async (entry) => {
+                if (isDayClosed(entry.date, entry.store)) {
+                    showToast('この日は締め済みのため記帳できません', 'error');
+                    return null;
                 }
-            }, []);
-
-            const saveLocal = useCallback((data) => {
-                try { localStorage.setItem(CASHBOOK_STORAGE_KEY, JSON.stringify(data)); } catch (e) {}
-            }, []);
-
-            const saveToGAS = useCallback(async (data) => {
-                if (CASHBOOK_GAS_URL !== 'YOUR_UNIFIED_GAS_URL') {
-                    await fetch(CASHBOOK_GAS_URL, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'text/plain' },
-                        body: JSON.stringify({ type: 'cashbook', action: 'saveCashbook', entries: data })
-                    }).catch(() => {});
-                }
-            }, []);
-
-            // エントリー追加
-            const addEntry = useCallback((entry) => {
                 const newEntry = {
                     id: 'cb_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
                     date: entry.date || new Date().toISOString().slice(0, 10),
-                    type: entry.type || 'income', // 'income' | 'expense'
+                    type: entry.type || 'income',
                     category: entry.category || '施術売上',
                     description: entry.description || '',
                     amount: parseInt(entry.amount) || 0,
                     customerName: entry.customerName || '',
                     treatmentCount: parseInt(entry.treatmentCount) || 0,
-                    paymentMethod: entry.paymentMethod || 'CASH', // 'CASH' | 'QR' | 'CARD' | 'SQUARE'
+                    paymentMethod: entry.paymentMethod || 'CASH',
+                    cashType: entry.cashType || 'register',
                     memberId: entry.memberId || null,
+                    store: entry.store || '',
+                    recorder: entry.recorder || getOperator(),
                     notes: entry.notes || '',
                     createdAt: new Date().toISOString()
                 };
-                setEntries(prev => {
-                    const updated = [newEntry, ...prev];
-                    saveLocal(updated);
-                    saveToGAS(updated);
-                    return updated;
-                });
-                return newEntry;
-            }, [saveLocal, saveToGAS]);
 
-            // エントリー更新
-            const updateEntry = useCallback((entryId, updates) => {
-                setEntries(prev => {
-                    const updated = prev.map(e => e.id === entryId ? { ...e, ...updates } : e);
-                    saveLocal(updated);
-                    saveToGAS(updated);
-                    return updated;
-                });
-            }, [saveLocal, saveToGAS]);
+                // 楽観的UI更新
+                setEntries(prev => [newEntry, ...prev]);
+                setSaving(true);
 
-            // エントリー削除
-            const deleteEntry = useCallback((entryId) => {
-                setEntries(prev => {
-                    const updated = prev.filter(e => e.id !== entryId);
-                    saveLocal(updated);
-                    saveToGAS(updated);
-                    return updated;
-                });
-            }, [saveLocal, saveToGAS]);
+                try {
+                    if (UNIFIED_GAS_URL !== 'YOUR_UNIFIED_GAS_URL') {
+                        const res = await fetch(UNIFIED_GAS_URL, {
+                            method: 'POST', headers: { 'Content-Type': 'text/plain' },
+                            body: JSON.stringify({ type: 'cashbook', action: 'addEntry', entry: newEntry, operator: getOperator() })
+                        });
+                        const result = await res.json();
+                        if (result.error) {
+                            // ロールバック
+                            setEntries(prev => prev.filter(e => e.id !== newEntry.id));
+                            showToast(result.error, 'error');
+                            return null;
+                        }
+                    }
+                    // キャッシュ更新
+                    try {
+                        const cached = JSON.parse(localStorage.getItem(CASHBOOK_CACHE_KEY) || '{}');
+                        cached.entries = [newEntry, ...(cached.entries || [])];
+                        cached.ts = Date.now();
+                        localStorage.setItem(CASHBOOK_CACHE_KEY, JSON.stringify(cached));
+                    } catch(e) {}
+                    return newEntry;
+                } catch (e) {
+                    showToast('保存に失敗しました（オフライン？）', 'error');
+                    return newEntry; // ローカルには残す
+                } finally {
+                    setSaving(false);
+                }
+            }, [getOperator, isDayClosed]);
 
-            return { entries, addEntry, updateEntry, deleteEntry, saving };
+            // エントリー更新（スプレッドシートファースト）
+            const updateEntry = useCallback(async (entryId, updates) => {
+                const target = entries.find(e => e.id === entryId);
+                if (target && isDayClosed(target.date, target.store)) {
+                    showToast('この日は締め済みのため編集できません', 'error');
+                    return false;
+                }
+                // 楽観的更新
+                const oldEntries = [...entries];
+                setEntries(prev => prev.map(e => e.id === entryId ? { ...e, ...updates, updatedAt: new Date().toISOString(), updatedBy: getOperator() } : e));
+                setSaving(true);
+
+                try {
+                    if (UNIFIED_GAS_URL !== 'YOUR_UNIFIED_GAS_URL') {
+                        const res = await fetch(UNIFIED_GAS_URL, {
+                            method: 'POST', headers: { 'Content-Type': 'text/plain' },
+                            body: JSON.stringify({ type: 'cashbook', action: 'updateEntry', entryId, updates, operator: getOperator() })
+                        });
+                        const result = await res.json();
+                        if (result.error) {
+                            setEntries(oldEntries); // ロールバック
+                            showToast(result.error, 'error');
+                            return false;
+                        }
+                    }
+                    return true;
+                } catch (e) {
+                    showToast('更新に失敗しました', 'error');
+                    return true; // ローカルには残す
+                } finally {
+                    setSaving(false);
+                }
+            }, [entries, getOperator, isDayClosed]);
+
+            // エントリー削除（論理削除）
+            const deleteEntry = useCallback(async (entryId) => {
+                const target = entries.find(e => e.id === entryId);
+                if (target && isDayClosed(target.date, target.store)) {
+                    showToast('この日は締め済みのため削除できません', 'error');
+                    return false;
+                }
+                const oldEntries = [...entries];
+                setEntries(prev => prev.filter(e => e.id !== entryId));
+                setSaving(true);
+
+                try {
+                    if (UNIFIED_GAS_URL !== 'YOUR_UNIFIED_GAS_URL') {
+                        const res = await fetch(UNIFIED_GAS_URL, {
+                            method: 'POST', headers: { 'Content-Type': 'text/plain' },
+                            body: JSON.stringify({ type: 'cashbook', action: 'deleteEntry', entryId, operator: getOperator() })
+                        });
+                        const result = await res.json();
+                        if (result.error) {
+                            setEntries(oldEntries);
+                            showToast(result.error, 'error');
+                            return false;
+                        }
+                    }
+                    return true;
+                } catch (e) {
+                    showToast('削除に失敗しました', 'error');
+                    return true;
+                } finally {
+                    setSaving(false);
+                }
+            }, [entries, getOperator, isDayClosed]);
+
+            // 日次締め
+            const closeDailyBooks = useCallback(async (date, storeId, balances, notes) => {
+                setSaving(true);
+                try {
+                    if (UNIFIED_GAS_URL !== 'YOUR_UNIFIED_GAS_URL') {
+                        const res = await fetch(UNIFIED_GAS_URL, {
+                            method: 'POST', headers: { 'Content-Type': 'text/plain' },
+                            body: JSON.stringify({
+                                type: 'cashbook', action: 'dailyClose',
+                                date, storeId,
+                                safeBalance: balances.safe || 0,
+                                pettyCashBalance: balances.pettyCash || 0,
+                                registerBalance: balances.register || 0,
+                                closedBy: getOperator(),
+                                notes: notes || ''
+                            })
+                        });
+                        const result = await res.json();
+                        if (result.error) {
+                            showToast(result.error, 'error');
+                            return false;
+                        }
+                        setDailyCloses(prev => [...prev, { date, storeId, safeBalance: balances.safe || 0, pettyCashBalance: balances.pettyCash || 0, registerBalance: balances.register || 0, closedBy: getOperator(), closedAt: new Date().toISOString(), locked: true }]);
+                        showToast(date + ' の日次締めが完了しました', 'success');
+                        return true;
+                    }
+                } catch (e) {
+                    showToast('日次締めに失敗しました', 'error');
+                    return false;
+                } finally {
+                    setSaving(false);
+                }
+            }, [getOperator]);
+
+            // 手動リフレッシュ
+            const refresh = useCallback(() => fetchFromGAS(true), [fetchFromGAS]);
+
+            return {
+                entries, dailyCloses, auditLogs, saving, loading, lastSynced, syncError,
+                addEntry, updateEntry, deleteEntry, closeDailyBooks, isDayClosed, refresh
+            };
         };
 
         // ========================================
@@ -7719,13 +7865,16 @@
         // 出納帳ビュー
         // ========================================
 
-        const CashbookView = ({ cashbookHook, memberData, manualMembersHook, activeStoreId }) => {
-            const { entries: rawEntries, addEntry: rawAddEntry, updateEntry, deleteEntry, saving } = cashbookHook;
+        const CashbookView = ({ cashbookHook, memberData, manualMembersHook, activeStoreId, squareData }) => {
+            const { entries: rawEntries, addEntry: rawAddEntry, updateEntry, deleteEntry, saving, loading,
+                    dailyCloses, auditLogs, lastSynced, syncError, closeDailyBooks, isDayClosed, refresh } = cashbookHook;
             const stores = memberData?.stores || [];
             const activeStores = stores.filter(s => s.status !== 'inactive');
 
             // 店舗フィルタ
             const [filterStore, setFilterStore] = useState('all');
+            // タブ: overview / entries / audit / reconcile
+            const [cashTab, setCashTab] = useState('overview');
 
             // 権限のある店舗のみ表示
             const entries = useMemo(() => {
@@ -7754,8 +7903,8 @@
             const [showCashCheck, setShowCashCheck] = useState(false);
             const [cashCheckAmount, setCashCheckAmount] = useState('');
             const [cashCheckStore, setCashCheckStore] = useState('');
-            const [gasLastSynced, setGasLastSynced] = useState(null);
-            const [gasSyncing, setGasSyncing] = useState(false);
+            const [showDailyClose, setShowDailyClose] = useState(false);
+            const [dailyCloseData, setDailyCloseData] = useState({ safe: '', pettyCash: '', register: '', notes: '' });
 
             const [formData, setFormData] = useState({
                 date: new Date().toISOString().slice(0, 10),
@@ -7766,6 +7915,7 @@
                 customerName: '',
                 treatmentCount: '1',
                 paymentMethod: 'CASH',
+                cashType: 'register',
                 store: activeStoreId || '',
                 recorder: '',
                 notes: ''
@@ -7773,6 +7923,7 @@
 
             const incomeCategories = ['施術売上', 'サブスク月額', '回数券販売', '物販', 'その他収入'];
             const expenseCategories = ['家賃', '水道光熱費', '消耗品', '広告費', '人件費', '設備', '交通費', 'その他経費'];
+            const cashTypeLabels = { register: 'レジ', safe: '金庫', pettyCash: '小口現金' };
 
             // 月別フィルタ
             const monthEntries = useMemo(() => {
@@ -7791,24 +7942,35 @@
                 return Object.entries(groups).sort((a, b) => b[0].localeCompare(a[0]));
             }, [monthEntries]);
 
-            // 現金残高計算（全期間・店舗別）
+            // 現金残高計算（全期間・店舗別・現金区分別）
             const cashBalance = useMemo(() => {
                 const all = (rawEntries || []).filter(e => {
                     if (currentAccess && e.store && !currentAccess.storeIds.includes(e.store)) return false;
                     return true;
                 });
-                // 全体
-                const totalIn = all.filter(e => e.type === 'income' && e.paymentMethod === 'CASH').reduce((s, e) => s + e.amount, 0);
-                const totalOut = all.filter(e => e.type === 'expense' && e.paymentMethod === 'CASH').reduce((s, e) => s + e.amount, 0);
+                const calcBalance = (items) => {
+                    const cashItems = items.filter(e => e.paymentMethod === 'CASH');
+                    const totalIn = cashItems.filter(e => e.type === 'income').reduce((s, e) => s + e.amount, 0);
+                    const totalOut = cashItems.filter(e => e.type === 'expense').reduce((s, e) => s + e.amount, 0);
+                    // 現金区分別
+                    const byCashType = {};
+                    ['register', 'safe', 'pettyCash'].forEach(ct => {
+                        const ctItems = cashItems.filter(e => (e.cashType || 'register') === ct);
+                        const ctIn = ctItems.filter(e => e.type === 'income').reduce((s, e) => s + e.amount, 0);
+                        const ctOut = ctItems.filter(e => e.type === 'expense').reduce((s, e) => s + e.amount, 0);
+                        byCashType[ct] = { balance: ctIn - ctOut, income: ctIn, expense: ctOut };
+                    });
+                    return { balance: totalIn - totalOut, income: totalIn, expense: totalOut, byCashType };
+                };
+                const total = calcBalance(all);
                 // 店舗別
                 const byStore = {};
                 activeStores.forEach(st => {
                     const stEntries = all.filter(e => e.store === st.id);
-                    const stIn = stEntries.filter(e => e.type === 'income' && e.paymentMethod === 'CASH').reduce((s, e) => s + e.amount, 0);
-                    const stOut = stEntries.filter(e => e.type === 'expense' && e.paymentMethod === 'CASH').reduce((s, e) => s + e.amount, 0);
-                    byStore[st.id] = { name: st.name, balance: stIn - stOut, income: stIn, expense: stOut };
+                    const stCalc = calcBalance(stEntries);
+                    byStore[st.id] = { name: st.name, ...stCalc };
                 });
-                return { total: totalIn - totalOut, byStore };
+                return { total: total.balance, income: total.income, expense: total.expense, byCashType: total.byCashType, byStore };
             }, [rawEntries, activeStores]);
 
             // 月間集計
@@ -7859,8 +8021,9 @@
                     customerName: '',
                     treatmentCount: '1',
                     paymentMethod: 'CASH',
+                    cashType: 'register',
                     store: filterStore !== 'all' ? filterStore : (activeStoreId || ''),
-                    recorder: '',
+                    recorder: currentAccess ? currentAccess.name : '',
                     notes: ''
                 });
                 setEditingId(null);
@@ -7886,6 +8049,10 @@
             };
 
             const handleEdit = (entry) => {
+                if (isDayClosed(entry.date, entry.store)) {
+                    showToast('この日は締め済みのため編集できません', 'error');
+                    return;
+                }
                 setFormData({
                     date: entry.date,
                     type: entry.type,
@@ -7895,6 +8062,7 @@
                     customerName: entry.customerName || '',
                     treatmentCount: String(entry.treatmentCount || 0),
                     paymentMethod: entry.paymentMethod || 'CASH',
+                    cashType: entry.cashType || 'register',
                     store: entry.store || '',
                     recorder: entry.recorder || '',
                     notes: entry.notes || ''
@@ -7909,50 +8077,6 @@
                 setViewMonth(d.toISOString().slice(0, 7));
             };
 
-            // スプシ保存
-            const handleGasSave = async () => {
-                if (UNIFIED_GAS_URL === 'YOUR_UNIFIED_GAS_URL') return;
-                setGasSyncing(true);
-                try {
-                    await fetch(UNIFIED_GAS_URL, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'text/plain' },
-                        body: JSON.stringify({ type: 'cashbook', action: 'saveCashbook', entries: rawEntries })
-                    });
-                    setGasLastSynced(new Date());
-                    showToast('出納帳をスプシに保存しました', 'success');
-                } catch (e) {
-                    showToast('スプシ保存に失敗しました', 'error');
-                } finally {
-                    setGasSyncing(false);
-                }
-            };
-
-            // スプシ読込
-            const handleGasLoad = async () => {
-                if (UNIFIED_GAS_URL === 'YOUR_UNIFIED_GAS_URL') return;
-                setGasSyncing(true);
-                try {
-                    const res = await fetch(UNIFIED_GAS_URL + '?type=cashbook');
-                    const data = await res.json();
-                    if (data && data.entries && data.entries.length > 0) {
-                        // rawEntriesを上書き（hookのsetEntriesを直接使う）
-                        cashbookHook.entries.splice(0);
-                        data.entries.forEach(e => cashbookHook.entries.push(e));
-                        try { localStorage.setItem('sise_cashbook_entries', JSON.stringify(data.entries)); } catch(e) {}
-                        setGasLastSynced(new Date());
-                        showToast(data.entries.length + '件をスプシから読み込みました', 'success');
-                        window.location.reload();
-                    } else {
-                        showToast('スプシにデータがありません', 'info');
-                    }
-                } catch (e) {
-                    showToast('スプシ読込に失敗しました', 'error');
-                } finally {
-                    setGasSyncing(false);
-                }
-            };
-
             // レジ金チェック
             const handleCashCheck = () => {
                 const actual = parseInt(cashCheckAmount) || 0;
@@ -7963,7 +8087,6 @@
                 }
                 const diff = actual - expected;
                 const storeName = getStoreName(storeId) || '全店舗';
-                // 差異を記録として残す
                 if (diff !== 0) {
                     addEntry({
                         date: new Date().toISOString().slice(0, 10),
@@ -7972,8 +8095,9 @@
                         description: 'レジ金チェック差異（' + storeName + '）実残高:' + formatCurrency(actual) + ' / 理論:' + formatCurrency(expected),
                         amount: Math.abs(diff),
                         paymentMethod: 'CASH',
+                        cashType: 'register',
                         store: storeId !== 'all' ? storeId : '',
-                        recorder: 'レジ金チェック'
+                        recorder: currentAccess ? currentAccess.name : 'レジ金チェック'
                     });
                     showToast('差異 ' + (diff > 0 ? '+' : '') + formatCurrency(diff) + ' を記録しました（' + storeName + '）', diff === 0 ? 'success' : 'error');
                 } else {
@@ -7983,19 +8107,46 @@
                 setCashCheckAmount('');
             };
 
+            // 日次締め処理
+            const handleDailyClose = async () => {
+                const storeId = filterStore !== 'all' ? filterStore : '';
+                if (!storeId) { showToast('日次締めは店舗を選択してください', 'error'); return; }
+                const today = new Date().toISOString().slice(0, 10);
+                const result = await closeDailyBooks(today, storeId, {
+                    safe: parseInt(dailyCloseData.safe) || 0,
+                    pettyCash: parseInt(dailyCloseData.pettyCash) || 0,
+                    register: parseInt(dailyCloseData.register) || 0
+                }, dailyCloseData.notes);
+                if (result) {
+                    setShowDailyClose(false);
+                    setDailyCloseData({ safe: '', pettyCash: '', register: '', notes: '' });
+                }
+            };
+
+            // Square売上との突合
+            const squareReconciliation = useMemo(() => {
+                if (!squareData?.payments) return null;
+                const today = new Date().toISOString().slice(0, 10);
+                const todaySquare = (squareData.payments || []).filter(p => p.created_at && p.created_at.startsWith(today));
+                const squareTotal = todaySquare.reduce((s, p) => s + (p.amount_money?.amount || 0) / 100, 0);
+                const todayCashbook = entries.filter(e => e.date === today && e.type === 'income');
+                const cashbookTotal = todayCashbook.reduce((s, e) => s + e.amount, 0);
+                return { squareTotal, cashbookTotal, diff: cashbookTotal - squareTotal, count: todaySquare.length, date: today };
+            }, [squareData, entries]);
+
             return (
                 <div className="space-y-5 md:space-y-6 animate-fade-in">
                     <SectionHeader title="出納帳" subtitle="CASH MANAGEMENT" icon="book-open">
                         <div className="flex items-center gap-2">
-                            <button onClick={handleGasSave} disabled={gasSyncing}
-                                className="flex items-center px-3 py-2 bg-sise-500 hover:bg-sise-600 text-white rounded-xl text-xs font-medium transition-all active:scale-95 disabled:opacity-50">
-                                <Icon name="upload-cloud" size={14} className="mr-1" />
-                                {gasSyncing ? '同期中...' : 'スプシ保存'}
-                            </button>
-                            <button onClick={handleGasLoad} disabled={gasSyncing}
+                            {syncError && (
+                                <span className="text-[11px] text-red-500 font-medium mr-1">
+                                    <Icon name="alert-circle" size={12} className="inline mr-0.5" />オフライン
+                                </span>
+                            )}
+                            <button onClick={refresh} disabled={loading}
                                 className="flex items-center px-3 py-2 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-xl text-xs font-medium transition-all active:scale-95 disabled:opacity-50">
-                                <Icon name="download-cloud" size={14} className="mr-1" />
-                                スプシ読込
+                                <Icon name="refresh-cw" size={14} className={`mr-1 ${loading ? 'animate-spin' : ''}`} />
+                                {loading ? '同期中...' : '最新取得'}
                             </button>
                             <button
                                 onClick={() => { resetForm(); setFormData(p => ({...p, date: selectedDate})); setShowForm(!showForm); }}
@@ -8007,46 +8158,32 @@
                         </div>
                     </SectionHeader>
 
-                    {gasLastSynced && (
-                        <p className="text-[11px] text-slate-400 text-right -mt-4">最終同期: {gasLastSynced.toLocaleString('ja-JP')}</p>
-                    )}
-
-                    {/* 現金残高カード（店舗別） */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                        {/* 全体残高 */}
-                        <div className="glass-card !rounded-2xl p-4 border-2 border-sise-200 bg-gradient-to-br from-sise-50 to-white">
-                            <div className="flex items-center justify-between mb-2">
-                                <span className="text-xs font-semibold text-sise-600 flex items-center"><Icon name="wallet" size={14} className="mr-1" /> 現金残高（全店舗）</span>
-                                <button onClick={() => { setShowCashCheck(true); setCashCheckStore('all'); }}
-                                    className="text-[11px] bg-sise-100 text-sise-700 px-2 py-1 rounded-lg font-semibold hover:bg-sise-200 transition-colors">
-                                    <Icon name="check-circle" size={12} className="inline mr-0.5 -mt-0.5" />レジ金チェック
-                                </button>
-                            </div>
-                            <p className="text-2xl font-extrabold text-slate-800">{formatCurrency(cashBalance.total)}</p>
-                            <div className="flex gap-3 mt-2 text-[11px]">
-                                <span className="text-sise-600">月入金: <strong>{formatCurrency(monthSummary.cashIn)}</strong></span>
-                                <span className="text-red-500">月出金: <strong>{formatCurrency(monthSummary.cashOut)}</strong></span>
-                            </div>
+                    {/* 同期状態表示 */}
+                    <div className="flex items-center justify-between -mt-3">
+                        <div className="flex items-center gap-2">
+                            {lastSynced && (
+                                <span className="text-[11px] text-slate-400 flex items-center">
+                                    <Icon name="check-circle" size={11} className="mr-1 text-green-500" />
+                                    スプシ同期: {lastSynced.toLocaleString('ja-JP')}
+                                </span>
+                            )}
+                            {saving && <span className="text-[11px] text-amber-500 font-medium animate-pulse">保存中...</span>}
                         </div>
-                        {/* 店舗別残高 */}
-                        {Object.entries(cashBalance.byStore).map(([storeId, data]) => (
-                            <div key={storeId} className={`glass-card !rounded-2xl p-4 cursor-pointer transition-all ${filterStore === storeId ? 'border-2 border-sise-400 bg-sise-50/30' : 'border border-slate-200 hover:border-sise-200'}`}
-                                onClick={() => setFilterStore(filterStore === storeId ? 'all' : storeId)}>
-                                <div className="flex items-center justify-between mb-2">
-                                    <span className="text-xs font-semibold text-slate-600 flex items-center">
-                                        <Icon name="map-pin" size={13} className="mr-1" /> {data.name}
-                                    </span>
-                                    <button onClick={(ev) => { ev.stopPropagation(); setShowCashCheck(true); setCashCheckStore(storeId); }}
-                                        className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-medium hover:bg-slate-200 transition-colors">
-                                        チェック
-                                    </button>
-                                </div>
-                                <p className="text-xl font-extrabold text-slate-800">{formatCurrency(data.balance)}</p>
-                                <div className="flex gap-3 mt-1 text-[10px] text-slate-400">
-                                    <span>入金: {formatCurrency(data.income)}</span>
-                                    <span>出金: {formatCurrency(data.expense)}</span>
-                                </div>
-                            </div>
+                        <span className="text-[10px] text-slate-300">自動同期: 60秒毎</span>
+                    </div>
+
+                    {/* タブ切り替え */}
+                    <div className="flex items-center gap-1 bg-slate-100 rounded-xl p-1">
+                        {[
+                            { id: 'overview', label: '残高総覧', icon: 'wallet' },
+                            { id: 'entries', label: '入出金記録', icon: 'list' },
+                            { id: 'audit', label: '操作ログ', icon: 'shield' },
+                            { id: 'reconcile', label: '売上突合', icon: 'git-merge' }
+                        ].map(t => (
+                            <button key={t.id} onClick={() => setCashTab(t.id)}
+                                className={`flex-1 flex items-center justify-center gap-1 px-3 py-2 rounded-lg text-xs font-semibold transition-all ${cashTab === t.id ? 'bg-white text-sise-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+                                <Icon name={t.icon} size={13} />{t.label}
+                            </button>
                         ))}
                     </div>
 
@@ -8062,6 +8199,178 @@
                             ))}
                         </div>
                     )}
+
+                    {/* ===== 残高総覧タブ ===== */}
+                    {cashTab === 'overview' && (<>
+                    {/* 全店舗残高カード（金庫・小口・レジ区分） */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+                        {/* 全体残高 */}
+                        <div className="glass-card !rounded-2xl p-4 border-2 border-sise-200 bg-gradient-to-br from-sise-50 to-white">
+                            <div className="flex items-center justify-between mb-2">
+                                <span className="text-xs font-semibold text-sise-600 flex items-center"><Icon name="wallet" size={14} className="mr-1" /> 現金合計</span>
+                                <button onClick={() => { setShowCashCheck(true); setCashCheckStore('all'); }}
+                                    className="text-[11px] bg-sise-100 text-sise-700 px-2 py-1 rounded-lg font-semibold hover:bg-sise-200 transition-colors">
+                                    <Icon name="check-circle" size={12} className="inline mr-0.5 -mt-0.5" />チェック
+                                </button>
+                            </div>
+                            <p className="text-2xl font-extrabold text-slate-800">{formatCurrency(cashBalance.total)}</p>
+                            <div className="flex gap-3 mt-2 text-[11px]">
+                                <span className="text-sise-600">月入金: <strong>{formatCurrency(monthSummary.cashIn)}</strong></span>
+                                <span className="text-red-500">月出金: <strong>{formatCurrency(monthSummary.cashOut)}</strong></span>
+                            </div>
+                        </div>
+                        {/* 金庫 */}
+                        <div className="glass-card !rounded-2xl p-4 border border-amber-200 bg-gradient-to-br from-amber-50 to-white">
+                            <span className="text-xs font-semibold text-amber-600 flex items-center mb-2"><Icon name="lock" size={14} className="mr-1" /> 金庫</span>
+                            <p className="text-xl font-extrabold text-slate-800">{formatCurrency(cashBalance.byCashType?.safe?.balance || 0)}</p>
+                            <p className="text-[10px] text-slate-400 mt-1">本部管理</p>
+                        </div>
+                        {/* 小口現金 */}
+                        <div className="glass-card !rounded-2xl p-4 border border-blue-200 bg-gradient-to-br from-blue-50 to-white">
+                            <span className="text-xs font-semibold text-blue-600 flex items-center mb-2"><Icon name="credit-card" size={14} className="mr-1" /> 小口現金</span>
+                            <p className="text-xl font-extrabold text-slate-800">{formatCurrency(cashBalance.byCashType?.pettyCash?.balance || 0)}</p>
+                            <p className="text-[10px] text-slate-400 mt-1">日常経費用</p>
+                        </div>
+                        {/* レジ */}
+                        <div className="glass-card !rounded-2xl p-4 border border-green-200 bg-gradient-to-br from-green-50 to-white">
+                            <span className="text-xs font-semibold text-green-600 flex items-center mb-2"><Icon name="shopping-bag" size={14} className="mr-1" /> レジ</span>
+                            <p className="text-xl font-extrabold text-slate-800">{formatCurrency(cashBalance.byCashType?.register?.balance || 0)}</p>
+                            <p className="text-[10px] text-slate-400 mt-1">店舗売上</p>
+                        </div>
+                    </div>
+
+                    {/* 店舗別残高カード */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                        {Object.entries(cashBalance.byStore).map(([storeId, data]) => {
+                            const storeClose = dailyCloses.find(c => c.storeId === storeId && c.date === new Date().toISOString().slice(0, 10));
+                            return (
+                            <div key={storeId} className={`glass-card !rounded-2xl p-4 cursor-pointer transition-all ${filterStore === storeId ? 'border-2 border-sise-400 bg-sise-50/30' : 'border border-slate-200 hover:border-sise-200'}`}
+                                onClick={() => setFilterStore(filterStore === storeId ? 'all' : storeId)}>
+                                <div className="flex items-center justify-between mb-2">
+                                    <span className="text-xs font-semibold text-slate-600 flex items-center">
+                                        <Icon name="map-pin" size={13} className="mr-1" /> {data.name}
+                                        {storeClose && <span className="ml-1.5 text-[10px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded font-bold">締済</span>}
+                                    </span>
+                                    <button onClick={(ev) => { ev.stopPropagation(); setShowCashCheck(true); setCashCheckStore(storeId); }}
+                                        className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-medium hover:bg-slate-200 transition-colors">
+                                        チェック
+                                    </button>
+                                </div>
+                                <p className="text-xl font-extrabold text-slate-800">{formatCurrency(data.balance)}</p>
+                                <div className="grid grid-cols-3 gap-1 mt-2">
+                                    <div className="text-center p-1.5 bg-amber-50 rounded-lg">
+                                        <p className="text-[9px] text-amber-500">金庫</p>
+                                        <p className="text-xs font-bold text-slate-700">{formatCurrency(data.byCashType?.safe?.balance || 0)}</p>
+                                    </div>
+                                    <div className="text-center p-1.5 bg-blue-50 rounded-lg">
+                                        <p className="text-[9px] text-blue-500">小口</p>
+                                        <p className="text-xs font-bold text-slate-700">{formatCurrency(data.byCashType?.pettyCash?.balance || 0)}</p>
+                                    </div>
+                                    <div className="text-center p-1.5 bg-green-50 rounded-lg">
+                                        <p className="text-[9px] text-green-500">レジ</p>
+                                        <p className="text-xs font-bold text-slate-700">{formatCurrency(data.byCashType?.register?.balance || 0)}</p>
+                                    </div>
+                                </div>
+                            </div>
+                            );
+                        })}
+                    </div>
+
+                    {/* 日次締めボタン */}
+                    {filterStore !== 'all' && !isDayClosed(new Date().toISOString().slice(0, 10), filterStore) && (
+                        <button onClick={() => setShowDailyClose(true)}
+                            className="w-full flex items-center justify-center gap-2 py-3 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white rounded-xl font-semibold text-sm transition-all active:scale-[0.98]">
+                            <Icon name="lock" size={16} /> 本日の日次締めを行う（{getStoreName(filterStore)}）
+                        </button>
+                    )}
+                    {filterStore !== 'all' && isDayClosed(new Date().toISOString().slice(0, 10), filterStore) && (
+                        <div className="flex items-center justify-center gap-2 py-3 bg-green-50 border border-green-200 text-green-700 rounded-xl font-semibold text-sm">
+                            <Icon name="check-circle" size={16} /> 本日の日次締め完了（{getStoreName(filterStore)}）
+                        </div>
+                    )}
+
+                    {/* 日次締めモーダル */}
+                    {showDailyClose && (
+                        <Card className="animate-scale-in !border-amber-300 !bg-amber-50/30">
+                            <h4 className="font-bold text-slate-800 mb-3 flex items-center">
+                                <Icon name="lock" size={18} className="mr-2 text-amber-500" />
+                                日次締め — {getStoreName(filterStore)} ({new Date().toLocaleDateString('ja-JP')})
+                            </h4>
+                            <p className="text-xs text-red-500 mb-3 font-medium">
+                                * 締め処理後、この日の記録は編集・削除できなくなります
+                            </p>
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
+                                <div>
+                                    <label className="block text-xs font-medium text-amber-700 mb-1">金庫 実残高（円）</label>
+                                    <input type="number" value={dailyCloseData.safe} onChange={e => setDailyCloseData(p => ({...p, safe: e.target.value}))}
+                                        className="w-full px-3 py-2.5 border border-amber-200 rounded-xl text-sm outline-none font-bold" placeholder="0" />
+                                    <p className="text-[10px] text-slate-400 mt-0.5">理論: {formatCurrency(cashBalance.byStore[filterStore]?.byCashType?.safe?.balance || 0)}</p>
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-medium text-blue-700 mb-1">小口現金 実残高（円）</label>
+                                    <input type="number" value={dailyCloseData.pettyCash} onChange={e => setDailyCloseData(p => ({...p, pettyCash: e.target.value}))}
+                                        className="w-full px-3 py-2.5 border border-blue-200 rounded-xl text-sm outline-none font-bold" placeholder="0" />
+                                    <p className="text-[10px] text-slate-400 mt-0.5">理論: {formatCurrency(cashBalance.byStore[filterStore]?.byCashType?.pettyCash?.balance || 0)}</p>
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-medium text-green-700 mb-1">レジ 実残高（円）</label>
+                                    <input type="number" value={dailyCloseData.register} onChange={e => setDailyCloseData(p => ({...p, register: e.target.value}))}
+                                        className="w-full px-3 py-2.5 border border-green-200 rounded-xl text-sm outline-none font-bold" placeholder="0" />
+                                    <p className="text-[10px] text-slate-400 mt-0.5">理論: {formatCurrency(cashBalance.byStore[filterStore]?.byCashType?.register?.balance || 0)}</p>
+                                </div>
+                            </div>
+                            <div className="mb-3">
+                                <label className="block text-xs font-medium text-slate-600 mb-1">備考</label>
+                                <input type="text" value={dailyCloseData.notes} onChange={e => setDailyCloseData(p => ({...p, notes: e.target.value}))}
+                                    placeholder="特記事項があれば..." className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm outline-none" />
+                            </div>
+                            <div className="flex justify-end gap-2">
+                                <button onClick={() => setShowDailyClose(false)}
+                                    className="px-4 py-2.5 text-sm text-slate-600 hover:bg-slate-100 rounded-xl">キャンセル</button>
+                                <button onClick={handleDailyClose} disabled={saving}
+                                    className="px-5 py-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-sm font-medium disabled:opacity-50">
+                                    <Icon name="lock" size={14} className="inline mr-1 -mt-0.5" />締め確定
+                                </button>
+                            </div>
+                        </Card>
+                    )}
+
+                    {/* 日次締め履歴 */}
+                    {dailyCloses.length > 0 && (
+                        <Card>
+                            <h4 className="font-bold text-slate-800 mb-3 flex items-center">
+                                <Icon name="calendar" size={16} className="mr-2 text-amber-500" />
+                                日次締め履歴（直近）
+                            </h4>
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-xs">
+                                    <thead>
+                                        <tr className="border-b border-slate-200">
+                                            <th className="text-left py-2 px-2 text-slate-500 font-medium">日付</th>
+                                            <th className="text-left py-2 px-2 text-slate-500 font-medium">店舗</th>
+                                            <th className="text-right py-2 px-2 text-amber-600 font-medium">金庫</th>
+                                            <th className="text-right py-2 px-2 text-blue-600 font-medium">小口</th>
+                                            <th className="text-right py-2 px-2 text-green-600 font-medium">レジ</th>
+                                            <th className="text-left py-2 px-2 text-slate-500 font-medium">締め者</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {[...dailyCloses].reverse().slice(0, 10).map((c, i) => (
+                                            <tr key={i} className="border-b border-slate-50 hover:bg-slate-50/50">
+                                                <td className="py-2 px-2 font-medium text-slate-700">{c.date}</td>
+                                                <td className="py-2 px-2 text-slate-600">{getStoreName(c.storeId)}</td>
+                                                <td className="py-2 px-2 text-right font-bold text-amber-700">{formatCurrency(c.safeBalance)}</td>
+                                                <td className="py-2 px-2 text-right font-bold text-blue-700">{formatCurrency(c.pettyCashBalance)}</td>
+                                                <td className="py-2 px-2 text-right font-bold text-green-700">{formatCurrency(c.registerBalance)}</td>
+                                                <td className="py-2 px-2 text-slate-500">{c.closedBy}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </Card>
+                    )}
+                    </>)}
 
                     {/* レジ金チェックモーダル */}
                     {showCashCheck && (
@@ -8112,6 +8421,8 @@
                         </Card>
                     )}
 
+                    {/* ===== 入出金記録タブ ===== */}
+                    {cashTab === 'entries' && (<>
                     {/* KPI（現金管理向け） */}
                     <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 md:gap-4">
                         <KpiCard title="月間入金（現金）" value={formatCurrency(monthSummary.cashIn)} icon="arrow-down-left"
@@ -8188,6 +8499,15 @@
                                         <option value="CARD">カード</option>
                                         <option value="SQUARE">Square</option>
                                         <option value="TRANSFER">振込</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-medium text-slate-600 mb-1">現金区分</label>
+                                    <select value={formData.cashType} onChange={e => setFormData(p => ({...p, cashType: e.target.value}))}
+                                        className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm outline-none">
+                                        <option value="register">レジ</option>
+                                        <option value="safe">金庫</option>
+                                        <option value="pettyCash">小口現金</option>
                                     </select>
                                 </div>
                                 <div>
@@ -8297,6 +8617,11 @@
                                         <div className="flex items-center justify-between mb-2">
                                             <div className="flex items-center gap-2">
                                                 <span className="text-sm font-bold text-slate-700">{dayLabel}</span>
+                                                {dailyCloses.some(c => c.date === date && c.locked) && (
+                                                    <span className="text-[10px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded-full font-bold flex items-center">
+                                                        <Icon name="lock" size={10} className="mr-0.5" />締済
+                                                    </span>
+                                                )}
                                                 {daySummary.treatments > 0 && (
                                                     <span className="text-[11px] bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full font-semibold">
                                                         施術 {daySummary.treatments}回
@@ -8359,8 +8684,18 @@
                                                         }`}>
                                                             {entry.paymentMethod === 'QR' ? 'QR' : entry.paymentMethod === 'CARD' ? 'ｶｰﾄﾞ' : entry.paymentMethod === 'SQUARE' ? 'Sq' : entry.paymentMethod === 'TRANSFER' ? '振込' : '現金'}
                                                         </span>
+                                                        {entry.paymentMethod === 'CASH' && entry.cashType && entry.cashType !== 'register' && (
+                                                            <span className={`text-[10px] px-1 py-0.5 rounded font-medium ${entry.cashType === 'safe' ? 'bg-amber-50 text-amber-600' : 'bg-blue-50 text-blue-600'}`}>
+                                                                {cashTypeLabels[entry.cashType] || entry.cashType}
+                                                            </span>
+                                                        )}
 
-                                                        {/* 編集・削除 */}
+                                                        {/* 編集・削除（締め済みの場合は非表示） */}
+                                                        {isDayClosed(entry.date, entry.store) ? (
+                                                            <span className="text-[9px] bg-slate-100 text-slate-400 px-1.5 py-0.5 rounded font-medium">
+                                                                <Icon name="lock" size={10} className="inline -mt-0.5" /> 締済
+                                                            </span>
+                                                        ) : (
                                                         <div className="md:opacity-0 md:group-hover:opacity-100 flex gap-0.5 transition-opacity">
                                                             <button onClick={() => handleEdit(entry)}
                                                                 className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors">
@@ -8371,6 +8706,7 @@
                                                                 <Icon name="trash-2" size={14} />
                                                             </button>
                                                         </div>
+                                                        )}
                                                     </div>
                                                 </div>
                                             ))}
@@ -8426,6 +8762,120 @@
                                     </div>
                                 </div>
                             </div>
+                        </Card>
+                    )}
+                    </>)}
+
+                    {/* ===== 操作ログタブ ===== */}
+                    {cashTab === 'audit' && (
+                        <Card>
+                            <h4 className="font-bold text-slate-800 mb-3 flex items-center">
+                                <Icon name="shield" size={16} className="mr-2 text-sise-500" />
+                                操作ログ（監査証跡）
+                            </h4>
+                            <p className="text-xs text-slate-400 mb-4">出納帳の全操作はスプレッドシートに記録されます。誰が、いつ、何を操作したかを追跡できます。</p>
+                            {auditLogs.length === 0 ? (
+                                <div className="text-center py-10 text-slate-400">
+                                    <Icon name="shield" size={32} className="mx-auto mb-3 text-slate-300" />
+                                    <p className="text-sm font-medium">操作ログはまだありません</p>
+                                    <p className="text-xs mt-1">出納帳の追加・編集・削除・締め操作が記録されます</p>
+                                </div>
+                            ) : (
+                                <div className="space-y-2 max-h-[600px] overflow-y-auto">
+                                    {auditLogs.map((log, i) => (
+                                        <div key={i} className={`flex items-start gap-3 p-3 rounded-xl border ${
+                                            log.action === 'delete' ? 'border-red-100 bg-red-50/30' :
+                                            log.action === 'dailyClose' ? 'border-amber-100 bg-amber-50/30' :
+                                            log.action === 'update' ? 'border-blue-100 bg-blue-50/30' :
+                                            'border-slate-100 bg-slate-50/30'
+                                        }`}>
+                                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${
+                                                log.action === 'delete' ? 'bg-red-100 text-red-500' :
+                                                log.action === 'dailyClose' ? 'bg-amber-100 text-amber-600' :
+                                                log.action === 'update' ? 'bg-blue-100 text-blue-500' :
+                                                log.action === 'add' ? 'bg-green-100 text-green-500' :
+                                                'bg-slate-100 text-slate-500'
+                                            }`}>
+                                                <Icon name={
+                                                    log.action === 'delete' ? 'trash-2' :
+                                                    log.action === 'dailyClose' ? 'lock' :
+                                                    log.action === 'update' ? 'edit-2' :
+                                                    log.action === 'add' ? 'plus' : 'file-text'
+                                                } size={14} />
+                                            </div>
+                                            <div className="flex-1 min-w-0">
+                                                <div className="flex items-center gap-2 flex-wrap">
+                                                    <span className="text-xs font-bold text-slate-700">
+                                                        {log.action === 'add' ? '追加' : log.action === 'update' ? '編集' : log.action === 'delete' ? '削除' : log.action === 'dailyClose' ? '日次締め' : log.action === 'bulkSave' ? '一括保存' : log.action}
+                                                    </span>
+                                                    <span className="text-[11px] text-slate-500">{log.operator}</span>
+                                                    {log.storeId && <span className="text-[10px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded">{getStoreName(log.storeId)}</span>}
+                                                </div>
+                                                <p className="text-[11px] text-slate-400 mt-0.5">
+                                                    {log.timestamp ? new Date(log.timestamp).toLocaleString('ja-JP') : ''}
+                                                    {log.entryId ? ' / ID: ' + log.entryId : ''}
+                                                </p>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </Card>
+                    )}
+
+                    {/* ===== 売上突合タブ ===== */}
+                    {cashTab === 'reconcile' && (
+                        <Card>
+                            <h4 className="font-bold text-slate-800 mb-3 flex items-center">
+                                <Icon name="git-merge" size={16} className="mr-2 text-sise-500" />
+                                Square売上突合
+                            </h4>
+                            <p className="text-xs text-slate-400 mb-4">Squareの決済データと出納帳の入金記録を照合し、差異を確認できます。</p>
+
+                            {squareReconciliation ? (
+                                <div className="space-y-4">
+                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                        <div className="p-4 bg-purple-50 border border-purple-200 rounded-xl text-center">
+                                            <p className="text-xs text-purple-500 font-medium mb-1">Square売上（本日）</p>
+                                            <p className="text-xl font-extrabold text-purple-700">{formatCurrency(squareReconciliation.squareTotal)}</p>
+                                            <p className="text-[10px] text-purple-400 mt-1">{squareReconciliation.count}件の決済</p>
+                                        </div>
+                                        <div className="p-4 bg-sise-50 border border-sise-200 rounded-xl text-center">
+                                            <p className="text-xs text-sise-500 font-medium mb-1">出納帳入金（本日）</p>
+                                            <p className="text-xl font-extrabold text-sise-700">{formatCurrency(squareReconciliation.cashbookTotal)}</p>
+                                            <p className="text-[10px] text-sise-400 mt-1">{entries.filter(e => e.date === squareReconciliation.date && e.type === 'income').length}件の記録</p>
+                                        </div>
+                                        <div className={`p-4 border rounded-xl text-center ${
+                                            squareReconciliation.diff === 0 ? 'bg-green-50 border-green-200' :
+                                            Math.abs(squareReconciliation.diff) < 1000 ? 'bg-amber-50 border-amber-200' :
+                                            'bg-red-50 border-red-200'
+                                        }`}>
+                                            <p className="text-xs font-medium mb-1 ${squareReconciliation.diff === 0 ? 'text-green-500' : 'text-red-500'}">差異</p>
+                                            <p className={`text-xl font-extrabold ${
+                                                squareReconciliation.diff === 0 ? 'text-green-600' : 'text-red-600'
+                                            }`}>
+                                                {squareReconciliation.diff === 0 ? '一致' : (squareReconciliation.diff > 0 ? '+' : '') + formatCurrency(squareReconciliation.diff)}
+                                            </p>
+                                            <p className="text-[10px] text-slate-400 mt-1">{squareReconciliation.date}</p>
+                                        </div>
+                                    </div>
+
+                                    {squareReconciliation.diff !== 0 && (
+                                        <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl">
+                                            <p className="text-xs text-amber-700 font-medium flex items-center">
+                                                <Icon name="alert-triangle" size={14} className="mr-1.5" />
+                                                差異が検出されました。出納帳の記録漏れまたはSquare外の取引がないか確認してください。
+                                            </p>
+                                        </div>
+                                    )}
+                                </div>
+                            ) : (
+                                <div className="text-center py-10 text-slate-400">
+                                    <Icon name="git-merge" size={32} className="mx-auto mb-3 text-slate-300" />
+                                    <p className="text-sm font-medium">Square連携データがありません</p>
+                                    <p className="text-xs mt-1">Squareタブで売上データを読み込んでください</p>
+                                </div>
+                            )}
                         </Card>
                     )}
                 </div>
@@ -12509,7 +12959,7 @@
                                         { name: '回数券プラン', icon: 'ticket', desc: '回数券プラン定義' },
                                         { name: '回数券データ', icon: 'ticket', desc: '回数券購入・利用データ' },
                                         { name: 'QR現金会員', icon: 'users', desc: 'QR・現金決済会員データ' },
-                                        { name: '出納帳', icon: 'book-open', desc: '入出金記録' },
+                                        { name: '出納帳', icon: 'book-open', desc: '金庫・小口・レジ管理 / 日次締め / 監査ログ' },
                                         { name: 'スタッフ管理', icon: 'users', desc: 'スタッフ・パスワード管理' },
                                         { name: '店舗管理', icon: 'map-pin', desc: '店舗の追加・無効化管理' },
                                         { name: 'ダッシュボード設定', icon: 'settings', desc: 'プラン上限・繰越など各種設定' },
@@ -12830,7 +13280,7 @@
                     case 'members':
                         return <MemberManagementView memberData={memberData} refreshSquareData={refreshSquareData} operateSubscription={operateSubscription} activeStoreId={activeStoreId} manualMembersHook={manualMembersHook} />;
                     case 'cashbook':
-                        return <CashbookView cashbookHook={cashbookHook} memberData={memberData} manualMembersHook={manualMembersHook} activeStoreId={activeStoreId} />;
+                        return <CashbookView cashbookHook={cashbookHook} memberData={memberData} manualMembersHook={manualMembersHook} activeStoreId={activeStoreId} squareData={memberData} />;
                     case 'usage':
                         return <MemberUsageView memberData={memberData} usageHook={usageHook} />;
                     case 'tickets':
