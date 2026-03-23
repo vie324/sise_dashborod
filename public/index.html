@@ -10295,7 +10295,7 @@
         // ==========================================
         // 施術レポート: LINE Flex Message 生成
         // ==========================================
-        const buildTreatmentFlexMessage = ({ customerName, visitDate, activeMenus, scores, coachComment, staffName, activeStretchList, customStretch, couponInfo, couponExpiry }) => {
+        const buildTreatmentFlexMessage = ({ customerName, visitDate, activeMenus, scores, coachComment, staffName, activeStretchList, customStretch, couponInfo, couponExpiry, photoUrl }) => {
             const displayName = customerName ? (customerName.includes('様') ? customerName : customerName + ' 様') : '様';
             const displayDate = visitDate ? visitDate.replace(/-/g, '.') : '-';
             const displayComment = coachComment || '本日はご来店ありがとうございました。\nお伝えしたストレッチを無理のない範囲で行ってみてください。';
@@ -10487,6 +10487,32 @@
                 },
             };
             carouselBubbles.push(headerBubble);
+
+            // === 写真バブル（photoUrlがある場合のみ追加） ===
+            if (photoUrl) {
+                const photoBubble = {
+                    type: 'bubble', size: 'mega',
+                    hero: {
+                        type: 'image', url: photoUrl, size: 'full',
+                        aspectRatio: '3:4', aspectMode: 'cover',
+                    },
+                    body: {
+                        type: 'box', layout: 'vertical', spacing: 'sm',
+                        paddingAll: '16px', backgroundColor: '#ffffff',
+                        contents: [
+                            {
+                                type: 'box', layout: 'horizontal', spacing: 'sm', justifyContent: 'center',
+                                contents: [
+                                    { type: 'text', text: '📸', size: 'sm' },
+                                    { type: 'text', text: '施術時の写真', size: 'sm', weight: 'bold', color: '#345244' },
+                                ],
+                            },
+                            { type: 'text', text: displayDate, size: 'xxs', color: '#999999', align: 'center' },
+                        ],
+                    },
+                };
+                carouselBubbles.push(photoBubble);
+            }
 
             // === HOME CARE ヘッダー生成 ===
             const makeCareHeader = (subtitle) => ({
@@ -11443,15 +11469,18 @@
             const applyPostureToReport = useCallback(() => {
                 if (!postureAnalysis || !postureImage) return;
                 // Set photo
+                const name = '姿勢分析_' + postureViewMode + '.jpg';
                 setPhotoData(postureImage);
-                setPhotoName('姿勢分析_' + postureViewMode + '.jpg');
+                setPhotoName(name);
+                // Vercel Blobにアップロード
+                uploadPhotoToBlob(postureImage, name, 'posture');
                 // Auto-set posture score (convert 0-100 to 0-5)
                 const total = postureGetTotal(postureAnalysis);
                 const postureScore5 = Math.round((total / 100) * 5 * 2) / 2; // 0.5 step
                 setScores(prev => ({ ...prev, posture: Math.min(5, Math.max(0, postureScore5)) }));
                 // Close modal
                 stopPostureCam(); setPostureModalOpen(false); setPosturePhase('idle');
-            }, [postureAnalysis, postureImage, postureViewMode, stopPostureCam]);
+            }, [postureAnalysis, postureImage, postureViewMode, stopPostureCam, uploadPhotoToBlob]);
 
             const chartRef = useRef(null);
             const chartInstance = useRef(null);
@@ -11520,18 +11549,55 @@
                 });
             }, []);
 
+            const [photoUrl, setPhotoUrl] = useState(null);
+            const [photoUploading, setPhotoUploading] = useState(false);
+            const [photoUploadError, setPhotoUploadError] = useState('');
+
+            // Vercel Blobに写真をアップロード
+            const uploadPhotoToBlob = useCallback(async (base64Data, name, folder) => {
+                setPhotoUploading(true);
+                setPhotoUploadError('');
+                try {
+                    const resp = await fetch('/api/photos/upload', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            imageData: base64Data,
+                            fileName: name || 'photo',
+                            folder: folder || 'reports',
+                        }),
+                    });
+                    const result = await resp.json();
+                    if (!resp.ok) throw new Error(result.message || result.error || 'アップロード失敗');
+                    setPhotoUrl(result.url);
+                    setPhotoUploading(false);
+                    return result.url;
+                } catch (e) {
+                    setPhotoUploadError(e.message);
+                    setPhotoUploading(false);
+                    return null;
+                }
+            }, []);
+
             const handlePhotoUpload = useCallback((e) => {
                 const file = e.target.files[0];
                 if (!file) return;
                 setPhotoName(file.name);
                 const reader = new FileReader();
-                reader.onload = (ev) => setPhotoData(ev.target.result);
+                reader.onload = (ev) => {
+                    const dataUrl = ev.target.result;
+                    setPhotoData(dataUrl);
+                    // Vercel Blobにアップロード
+                    uploadPhotoToBlob(dataUrl, file.name, 'reports');
+                };
                 reader.readAsDataURL(file);
-            }, []);
+            }, [uploadPhotoToBlob]);
 
             const clearPhoto = useCallback(() => {
                 setPhotoData(null);
                 setPhotoName('');
+                setPhotoUrl(null);
+                setPhotoUploadError('');
             }, []);
 
             const applyTemplate = useCallback((key) => {
@@ -11552,6 +11618,7 @@
                 setSelectedStretches({}); setCoupon('none');
                 setTemplateKey('');
                 setPostureAnalysis(null); setPostureImage(null); setPostureLandmarks(null);
+                setPhotoUrl(null); setPhotoUploadError('');
             }, []);
 
             // --- Download Image ---
@@ -11634,6 +11701,7 @@
                     customerName, visitDate, activeMenus: activeMenusForFlex, scores,
                     coachComment, staffName, activeStretchList: activeStretchListForFlex,
                     customStretch, couponInfo: cInfo, couponExpiry: cExpiry,
+                    photoUrl: photoUrl || null,
                 });
 
                 const ok = await lineChatHook.sendFlexMessage(lineSelectedUser.userId, flexMsg);
@@ -11641,7 +11709,7 @@
                 if (ok) {
                     setTimeout(() => { setLineModalOpen(false); setLineSendStatus(''); }, 2000);
                 }
-            }, [lineSelectedUser, lineChatHook, customerName, visitDate, menuChecks, scores, coachComment, staffName, selectedStretches, customStretch, coupon]);
+            }, [lineSelectedUser, lineChatHook, customerName, visitDate, menuChecks, scores, coachComment, staffName, selectedStretches, customStretch, coupon, photoUrl]);
 
             // --- Derived values ---
             const activeMenus = Object.entries(menuChecks).filter(([, v]) => v).map(([k]) => k);
@@ -11776,7 +11844,26 @@
                                                 <input type="file" accept="image/*" className="hidden" onChange={handlePhotoUpload} />
                                                 <span className="text-[10px] text-gray-400">{photoName || 'Before/Afterや姿勢写真など'}</span>
                                             </label>
-                                            {photoData && <button onClick={clearPhoto} className="mt-2 text-[10px] text-red-400 underline">写真を削除</button>}
+                                            {photoData && (
+                                                <div className="mt-2 space-y-1">
+                                                    {photoUploading && (
+                                                        <div className="flex items-center justify-center gap-2 text-[10px] text-teal-600">
+                                                            <div className="w-3 h-3 border-2 border-teal-300 border-t-teal-600 rounded-full animate-spin"/>
+                                                            アップロード中...
+                                                        </div>
+                                                    )}
+                                                    {photoUrl && (
+                                                        <div className="flex items-center justify-center gap-1 text-[10px] text-green-600">
+                                                            <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7"/></svg>
+                                                            クラウド保存済み
+                                                        </div>
+                                                    )}
+                                                    {photoUploadError && (
+                                                        <div className="text-[10px] text-red-500">{photoUploadError}</div>
+                                                    )}
+                                                    <button onClick={clearPhoto} className="text-[10px] text-red-400 underline">写真を削除</button>
+                                                </div>
+                                            )}
                                         </div>
                                         {/* 姿勢分析結果サマリー（分析済みの場合表示） */}
                                         {postureAnalysis && (
