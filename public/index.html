@@ -11348,10 +11348,20 @@
                 setPhase('loading'); setErrorMsg(''); setAnalysis(null); setLandmarks(null);
                 setCapturedImage(null);
                 try {
+                    // 超広角レンズを優先的に選択し、zoom を最小にして最大画角を確保
                     const s = await navigator.mediaDevices.getUserMedia({
-                        video: { width:{ideal:640}, height:{ideal:480}, facingMode:{ideal:'environment'},
-                            aspectRatio:{ideal:3/4}, resizeMode:'crop-and-scale' }
+                        video: { width:{ideal:1280}, height:{ideal:960}, facingMode:{ideal:'environment'},
+                            zoom: {ideal: 0.5},
+                            advanced: [{ zoom: {min: 0.5, ideal: 0.5} }] }
                     });
+                    // zoom を最小値に強制設定（対応デバイスのみ）
+                    const track = s.getVideoTracks()[0];
+                    if (track) {
+                        try {
+                            const caps = track.getCapabilities ? track.getCapabilities() : {};
+                            if (caps.zoom) { await track.applyConstraints({ advanced: [{ zoom: caps.zoom.min }] }); }
+                        } catch(e) { /* zoom 非対応デバイスは無視 */ }
+                    }
                     streamRef.current = s;
                     const v = videoRef.current;
                     v.srcObject = s; await v.play();
@@ -11369,8 +11379,8 @@
                         const pose = new window.Pose({
                             locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5.1675469404/${f}`,
                         });
-                        pose.setOptions({ modelComplexity:1, smoothLandmarks:true, enableSegmentation:false,
-                            minDetectionConfidence:0.5, minTrackingConfidence:0.5 });
+                        pose.setOptions({ modelComplexity:2, smoothLandmarks:true, enableSegmentation:false,
+                            minDetectionConfidence:0.7, minTrackingConfidence:0.7 });
                         pose.onResults(r => { if (r.poseLandmarks) setLandmarks(r.poseLandmarks); });
                         await pose.initialize();
                         poseRef.current = pose;
@@ -11894,7 +11904,7 @@
                                     {viewMode==='front'?'正面':viewMode==='seated'?'座位':'側面'}撮影ガイド
                                 </div>
                                 <div className="text-xs text-gray-400 leading-relaxed" dangerouslySetInnerHTML={{__html:viewMode==='front'
-                                    ?'・お客様から約1.5m離れて背面カメラで撮影<br>・両腕は自然に体の横に下ろしてもらう<br>・足は肩幅に開いてリラックス<br>・頭頂部から足先まで全身が映るように調整'
+                                    ?'・お客様から約1m離れて背面カメラで撮影<br>・両腕は自然に体の横に下ろしてもらう<br>・足は肩幅に開いてリラックス<br>・頭頂部から足先まで全身が映るように調整'
                                     :viewMode==='seated'
                                     ?'・お客様の左側面から背面カメラで撮影<br>・椅子に座った普段通りの姿勢で撮影<br>・両手は膝の上か自然な位置に<br>・頭頂部から腰まで映るように調整'
                                     :'・お客様の左側面から背面カメラで撮影<br>・両腕は自然に体の横に下ろしてもらう<br>・普段通りの姿勢でリラックス<br>・頭頂部から足先まで全身が映るように調整'
@@ -12022,7 +12032,9 @@
             const startPostureCam = useCallback(async () => {
                 setPosturePhase('loading'); setPostureAnalysis(null); setPostureLandmarks(null); setPostureImage(null);
                 try {
-                    const s = await navigator.mediaDevices.getUserMedia({ video: { width:{ideal:640}, height:{ideal:480}, facingMode:{ideal:'environment'}, aspectRatio:{ideal:3/4}, resizeMode:'crop-and-scale' } });
+                    const s = await navigator.mediaDevices.getUserMedia({ video: { width:{ideal:1280}, height:{ideal:960}, facingMode:{ideal:'environment'}, zoom:{ideal:0.5}, advanced:[{zoom:{min:0.5,ideal:0.5}}] } });
+                    const trk = s.getVideoTracks()[0];
+                    if (trk) { try { const c = trk.getCapabilities ? trk.getCapabilities() : {}; if (c.zoom) await trk.applyConstraints({advanced:[{zoom:c.zoom.min}]}); } catch(e){} }
                     postureStreamRef.current = s;
                     const v = postureVideoRef.current; v.srcObject = s; await v.play();
                     if (!window.Pose) {
@@ -12031,7 +12043,7 @@
                     }
                     if (!posturePoseRef.current) {
                         const pose = new window.Pose({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5.1675469404/${f}` });
-                        pose.setOptions({ modelComplexity:1, smoothLandmarks:true, enableSegmentation:false, minDetectionConfidence:0.5, minTrackingConfidence:0.5 });
+                        pose.setOptions({ modelComplexity:2, smoothLandmarks:true, enableSegmentation:false, minDetectionConfidence:0.7, minTrackingConfidence:0.7 });
                         pose.onResults(r => { if (r.poseLandmarks) setPostureLandmarks(r.poseLandmarks); });
                         await pose.initialize();
                         posturePoseRef.current = pose;
