@@ -11832,21 +11832,22 @@
                             {(phase==='live'||phase==='captured') && overlayOn && (
                                 <svg ref={svgRef} className="absolute inset-0 w-full h-full pointer-events-none" style={{zIndex:3}} preserveAspectRatio="none"/>
                             )}
+                            {/* 方眼グリッド: 6列×8行, 正方形セル, 中心線が赤線と重なる */}
                             {(phase==='live'||phase==='captured') && gridOn && (
-                                <svg className="absolute inset-0 w-full h-full pointer-events-none" style={{zIndex:2}} viewBox="0 0 700 900" preserveAspectRatio="none">
-                                    {/* 外枠 */}
-                                    <rect x="0" y="0" width="700" height="900" fill="none" stroke="rgba(220,40,40,0.6)" strokeWidth="3"/>
-                                    {/* 縦線 7列 → 6本の内部線 */}
-                                    {[1,2,3,4,5,6].map(i=><line key={`v${i}`} x1={i*100} y1="0" x2={i*100} y2="900" stroke="rgba(220,40,40,0.45)" strokeWidth="1.5"/>)}
-                                    {/* 横線 9行 → 8本の内部線 */}
-                                    {[1,2,3,4,5,6,7,8].map(i=><line key={`h${i}`} x1="0" y1={i*100} x2="700" y2={i*100} stroke="rgba(220,40,40,0.45)" strokeWidth="1.5"/>)}
-                                    {/* 列ラベル 1-7 */}
-                                    {[1,2,3,4,5,6,7].map(i=><text key={`cl${i}`} x={i*100-50} y="895" textAnchor="middle" fill="rgba(220,40,40,0.8)" style={{fontSize:'28px',fontWeight:700}}>{i}</text>)}
-                                    {/* 行ラベル a-i */}
-                                    {['a','b','c','d','e','f','g','h','i'].map((c,i)=><text key={`rl${c}`} x="12" y={i*100+65} fill="rgba(220,40,40,0.8)" style={{fontSize:'28px',fontWeight:700}}>{c}</text>)}
-                                    {/* 青い中心線（縦・横） */}
-                                    <line x1="350" y1="0" x2="350" y2="900" stroke="rgba(60,140,220,0.7)" strokeWidth="2"/>
-                                    <line x1="0" y1="450" x2="700" y2="450" stroke="rgba(60,140,220,0.7)" strokeWidth="2"/>
+                                <svg className="absolute inset-0 w-full h-full pointer-events-none" style={{zIndex:2}} viewBox="0 0 900 1600" preserveAspectRatio="none">
+                                    {/* 6列×8行, セル130px正方形, グリッド780×1040, 中心(450,800) */}
+                                    <rect x="60" y="280" width="780" height="1040" fill="none" stroke="rgba(220,40,40,0.6)" strokeWidth="3"/>
+                                    {/* 縦の内部線 5本 (3本目=450が中心) */}
+                                    {[1,2,3,4,5].map(i=><line key={`v${i}`} x1={60+i*130} y1="280" x2={60+i*130} y2="1320" stroke="rgba(220,40,40,0.45)" strokeWidth="1.5"/>)}
+                                    {/* 横の内部線 7本 (4本目=800が中心) */}
+                                    {[1,2,3,4,5,6,7].map(i=><line key={`h${i}`} x1="60" y1={280+i*130} x2="840" y2={280+i*130} stroke="rgba(220,40,40,0.45)" strokeWidth="1.5"/>)}
+                                    {/* 列ラベル 1-6 */}
+                                    {[1,2,3,4,5,6].map(i=><text key={`cl${i}`} x={60+(i-1)*130+65} y="1355" textAnchor="middle" fill="rgba(220,40,40,0.8)" style={{fontSize:'28px',fontWeight:700}}>{i}</text>)}
+                                    {/* 行ラベル a-h */}
+                                    {['a','b','c','d','e','f','g','h'].map((c,i)=><text key={`rl${c}`} x="30" y={280+i*130+75} textAnchor="middle" fill="rgba(220,40,40,0.8)" style={{fontSize:'28px',fontWeight:700}}>{c}</text>)}
+                                    {/* 青い中心線 — 赤の格子線(列3/4境界, 行4/5境界)と完全に重なる */}
+                                    <line x1="450" y1="280" x2="450" y2="1320" stroke="rgba(60,140,220,0.8)" strokeWidth="2.5"/>
+                                    <line x1="60" y1="800" x2="840" y2="800" stroke="rgba(60,140,220,0.8)" strokeWidth="2.5"/>
                                 </svg>
                             )}
                             {phase==='live' && (
