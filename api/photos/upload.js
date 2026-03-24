@@ -1,6 +1,6 @@
 // Photo Upload API - Vercel Serverless Function
-// Uploads Base64 image data to Vercel Blob Storage
-// Returns the public URL of the uploaded image
+// Uploads Base64 image data to Vercel Blob Storage (private store)
+// Returns the accessible URL of the uploaded image
 
 import { put } from '@vercel/blob';
 
@@ -52,9 +52,8 @@ export default async function handler(req, res) {
     const folderPath = folder ? `photos/${folder}` : 'photos';
     const blobPath = `${folderPath}/${timestamp}_${sanitizedName}.${extension}`;
 
-    // Upload to Vercel Blob
+    // Upload to Vercel Blob (private store — トークン付きURLが返される)
     const blob = await put(blobPath, buffer, {
-      access: 'public',
       contentType: `image/${matches[1]}`,
     });
 
