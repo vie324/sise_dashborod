@@ -10983,8 +10983,11 @@
         function postureDrawSkeletonOnCanvas(ctx, w, h, landmarks, analysis, viewMode) {
             if (!landmarks) return;
             ctx.lineCap = 'round';
-            // 骨格線
-            POSTURE_CONNECTIONS.forEach(([a,b]) => {
+            // ビュー別の接続線（分析対象のみ）
+            const conns = viewMode === 'front' ? [[11,12],[11,23],[12,24],[23,24]]
+                : viewMode === 'side' ? [[11,23],[23,25],[25,27]]
+                : [[11,23],[11,13]];
+            conns.forEach(([a,b]) => {
                 const la = landmarks[a], lb = landmarks[b];
                 if (!la || !lb || la.visibility < 0.5 || lb.visibility < 0.5) return;
                 ctx.strokeStyle = 'rgba(15,110,86,0.8)';
@@ -10994,9 +10997,13 @@
                 ctx.lineTo(lb.x * w, lb.y * h);
                 ctx.stroke();
             });
-            // 関節点
+            // ビュー別の関節点（分析対象のみ）
+            const L = POSTURE_LM;
+            const pts = viewMode === 'front' ? [L.NOSE, L.LEFT_SHOULDER, L.RIGHT_SHOULDER, L.LEFT_HIP, L.RIGHT_HIP]
+                : viewMode === 'side' ? [L.LEFT_EAR, L.LEFT_SHOULDER, L.LEFT_HIP, L.LEFT_KNEE, L.LEFT_ANKLE]
+                : [L.NOSE, L.LEFT_EAR, L.LEFT_SHOULDER, L.LEFT_HIP, L.LEFT_ELBOW];
             const r = Math.max(4, Math.round(w / 120));
-            Object.values(POSTURE_LM).forEach(idx => {
+            pts.forEach(idx => {
                 const l = landmarks[idx];
                 if (!l || l.visibility < 0.5) return;
                 ctx.fillStyle = '#0F6E56';
@@ -11309,6 +11316,7 @@
             const [landmarks, setLandmarks] = useState(null);
             const [analysis, setAnalysis] = useState(null);
             const [overlayOn, setOverlayOn] = useState(true);
+            const [gridOn, setGridOn] = useState(false);
             const [capturedImage, setCapturedImage] = useState(null);
 
             // ランドマーク手動修正モード
@@ -11445,6 +11453,21 @@
                 setAnalysis(a);
             }, [landmarks, viewMode]);
 
+            // ビュー別の表示用接続線（分析対象のみ）
+            const viewConnections = useMemo(() => {
+                if (viewMode === 'front') return [[11,12],[11,23],[12,24],[23,24]]; // 肩ライン,体幹,腰ライン
+                if (viewMode === 'side') return [[11,23],[23,25],[25,27]]; // 肩→腰→膝→足首
+                return [[11,23],[11,13]]; // seated: 肩→腰, 肩→肘
+            }, [viewMode]);
+
+            // ビュー別の表示用ポイント（分析対象のみ）
+            const viewPoints = useMemo(() => {
+                const L = POSTURE_LM;
+                if (viewMode === 'front') return [L.NOSE, L.LEFT_SHOULDER, L.RIGHT_SHOULDER, L.LEFT_HIP, L.RIGHT_HIP];
+                if (viewMode === 'side') return [L.LEFT_EAR, L.LEFT_SHOULDER, L.LEFT_HIP, L.LEFT_KNEE, L.LEFT_ANKLE];
+                return [L.NOSE, L.LEFT_EAR, L.LEFT_SHOULDER, L.LEFT_HIP, L.LEFT_ELBOW];
+            }, [viewMode]);
+
             // Draw skeleton overlay
             useEffect(() => {
                 if (!landmarks || !svgRef.current || !vpRef.current) return;
@@ -11452,7 +11475,7 @@
                 const w = vpRef.current.clientWidth, h = vpRef.current.clientHeight;
                 svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
                 let html = '';
-                POSTURE_CONNECTIONS.forEach(([a,b]) => {
+                viewConnections.forEach(([a,b]) => {
                     const la = landmarks[a], lb = landmarks[b];
                     if (!la || !lb || la.visibility < 0.5 || lb.visibility < 0.5) return;
                     const color = phase === 'captured' && analysis ? postureScoreColor(
@@ -11464,7 +11487,7 @@
                     ) : 'rgba(15,110,86,0.7)';
                     html += `<line x1="${la.x*w}" y1="${la.y*h}" x2="${lb.x*w}" y2="${lb.y*h}" stroke="${color}" stroke-width="2.5" stroke-linecap="round"/>`;
                 });
-                Object.values(POSTURE_LM).forEach(idx => {
+                viewPoints.forEach(idx => {
                     const l = landmarks[idx];
                     if (!l || l.visibility < 0.5) return;
                     html += `<circle cx="${l.x*w}" cy="${l.y*h}" r="5" fill="#0F6E56" stroke="#fff" stroke-width="1.5"/>`;
@@ -11475,7 +11498,7 @@
                     html += `<line x1="${sm.x*w}" y1="${sm.y*h}" x2="${hm.x*w}" y2="${hm.y*h}" stroke="rgba(255,255,255,0.7)" stroke-width="2" stroke-dasharray="6 4"/>`;
                 }
                 svg.innerHTML = html;
-            }, [landmarks, analysis, phase, viewMode, overlayOn]);
+            }, [landmarks, analysis, phase, viewMode, overlayOn, viewConnections, viewPoints]);
 
             // 比較データの有効ペア判定
             const hasFrontPair = compData.before_front && compData.after_front;
@@ -11809,6 +11832,23 @@
                             {(phase==='live'||phase==='captured') && overlayOn && (
                                 <svg ref={svgRef} className="absolute inset-0 w-full h-full pointer-events-none" style={{zIndex:3}} preserveAspectRatio="none"/>
                             )}
+                            {(phase==='live'||phase==='captured') && gridOn && (
+                                <svg className="absolute inset-0 w-full h-full pointer-events-none" style={{zIndex:2}} viewBox="0 0 700 900" preserveAspectRatio="none">
+                                    {/* 外枠 */}
+                                    <rect x="0" y="0" width="700" height="900" fill="none" stroke="rgba(220,40,40,0.6)" strokeWidth="3"/>
+                                    {/* 縦線 7列 → 6本の内部線 */}
+                                    {[1,2,3,4,5,6].map(i=><line key={`v${i}`} x1={i*100} y1="0" x2={i*100} y2="900" stroke="rgba(220,40,40,0.45)" strokeWidth="1.5"/>)}
+                                    {/* 横線 9行 → 8本の内部線 */}
+                                    {[1,2,3,4,5,6,7,8].map(i=><line key={`h${i}`} x1="0" y1={i*100} x2="700" y2={i*100} stroke="rgba(220,40,40,0.45)" strokeWidth="1.5"/>)}
+                                    {/* 列ラベル 1-7 */}
+                                    {[1,2,3,4,5,6,7].map(i=><text key={`cl${i}`} x={i*100-50} y="895" textAnchor="middle" fill="rgba(220,40,40,0.8)" style={{fontSize:'28px',fontWeight:700}}>{i}</text>)}
+                                    {/* 行ラベル a-i */}
+                                    {['a','b','c','d','e','f','g','h','i'].map((c,i)=><text key={`rl${c}`} x="12" y={i*100+65} fill="rgba(220,40,40,0.8)" style={{fontSize:'28px',fontWeight:700}}>{c}</text>)}
+                                    {/* 青い中心線（縦・横） */}
+                                    <line x1="350" y1="0" x2="350" y2="900" stroke="rgba(60,140,220,0.7)" strokeWidth="2"/>
+                                    <line x1="0" y1="450" x2="700" y2="450" stroke="rgba(60,140,220,0.7)" strokeWidth="2"/>
+                                </svg>
+                            )}
                             {phase==='live' && (
                                 <div className="absolute top-3 right-3 flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-black/50 backdrop-blur">
                                     <div className="w-2 h-2 rounded-full bg-red-400 animate-pulse"/><span className="text-white text-xs font-bold">LIVE</span>
@@ -11857,17 +11897,26 @@
                             )}
                         </div>
 
-                        {/* Overlay toggle + 位置修正ボタン (when captured) */}
-                        {phase==='captured' && !editMode && (
+                        {/* Overlay toggle + Grid toggle + 位置修正ボタン */}
+                        {(phase==='live'||phase==='captured') && !editMode && (
                             <div className="flex items-center gap-2">
-                                <div className="flex-1 flex items-center justify-between bg-white rounded-xl p-3 border border-gray-100">
-                                    <span className="text-sm font-bold text-gray-700">骨格オーバーレイ</span>
-                                    <button onClick={()=>setOverlayOn(!overlayOn)}
-                                        className={`w-11 h-6 rounded-full relative transition ${overlayOn?'bg-teal-400':'bg-gray-300'}`}>
-                                        <div className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${overlayOn?'left-[22px]':'left-0.5'}`}/>
-                                    </button>
+                                <div className="flex-1 grid grid-cols-2 gap-2">
+                                    <div className="flex items-center justify-between bg-white rounded-xl p-3 border border-gray-100">
+                                        <span className="text-xs font-bold text-gray-700">骨格</span>
+                                        <button onClick={()=>setOverlayOn(!overlayOn)}
+                                            className={`w-11 h-6 rounded-full relative transition ${overlayOn?'bg-teal-400':'bg-gray-300'}`}>
+                                            <div className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${overlayOn?'left-[22px]':'left-0.5'}`}/>
+                                        </button>
+                                    </div>
+                                    <div className="flex items-center justify-between bg-white rounded-xl p-3 border border-gray-100">
+                                        <span className="text-xs font-bold text-gray-700">方眼</span>
+                                        <button onClick={()=>setGridOn(!gridOn)}
+                                            className={`w-11 h-6 rounded-full relative transition ${gridOn?'bg-red-400':'bg-gray-300'}`}>
+                                            <div className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${gridOn?'left-[22px]':'left-0.5'}`}/>
+                                        </button>
+                                    </div>
                                 </div>
-                                {analysis && landmarks && (
+                                {phase==='captured' && analysis && landmarks && (
                                     <button onClick={startEdit} className="flex items-center gap-1.5 px-4 py-3 rounded-xl text-sm font-bold border-2 border-red-300 text-red-500 bg-white hover:bg-red-50 transition whitespace-nowrap">
                                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
                                         位置を修正
