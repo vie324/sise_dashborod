@@ -11311,6 +11311,11 @@
             const [overlayOn, setOverlayOn] = useState(true);
             const [capturedImage, setCapturedImage] = useState(null);
 
+            // ランドマーク手動修正モード
+            const [editMode, setEditMode] = useState(false);
+            const [draggingIdx, setDraggingIdx] = useState(null);
+            const editContainerRef = useRef(null);
+
             // ビフォーアフター比較モード
             const [analysisMode, setAnalysisMode] = useState('single'); // 'single' | 'comparison'
             const [captureSlot, setCaptureSlot] = useState('before'); // 'before' | 'after'
@@ -11418,17 +11423,17 @@
             }, [capturedImage, landmarks, analysis, captureSlot, viewMode]);
 
             const retake = useCallback(() => {
-                setCapturedImage(null); setAnalysis(null); setLandmarks(null);
+                setCapturedImage(null); setAnalysis(null); setLandmarks(null); setEditMode(false);
                 startCamera();
             }, [startCamera]);
 
             const resetAll = useCallback(() => {
-                stopCam(); setCapturedImage(null); setAnalysis(null); setLandmarks(null);
+                stopCam(); setCapturedImage(null); setAnalysis(null); setLandmarks(null); setEditMode(false);
                 setPhase('idle');
             }, [stopCam]);
 
             const resetComparison = useCallback(() => {
-                stopCam(); setCapturedImage(null); setAnalysis(null); setLandmarks(null);
+                stopCam(); setCapturedImage(null); setAnalysis(null); setLandmarks(null); setEditMode(false);
                 setPhase('idle'); setCaptureSlot('before');
                 setCompData({ before_front: null, before_side: null, before_seated: null, after_front: null, after_side: null, after_seated: null });
             }, [stopCam]);
@@ -11477,6 +11482,69 @@
             const hasSidePair = compData.before_side && compData.after_side;
             const hasSeatedPair = compData.before_seated && compData.after_seated;
             const hasAnyPair = hasFrontPair || hasSidePair || hasSeatedPair;
+
+            // 分析に使うランドマークインデックス（viewMode別）
+            const editableIndices = useMemo(() => {
+                const L = POSTURE_LM;
+                if (viewMode === 'front') return [
+                    {idx:L.NOSE, label:'鼻'},
+                    {idx:L.LEFT_SHOULDER, label:'左肩'},
+                    {idx:L.RIGHT_SHOULDER, label:'右肩'},
+                    {idx:L.LEFT_HIP, label:'左腰'},
+                    {idx:L.RIGHT_HIP, label:'右腰'},
+                ];
+                if (viewMode === 'side') return [
+                    {idx:L.LEFT_EAR, label:'左耳'},
+                    {idx:L.LEFT_SHOULDER, label:'左肩'},
+                    {idx:L.LEFT_HIP, label:'左腰'},
+                    {idx:L.LEFT_KNEE, label:'左膝'},
+                    {idx:L.LEFT_ANKLE, label:'左足首'},
+                ];
+                // seated
+                return [
+                    {idx:L.NOSE, label:'鼻'},
+                    {idx:L.LEFT_EAR, label:'左耳'},
+                    {idx:L.LEFT_SHOULDER, label:'左肩'},
+                    {idx:L.LEFT_HIP, label:'左腰'},
+                    {idx:L.LEFT_ELBOW, label:'左肘'},
+                ];
+            }, [viewMode]);
+
+            // ドラッグ操作でランドマーク位置を更新
+            const getPointerPos = useCallback((e) => {
+                const container = editContainerRef.current;
+                if (!container) return null;
+                const rect = container.getBoundingClientRect();
+                const touch = e.touches ? e.touches[0] : e;
+                const x = (touch.clientX - rect.left) / rect.width;
+                const y = (touch.clientY - rect.top) / rect.height;
+                return { x: Math.max(0, Math.min(1, x)), y: Math.max(0, Math.min(1, y)) };
+            }, []);
+
+            const handleEditPointerDown = useCallback((e, lmIdx) => {
+                e.preventDefault(); e.stopPropagation();
+                setDraggingIdx(lmIdx);
+            }, []);
+
+            const handleEditPointerMove = useCallback((e) => {
+                if (draggingIdx === null || !landmarks) return;
+                e.preventDefault();
+                const pos = getPointerPos(e);
+                if (!pos) return;
+                const newLm = landmarks.map((lm, i) => i === draggingIdx ? { ...lm, x: pos.x, y: pos.y } : lm);
+                setLandmarks(newLm);
+                // リアルタイム再計算
+                const a = viewMode === 'front' ? postureAnalyzeFront(newLm) : viewMode === 'seated' ? postureAnalyzeSeated(newLm) : postureAnalyzeSide(newLm);
+                setAnalysis(a);
+            }, [draggingIdx, landmarks, viewMode, getPointerPos]);
+
+            const handleEditPointerUp = useCallback(() => {
+                setDraggingIdx(null);
+            }, []);
+
+            // 編集モード開始・確定
+            const startEdit = useCallback(() => { setEditMode(true); setOverlayOn(true); }, []);
+            const confirmEdit = useCallback(() => { setEditMode(false); }, []);
 
             // Blob upload helper
             const uploadToBlob = useCallback(async (base64Data, fileName) => {
@@ -11657,6 +11725,73 @@
                         <div ref={vpRef} className="relative rounded-2xl overflow-hidden bg-gray-900 shadow-lg" style={{aspectRatio:'9/16'}}>
                             <video ref={videoRef} playsInline muted className="w-full h-full object-cover" style={{display:phase==='live'?'block':'none'}}/>
                             {capturedImage && <img src={capturedImage} className="w-full h-full object-cover" alt="captured"/>}
+                            {/* ランドマーク手動修正レイヤー */}
+                            {editMode && phase==='captured' && landmarks && (
+                                <div ref={editContainerRef}
+                                    className="absolute inset-0"
+                                    style={{zIndex:10, touchAction:'none'}}
+                                    onMouseMove={handleEditPointerMove}
+                                    onMouseUp={handleEditPointerUp}
+                                    onMouseLeave={handleEditPointerUp}
+                                    onTouchMove={handleEditPointerMove}
+                                    onTouchEnd={handleEditPointerUp}
+                                    onTouchCancel={handleEditPointerUp}>
+                                    {editableIndices.map(({idx, label}) => {
+                                        const lm = landmarks[idx];
+                                        if (!lm) return null;
+                                        const isDragging = draggingIdx === idx;
+                                        return (
+                                            <div key={idx}
+                                                style={{
+                                                    position:'absolute',
+                                                    left: `${lm.x * 100}%`,
+                                                    top: `${lm.y * 100}%`,
+                                                    transform: 'translate(-50%,-50%)',
+                                                    zIndex: isDragging ? 20 : 11,
+                                                }}
+                                                onMouseDown={(e) => handleEditPointerDown(e, idx)}
+                                                onTouchStart={(e) => handleEditPointerDown(e, idx)}>
+                                                {/* タッチ範囲を広くする透明領域 */}
+                                                <div style={{
+                                                    width: 44, height: 44,
+                                                    display:'flex', alignItems:'center', justifyContent:'center',
+                                                    cursor: isDragging ? 'grabbing' : 'grab',
+                                                }}>
+                                                    {/* 外側のリング */}
+                                                    <div style={{
+                                                        width: isDragging ? 28 : 22,
+                                                        height: isDragging ? 28 : 22,
+                                                        borderRadius: '50%',
+                                                        border: `3px solid ${isDragging ? '#FFD700' : '#FF6B6B'}`,
+                                                        background: isDragging ? 'rgba(255,215,0,0.3)' : 'rgba(255,107,107,0.25)',
+                                                        boxShadow: isDragging ? '0 0 12px rgba(255,215,0,0.7)' : '0 0 8px rgba(255,107,107,0.5)',
+                                                        display:'flex', alignItems:'center', justifyContent:'center',
+                                                        transition: 'width 0.1s, height 0.1s',
+                                                    }}>
+                                                        <div style={{
+                                                            width: 6, height: 6,
+                                                            borderRadius: '50%',
+                                                            background: isDragging ? '#FFD700' : '#FF6B6B',
+                                                        }}/>
+                                                    </div>
+                                                </div>
+                                                {/* ラベル */}
+                                                <div style={{
+                                                    position:'absolute', top: -18, left: '50%', transform: 'translateX(-50%)',
+                                                    background: 'rgba(0,0,0,0.75)', color: '#fff',
+                                                    fontSize: 9, fontWeight: 'bold',
+                                                    padding: '1px 5px', borderRadius: 4, whiteSpace: 'nowrap',
+                                                    pointerEvents: 'none',
+                                                }}>{label}</div>
+                                            </div>
+                                        );
+                                    })}
+                                    {/* 編集モードバナー */}
+                                    <div className="absolute top-2 left-2 right-2 flex items-center justify-center gap-2 py-1.5 px-3 rounded-lg" style={{background:'rgba(255,107,107,0.9)', zIndex:25}}>
+                                        <span className="text-white text-xs font-bold">修正モード — ポイントをドラッグして調整</span>
+                                    </div>
+                                </div>
+                            )}
                             {phase==='idle' && (
                                 <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
                                     <div className="w-16 h-16 rounded-full bg-white/10 flex items-center justify-center">
@@ -11695,7 +11830,7 @@
                                     </button>
                                 </div>
                             )}
-                            {phase==='captured' && (
+                            {phase==='captured' && !editMode && (
                                 <div className="absolute bottom-0 left-0 right-0 p-4 flex gap-2 z-10" style={{background:'linear-gradient(transparent, rgba(0,0,0,0.6))'}}>
                                     {analysisMode==='comparison' && analysis && (
                                         <button onClick={saveToCompSlot} className="flex-1 py-3.5 rounded-xl text-white font-bold text-sm shadow-lg backdrop-blur" style={{background:'rgba(234,160,24,0.95)'}}>
@@ -11710,16 +11845,34 @@
                                     </button>
                                 </div>
                             )}
+                            {phase==='captured' && editMode && (
+                                <div className="absolute bottom-0 left-0 right-0 p-4 flex gap-2" style={{background:'linear-gradient(transparent, rgba(0,0,0,0.6))', zIndex:30}}>
+                                    <button onClick={confirmEdit} className="flex-1 py-3.5 rounded-xl text-white font-bold text-sm shadow-lg" style={{background:'rgba(15,110,86,0.95)'}}>
+                                        修正を確定
+                                    </button>
+                                    <button onClick={()=>{setEditMode(false);}} className="px-4 py-3.5 rounded-xl font-bold text-sm shadow-lg" style={{background:'rgba(255,255,255,0.9)', color:'#555'}}>
+                                        キャンセル
+                                    </button>
+                                </div>
+                            )}
                         </div>
 
-                        {/* Overlay toggle (when captured) */}
-                        {phase==='captured' && (
-                            <div className="flex items-center justify-between bg-white rounded-xl p-3 border border-gray-100">
-                                <span className="text-sm font-bold text-gray-700">骨格オーバーレイ</span>
-                                <button onClick={()=>setOverlayOn(!overlayOn)}
-                                    className={`w-11 h-6 rounded-full relative transition ${overlayOn?'bg-teal-400':'bg-gray-300'}`}>
-                                    <div className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${overlayOn?'left-[22px]':'left-0.5'}`}/>
-                                </button>
+                        {/* Overlay toggle + 位置修正ボタン (when captured) */}
+                        {phase==='captured' && !editMode && (
+                            <div className="flex items-center gap-2">
+                                <div className="flex-1 flex items-center justify-between bg-white rounded-xl p-3 border border-gray-100">
+                                    <span className="text-sm font-bold text-gray-700">骨格オーバーレイ</span>
+                                    <button onClick={()=>setOverlayOn(!overlayOn)}
+                                        className={`w-11 h-6 rounded-full relative transition ${overlayOn?'bg-teal-400':'bg-gray-300'}`}>
+                                        <div className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${overlayOn?'left-[22px]':'left-0.5'}`}/>
+                                    </button>
+                                </div>
+                                {analysis && landmarks && (
+                                    <button onClick={startEdit} className="flex items-center gap-1.5 px-4 py-3 rounded-xl text-sm font-bold border-2 border-red-300 text-red-500 bg-white hover:bg-red-50 transition whitespace-nowrap">
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+                                        位置を修正
+                                    </button>
+                                )}
                             </div>
                         )}
 
