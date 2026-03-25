@@ -11197,26 +11197,100 @@
         function postureDrawSkeletonOnCanvas(ctx, w, h, landmarks, analysis, viewMode) {
             if (!landmarks) return;
             ctx.lineCap = 'round';
-            // ビュー別の接続線（分析対象のみ）
-            const conns = (viewMode === 'front' || viewMode === 'back') ? [[11,12],[11,23],[12,24],[23,24]]
+            const L = POSTURE_LM;
+            const lineW = Math.max(2, Math.round(w / 200));
+            const r = Math.max(4, Math.round(w / 120));
+
+            if (viewMode === 'back') {
+                // === 背面ビュー: 三角形パターン + 脊柱ライン ===
+                const ls = landmarks[L.LEFT_SHOULDER], rs = landmarks[L.RIGHT_SHOULDER];
+                const lh = landmarks[L.LEFT_HIP], rh = landmarks[L.RIGHT_HIP];
+                const nose = landmarks[L.NOSE];
+                if (!ls || !rs || !lh || !rh) return;
+                const sm = postureMid(ls, rs);
+                const hm = postureMid(lh, rh);
+
+                ctx.strokeStyle = 'rgba(15,110,86,0.85)';
+                ctx.lineWidth = lineW;
+
+                // 肩の三角形: 左肩→肩中点→右肩→左肩
+                ctx.beginPath();
+                ctx.moveTo(ls.x * w, ls.y * h);
+                ctx.lineTo(sm.x * w, sm.y * h);
+                ctx.lineTo(rs.x * w, rs.y * h);
+                ctx.stroke();
+                // 肩中点から左右肩への補助線（三角形の底辺）
+                ctx.beginPath();
+                ctx.moveTo(ls.x * w, ls.y * h);
+                ctx.lineTo(rs.x * w, rs.y * h);
+                ctx.stroke();
+
+                // 骨盤の三角形: 左腰→腰中点→右腰→左腰
+                ctx.beginPath();
+                ctx.moveTo(lh.x * w, lh.y * h);
+                ctx.lineTo(hm.x * w, hm.y * h);
+                ctx.lineTo(rh.x * w, rh.y * h);
+                ctx.stroke();
+                // 骨盤三角形の底辺
+                ctx.beginPath();
+                ctx.moveTo(lh.x * w, lh.y * h);
+                ctx.lineTo(rh.x * w, rh.y * h);
+                ctx.stroke();
+
+                // 脊柱ライン: 頭頂→肩中点→腰中点（実線）
+                ctx.strokeStyle = 'rgba(15,110,86,0.9)';
+                ctx.lineWidth = Math.max(2.5, Math.round(w / 180));
+                ctx.beginPath();
+                if (nose && nose.visibility >= 0.5) {
+                    ctx.moveTo(nose.x * w, nose.y * h);
+                    ctx.lineTo(sm.x * w, sm.y * h);
+                } else {
+                    ctx.moveTo(sm.x * w, sm.y * h);
+                }
+                ctx.lineTo(hm.x * w, hm.y * h);
+                ctx.stroke();
+
+                // 関節点: 5つのランドマーク + 肩中点・腰中点
+                const allPts = [];
+                if (nose && nose.visibility >= 0.5) allPts.push({ x: nose.x, y: nose.y });
+                if (ls.visibility >= 0.5) allPts.push({ x: ls.x, y: ls.y });
+                if (rs.visibility >= 0.5) allPts.push({ x: rs.x, y: rs.y });
+                if (lh.visibility >= 0.5) allPts.push({ x: lh.x, y: lh.y });
+                if (rh.visibility >= 0.5) allPts.push({ x: rh.x, y: rh.y });
+                // 中点も描画
+                allPts.push({ x: sm.x, y: sm.y });
+                allPts.push({ x: hm.x, y: hm.y });
+
+                allPts.forEach(p => {
+                    ctx.fillStyle = '#0F6E56';
+                    ctx.strokeStyle = '#ffffff';
+                    ctx.lineWidth = Math.max(1.5, Math.round(w / 400));
+                    ctx.beginPath();
+                    ctx.arc(p.x * w, p.y * h, r, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.stroke();
+                });
+                return; // back専用描画完了
+            }
+
+            // === front / side / seated ビュー（既存ロジック） ===
+            const conns = viewMode === 'front' ? [[11,12],[11,23],[12,24],[23,24]]
                 : viewMode === 'side' ? [[11,23],[23,25],[25,27]]
                 : [[11,23],[11,13]];
             conns.forEach(([a,b]) => {
                 const la = landmarks[a], lb = landmarks[b];
                 if (!la || !lb || la.visibility < 0.5 || lb.visibility < 0.5) return;
                 ctx.strokeStyle = 'rgba(15,110,86,0.8)';
-                ctx.lineWidth = Math.max(2, Math.round(w / 200));
+                ctx.lineWidth = lineW;
                 ctx.beginPath();
                 ctx.moveTo(la.x * w, la.y * h);
                 ctx.lineTo(lb.x * w, lb.y * h);
                 ctx.stroke();
             });
-            // ビュー別の関節点（分析対象のみ）
-            const L = POSTURE_LM;
-            const pts = (viewMode === 'front' || viewMode === 'back') ? [L.NOSE, L.LEFT_SHOULDER, L.RIGHT_SHOULDER, L.LEFT_HIP, L.RIGHT_HIP]
+            // 関節点
+            const pts = viewMode === 'front' ? [L.NOSE, L.LEFT_SHOULDER, L.RIGHT_SHOULDER, L.LEFT_HIP, L.RIGHT_HIP]
                 : viewMode === 'side' ? [L.LEFT_EAR, L.LEFT_SHOULDER, L.LEFT_HIP, L.LEFT_KNEE, L.LEFT_ANKLE]
                 : [L.NOSE, L.LEFT_EAR, L.LEFT_SHOULDER, L.LEFT_HIP, L.LEFT_ELBOW];
-            const r = Math.max(4, Math.round(w / 120));
             pts.forEach(idx => {
                 const l = landmarks[idx];
                 if (!l || l.visibility < 0.5) return;
@@ -11228,18 +11302,20 @@
                 ctx.fill();
                 ctx.stroke();
             });
-            // 体軸
-            const ls = landmarks[11], rs = landmarks[12], lh = landmarks[23], rh = landmarks[24];
-            if (ls && rs && lh && rh) {
-                const sm = postureMid(ls, rs), hm = postureMid(lh, rh);
-                ctx.strokeStyle = 'rgba(255,255,255,0.7)';
-                ctx.lineWidth = Math.max(2, Math.round(w / 250));
-                ctx.setLineDash([6, 4]);
-                ctx.beginPath();
-                ctx.moveTo(sm.x * w, sm.y * h);
-                ctx.lineTo(hm.x * w, hm.y * h);
-                ctx.stroke();
-                ctx.setLineDash([]);
+            // 体軸（front のみ破線）
+            if (viewMode === 'front') {
+                const ls = landmarks[11], rs = landmarks[12], lh = landmarks[23], rh = landmarks[24];
+                if (ls && rs && lh && rh) {
+                    const sm = postureMid(ls, rs), hm = postureMid(lh, rh);
+                    ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+                    ctx.lineWidth = Math.max(2, Math.round(w / 250));
+                    ctx.setLineDash([6, 4]);
+                    ctx.beginPath();
+                    ctx.moveTo(sm.x * w, sm.y * h);
+                    ctx.lineTo(hm.x * w, hm.y * h);
+                    ctx.stroke();
+                    ctx.setLineDash([]);
+                }
             }
         }
 
@@ -11732,7 +11808,8 @@
 
             // ビュー別の表示用接続線（分析対象のみ）
             const viewConnections = useMemo(() => {
-                if (viewMode === 'front' || viewMode === 'back') return [[11,12],[11,23],[12,24],[23,24]]; // 肩ライン,体幹,腰ライン
+                if (viewMode === 'front') return [[11,12],[11,23],[12,24],[23,24]]; // 肩ライン,体幹,腰ライン
+                if (viewMode === 'back') return []; // back は専用描画
                 if (viewMode === 'side') return [[11,23],[23,25],[25,27]]; // 肩→腰→膝→足首
                 return [[11,23],[11,13]]; // seated: 肩→腰, 肩→肘
             }, [viewMode]);
@@ -11740,7 +11817,8 @@
             // ビュー別の表示用ポイント（分析対象のみ）
             const viewPoints = useMemo(() => {
                 const L = POSTURE_LM;
-                if (viewMode === 'front' || viewMode === 'back') return [L.NOSE, L.LEFT_SHOULDER, L.RIGHT_SHOULDER, L.LEFT_HIP, L.RIGHT_HIP];
+                if (viewMode === 'front') return [L.NOSE, L.LEFT_SHOULDER, L.RIGHT_SHOULDER, L.LEFT_HIP, L.RIGHT_HIP];
+                if (viewMode === 'back') return []; // back は専用描画
                 if (viewMode === 'side') return [L.LEFT_EAR, L.LEFT_SHOULDER, L.LEFT_HIP, L.LEFT_KNEE, L.LEFT_ANKLE];
                 return [L.NOSE, L.LEFT_EAR, L.LEFT_SHOULDER, L.LEFT_HIP, L.LEFT_ELBOW];
             }, [viewMode]);
@@ -11752,27 +11830,67 @@
                 const w = vpRef.current.clientWidth, h = vpRef.current.clientHeight;
                 svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
                 let html = '';
-                viewConnections.forEach(([a,b]) => {
-                    const la = landmarks[a], lb = landmarks[b];
-                    if (!la || !lb || la.visibility < 0.5 || lb.visibility < 0.5) return;
-                    const color = phase === 'captured' && analysis ? postureScoreColor(
-                        (analysis.items.find(i => {
-                            if (viewMode==='front'||viewMode==='back') { if(i.key==='shoulder'&&(a===11||b===12)) return true; if(i.key==='hip'&&(a===23||b===24)) return true; }
-                            else { if(i.key==='shoulder'&&a===11&&b===23) return true; if(i.key==='hip'&&a===23&&b===25) return true; if(i.key==='knee'&&a===25&&b===27) return true; }
-                            return false;
-                        }) || {score:80}).score
-                    ) : 'rgba(15,110,86,0.7)';
-                    html += `<line x1="${la.x*w}" y1="${la.y*h}" x2="${lb.x*w}" y2="${lb.y*h}" stroke="${color}" stroke-width="2.5" stroke-linecap="round"/>`;
-                });
-                viewPoints.forEach(idx => {
-                    const l = landmarks[idx];
-                    if (!l || l.visibility < 0.5) return;
-                    html += `<circle cx="${l.x*w}" cy="${l.y*h}" r="5" fill="#0F6E56" stroke="#fff" stroke-width="1.5"/>`;
-                });
-                const ls=landmarks[11],rs=landmarks[12],lh=landmarks[23],rh=landmarks[24];
-                if(ls&&rs&&lh&&rh){
-                    const sm=postureMid(ls,rs), hm=postureMid(lh,rh);
-                    html += `<line x1="${sm.x*w}" y1="${sm.y*h}" x2="${hm.x*w}" y2="${hm.y*h}" stroke="rgba(255,255,255,0.7)" stroke-width="2" stroke-dasharray="6 4"/>`;
+
+                if (viewMode === 'back') {
+                    // === 背面専用: 三角形パターン + 脊柱ライン ===
+                    const ls = landmarks[11], rs = landmarks[12], lh = landmarks[23], rh = landmarks[24], nose = landmarks[0];
+                    if (ls && rs && lh && rh) {
+                        const sm = postureMid(ls, rs), hm = postureMid(lh, rh);
+                        const lineColor = 'rgba(15,110,86,0.85)';
+                        // 肩の三角形
+                        html += `<line x1="${ls.x*w}" y1="${ls.y*h}" x2="${sm.x*w}" y2="${sm.y*h}" stroke="${lineColor}" stroke-width="2.5" stroke-linecap="round"/>`;
+                        html += `<line x1="${rs.x*w}" y1="${rs.y*h}" x2="${sm.x*w}" y2="${sm.y*h}" stroke="${lineColor}" stroke-width="2.5" stroke-linecap="round"/>`;
+                        html += `<line x1="${ls.x*w}" y1="${ls.y*h}" x2="${rs.x*w}" y2="${rs.y*h}" stroke="${lineColor}" stroke-width="2.5" stroke-linecap="round"/>`;
+                        // 骨盤の三角形
+                        html += `<line x1="${lh.x*w}" y1="${lh.y*h}" x2="${hm.x*w}" y2="${hm.y*h}" stroke="${lineColor}" stroke-width="2.5" stroke-linecap="round"/>`;
+                        html += `<line x1="${rh.x*w}" y1="${rh.y*h}" x2="${hm.x*w}" y2="${hm.y*h}" stroke="${lineColor}" stroke-width="2.5" stroke-linecap="round"/>`;
+                        html += `<line x1="${lh.x*w}" y1="${lh.y*h}" x2="${rh.x*w}" y2="${rh.y*h}" stroke="${lineColor}" stroke-width="2.5" stroke-linecap="round"/>`;
+                        // 脊柱ライン
+                        const spineColor = 'rgba(15,110,86,0.9)';
+                        if (nose && nose.visibility >= 0.5) {
+                            html += `<line x1="${nose.x*w}" y1="${nose.y*h}" x2="${sm.x*w}" y2="${sm.y*h}" stroke="${spineColor}" stroke-width="3" stroke-linecap="round"/>`;
+                        }
+                        html += `<line x1="${sm.x*w}" y1="${sm.y*h}" x2="${hm.x*w}" y2="${hm.y*h}" stroke="${spineColor}" stroke-width="3" stroke-linecap="round"/>`;
+                        // 関節点
+                        const pts = [];
+                        if (nose && nose.visibility >= 0.5) pts.push({x:nose.x,y:nose.y});
+                        if (ls.visibility >= 0.5) pts.push({x:ls.x,y:ls.y});
+                        if (rs.visibility >= 0.5) pts.push({x:rs.x,y:rs.y});
+                        if (lh.visibility >= 0.5) pts.push({x:lh.x,y:lh.y});
+                        if (rh.visibility >= 0.5) pts.push({x:rh.x,y:rh.y});
+                        pts.push({x:sm.x,y:sm.y}); // 肩中点
+                        pts.push({x:hm.x,y:hm.y}); // 腰中点
+                        pts.forEach(p => {
+                            html += `<circle cx="${p.x*w}" cy="${p.y*h}" r="5" fill="#0F6E56" stroke="#fff" stroke-width="1.5"/>`;
+                        });
+                    }
+                } else {
+                    // === front / side / seated ===
+                    viewConnections.forEach(([a,b]) => {
+                        const la = landmarks[a], lb = landmarks[b];
+                        if (!la || !lb || la.visibility < 0.5 || lb.visibility < 0.5) return;
+                        const color = phase === 'captured' && analysis ? postureScoreColor(
+                            (analysis.items.find(i => {
+                                if (viewMode==='front') { if(i.key==='shoulder'&&(a===11||b===12)) return true; if(i.key==='hip'&&(a===23||b===24)) return true; }
+                                else { if(i.key==='shoulder'&&a===11&&b===23) return true; if(i.key==='hip'&&a===23&&b===25) return true; if(i.key==='knee'&&a===25&&b===27) return true; }
+                                return false;
+                            }) || {score:80}).score
+                        ) : 'rgba(15,110,86,0.7)';
+                        html += `<line x1="${la.x*w}" y1="${la.y*h}" x2="${lb.x*w}" y2="${lb.y*h}" stroke="${color}" stroke-width="2.5" stroke-linecap="round"/>`;
+                    });
+                    viewPoints.forEach(idx => {
+                        const l = landmarks[idx];
+                        if (!l || l.visibility < 0.5) return;
+                        html += `<circle cx="${l.x*w}" cy="${l.y*h}" r="5" fill="#0F6E56" stroke="#fff" stroke-width="1.5"/>`;
+                    });
+                    // 体軸（front のみ破線）
+                    if (viewMode === 'front') {
+                        const ls=landmarks[11],rs=landmarks[12],lh=landmarks[23],rh=landmarks[24];
+                        if(ls&&rs&&lh&&rh){
+                            const sm=postureMid(ls,rs), hm=postureMid(lh,rh);
+                            html += `<line x1="${sm.x*w}" y1="${sm.y*h}" x2="${hm.x*w}" y2="${hm.y*h}" stroke="rgba(255,255,255,0.7)" stroke-width="2" stroke-dasharray="6 4"/>`;
+                        }
+                    }
                 }
                 svg.innerHTML = html;
             }, [landmarks, analysis, phase, viewMode, overlayOn, viewConnections, viewPoints]);
