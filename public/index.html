@@ -10828,6 +10828,13 @@
                     ]},
                     barFill(item.score),
                     { type: 'text', text: item.detail + ' — ' + item.value, size: 'xxs', color: '#888888', margin: 'xs' },
+                    ...(item.reference ? [{
+                        type: 'text',
+                        text: '📚 ' + item.reference.authors + ' (' + item.reference.year + ')',
+                        size: 'xxs',
+                        color: '#aaaaaa',
+                        margin: 'xs',
+                    }] : []),
                 ],
             }));
 
@@ -10883,6 +10890,7 @@
                         { type: 'text', text: displayStaff, size: 'xxs', color: '#888888', align: 'end' },
                         { type: 'separator', color: '#e8e8e8', margin: 'md' },
                         { type: 'text', text: '定期的な姿勢チェックで改善を実感しましょう', size: 'xxs', color: '#aaaaaa', align: 'center', margin: 'md' },
+                        { type: 'text', text: '※スコアは査読付き学術論文の基準に基づいています', size: 'xxs', color: '#bbbbbb', align: 'center', margin: 'sm' },
                     ],
                 },
             };
