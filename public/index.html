@@ -10808,7 +10808,7 @@
             const displayName = customerName ? (customerName.includes('様') ? customerName : customerName + ' 様') : '様';
             const displayDate = visitDate ? visitDate.replace(/-/g, '.') : new Date().toISOString().split('T')[0].replace(/-/g, '.');
             const displayStaff = staffName ? staffName + ' より' : '担当より';
-            const viewLabel = viewMode === 'front' ? '正面' : viewMode === 'seated' ? '座位' : '側面';
+            const viewLabel = viewMode === 'front' ? '正面' : viewMode === 'back' ? '背面' : viewMode === 'seated' ? '座位' : '側面';
 
             const scoreColor = (s) => s >= 80 ? '#0F6E56' : s >= 60 ? '#639922' : s >= 40 ? '#EF9F27' : '#E24B4A';
             const scoreLabel = (s) => s >= 80 ? '良好' : s >= 60 ? 'やや注意' : s >= 40 ? '要改善' : '要施術';
@@ -10933,6 +10933,10 @@
                  detail:centerShift<0.015?'正中':sMid.x<hMid.x?'左にズレ':'右にズレ',value:(centerShift*100).toFixed(1)+'%偏位'},
             ]};
         }
+        // 背面の姿勢分析（正面と同じランドマーク・ロジック）
+        function postureAnalyzeBack(lm){
+            return postureAnalyzeFront(lm);
+        }
         function postureAnalyzeSide(lm){
             const L=POSTURE_LM;
             const ear=lm[L.LEFT_EAR],sh=lm[L.LEFT_SHOULDER];
@@ -10984,7 +10988,7 @@
             if (!landmarks) return;
             ctx.lineCap = 'round';
             // ビュー別の接続線（分析対象のみ）
-            const conns = viewMode === 'front' ? [[11,12],[11,23],[12,24],[23,24]]
+            const conns = (viewMode === 'front' || viewMode === 'back') ? [[11,12],[11,23],[12,24],[23,24]]
                 : viewMode === 'side' ? [[11,23],[23,25],[25,27]]
                 : [[11,23],[11,13]];
             conns.forEach(([a,b]) => {
@@ -10999,7 +11003,7 @@
             });
             // ビュー別の関節点（分析対象のみ）
             const L = POSTURE_LM;
-            const pts = viewMode === 'front' ? [L.NOSE, L.LEFT_SHOULDER, L.RIGHT_SHOULDER, L.LEFT_HIP, L.RIGHT_HIP]
+            const pts = (viewMode === 'front' || viewMode === 'back') ? [L.NOSE, L.LEFT_SHOULDER, L.RIGHT_SHOULDER, L.LEFT_HIP, L.RIGHT_HIP]
                 : viewMode === 'side' ? [L.LEFT_EAR, L.LEFT_SHOULDER, L.LEFT_HIP, L.LEFT_KNEE, L.LEFT_ANKLE]
                 : [L.NOSE, L.LEFT_EAR, L.LEFT_SHOULDER, L.LEFT_HIP, L.LEFT_ELBOW];
             const r = Math.max(4, Math.round(w / 120));
@@ -11098,7 +11102,7 @@
         // ==========================================
         // ビフォーアフター比較 LINE Flexメッセージビルダー
         // ==========================================
-        const buildPostureComparisonFlexMessage = ({ customerName, visitDate, staffName, frontBefore, frontAfter, sideBefore, sideAfter, seatedBefore, seatedAfter, frontImageUrl, sideImageUrl, seatedImageUrl }) => {
+        const buildPostureComparisonFlexMessage = ({ customerName, visitDate, staffName, frontBefore, frontAfter, backBefore, backAfter, sideBefore, sideAfter, seatedBefore, seatedAfter, frontImageUrl, backImageUrl, sideImageUrl, seatedImageUrl }) => {
             const displayName = customerName ? (customerName.includes('様') ? customerName : customerName + ' 様') : '様';
             const displayDate = visitDate ? visitDate.replace(/-/g, '.') : new Date().toISOString().split('T')[0].replace(/-/g, '.');
             const displayStaff = staffName ? staffName + ' より' : '担当より';
@@ -11154,6 +11158,46 @@
                             // 各項目の変化
                             frontBefore.analysis.items.forEach((bItem, i) => {
                                 const aItem = frontAfter.analysis.items[i];
+                                if (!aItem) return;
+                                const d = aItem.score - bItem.score;
+                                sections.push({
+                                    type: 'box', layout: 'horizontal', margin: 'sm', paddingAll: '8px', cornerRadius: 'md',
+                                    backgroundColor: d >= 0 ? '#E1F5EE' : '#FCEBEB',
+                                    contents: [
+                                        { type: 'text', text: bItem.label, size: 'xxs', weight: 'bold', color: '#333', flex: 4 },
+                                        { type: 'text', text: bItem.score + ' → ' + aItem.score, size: 'xxs', color: '#666', flex: 3, align: 'end' },
+                                        { type: 'text', text: d >= 0 ? '+' + d : String(d), size: 'xxs', weight: 'bold', color: d >= 0 ? '#0F6E56' : '#E24B4A', flex: 1, align: 'end' },
+                                    ],
+                                });
+                            });
+                        }
+                        // 背面スコア比較
+                        if (backBefore && backAfter) {
+                            if (sections.length > 0) sections.push({ type: 'separator', color: '#e8e8e8', margin: 'lg' });
+                            const bTotal = postureGetTotal(backBefore.analysis);
+                            const aTotal = postureGetTotal(backAfter.analysis);
+                            const diff = aTotal - bTotal;
+                            sections.push(
+                                { type: 'text', text: '📐 背面分析', size: 'sm', weight: 'bold', color: '#04342C', margin: 'md' },
+                                { type: 'box', layout: 'horizontal', spacing: 'md', margin: 'md', contents: [
+                                    { type: 'box', layout: 'vertical', flex: 1, alignItems: 'center', contents: [
+                                        { type: 'text', text: 'Before', size: 'xxs', color: '#888888' },
+                                        { type: 'text', text: String(bTotal), size: 'xxl', weight: 'bold', color: scoreColor(bTotal) },
+                                        { type: 'text', text: scoreLabel(bTotal), size: 'xxs', color: scoreColor(bTotal) },
+                                    ]},
+                                    { type: 'box', layout: 'vertical', flex: 1, alignItems: 'center', justifyContent: 'center', contents: [
+                                        { type: 'text', text: diff >= 0 ? '+' + diff : String(diff), size: 'xl', weight: 'bold', color: diff >= 0 ? '#0F6E56' : '#E24B4A' },
+                                        { type: 'text', text: diff >= 0 ? '改善 ▲' : '低下 ▼', size: 'xxs', color: diff >= 0 ? '#0F6E56' : '#E24B4A' },
+                                    ]},
+                                    { type: 'box', layout: 'vertical', flex: 1, alignItems: 'center', contents: [
+                                        { type: 'text', text: 'After', size: 'xxs', color: '#888888' },
+                                        { type: 'text', text: String(aTotal), size: 'xxl', weight: 'bold', color: scoreColor(aTotal) },
+                                        { type: 'text', text: scoreLabel(aTotal), size: 'xxs', color: scoreColor(aTotal) },
+                                    ]},
+                                ]},
+                            );
+                            backBefore.analysis.items.forEach((bItem, i) => {
+                                const aItem = backAfter.analysis.items[i];
                                 if (!aItem) return;
                                 const d = aItem.score - bItem.score;
                                 sections.push({
@@ -11274,6 +11318,20 @@
                 });
             }
 
+            // 背面比較画像バブル
+            if (backImageUrl) {
+                bubbles.push({
+                    type: 'bubble', size: 'mega',
+                    hero: { type: 'image', url: backImageUrl, size: 'full', aspectRatio: '20:9', aspectMode: 'cover' },
+                    body: {
+                        type: 'box', layout: 'vertical', paddingAll: '12px',
+                        contents: [
+                            { type: 'text', text: '背面 Before / After', size: 'sm', weight: 'bold', color: '#04342C', align: 'center' },
+                        ],
+                    },
+                });
+            }
+
             // 側面比較画像バブル
             if (sideImageUrl) {
                 bubbles.push({
@@ -11327,7 +11385,7 @@
             // ビフォーアフター比較モード
             const [analysisMode, setAnalysisMode] = useState('single'); // 'single' | 'comparison'
             const [captureSlot, setCaptureSlot] = useState('before'); // 'before' | 'after'
-            const [compData, setCompData] = useState({ before_front: null, before_side: null, before_seated: null, after_front: null, after_side: null, after_seated: null });
+            const [compData, setCompData] = useState({ before_front: null, before_back: null, before_side: null, before_seated: null, after_front: null, after_back: null, after_side: null, after_seated: null });
             // each slot: { image, landmarks, analysis }
 
             // LINE modal state
@@ -11443,19 +11501,19 @@
             const resetComparison = useCallback(() => {
                 stopCam(); setCapturedImage(null); setAnalysis(null); setLandmarks(null); setEditMode(false);
                 setPhase('idle'); setCaptureSlot('before');
-                setCompData({ before_front: null, before_side: null, before_seated: null, after_front: null, after_side: null, after_seated: null });
+                setCompData({ before_front: null, before_back: null, before_side: null, before_seated: null, after_front: null, after_back: null, after_side: null, after_seated: null });
             }, [stopCam]);
 
             // Run analysis when landmarks change
             useEffect(() => {
                 if (!landmarks) return;
-                const a = viewMode === 'front' ? postureAnalyzeFront(landmarks) : viewMode === 'seated' ? postureAnalyzeSeated(landmarks) : postureAnalyzeSide(landmarks);
+                const a = viewMode === 'front' ? postureAnalyzeFront(landmarks) : viewMode === 'back' ? postureAnalyzeBack(landmarks) : viewMode === 'seated' ? postureAnalyzeSeated(landmarks) : postureAnalyzeSide(landmarks);
                 setAnalysis(a);
             }, [landmarks, viewMode]);
 
             // ビュー別の表示用接続線（分析対象のみ）
             const viewConnections = useMemo(() => {
-                if (viewMode === 'front') return [[11,12],[11,23],[12,24],[23,24]]; // 肩ライン,体幹,腰ライン
+                if (viewMode === 'front' || viewMode === 'back') return [[11,12],[11,23],[12,24],[23,24]]; // 肩ライン,体幹,腰ライン
                 if (viewMode === 'side') return [[11,23],[23,25],[25,27]]; // 肩→腰→膝→足首
                 return [[11,23],[11,13]]; // seated: 肩→腰, 肩→肘
             }, [viewMode]);
@@ -11463,7 +11521,7 @@
             // ビュー別の表示用ポイント（分析対象のみ）
             const viewPoints = useMemo(() => {
                 const L = POSTURE_LM;
-                if (viewMode === 'front') return [L.NOSE, L.LEFT_SHOULDER, L.RIGHT_SHOULDER, L.LEFT_HIP, L.RIGHT_HIP];
+                if (viewMode === 'front' || viewMode === 'back') return [L.NOSE, L.LEFT_SHOULDER, L.RIGHT_SHOULDER, L.LEFT_HIP, L.RIGHT_HIP];
                 if (viewMode === 'side') return [L.LEFT_EAR, L.LEFT_SHOULDER, L.LEFT_HIP, L.LEFT_KNEE, L.LEFT_ANKLE];
                 return [L.NOSE, L.LEFT_EAR, L.LEFT_SHOULDER, L.LEFT_HIP, L.LEFT_ELBOW];
             }, [viewMode]);
@@ -11480,7 +11538,7 @@
                     if (!la || !lb || la.visibility < 0.5 || lb.visibility < 0.5) return;
                     const color = phase === 'captured' && analysis ? postureScoreColor(
                         (analysis.items.find(i => {
-                            if (viewMode==='front') { if(i.key==='shoulder'&&(a===11||b===12)) return true; if(i.key==='hip'&&(a===23||b===24)) return true; }
+                            if (viewMode==='front'||viewMode==='back') { if(i.key==='shoulder'&&(a===11||b===12)) return true; if(i.key==='hip'&&(a===23||b===24)) return true; }
                             else { if(i.key==='shoulder'&&a===11&&b===23) return true; if(i.key==='hip'&&a===23&&b===25) return true; if(i.key==='knee'&&a===25&&b===27) return true; }
                             return false;
                         }) || {score:80}).score
@@ -11502,14 +11560,15 @@
 
             // 比較データの有効ペア判定
             const hasFrontPair = compData.before_front && compData.after_front;
+            const hasBackPair = compData.before_back && compData.after_back;
             const hasSidePair = compData.before_side && compData.after_side;
             const hasSeatedPair = compData.before_seated && compData.after_seated;
-            const hasAnyPair = hasFrontPair || hasSidePair || hasSeatedPair;
+            const hasAnyPair = hasFrontPair || hasBackPair || hasSidePair || hasSeatedPair;
 
             // 分析に使うランドマークインデックス（viewMode別）
             const editableIndices = useMemo(() => {
                 const L = POSTURE_LM;
-                if (viewMode === 'front') return [
+                if (viewMode === 'front' || viewMode === 'back') return [
                     {idx:L.NOSE, label:'鼻'},
                     {idx:L.LEFT_SHOULDER, label:'左肩'},
                     {idx:L.RIGHT_SHOULDER, label:'右肩'},
@@ -11519,7 +11578,7 @@
                 if (viewMode === 'side') return [
                     {idx:L.LEFT_EAR, label:'左耳'},
                     {idx:L.LEFT_SHOULDER, label:'左肩'},
-                    {idx:L.LEFT_HIP, label:'左腰'},
+                    {idx:L.LEFT_HIP, label:'大転子'},
                     {idx:L.LEFT_KNEE, label:'左膝'},
                     {idx:L.LEFT_ANKLE, label:'左足首'},
                 ];
@@ -11602,12 +11661,18 @@
                 try {
                     if (analysisMode === 'comparison' && hasAnyPair) {
                         // ビフォーアフター比較送信
-                        let frontImageUrl = null, sideImageUrl = null, seatedImageUrl = null;
+                        let frontImageUrl = null, backImageUrl = null, sideImageUrl = null, seatedImageUrl = null;
                         if (hasFrontPair) {
                             const bComp = await postureComposeImage(compData.before_front.image, compData.before_front.landmarks, compData.before_front.analysis, 'front');
                             const aComp = await postureComposeImage(compData.after_front.image, compData.after_front.landmarks, compData.after_front.analysis, 'front');
                             const compImg = await postureCreateComparisonImage(bComp, aComp, '正面');
                             frontImageUrl = await uploadToBlob(compImg, 'comparison_front_' + Date.now() + '.jpg');
+                        }
+                        if (hasBackPair) {
+                            const bComp = await postureComposeImage(compData.before_back.image, compData.before_back.landmarks, compData.before_back.analysis, 'back');
+                            const aComp = await postureComposeImage(compData.after_back.image, compData.after_back.landmarks, compData.after_back.analysis, 'back');
+                            const compImg = await postureCreateComparisonImage(bComp, aComp, '背面');
+                            backImageUrl = await uploadToBlob(compImg, 'comparison_back_' + Date.now() + '.jpg');
                         }
                         if (hasSidePair) {
                             const bComp = await postureComposeImage(compData.before_side.image, compData.before_side.landmarks, compData.before_side.analysis, 'side');
@@ -11624,9 +11689,10 @@
                         const flexMsg = buildPostureComparisonFlexMessage({
                             customerName, visitDate, staffName,
                             frontBefore: compData.before_front, frontAfter: compData.after_front,
+                            backBefore: compData.before_back, backAfter: compData.after_back,
                             sideBefore: compData.before_side, sideAfter: compData.after_side,
                             seatedBefore: compData.before_seated, seatedAfter: compData.after_seated,
-                            frontImageUrl, sideImageUrl, seatedImageUrl,
+                            frontImageUrl, backImageUrl, sideImageUrl, seatedImageUrl,
                         });
                         const ok = await lineChatHook.sendFlexMessage(lineSelectedUser.userId, flexMsg);
                         setLineSendStatus(ok ? 'sent' : 'error');
@@ -11642,7 +11708,7 @@
                     console.error('LINE送信エラー:', e);
                     setLineSendStatus('error');
                 }
-            }, [lineSelectedUser, lineChatHook, analysis, analysisMode, hasAnyPair, hasFrontPair, hasSidePair, hasSeatedPair, compData, customerName, visitDate, viewMode, staffName, uploadToBlob]);
+            }, [lineSelectedUser, lineChatHook, analysis, analysisMode, hasAnyPair, hasFrontPair, hasBackPair, hasSidePair, hasSeatedPair, compData, customerName, visitDate, viewMode, staffName, uploadToBlob]);
 
             const total = analysis ? postureGetTotal(analysis) : null;
 
@@ -11697,7 +11763,7 @@
                                     ))}
                                 </div>
                                 <div className="flex gap-1 p-1 rounded-xl" style={{background:'rgba(0,0,0,0.05)'}}>
-                                    {[{k:'front',l:'正面'},{k:'side',l:'側面'},{k:'seated',l:'座位'}].map(m=>(
+                                    {[{k:'front',l:'正面'},{k:'back',l:'背面'},{k:'side',l:'側面'},{k:'seated',l:'座位'}].map(m=>(
                                         <button key={m.k} onClick={()=>{setViewMode(m.k);if(phase==='captured'){setCapturedImage(null);setAnalysis(null);setLandmarks(null);setPhase('idle');}}}
                                             className={`flex-1 py-2 rounded-lg text-sm font-bold transition ${viewMode===m.k?'bg-white shadow text-teal-700':'text-gray-400'}`}>
                                             {m.l}
@@ -11705,8 +11771,8 @@
                                     ))}
                                 </div>
                                 {/* 撮影済みサムネイルグリッド */}
-                                <div className="grid grid-cols-3 gap-2">
-                                    {[{k:'before_front',l:'B正面'},{k:'before_side',l:'B側面'},{k:'before_seated',l:'B座位'},{k:'after_front',l:'A正面'},{k:'after_side',l:'A側面'},{k:'after_seated',l:'A座位'}].map(slot=>{
+                                <div className="grid grid-cols-4 gap-2">
+                                    {[{k:'before_front',l:'B正面'},{k:'before_back',l:'B背面'},{k:'before_side',l:'B側面'},{k:'before_seated',l:'B座位'},{k:'after_front',l:'A正面'},{k:'after_back',l:'A背面'},{k:'after_side',l:'A側面'},{k:'after_seated',l:'A座位'}].map(slot=>{
                                         const d = compData[slot.k];
                                         const isActive = captureSlot+'_'+viewMode === slot.k;
                                         return (
@@ -11735,7 +11801,7 @@
                         {/* 通常モード: 正面/側面/座位切替 */}
                         {analysisMode==='single' && (
                             <div className="flex gap-1 p-1 rounded-xl" style={{background:'rgba(0,0,0,0.05)'}}>
-                                {[{k:'front',l:'正面'},{k:'side',l:'側面'},{k:'seated',l:'座位'}].map(m=>(
+                                {[{k:'front',l:'正面'},{k:'back',l:'背面'},{k:'side',l:'側面'},{k:'seated',l:'座位'}].map(m=>(
                                     <button key={m.k} onClick={()=>setViewMode(m.k)}
                                         className={`flex-1 py-2 rounded-lg text-sm font-bold transition ${viewMode===m.k?'bg-white shadow text-teal-700':'text-gray-400'}`}>
                                         {m.l}
@@ -11820,7 +11886,7 @@
                                     <div className="w-16 h-16 rounded-full bg-white/10 flex items-center justify-center">
                                         <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.5)" strokeWidth="1.5"><rect x="2" y="3" width="20" height="14" rx="2"/><circle cx="12" cy="10" r="3"/></svg>
                                     </div>
-                                    <p className="text-white/40 text-xs text-center px-5">{viewMode==='front'?'背面カメラでお客様の正面全身を撮影します':viewMode==='seated'?'背面カメラでお客様の座位（左側面）を撮影します':'背面カメラでお客様の側面（左側）を撮影します'}</p>
+                                    <p className="text-white/40 text-xs text-center px-5">{viewMode==='front'?'背面カメラでお客様の正面全身を撮影します':viewMode==='back'?'背面カメラでお客様の後ろ姿全身を撮影します':viewMode==='seated'?'背面カメラでお客様の座位（左側面）を撮影します':'背面カメラでお客様の側面（左側）を撮影します'}</p>
                                 </div>
                             )}
                             {phase==='loading' && (
@@ -11955,7 +12021,7 @@
                                         <text x="50" y="68" textAnchor="middle" dominantBaseline="central" style={{fontSize:'11px',fontWeight:500,fill:postureScoreColor(total)}}>{postureScoreLabel(total)}</text>
                                     </svg>
                                     <div>
-                                        <div className="font-bold text-sm mb-1">{viewMode==='front'?'正面':viewMode==='seated'?'座位':'側面'}総合スコア</div>
+                                        <div className="font-bold text-sm mb-1">{viewMode==='front'?'正面':viewMode==='back'?'背面':viewMode==='seated'?'座位':'側面'}総合スコア</div>
                                         <div className="text-xs text-gray-400 leading-relaxed">
                                             {total>=80?'姿勢は概ね良好です。':total>=60?'軽度の歪みが見られます。定期的なケアをおすすめします。':total>=40?'複数の項目で改善が必要です。':'姿勢の歪みが顕著です。早めの施術をおすすめします。'}
                                         </div>
@@ -12006,6 +12072,41 @@
                                                 </div>
                                                 {compData.before_front.analysis.items.map((bI,i) => {
                                                     const aI = compData.after_front.analysis.items[i]; if(!aI) return null;
+                                                    const d = aI.score - bI.score;
+                                                    return (
+                                                        <div key={bI.key} className="flex items-center text-xs py-1.5 border-b border-gray-50 last:border-0">
+                                                            <span className="flex-1 font-bold text-gray-600">{bI.label}</span>
+                                                            <span className="text-gray-400 w-16 text-right">{bI.score} → {aI.score}</span>
+                                                            <span className={`w-10 text-right font-bold ${d>=0?'text-teal-600':'text-red-500'}`}>{d>=0?'+':''}{d}</span>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        );
+                                    })()}
+                                    {hasBackPair && (() => {
+                                        const bT = postureGetTotal(compData.before_back.analysis);
+                                        const aT = postureGetTotal(compData.after_back.analysis);
+                                        const diff = aT - bT;
+                                        return (
+                                            <div className="mb-4">
+                                                <div className="text-xs font-bold text-gray-500 mb-2">背面分析</div>
+                                                <div className="flex items-center gap-3 mb-2">
+                                                    <div className="flex-1 text-center p-2 rounded-lg" style={{background:postureScoreBg(bT)}}>
+                                                        <div className="text-[10px] text-gray-400">Before</div>
+                                                        <div className="text-2xl font-bold" style={{color:postureScoreColor(bT)}}>{bT}</div>
+                                                    </div>
+                                                    <div className="text-center px-2">
+                                                        <div className={`text-xl font-bold ${diff>=0?'text-teal-600':'text-red-500'}`}>{diff>=0?'+':''}{diff}</div>
+                                                        <div className={`text-[10px] font-bold ${diff>=0?'text-teal-600':'text-red-500'}`}>{diff>=0?'改善':'低下'}</div>
+                                                    </div>
+                                                    <div className="flex-1 text-center p-2 rounded-lg" style={{background:postureScoreBg(aT)}}>
+                                                        <div className="text-[10px] text-gray-400">After</div>
+                                                        <div className="text-2xl font-bold" style={{color:postureScoreColor(aT)}}>{aT}</div>
+                                                    </div>
+                                                </div>
+                                                {compData.before_back.analysis.items.map((bI,i) => {
+                                                    const aI = compData.after_back.analysis.items[i]; if(!aI) return null;
                                                     const d = aI.score - bI.score;
                                                     return (
                                                         <div key={bI.key} className="flex items-center text-xs py-1.5 border-b border-gray-50 last:border-0">
@@ -12104,7 +12205,7 @@
                             <div className="bg-white rounded-xl p-4 border border-gray-100">
                                 <div className="font-bold text-sm mb-2">
                                     {analysisMode==='comparison' ? (captureSlot==='before'?'Before（施術前）':'After（施術後）') + ' — ' : ''}
-                                    {viewMode==='front'?'正面':viewMode==='seated'?'座位':'側面'}撮影ガイド
+                                    {viewMode==='front'?'正面':viewMode==='back'?'背面':viewMode==='seated'?'座位':'側面'}撮影ガイド
                                 </div>
                                 <div className="text-xs text-gray-400 leading-relaxed" dangerouslySetInnerHTML={{__html:viewMode==='front'
                                     ?'・お客様から約1m離れて背面カメラで撮影<br>・両腕は自然に体の横に下ろしてもらう<br>・足は肩幅に開いてリラックス<br>・頭頂部から足先まで全身が映るように調整'
