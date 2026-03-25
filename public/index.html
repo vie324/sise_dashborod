@@ -11245,7 +11245,7 @@
 
         // 写真+骨格を合成した画像を生成
         function postureComposeImage(imageDataUrl, landmarks, analysis, viewMode) {
-            return new Promise((resolve) => {
+            return new Promise((resolve, reject) => {
                 const img = new Image();
                 img.onload = () => {
                     const c = document.createElement('canvas');
@@ -11255,17 +11255,21 @@
                     postureDrawSkeletonOnCanvas(ctx, img.width, img.height, landmarks, analysis, viewMode);
                     resolve(c.toDataURL('image/jpeg', 0.92));
                 };
+                img.onerror = () => reject(new Error('画像の読み込みに失敗'));
                 img.src = imageDataUrl;
             });
         }
 
         // ビフォーアフター比較画像を生成（横並び）
         function postureCreateComparisonImage(beforeDataUrl, afterDataUrl, viewLabel) {
-            return new Promise((resolve) => {
+            return new Promise((resolve, reject) => {
                 const imgB = new Image();
                 const imgA = new Image();
                 let loaded = 0;
+                let failed = false;
+                const onError = () => { if (!failed) { failed = true; reject(new Error('比較画像の読み込みに失敗')); } };
                 const onLoad = () => {
+                    if (failed) return;
                     loaded++;
                     if (loaded < 2) return;
                     // 両画像のアスペクト比を合わせて横並び
@@ -11304,6 +11308,8 @@
                 };
                 imgB.onload = onLoad;
                 imgA.onload = onLoad;
+                imgB.onerror = onError;
+                imgA.onerror = onError;
                 imgB.src = beforeDataUrl;
                 imgA.src = afterDataUrl;
             });
@@ -11872,32 +11878,37 @@
                 if (!lineSelectedUser || !lineChatHook) return;
                 setLineSendStatus('sending');
                 try {
+                    let sendOk = false;
                     if (analysisMode === 'comparison' && hasAnyPair) {
                         // ビフォーアフター比較送信
                         let frontImageUrl = null, backImageUrl = null, sideImageUrl = null, seatedImageUrl = null;
-                        if (hasFrontPair) {
-                            const bComp = await postureComposeImage(compData.before_front.image, compData.before_front.landmarks, compData.before_front.analysis, 'front');
-                            const aComp = await postureComposeImage(compData.after_front.image, compData.after_front.landmarks, compData.after_front.analysis, 'front');
-                            const compImg = await postureCreateComparisonImage(bComp, aComp, '正面');
-                            frontImageUrl = await uploadToBlob(compImg, 'comparison_front_' + Date.now() + '.jpg');
-                        }
-                        if (hasBackPair) {
-                            const bComp = await postureComposeImage(compData.before_back.image, compData.before_back.landmarks, compData.before_back.analysis, 'back');
-                            const aComp = await postureComposeImage(compData.after_back.image, compData.after_back.landmarks, compData.after_back.analysis, 'back');
-                            const compImg = await postureCreateComparisonImage(bComp, aComp, '背面');
-                            backImageUrl = await uploadToBlob(compImg, 'comparison_back_' + Date.now() + '.jpg');
-                        }
-                        if (hasSidePair) {
-                            const bComp = await postureComposeImage(compData.before_side.image, compData.before_side.landmarks, compData.before_side.analysis, 'side');
-                            const aComp = await postureComposeImage(compData.after_side.image, compData.after_side.landmarks, compData.after_side.analysis, 'side');
-                            const compImg = await postureCreateComparisonImage(bComp, aComp, '側面');
-                            sideImageUrl = await uploadToBlob(compImg, 'comparison_side_' + Date.now() + '.jpg');
-                        }
-                        if (hasSeatedPair) {
-                            const bComp = await postureComposeImage(compData.before_seated.image, compData.before_seated.landmarks, compData.before_seated.analysis, 'seated');
-                            const aComp = await postureComposeImage(compData.after_seated.image, compData.after_seated.landmarks, compData.after_seated.analysis, 'seated');
-                            const compImg = await postureCreateComparisonImage(bComp, aComp, '座位');
-                            seatedImageUrl = await uploadToBlob(compImg, 'comparison_seated_' + Date.now() + '.jpg');
+                        try {
+                            if (hasFrontPair) {
+                                const bComp = await postureComposeImage(compData.before_front.image, compData.before_front.landmarks, compData.before_front.analysis, 'front');
+                                const aComp = await postureComposeImage(compData.after_front.image, compData.after_front.landmarks, compData.after_front.analysis, 'front');
+                                const compImg = await postureCreateComparisonImage(bComp, aComp, '正面');
+                                frontImageUrl = await uploadToBlob(compImg, 'comparison_front_' + Date.now() + '.jpg');
+                            }
+                            if (hasBackPair) {
+                                const bComp = await postureComposeImage(compData.before_back.image, compData.before_back.landmarks, compData.before_back.analysis, 'back');
+                                const aComp = await postureComposeImage(compData.after_back.image, compData.after_back.landmarks, compData.after_back.analysis, 'back');
+                                const compImg = await postureCreateComparisonImage(bComp, aComp, '背面');
+                                backImageUrl = await uploadToBlob(compImg, 'comparison_back_' + Date.now() + '.jpg');
+                            }
+                            if (hasSidePair) {
+                                const bComp = await postureComposeImage(compData.before_side.image, compData.before_side.landmarks, compData.before_side.analysis, 'side');
+                                const aComp = await postureComposeImage(compData.after_side.image, compData.after_side.landmarks, compData.after_side.analysis, 'side');
+                                const compImg = await postureCreateComparisonImage(bComp, aComp, '側面');
+                                sideImageUrl = await uploadToBlob(compImg, 'comparison_side_' + Date.now() + '.jpg');
+                            }
+                            if (hasSeatedPair) {
+                                const bComp = await postureComposeImage(compData.before_seated.image, compData.before_seated.landmarks, compData.before_seated.analysis, 'seated');
+                                const aComp = await postureComposeImage(compData.after_seated.image, compData.after_seated.landmarks, compData.after_seated.analysis, 'seated');
+                                const compImg = await postureCreateComparisonImage(bComp, aComp, '座位');
+                                seatedImageUrl = await uploadToBlob(compImg, 'comparison_seated_' + Date.now() + '.jpg');
+                            }
+                        } catch (imgErr) {
+                            console.warn('比較画像の生成に失敗（テキストのみ送信）:', imgErr);
                         }
                         const flexMsg = buildPostureComparisonFlexMessage({
                             customerName, visitDate, staffName,
@@ -11907,16 +11918,17 @@
                             seatedBefore: compData.before_seated, seatedAfter: compData.after_seated,
                             frontImageUrl, backImageUrl, sideImageUrl, seatedImageUrl,
                         });
-                        const ok = await lineChatHook.sendFlexMessage(lineSelectedUser.userId, flexMsg);
-                        setLineSendStatus(ok ? 'sent' : 'error');
+                        sendOk = await lineChatHook.sendFlexMessage(lineSelectedUser.userId, flexMsg);
                     } else if (analysis) {
                         // 通常の単発送信
                         const total = postureGetTotal(analysis);
                         const flexMsg = buildPostureFlexMessage({ customerName, visitDate, viewMode, analysis, totalScore: total, staffName });
-                        const ok = await lineChatHook.sendFlexMessage(lineSelectedUser.userId, flexMsg);
-                        setLineSendStatus(ok ? 'sent' : 'error');
+                        sendOk = await lineChatHook.sendFlexMessage(lineSelectedUser.userId, flexMsg);
                     }
-                    if (lineSendStatus !== 'error') setTimeout(() => { setLineModalOpen(false); setLineSendStatus(''); }, 2000);
+                    setLineSendStatus(sendOk ? 'sent' : 'error');
+                    if (sendOk) {
+                        setTimeout(() => { setLineModalOpen(false); setLineSendStatus(''); }, 2000);
+                    }
                 } catch (e) {
                     console.error('LINE送信エラー:', e);
                     setLineSendStatus('error');
@@ -11944,7 +11956,7 @@
                         {/* 分析モード切替 */}
                         <div className="flex gap-1 p-1 rounded-xl" style={{background:'rgba(0,0,0,0.05)'}}>
                             {[{k:'single',l:'通常分析'},{k:'comparison',l:'ビフォーアフター比較'}].map(m=>(
-                                <button key={m.k} onClick={()=>{setAnalysisMode(m.k);resetAll();setCaptureSlot('before');setCompData({before_front:null,before_side:null,before_seated:null,after_front:null,after_side:null,after_seated:null});}}
+                                <button key={m.k} onClick={()=>{setAnalysisMode(m.k);resetAll();setCaptureSlot('before');setCompData({before_front:null,before_back:null,before_side:null,before_seated:null,after_front:null,after_back:null,after_side:null,after_seated:null});}}
                                     className={`flex-1 py-2 rounded-lg text-sm font-bold transition ${analysisMode===m.k?'bg-white shadow text-teal-700':'text-gray-400'}`}>
                                     {m.l}
                                 </button>
