@@ -11905,8 +11905,15 @@
             // 分析に使うランドマークインデックス（viewMode別）
             const editableIndices = useMemo(() => {
                 const L = POSTURE_LM;
-                if (viewMode === 'front' || viewMode === 'back') return [
+                if (viewMode === 'front') return [
                     {idx:L.NOSE, label:'鼻'},
+                    {idx:L.LEFT_SHOULDER, label:'左肩'},
+                    {idx:L.RIGHT_SHOULDER, label:'右肩'},
+                    {idx:L.LEFT_HIP, label:'左腰'},
+                    {idx:L.RIGHT_HIP, label:'右腰'},
+                ];
+                if (viewMode === 'back') return [
+                    {idx:L.NOSE, label:'頭頂'},
                     {idx:L.LEFT_SHOULDER, label:'左肩'},
                     {idx:L.RIGHT_SHOULDER, label:'右肩'},
                     {idx:L.LEFT_HIP, label:'左腰'},
