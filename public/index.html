@@ -11542,77 +11542,122 @@
             }
         }
 
-        // Canvas上にスコア情報を描画する関数
-        function postureDrawScoreOnCanvas(ctx, w, h, analysis, viewMode) {
-            if (!analysis) return;
+        // Canvas上にスコア情報を部位別に描画する関数
+        function postureDrawScoreOnCanvas(ctx, w, h, analysis, viewMode, landmarks) {
+            if (!analysis || !landmarks) return;
             const total = postureGetTotal(analysis);
             if (total === null) return;
             const scale = Math.max(1, w / 400);
-            const pad = Math.round(10 * scale);
-            const panelW = Math.round(w * 0.52);
-            const lineH = Math.round(14 * scale);
-            const headerH = Math.round(28 * scale);
-            const cmLineH = Math.round(10 * scale);
-            const validItems = analysis.items.filter(i => i.confidence == null || i.confidence >= 0.5);
-            const cmItems = validItems.filter(i => i.valueCm);
-            const panelH = headerH + pad + validItems.length * lineH + (cmItems.length > 0 ? pad * 0.5 + cmItems.length * cmLineH : 0) + pad;
-            const x0 = pad;
-            const y0 = pad;
-            // 背景
+            const L = POSTURE_LM;
+            // 各項目の表示位置をランドマーク座標から算出
+            const getItemPos = (item) => {
+                const ls = landmarks[L.LEFT_SHOULDER], rs = landmarks[L.RIGHT_SHOULDER];
+                const lh = landmarks[L.LEFT_HIP], rh = landmarks[L.RIGHT_HIP];
+                const nose = landmarks[L.NOSE], ear = landmarks[L.LEFT_EAR];
+                const knee = landmarks[L.LEFT_KNEE];
+                const sh = landmarks[L.LEFT_SHOULDER], hip = landmarks[L.LEFT_HIP];
+                if (viewMode === 'front') {
+                    if (item.key === 'shoulder' && ls && rs) return { x: (ls.x+rs.x)/2, y: Math.min(ls.y,rs.y) - 0.035, align: 'center' };
+                    if (item.key === 'hip' && lh && rh) return { x: (lh.x+rh.x)/2, y: Math.min(lh.y,rh.y) - 0.025, align: 'center' };
+                    if (item.key === 'head' && nose) return { x: nose.x, y: nose.y - 0.045, align: 'center' };
+                    if (item.key === 'center' && ls && rs && lh && rh) { const sm=postureMid(ls,rs), hm=postureMid(lh,rh); return { x: (sm.x+hm.x)/2+0.13, y: (sm.y+hm.y)/2, align: 'left' }; }
+                } else if (viewMode === 'back') {
+                    if (item.key === 'shoulder' && ls && rs) return { x: (ls.x+rs.x)/2, y: Math.min(ls.y,rs.y) - 0.035, align: 'center' };
+                    if (item.key === 'hip' && lh && rh) return { x: (lh.x+rh.x)/2, y: Math.min(lh.y,rh.y) - 0.025, align: 'center' };
+                    if (item.key === 'spine' && nose && ls && rs) { const sm=postureMid(ls,rs); return { x: (nose.x+sm.x)/2+0.13, y: (nose.y+sm.y)/2, align: 'left' }; }
+                    if (item.key === 'trunk' && ls && rs && lh && rh) { const sm=postureMid(ls,rs), hm=postureMid(lh,rh); return { x: (sm.x+hm.x)/2+0.13, y: (sm.y+hm.y)/2, align: 'left' }; }
+                } else if (viewMode === 'side') {
+                    if (item.key === 'head' && ear) return { x: ear.x, y: ear.y - 0.045, align: 'center' };
+                    if (item.key === 'shoulder' && sh) return { x: sh.x + 0.09, y: sh.y, align: 'left' };
+                    if (item.key === 'hip' && hip) return { x: hip.x + 0.09, y: hip.y, align: 'left' };
+                    if (item.key === 'knee' && knee) return { x: knee.x + 0.09, y: knee.y, align: 'left' };
+                } else {
+                    if (item.key === 'head' && ear) return { x: ear.x, y: ear.y - 0.045, align: 'center' };
+                    if (item.key === 'shoulder' && sh) return { x: sh.x + 0.09, y: sh.y, align: 'left' };
+                    if (item.key === 'trunk' && sh && hip) return { x: (sh.x+hip.x)/2+0.11, y: (sh.y+hip.y)/2, align: 'left' };
+                    if (item.key === 'posture' && hip) return { x: hip.x + 0.09, y: hip.y, align: 'left' };
+                }
+                return null;
+            };
+            const pad = Math.round(8 * scale);
+            // 総合スコアバッジ（左上）
+            const badgeW = Math.round(w * 0.3);
+            const badgeH = Math.round(28 * scale);
             ctx.fillStyle = 'rgba(0,0,0,0.6)';
+            const cr = Math.round(6 * scale);
             ctx.beginPath();
-            const cr = Math.round(8 * scale);
-            ctx.moveTo(x0+cr, y0); ctx.lineTo(x0+panelW-cr, y0); ctx.quadraticCurveTo(x0+panelW, y0, x0+panelW, y0+cr);
-            ctx.lineTo(x0+panelW, y0+panelH-cr); ctx.quadraticCurveTo(x0+panelW, y0+panelH, x0+panelW-cr, y0+panelH);
-            ctx.lineTo(x0+cr, y0+panelH); ctx.quadraticCurveTo(x0, y0+panelH, x0, y0+panelH-cr);
-            ctx.lineTo(x0, y0+cr); ctx.quadraticCurveTo(x0, y0, x0+cr, y0);
+            ctx.moveTo(pad+cr, pad); ctx.lineTo(pad+badgeW-cr, pad); ctx.quadraticCurveTo(pad+badgeW, pad, pad+badgeW, pad+cr);
+            ctx.lineTo(pad+badgeW, pad+badgeH-cr); ctx.quadraticCurveTo(pad+badgeW, pad+badgeH, pad+badgeW-cr, pad+badgeH);
+            ctx.lineTo(pad+cr, pad+badgeH); ctx.quadraticCurveTo(pad, pad+badgeH, pad, pad+badgeH-cr);
+            ctx.lineTo(pad, pad+cr); ctx.quadraticCurveTo(pad, pad, pad+cr, pad);
             ctx.fill();
-            // 総合スコア
-            let cy = y0 + pad;
-            const circleR = Math.round(14 * scale);
-            const cx = x0 + pad + circleR;
-            ctx.beginPath(); ctx.arc(cx, cy + circleR, circleR, 0, Math.PI*2);
-            ctx.strokeStyle = postureScoreColor(total); ctx.lineWidth = Math.round(2.5 * scale); ctx.stroke();
+            const circleR = Math.round(10 * scale);
+            const cx = pad + pad + circleR;
+            const cy = pad + badgeH / 2;
+            ctx.beginPath(); ctx.arc(cx, cy, circleR, 0, Math.PI*2);
+            ctx.strokeStyle = postureScoreColor(total); ctx.lineWidth = Math.round(2 * scale); ctx.stroke();
             ctx.fillStyle = postureScoreColor(total);
-            ctx.font = `bold ${Math.round(12*scale)}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-            ctx.fillText(total, cx, cy + circleR);
-            // ラベル
-            const labelX = cx + circleR + Math.round(6*scale);
-            ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+            ctx.font = `bold ${Math.round(10*scale)}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+            ctx.fillText(total, cx, cy);
+            ctx.textAlign = 'left';
             ctx.fillStyle = postureScoreColor(total);
-            ctx.font = `bold ${Math.round(9*scale)}px sans-serif`;
-            ctx.fillText(postureScoreLabel(total), labelX, cy);
-            ctx.fillStyle = 'rgba(255,255,255,0.6)';
-            ctx.font = `${Math.round(7*scale)}px sans-serif`;
+            ctx.font = `bold ${Math.round(8*scale)}px sans-serif`;
+            ctx.fillText(postureScoreLabel(total), cx + circleR + Math.round(4*scale), cy - Math.round(4*scale));
+            ctx.fillStyle = 'rgba(255,255,255,0.5)';
+            ctx.font = `${Math.round(6*scale)}px sans-serif`;
             const viewLabel = viewMode==='front'?'正面':viewMode==='back'?'背面':viewMode==='seated'?'座位':'側面';
-            ctx.fillText(viewLabel + '分析', labelX, cy + Math.round(11*scale));
-            cy += headerH + Math.round(2*scale);
-            // 各項目
-            validItems.forEach(item => {
-                const dotR = Math.round(3 * scale);
-                ctx.fillStyle = postureScoreColor(item.score);
-                ctx.beginPath(); ctx.arc(x0+pad+dotR, cy+lineH/2, dotR, 0, Math.PI*2); ctx.fill();
-                ctx.fillStyle = 'rgba(255,255,255,0.85)';
-                ctx.font = `${Math.round(8*scale)}px sans-serif`; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-                ctx.fillText(item.label, x0+pad+dotR*2+Math.round(4*scale), cy+lineH/2);
-                ctx.fillStyle = postureScoreColor(item.score);
-                ctx.font = `bold ${Math.round(9*scale)}px sans-serif`; ctx.textAlign = 'right';
-                ctx.fillText(item.score, x0+panelW-pad, cy+lineH/2);
-                cy += lineH;
+            ctx.fillText(viewLabel, cx + circleR + Math.round(4*scale), cy + Math.round(6*scale));
+            // 各部位にラベル描画
+            analysis.items.forEach(item => {
+                const isLow = item.confidence != null && item.confidence < 0.5;
+                if (isLow) return;
+                const pos = getItemPos(item);
+                if (!pos) return;
+                const px = pos.x * w;
+                const py = pos.y * h;
+                const color = postureScoreColor(item.score);
+                const labelText = item.label;
+                const scoreText = String(item.score);
+                const detailText = item.value + (item.valueCm ? ' / ' + item.valueCm : '');
+                const fontLabel = Math.round(7 * scale);
+                const fontScore = Math.round(10 * scale);
+                const fontDetail = Math.round(6 * scale);
+                const borderW = Math.round(3 * scale);
+                ctx.font = `${fontLabel}px sans-serif`;
+                const labelW = ctx.measureText(labelText).width;
+                ctx.font = `bold ${fontScore}px sans-serif`;
+                const scoreW = ctx.measureText(scoreText).width;
+                ctx.font = `${fontDetail}px sans-serif`;
+                const detailW = ctx.measureText(detailText).width;
+                const boxW = Math.max(labelW + scoreW + Math.round(8*scale), detailW) + Math.round(12*scale) + borderW;
+                const boxH = Math.round(22 * scale);
+                const bx = pos.align === 'center' ? px - boxW/2 : px;
+                const by = pos.align === 'center' ? py - boxH : py - boxH/2;
+                // 背景
+                ctx.fillStyle = 'rgba(0,0,0,0.7)';
+                ctx.beginPath();
+                const r = Math.round(4*scale);
+                ctx.moveTo(bx+borderW+r, by); ctx.lineTo(bx+boxW-r, by); ctx.quadraticCurveTo(bx+boxW, by, bx+boxW, by+r);
+                ctx.lineTo(bx+boxW, by+boxH-r); ctx.quadraticCurveTo(bx+boxW, by+boxH, bx+boxW-r, by+boxH);
+                ctx.lineTo(bx+borderW+r, by+boxH); ctx.quadraticCurveTo(bx+borderW, by+boxH, bx+borderW, by+boxH-r);
+                ctx.lineTo(bx+borderW, by+r); ctx.quadraticCurveTo(bx+borderW, by, bx+borderW+r, by);
+                ctx.fill();
+                // 左ボーダー
+                ctx.fillStyle = color;
+                ctx.fillRect(bx, by, borderW, boxH);
+                // ラベル＋スコア
+                const tx = bx + borderW + Math.round(5*scale);
+                ctx.fillStyle = 'rgba(255,255,255,0.8)';
+                ctx.font = `${fontLabel}px sans-serif`; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+                ctx.fillText(labelText, tx, by + boxH * 0.32);
+                ctx.fillStyle = color;
+                ctx.font = `bold ${fontScore}px sans-serif`; ctx.textAlign = 'left';
+                ctx.fillText(scoreText, tx + labelW + Math.round(4*scale), by + boxH * 0.32);
+                // 詳細
+                ctx.fillStyle = 'rgba(255,255,255,0.5)';
+                ctx.font = `${fontDetail}px sans-serif`; ctx.textAlign = 'left';
+                ctx.fillText(detailText, tx, by + boxH * 0.72);
             });
-            // cm情報
-            if (cmItems.length > 0) {
-                cy += Math.round(2*scale);
-                ctx.strokeStyle = 'rgba(255,255,255,0.15)'; ctx.lineWidth = 1;
-                ctx.beginPath(); ctx.moveTo(x0+pad, cy); ctx.lineTo(x0+panelW-pad, cy); ctx.stroke();
-                cy += Math.round(3*scale);
-                cmItems.forEach(item => {
-                    ctx.fillStyle = 'rgba(255,255,255,0.55)';
-                    ctx.font = `${Math.round(6.5*scale)}px sans-serif`; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-                    ctx.fillText(item.label + ': ' + item.value + ' / 約' + item.valueCm, x0+pad, cy+cmLineH/2);
-                    cy += cmLineH;
-                });
-            }
         }
 
         // 写真+骨格を合成した画像を生成
@@ -11625,7 +11670,7 @@
                     const ctx = c.getContext('2d');
                     ctx.drawImage(img, 0, 0);
                     postureDrawSkeletonOnCanvas(ctx, img.width, img.height, landmarks, analysis, viewMode);
-                    if (drawScore) postureDrawScoreOnCanvas(ctx, img.width, img.height, analysis, viewMode);
+                    if (drawScore) postureDrawScoreOnCanvas(ctx, img.width, img.height, analysis, viewMode, landmarks);
                     resolve(c.toDataURL('image/jpeg', 0.92));
                 };
                 img.onerror = () => reject(new Error('画像の読み込みに失敗'));
@@ -12671,38 +12716,90 @@
                                     <span className="text-white text-xs font-bold">撮影済み</span>
                                 </div>
                             )}
-                            {/* スコアオーバーレイ: 写真上にスコアと結果を表示 */}
-                            {phase==='captured' && analysis && total !== null && scoreOverlayOn && !editMode && (
-                                <div className="absolute top-3 left-3 pointer-events-none" style={{zIndex:4, maxWidth:'55%'}}>
-                                    <div style={{background:'rgba(0,0,0,0.65)', backdropFilter:'blur(6px)', borderRadius:12, padding:'8px 10px'}}>
-                                        <div className="flex items-center gap-2 mb-1">
-                                            <div style={{width:36, height:36, borderRadius:'50%', border:`3px solid ${postureScoreColor(total)}`, display:'flex', alignItems:'center', justifyContent:'center', background:'rgba(0,0,0,0.4)'}}>
-                                                <span style={{fontSize:14, fontWeight:700, color:postureScoreColor(total)}}>{total}</span>
-                                            </div>
-                                            <div>
-                                                <div style={{fontSize:10, fontWeight:700, color:postureScoreColor(total)}}>{postureScoreLabel(total)}</div>
-                                                <div style={{fontSize:8, color:'rgba(255,255,255,0.6)'}}>{viewMode==='front'?'正面':viewMode==='back'?'背面':viewMode==='seated'?'座位':'側面'}分析</div>
+                            {/* スコアオーバーレイ: 各部位の近くにスコアと結果を表示 */}
+                            {phase==='captured' && analysis && total !== null && scoreOverlayOn && !editMode && landmarks && (() => {
+                                const L = POSTURE_LM;
+                                // 各項目の表示位置をランドマーク座標から算出
+                                const getItemPos = (item) => {
+                                    const ls = landmarks[L.LEFT_SHOULDER], rs = landmarks[L.RIGHT_SHOULDER];
+                                    const lh = landmarks[L.LEFT_HIP], rh = landmarks[L.RIGHT_HIP];
+                                    const nose = landmarks[L.NOSE], ear = landmarks[L.LEFT_EAR];
+                                    const knee = landmarks[L.LEFT_KNEE], ankle = landmarks[L.LEFT_ANKLE];
+                                    const sh = landmarks[L.LEFT_SHOULDER], hip = landmarks[L.LEFT_HIP];
+                                    if (viewMode === 'front') {
+                                        if (item.key === 'shoulder' && ls && rs) return { x: (ls.x + rs.x) / 2, y: Math.min(ls.y, rs.y) - 0.03, align: 'center' };
+                                        if (item.key === 'hip' && lh && rh) return { x: (lh.x + rh.x) / 2, y: Math.min(lh.y, rh.y) - 0.02, align: 'center' };
+                                        if (item.key === 'head' && nose) return { x: nose.x, y: nose.y - 0.04, align: 'center' };
+                                        if (item.key === 'center' && ls && rs && lh && rh) { const sm = postureMid(ls,rs), hm = postureMid(lh,rh); return { x: (sm.x+hm.x)/2 + 0.12, y: (sm.y+hm.y)/2, align: 'left' }; }
+                                    } else if (viewMode === 'back') {
+                                        if (item.key === 'shoulder' && ls && rs) return { x: (ls.x + rs.x) / 2, y: Math.min(ls.y, rs.y) - 0.03, align: 'center' };
+                                        if (item.key === 'hip' && lh && rh) return { x: (lh.x + rh.x) / 2, y: Math.min(lh.y, rh.y) - 0.02, align: 'center' };
+                                        if (item.key === 'spine' && nose && ls && rs) { const sm = postureMid(ls,rs); return { x: (nose.x+sm.x)/2 + 0.12, y: (nose.y+sm.y)/2, align: 'left' }; }
+                                        if (item.key === 'trunk' && ls && rs && lh && rh) { const sm = postureMid(ls,rs), hm = postureMid(lh,rh); return { x: (sm.x+hm.x)/2 + 0.12, y: (sm.y+hm.y)/2, align: 'left' }; }
+                                    } else if (viewMode === 'side') {
+                                        if (item.key === 'head' && ear) return { x: ear.x, y: ear.y - 0.04, align: 'center' };
+                                        if (item.key === 'shoulder' && sh) return { x: sh.x + 0.08, y: sh.y, align: 'left' };
+                                        if (item.key === 'hip' && hip) return { x: hip.x + 0.08, y: hip.y, align: 'left' };
+                                        if (item.key === 'knee' && knee) return { x: knee.x + 0.08, y: knee.y, align: 'left' };
+                                    } else { // seated
+                                        if (item.key === 'head' && ear) return { x: ear.x, y: ear.y - 0.04, align: 'center' };
+                                        if (item.key === 'shoulder' && sh) return { x: sh.x + 0.08, y: sh.y, align: 'left' };
+                                        if (item.key === 'trunk' && sh && hip) return { x: (sh.x+hip.x)/2 + 0.1, y: (sh.y+hip.y)/2, align: 'left' };
+                                        if (item.key === 'posture' && hip) return { x: hip.x + 0.08, y: hip.y, align: 'left' };
+                                    }
+                                    return null;
+                                };
+                                return (
+                                    <React.Fragment>
+                                        {/* 総合スコアバッジ（右上） */}
+                                        <div className="absolute pointer-events-none" style={{zIndex:4, top:8, left:8}}>
+                                            <div style={{background:'rgba(0,0,0,0.6)', backdropFilter:'blur(6px)', borderRadius:10, padding:'6px 10px', display:'flex', alignItems:'center', gap:6}}>
+                                                <div style={{width:32, height:32, borderRadius:'50%', border:`3px solid ${postureScoreColor(total)}`, display:'flex', alignItems:'center', justifyContent:'center', background:'rgba(0,0,0,0.4)'}}>
+                                                    <span style={{fontSize:13, fontWeight:700, color:postureScoreColor(total)}}>{total}</span>
+                                                </div>
+                                                <div>
+                                                    <div style={{fontSize:10, fontWeight:700, color:postureScoreColor(total)}}>{postureScoreLabel(total)}</div>
+                                                    <div style={{fontSize:7, color:'rgba(255,255,255,0.5)'}}>{viewMode==='front'?'正面':viewMode==='back'?'背面':viewMode==='seated'?'座位':'側面'}</div>
+                                                </div>
                                             </div>
                                         </div>
-                                        {analysis.items.map(item => (
-                                            <div key={item.key} style={{display:'flex', alignItems:'center', gap:4, padding:'2px 0', borderTop:'1px solid rgba(255,255,255,0.1)'}}>
-                                                <div style={{width:6, height:6, borderRadius:'50%', background: item.confidence != null && item.confidence < 0.5 ? '#aaa' : postureScoreColor(item.score), flexShrink:0}}/>
-                                                <span style={{fontSize:9, color:'rgba(255,255,255,0.85)', flex:1, lineHeight:'1.2'}}>{item.label}</span>
-                                                <span style={{fontSize:9, fontWeight:700, color: item.confidence != null && item.confidence < 0.5 ? '#aaa' : postureScoreColor(item.score)}}>{item.confidence != null && item.confidence < 0.5 ? '—' : item.score}</span>
-                                            </div>
-                                        ))}
-                                        {analysis.items.some(i => i.valueCm) && (
-                                            <div style={{marginTop:3, paddingTop:3, borderTop:'1px solid rgba(255,255,255,0.15)'}}>
-                                                {analysis.items.filter(i => i.valueCm && (i.confidence == null || i.confidence >= 0.5)).map(item => (
-                                                    <div key={item.key+'cm'} style={{fontSize:8, color:'rgba(255,255,255,0.6)', lineHeight:'1.4'}}>
-                                                        {item.label}: {item.value} / 約{item.valueCm}
+                                        {/* 各部位のスコアラベル */}
+                                        {analysis.items.map(item => {
+                                            const pos = getItemPos(item);
+                                            if (!pos) return null;
+                                            const isLow = item.confidence != null && item.confidence < 0.5;
+                                            const color = isLow ? '#aaa' : postureScoreColor(item.score);
+                                            const scoreText = isLow ? '—' : item.score;
+                                            const cmText = item.valueCm && !isLow ? ' / ' + item.valueCm : '';
+                                            return (
+                                                <div key={item.key} className="absolute pointer-events-none" style={{
+                                                    zIndex:4,
+                                                    left: `${pos.x * 100}%`,
+                                                    top: `${pos.y * 100}%`,
+                                                    transform: pos.align === 'center' ? 'translate(-50%, -100%)' : 'translate(0, -50%)',
+                                                }}>
+                                                    <div style={{
+                                                        background:'rgba(0,0,0,0.7)',
+                                                        backdropFilter:'blur(4px)',
+                                                        borderRadius:6,
+                                                        padding:'3px 6px',
+                                                        borderLeft:`3px solid ${color}`,
+                                                        whiteSpace:'nowrap',
+                                                    }}>
+                                                        <div style={{display:'flex', alignItems:'center', gap:4}}>
+                                                            <span style={{fontSize:8, color:'rgba(255,255,255,0.8)', lineHeight:1}}>{item.label}</span>
+                                                            <span style={{fontSize:11, fontWeight:700, color, lineHeight:1}}>{scoreText}</span>
+                                                        </div>
+                                                        <div style={{fontSize:7, color:'rgba(255,255,255,0.5)', lineHeight:1.3, marginTop:1}}>
+                                                            {item.value}{cmText}
+                                                        </div>
                                                     </div>
-                                                ))}
-                                            </div>
-                                        )}
-                                    </div>
-                                </div>
-                            )}
+                                                </div>
+                                            );
+                                        })}
+                                    </React.Fragment>
+                                );
+                            })()}
                             {/* Floating buttons inside viewport */}
                             {phase==='live' && (
                                 <div className="absolute bottom-0 left-0 right-0 p-4 flex gap-2 z-10" style={{background:'linear-gradient(transparent, rgba(0,0,0,0.6))'}}>
