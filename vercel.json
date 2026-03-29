@@ -2,6 +2,7 @@
   "buildCommand": "",
   "outputDirectory": "public",
   "rewrites": [
+    { "source": "/api/claude/advice", "destination": "/api/claude/advice" },
     { "source": "/api/photos/upload", "destination": "/api/photos/upload" },
     { "source": "/api/photos/list", "destination": "/api/photos/list" },
     { "source": "/api/square/config", "destination": "/api/square/config" },
