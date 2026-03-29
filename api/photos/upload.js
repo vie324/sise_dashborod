@@ -52,8 +52,9 @@ export default async function handler(req, res) {
     const folderPath = folder ? `photos/${folder}` : 'photos';
     const blobPath = `${folderPath}/${timestamp}_${sanitizedName}.${extension}`;
 
-    // Upload to Vercel Blob (private store — トークン付きURLが返される)
+    // Upload to Vercel Blob
     const blob = await put(blobPath, buffer, {
+      access: 'public',
       contentType: `image/${matches[1]}`,
     });
 
