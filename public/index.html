@@ -10926,6 +10926,10 @@
         function postureScoreLabel(s){return s>=80?'良好':s>=60?'やや注意':s>=40?'要改善':'要施術';}
         function postureScoreBg(s){return s>=80?'#E1F5EE':s>=60?'#EAF3DE':s>=40?'#FAEEDA':'#FCEBEB';}
 
+        // 推定実寸変換用の基準値（cm）
+        const POSTURE_REF_SHOULDER_WIDTH_CM = 38; // 成人平均肩幅(cm)
+        const POSTURE_REF_SH_HIP_DIST_CM = 42;   // 成人平均肩-腰間距離(cm)
+
         function postureAnalyzeFront(lm){
             const L=POSTURE_LM, ls=lm[L.LEFT_SHOULDER],rs=lm[L.RIGHT_SHOULDER];
             const lh=lm[L.LEFT_HIP],rh=lm[L.RIGHT_HIP],nose=lm[L.NOSE];
@@ -10970,6 +10974,12 @@
                 centerOffset <= 3 ? Math.round(90 - (centerOffset-1.5) * 13.3) :
                 centerOffset <= 5 ? Math.round(70 - (centerOffset-3) * 15) :
                 Math.round(Math.max(0, 40 - (centerOffset-5) * 8));
+            // cm推定: 肩幅基準で実寸換算
+            const cmPerUnit = POSTURE_REF_SHOULDER_WIDTH_CM / refLen;
+            const shoulderDisplacementCm = Math.abs(shoulderDy) * cmPerUnit;
+            const hipDisplacementCm = Math.abs(hipDy) * cmPerUnit;
+            const headDisplacementCm = headOffsetRaw * cmPerUnit;
+            const centerDisplacementCm = centerOffsetRaw * cmPerUnit;
             return {items:[
                 {
                     key:'shoulder', label:'肩の左右バランス',
@@ -10977,6 +10987,7 @@
                     confidence: postureLmConfidence(ls, rs),
                     detail: shoulderTilt < 1 ? '均等' : ls.y < rs.y ? '左肩が高い' : '右肩が高い',
                     value: shoulderTilt.toFixed(1) + '°',
+                    valueCm: shoulderDisplacementCm.toFixed(1) + 'cm',
                     reference: {
                         authors: 'Fortin C, Feldman DE, Cheriet F, Labelle H',
                         year: 2011,
@@ -10992,6 +11003,7 @@
                     confidence: postureLmConfidence(lh, rh),
                     detail: hipTilt < 1 ? '均等' : lh.y < rh.y ? '左が高い' : '右が高い',
                     value: hipTilt.toFixed(1) + '°',
+                    valueCm: hipDisplacementCm.toFixed(1) + 'cm',
                     reference: {
                         authors: 'Herrington L',
                         year: 2011,
@@ -11007,6 +11019,7 @@
                     confidence: postureLmConfidence(nose, ls, rs),
                     detail: headOffset < 1 ? '正中' : nose.x < sMid.x ? '左に傾斜' : '右に傾斜',
                     value: headOffset.toFixed(1) + '%偏位',
+                    valueCm: headDisplacementCm.toFixed(1) + 'cm',
                     reference: {
                         authors: 'Singla D, Veqar Z',
                         year: 2017,
@@ -11022,6 +11035,7 @@
                     confidence: postureLmConfidence(ls, rs, lh, rh),
                     detail: centerOffset < 1 ? '正中' : sMid.x < hMid.x ? '左にズレ' : '右にズレ',
                     value: centerOffset.toFixed(1) + '%偏位',
+                    valueCm: centerDisplacementCm.toFixed(1) + 'cm',
                     reference: {
                         authors: 'Ferreira EA, Duarte M, Maldonado EP, Burke TN, Marques AP',
                         year: 2010,
@@ -11083,6 +11097,20 @@
                 trunkLateral <= 3 ? Math.round(90 - (trunkLateral-1.5) * 13.3) :
                 trunkLateral <= 5 ? Math.round(70 - (trunkLateral-3) * 15) :
                 Math.round(Math.max(0, 40 - (trunkLateral-5) * 8));
+            // cm推定: 肩幅基準で実寸換算
+            const cmPerUnit = POSTURE_REF_SHOULDER_WIDTH_CM / refLen;
+            const shoulderDisplacementCm = Math.abs(shoulderDy) * cmPerUnit;
+            const hipDisplacementCm = Math.abs(hipDy) * cmPerUnit;
+            const spineDeviationCm = (function(){
+                if (!nose || nose.visibility < 0.5) return 0;
+                const vx = sMid.x - hMid.x, vy = sMid.y - hMid.y;
+                const len = Math.sqrt(vx*vx + vy*vy);
+                if (len < 0.001) return 0;
+                const hx = nose.x - sMid.x, hy = nose.y - sMid.y;
+                const cross = (vx * hy - vy * hx) / len;
+                return Math.abs(cross) * cmPerUnit;
+            })();
+            const trunkLateralCm = Math.abs(sMid.x - hMid.x) * cmPerUnit;
             return {items:[
                 {
                     key:'shoulder', label:'肩の左右バランス',
@@ -11090,6 +11118,7 @@
                     confidence: postureLmConfidence(ls, rs),
                     detail: shoulderTilt < 1 ? '均等' : ls.y < rs.y ? '左肩が高い' : '右肩が高い',
                     value: shoulderTilt.toFixed(1) + '°',
+                    valueCm: shoulderDisplacementCm.toFixed(1) + 'cm',
                     reference: {
                         authors: 'Fortin C, Feldman DE, Cheriet F, Labelle H',
                         year: 2011,
@@ -11105,6 +11134,7 @@
                     confidence: postureLmConfidence(lh, rh),
                     detail: hipTilt < 1 ? '均等' : lh.y < rh.y ? '左が高い' : '右が高い',
                     value: hipTilt.toFixed(1) + '°',
+                    valueCm: hipDisplacementCm.toFixed(1) + 'cm',
                     reference: {
                         authors: 'Herrington L',
                         year: 2011,
@@ -11128,6 +11158,7 @@
                         return cross > 0 ? '右に偏位' : '左に偏位';
                     })(),
                     value: spineDeviation.toFixed(1) + '%偏位',
+                    valueCm: spineDeviationCm.toFixed(1) + 'cm',
                     reference: {
                         authors: 'Fortin C, Feldman DE, Cheriet F, Labelle H',
                         year: 2011,
@@ -11143,6 +11174,7 @@
                     confidence: postureLmConfidence(ls, rs, lh, rh),
                     detail: trunkLateral < 1 ? '正中' : sMid.x < hMid.x ? '左に傾斜' : '右に傾斜',
                     value: trunkLateral.toFixed(1) + '%偏位',
+                    valueCm: trunkLateralCm.toFixed(1) + 'cm',
                     reference: {
                         authors: 'Ferreira EA, Duarte M, Maldonado EP, Burke TN, Marques AP',
                         year: 2010,
@@ -11193,6 +11225,12 @@
                 kneeDeviation <= 10 ? Math.round(90 - (kneeDeviation-5) * 4) :
                 kneeDeviation <= 15 ? Math.round(70 - (kneeDeviation-10) * 6) :
                 Math.round(Math.max(0, 40 - (kneeDeviation-15) * 4));
+            // cm推定: 肩-腰間距離基準で実寸換算
+            const cmPerUnitSide = POSTURE_REF_SH_HIP_DIST_CM / refLenSide;
+            const headFwdCm = Math.abs(headFwd) * cmPerUnitSide;
+            const roundShoulderDevCm = Math.abs(180 - shAngle) > 0 ? (Math.abs(ear.x - hip.x) * cmPerUnitSide) : 0;
+            const pelvicDevCm = Math.abs(sh.x - hip.x) * cmPerUnitSide;
+            const kneeDevCm = Math.abs(hip.x - ankle.x) > 0 ? Math.abs(knee.x - ((hip.x+ankle.x)/2)) * cmPerUnitSide : 0;
             return {items:[
                 {
                     key:'head', label:'頭部前方偏位（CVA）',
@@ -11200,6 +11238,7 @@
                     confidence: postureLmConfidence(ear, sh),
                     detail: estimatedCVA >= 55 ? '正常' : estimatedCVA >= 50 ? '軽度の前方偏位' : estimatedCVA >= 45 ? '中度の前方偏位' : '重度の前方偏位（ストレートネック疑い）',
                     value: '推定CVA ' + Math.round(estimatedCVA) + '°',
+                    valueCm: headFwdCm.toFixed(1) + 'cm前方',
                     reference: {
                         authors: 'Shaghayegh Fard B, Ahmadi A, Maroufi N, Sarrafzadeh J',
                         year: 2016,
@@ -11215,6 +11254,7 @@
                     confidence: postureLmConfidence(ear, sh, hip),
                     detail: shAngle >= 160 ? '正常' : shAngle >= 150 ? '軽度の巻き肩' : shAngle >= 140 ? '中度の巻き肩' : '巻き肩傾向が強い',
                     value: shAngle.toFixed(0) + '°',
+                    valueCm: roundShoulderDevCm.toFixed(1) + 'cm',
                     reference: {
                         authors: 'Singla D, Veqar Z',
                         year: 2017,
@@ -11230,6 +11270,7 @@
                     confidence: postureLmConfidence(sh, hip, knee),
                     detail: pelvicDeviation <= 5 ? '正常範囲' : hipAngle > 170 ? '後傾傾向' : '前傾傾向',
                     value: hipAngle.toFixed(0) + '°',
+                    valueCm: pelvicDevCm.toFixed(1) + 'cm',
                     reference: {
                         authors: 'Herrington L',
                         year: 2011,
@@ -11245,6 +11286,7 @@
                     confidence: postureLmConfidence(hip, knee, ankle),
                     detail: kneeDeviation <= 5 ? '正常範囲' : kneeAngle > 180 ? '過伸展' : 'やや屈曲',
                     value: kneeAngle.toFixed(0) + '°',
+                    valueCm: kneeDevCm.toFixed(1) + 'cm',
                     reference: {
                         authors: 'Loudon JK, Goist HL, Loudon KL',
                         year: 1998,
@@ -11294,6 +11336,12 @@
                 headVsHip <= 6 ? Math.round(90 - (headVsHip-3) * 6.7) :
                 headVsHip <= 10 ? Math.round(70 - (headVsHip-6) * 7.5) :
                 Math.round(Math.max(0, 40 - (headVsHip-10) * 5));
+            // cm推定: 肩-腰間距離基準で実寸換算（座位）
+            const cmPerUnitSeated = POSTURE_REF_SH_HIP_DIST_CM / refLenSeated;
+            const headFwdSeatedCm = Math.abs(ear.x - sh.x) * cmPerUnitSeated;
+            const roundShoulderSeatedCm = Math.abs(ear.x - hip.x) * cmPerUnitSeated;
+            const trunkTiltCm = Math.abs(sh.x - hip.x) * cmPerUnitSeated;
+            const headVsHipCm = Math.abs(nose.x - hip.x) * cmPerUnitSeated;
             return {items:[
                 {
                     key:'head', label:'頭部前方偏位（座位）',
@@ -11301,6 +11349,7 @@
                     confidence: postureLmConfidence(ear, sh),
                     detail: estimatedCVA >= 50 ? '正常' : estimatedCVA >= 45 ? '軽度の前方偏位' : '前方偏位',
                     value: '推定CVA ' + Math.round(estimatedCVA) + '°',
+                    valueCm: headFwdSeatedCm.toFixed(1) + 'cm前方',
                     reference: {
                         authors: 'Shaghayegh Fard B, Ahmadi A, Maroufi N, Sarrafzadeh J',
                         year: 2016,
@@ -11316,6 +11365,7 @@
                     confidence: postureLmConfidence(ear, sh, hip),
                     detail: shAngle >= 155 ? '正常' : shAngle >= 145 ? '軽度の猫背' : '猫背傾向',
                     value: shAngle.toFixed(0) + '°',
+                    valueCm: roundShoulderSeatedCm.toFixed(1) + 'cm',
                     reference: {
                         authors: 'Singla D, Veqar Z',
                         year: 2017,
@@ -11331,6 +11381,7 @@
                     confidence: postureLmConfidence(sh, hip),
                     detail: trunkTilt < 2 ? '垂直' : sh.x < hip.x ? '後方に傾斜' : '前方に傾斜',
                     value: trunkTilt.toFixed(1) + '%',
+                    valueCm: trunkTiltCm.toFixed(1) + 'cm',
                     reference: {
                         authors: 'Kocur P, Wilski M, Goliwąs M, Lewandowski J, Łochyński D',
                         year: 2019,
@@ -11346,6 +11397,7 @@
                     confidence: postureLmConfidence(nose, hip),
                     detail: headVsHip < 3 ? '良好' : nose.x > hip.x ? '頭部が前方' : '頭部が後方',
                     value: headVsHip.toFixed(1) + '%',
+                    valueCm: headVsHipCm.toFixed(1) + 'cm',
                     reference: {
                         authors: 'Yip CH, Chiu TT, Poon AT',
                         year: 2008,
@@ -11490,8 +11542,81 @@
             }
         }
 
+        // Canvas上にスコア情報を描画する関数
+        function postureDrawScoreOnCanvas(ctx, w, h, analysis, viewMode) {
+            if (!analysis) return;
+            const total = postureGetTotal(analysis);
+            if (total === null) return;
+            const scale = Math.max(1, w / 400);
+            const pad = Math.round(10 * scale);
+            const panelW = Math.round(w * 0.52);
+            const lineH = Math.round(14 * scale);
+            const headerH = Math.round(28 * scale);
+            const cmLineH = Math.round(10 * scale);
+            const validItems = analysis.items.filter(i => i.confidence == null || i.confidence >= 0.5);
+            const cmItems = validItems.filter(i => i.valueCm);
+            const panelH = headerH + pad + validItems.length * lineH + (cmItems.length > 0 ? pad * 0.5 + cmItems.length * cmLineH : 0) + pad;
+            const x0 = pad;
+            const y0 = pad;
+            // 背景
+            ctx.fillStyle = 'rgba(0,0,0,0.6)';
+            ctx.beginPath();
+            const cr = Math.round(8 * scale);
+            ctx.moveTo(x0+cr, y0); ctx.lineTo(x0+panelW-cr, y0); ctx.quadraticCurveTo(x0+panelW, y0, x0+panelW, y0+cr);
+            ctx.lineTo(x0+panelW, y0+panelH-cr); ctx.quadraticCurveTo(x0+panelW, y0+panelH, x0+panelW-cr, y0+panelH);
+            ctx.lineTo(x0+cr, y0+panelH); ctx.quadraticCurveTo(x0, y0+panelH, x0, y0+panelH-cr);
+            ctx.lineTo(x0, y0+cr); ctx.quadraticCurveTo(x0, y0, x0+cr, y0);
+            ctx.fill();
+            // 総合スコア
+            let cy = y0 + pad;
+            const circleR = Math.round(14 * scale);
+            const cx = x0 + pad + circleR;
+            ctx.beginPath(); ctx.arc(cx, cy + circleR, circleR, 0, Math.PI*2);
+            ctx.strokeStyle = postureScoreColor(total); ctx.lineWidth = Math.round(2.5 * scale); ctx.stroke();
+            ctx.fillStyle = postureScoreColor(total);
+            ctx.font = `bold ${Math.round(12*scale)}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+            ctx.fillText(total, cx, cy + circleR);
+            // ラベル
+            const labelX = cx + circleR + Math.round(6*scale);
+            ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+            ctx.fillStyle = postureScoreColor(total);
+            ctx.font = `bold ${Math.round(9*scale)}px sans-serif`;
+            ctx.fillText(postureScoreLabel(total), labelX, cy);
+            ctx.fillStyle = 'rgba(255,255,255,0.6)';
+            ctx.font = `${Math.round(7*scale)}px sans-serif`;
+            const viewLabel = viewMode==='front'?'正面':viewMode==='back'?'背面':viewMode==='seated'?'座位':'側面';
+            ctx.fillText(viewLabel + '分析', labelX, cy + Math.round(11*scale));
+            cy += headerH + Math.round(2*scale);
+            // 各項目
+            validItems.forEach(item => {
+                const dotR = Math.round(3 * scale);
+                ctx.fillStyle = postureScoreColor(item.score);
+                ctx.beginPath(); ctx.arc(x0+pad+dotR, cy+lineH/2, dotR, 0, Math.PI*2); ctx.fill();
+                ctx.fillStyle = 'rgba(255,255,255,0.85)';
+                ctx.font = `${Math.round(8*scale)}px sans-serif`; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+                ctx.fillText(item.label, x0+pad+dotR*2+Math.round(4*scale), cy+lineH/2);
+                ctx.fillStyle = postureScoreColor(item.score);
+                ctx.font = `bold ${Math.round(9*scale)}px sans-serif`; ctx.textAlign = 'right';
+                ctx.fillText(item.score, x0+panelW-pad, cy+lineH/2);
+                cy += lineH;
+            });
+            // cm情報
+            if (cmItems.length > 0) {
+                cy += Math.round(2*scale);
+                ctx.strokeStyle = 'rgba(255,255,255,0.15)'; ctx.lineWidth = 1;
+                ctx.beginPath(); ctx.moveTo(x0+pad, cy); ctx.lineTo(x0+panelW-pad, cy); ctx.stroke();
+                cy += Math.round(3*scale);
+                cmItems.forEach(item => {
+                    ctx.fillStyle = 'rgba(255,255,255,0.55)';
+                    ctx.font = `${Math.round(6.5*scale)}px sans-serif`; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+                    ctx.fillText(item.label + ': ' + item.value + ' / 約' + item.valueCm, x0+pad, cy+cmLineH/2);
+                    cy += cmLineH;
+                });
+            }
+        }
+
         // 写真+骨格を合成した画像を生成
-        function postureComposeImage(imageDataUrl, landmarks, analysis, viewMode) {
+        function postureComposeImage(imageDataUrl, landmarks, analysis, viewMode, drawScore) {
             return new Promise((resolve, reject) => {
                 const img = new Image();
                 img.onload = () => {
@@ -11500,6 +11625,7 @@
                     const ctx = c.getContext('2d');
                     ctx.drawImage(img, 0, 0);
                     postureDrawSkeletonOnCanvas(ctx, img.width, img.height, landmarks, analysis, viewMode);
+                    if (drawScore) postureDrawScoreOnCanvas(ctx, img.width, img.height, analysis, viewMode);
                     resolve(c.toDataURL('image/jpeg', 0.92));
                 };
                 img.onerror = () => reject(new Error('画像の読み込みに失敗'));
@@ -11838,6 +11964,7 @@
             const [analysis, setAnalysis] = useState(null);
             const [overlayOn, setOverlayOn] = useState(true);
             const [gridOn, setGridOn] = useState(false);
+            const [scoreOverlayOn, setScoreOverlayOn] = useState(true);
             const [capturedImage, setCapturedImage] = useState(null);
 
             // ランドマーク手動修正モード
@@ -12222,26 +12349,26 @@
                         let frontImageUrl = null, backImageUrl = null, sideImageUrl = null, seatedImageUrl = null;
                         try {
                             if (hasFrontPair) {
-                                const bComp = await postureComposeImage(compData.before_front.image, compData.before_front.landmarks, compData.before_front.analysis, 'front');
-                                const aComp = await postureComposeImage(compData.after_front.image, compData.after_front.landmarks, compData.after_front.analysis, 'front');
+                                const bComp = await postureComposeImage(compData.before_front.image, compData.before_front.landmarks, compData.before_front.analysis, 'front', scoreOverlayOn);
+                                const aComp = await postureComposeImage(compData.after_front.image, compData.after_front.landmarks, compData.after_front.analysis, 'front', scoreOverlayOn);
                                 const compImg = await postureCreateComparisonImage(bComp, aComp, '正面');
                                 frontImageUrl = await uploadToBlob(compImg, 'comparison_front_' + Date.now() + '.jpg');
                             }
                             if (hasBackPair) {
-                                const bComp = await postureComposeImage(compData.before_back.image, compData.before_back.landmarks, compData.before_back.analysis, 'back');
-                                const aComp = await postureComposeImage(compData.after_back.image, compData.after_back.landmarks, compData.after_back.analysis, 'back');
+                                const bComp = await postureComposeImage(compData.before_back.image, compData.before_back.landmarks, compData.before_back.analysis, 'back', scoreOverlayOn);
+                                const aComp = await postureComposeImage(compData.after_back.image, compData.after_back.landmarks, compData.after_back.analysis, 'back', scoreOverlayOn);
                                 const compImg = await postureCreateComparisonImage(bComp, aComp, '背面');
                                 backImageUrl = await uploadToBlob(compImg, 'comparison_back_' + Date.now() + '.jpg');
                             }
                             if (hasSidePair) {
-                                const bComp = await postureComposeImage(compData.before_side.image, compData.before_side.landmarks, compData.before_side.analysis, 'side');
-                                const aComp = await postureComposeImage(compData.after_side.image, compData.after_side.landmarks, compData.after_side.analysis, 'side');
+                                const bComp = await postureComposeImage(compData.before_side.image, compData.before_side.landmarks, compData.before_side.analysis, 'side', scoreOverlayOn);
+                                const aComp = await postureComposeImage(compData.after_side.image, compData.after_side.landmarks, compData.after_side.analysis, 'side', scoreOverlayOn);
                                 const compImg = await postureCreateComparisonImage(bComp, aComp, '側面');
                                 sideImageUrl = await uploadToBlob(compImg, 'comparison_side_' + Date.now() + '.jpg');
                             }
                             if (hasSeatedPair) {
-                                const bComp = await postureComposeImage(compData.before_seated.image, compData.before_seated.landmarks, compData.before_seated.analysis, 'seated');
-                                const aComp = await postureComposeImage(compData.after_seated.image, compData.after_seated.landmarks, compData.after_seated.analysis, 'seated');
+                                const bComp = await postureComposeImage(compData.before_seated.image, compData.before_seated.landmarks, compData.before_seated.analysis, 'seated', scoreOverlayOn);
+                                const aComp = await postureComposeImage(compData.after_seated.image, compData.after_seated.landmarks, compData.after_seated.analysis, 'seated', scoreOverlayOn);
                                 const compImg = await postureCreateComparisonImage(bComp, aComp, '座位');
                                 seatedImageUrl = await uploadToBlob(compImg, 'comparison_seated_' + Date.now() + '.jpg');
                             }
@@ -12286,8 +12413,8 @@
                     if (hasSeatedPair) pairs.push({ before: compData.before_seated, after: compData.after_seated, label: '座位', vm: 'seated' });
 
                     for (const p of pairs) {
-                        const bComp = await postureComposeImage(p.before.image, p.before.landmarks, p.before.analysis, p.vm);
-                        const aComp = await postureComposeImage(p.after.image, p.after.landmarks, p.after.analysis, p.vm);
+                        const bComp = await postureComposeImage(p.before.image, p.before.landmarks, p.before.analysis, p.vm, scoreOverlayOn);
+                        const aComp = await postureComposeImage(p.after.image, p.after.landmarks, p.after.analysis, p.vm, scoreOverlayOn);
                         const compImg = await postureCreateComparisonImage(bComp, aComp, p.label);
                         const link = document.createElement('a');
                         const name = customerName ? customerName.replace(/\s+/g, '_') : 'posture';
@@ -12544,6 +12671,38 @@
                                     <span className="text-white text-xs font-bold">撮影済み</span>
                                 </div>
                             )}
+                            {/* スコアオーバーレイ: 写真上にスコアと結果を表示 */}
+                            {phase==='captured' && analysis && total !== null && scoreOverlayOn && !editMode && (
+                                <div className="absolute top-3 left-3 pointer-events-none" style={{zIndex:4, maxWidth:'55%'}}>
+                                    <div style={{background:'rgba(0,0,0,0.65)', backdropFilter:'blur(6px)', borderRadius:12, padding:'8px 10px'}}>
+                                        <div className="flex items-center gap-2 mb-1">
+                                            <div style={{width:36, height:36, borderRadius:'50%', border:`3px solid ${postureScoreColor(total)}`, display:'flex', alignItems:'center', justifyContent:'center', background:'rgba(0,0,0,0.4)'}}>
+                                                <span style={{fontSize:14, fontWeight:700, color:postureScoreColor(total)}}>{total}</span>
+                                            </div>
+                                            <div>
+                                                <div style={{fontSize:10, fontWeight:700, color:postureScoreColor(total)}}>{postureScoreLabel(total)}</div>
+                                                <div style={{fontSize:8, color:'rgba(255,255,255,0.6)'}}>{viewMode==='front'?'正面':viewMode==='back'?'背面':viewMode==='seated'?'座位':'側面'}分析</div>
+                                            </div>
+                                        </div>
+                                        {analysis.items.map(item => (
+                                            <div key={item.key} style={{display:'flex', alignItems:'center', gap:4, padding:'2px 0', borderTop:'1px solid rgba(255,255,255,0.1)'}}>
+                                                <div style={{width:6, height:6, borderRadius:'50%', background: item.confidence != null && item.confidence < 0.5 ? '#aaa' : postureScoreColor(item.score), flexShrink:0}}/>
+                                                <span style={{fontSize:9, color:'rgba(255,255,255,0.85)', flex:1, lineHeight:'1.2'}}>{item.label}</span>
+                                                <span style={{fontSize:9, fontWeight:700, color: item.confidence != null && item.confidence < 0.5 ? '#aaa' : postureScoreColor(item.score)}}>{item.confidence != null && item.confidence < 0.5 ? '—' : item.score}</span>
+                                            </div>
+                                        ))}
+                                        {analysis.items.some(i => i.valueCm) && (
+                                            <div style={{marginTop:3, paddingTop:3, borderTop:'1px solid rgba(255,255,255,0.15)'}}>
+                                                {analysis.items.filter(i => i.valueCm && (i.confidence == null || i.confidence >= 0.5)).map(item => (
+                                                    <div key={item.key+'cm'} style={{fontSize:8, color:'rgba(255,255,255,0.6)', lineHeight:'1.4'}}>
+                                                        {item.label}: {item.value} / 約{item.valueCm}
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
                             {/* Floating buttons inside viewport */}
                             {phase==='live' && (
                                 <div className="absolute bottom-0 left-0 right-0 p-4 flex gap-2 z-10" style={{background:'linear-gradient(transparent, rgba(0,0,0,0.6))'}}>
@@ -12585,12 +12744,19 @@
                         {/* Overlay toggle + Grid toggle + 位置修正ボタン */}
                         {(phase==='live'||phase==='captured') && !editMode && (
                             <div className="flex items-center gap-2">
-                                <div className="flex-1 grid grid-cols-2 gap-2">
+                                <div className="flex-1 grid grid-cols-3 gap-2">
                                     <div className="flex items-center justify-between bg-white rounded-xl p-3 border border-gray-100">
                                         <span className="text-xs font-bold text-gray-700">骨格</span>
                                         <button onClick={()=>setOverlayOn(!overlayOn)}
                                             className={`w-11 h-6 rounded-full relative transition ${overlayOn?'bg-teal-400':'bg-gray-300'}`}>
                                             <div className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${overlayOn?'left-[22px]':'left-0.5'}`}/>
+                                        </button>
+                                    </div>
+                                    <div className="flex items-center justify-between bg-white rounded-xl p-3 border border-gray-100">
+                                        <span className="text-xs font-bold text-gray-700">点数</span>
+                                        <button onClick={()=>setScoreOverlayOn(!scoreOverlayOn)}
+                                            className={`w-11 h-6 rounded-full relative transition ${scoreOverlayOn?'bg-blue-400':'bg-gray-300'}`}>
+                                            <div className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${scoreOverlayOn?'left-[22px]':'left-0.5'}`}/>
                                         </button>
                                     </div>
                                     <div className="flex items-center justify-between bg-white rounded-xl p-3 border border-gray-100">
@@ -12660,7 +12826,7 @@
                                                         )}
                                                     </div>
                                                     <div className="text-xs text-gray-500 mt-0.5">
-                                                        {item.confidence != null && item.confidence < 0.5 ? '再撮影推奨 — ' + item.value : item.detail + ' — ' + item.value}
+                                                        {item.confidence != null && item.confidence < 0.5 ? '再撮影推奨 — ' + item.value : item.detail + ' — ' + item.value + (item.valueCm ? '（約' + item.valueCm + '）' : '')}
                                                     </div>
                                                 </div>
                                                 <div className="flex items-center gap-2">
@@ -12912,7 +13078,7 @@
                                 <div className="space-y-3">
                                     <div className="flex items-center gap-2 mb-2">
                                         <div className="min-w-[44px] h-7 rounded-full flex items-center justify-center text-white text-sm font-bold" style={{background:postureScoreColor(refModal.score)}}>{refModal.score}</div>
-                                        <span className="text-sm text-gray-600">{refModal.detail} — {refModal.value}</span>
+                                        <span className="text-sm text-gray-600">{refModal.detail} — {refModal.value}{refModal.valueCm ? '（約' + refModal.valueCm + '）' : ''}</span>
                                     </div>
                                     <div className="bg-teal-50 rounded-xl p-4 border border-teal-100">
                                         <div className="text-xs font-bold text-teal-700 mb-2">📚 査読付き学術論文</div>
