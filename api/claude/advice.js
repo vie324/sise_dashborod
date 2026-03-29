@@ -1,7 +1,13 @@
 // Claude API Proxy - 姿勢分析アドバイス生成
 // Vercel Serverless Function
 
-module.exports = async (req, res) => {
+export default async function handler(req, res) {
+  if (req.method === 'OPTIONS') {
+    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    return res.status(200).end();
+  }
+
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
@@ -11,11 +17,8 @@ module.exports = async (req, res) => {
     return res.status(500).json({ error: 'ANTHROPIC_API_KEY not configured' });
   }
 
-  // CORS
-  const allowed = process.env.ALLOWED_ORIGIN;
-  if (allowed) {
-    res.setHeader('Access-Control-Allow-Origin', allowed);
-  }
+  const allowed = process.env.ALLOWED_ORIGIN || '*';
+  res.setHeader('Access-Control-Allow-Origin', allowed);
 
   try {
     const { analysisData, viewMode, customerName } = req.body;
@@ -23,7 +26,6 @@ module.exports = async (req, res) => {
       return res.status(400).json({ error: 'analysisData is required' });
     }
 
-    // 分析結果をプロンプト用にフォーマット
     const itemsSummary = analysisData.items
       .filter(item => item.confidence == null || item.confidence >= 0.5)
       .map(item => `- ${item.label}: ${item.score}点 (${item.detail}, ${item.value})`)
@@ -79,4 +81,4 @@ ${itemsSummary}
     console.error('Advice generation error:', err);
     return res.status(500).json({ error: 'Internal server error' });
   }
-};
+}
