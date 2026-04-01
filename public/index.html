@@ -3887,18 +3887,39 @@
         };
 
         const DashboardView = ({ memberData, reportData, selectedStore, setSelectedStore, allowedStoreNames, manualMembersHook }) => {
-            // サブスクで現金入金の方をアクティブ会員として計上
+            // サブスクで現金入金の方をアクティブ会員として計上（店舗フィルタ適用）
             const cashActiveMembers = useMemo(() => {
                 if (!manualMembersHook?.manualMembers) return 0;
-                return manualMembersHook.manualMembers.filter(m => m.status === 'ACTIVE' && m.paymentMethod === 'CASH').length;
-            }, [manualMembersHook?.manualMembers]);
+                const activeStores = memberData?.stores || [];
+                return manualMembersHook.manualMembers.filter(m => {
+                    if (m.status !== 'ACTIVE' || m.paymentMethod !== 'CASH') return false;
+                    // 店舗フィルタ: selectedStoreが'all'でなければ、会員のstoreNameと照合
+                    if (selectedStore && selectedStore !== 'all') {
+                        return m.storeName === selectedStore;
+                    }
+                    // allowedStoreNames（スタッフ権限）が設定されていれば絞り込み
+                    if (allowedStoreNames && allowedStoreNames.length > 0) {
+                        return allowedStoreNames.includes(m.storeName);
+                    }
+                    return true;
+                }).length;
+            }, [manualMembersHook?.manualMembers, selectedStore, allowedStoreNames, memberData?.stores]);
             const totalActiveMembers = (memberData.activeMembers || 0) + cashActiveMembers;
             const cashActiveRevenue = useMemo(() => {
                 if (!manualMembersHook?.manualMembers) return 0;
                 return manualMembersHook.manualMembers
-                    .filter(m => m.status === 'ACTIVE' && m.paymentMethod === 'CASH')
+                    .filter(m => {
+                        if (m.status !== 'ACTIVE' || m.paymentMethod !== 'CASH') return false;
+                        if (selectedStore && selectedStore !== 'all') {
+                            return m.storeName === selectedStore;
+                        }
+                        if (allowedStoreNames && allowedStoreNames.length > 0) {
+                            return allowedStoreNames.includes(m.storeName);
+                        }
+                        return true;
+                    })
                     .reduce((sum, m) => sum + (m.monthlyPrice || 0), 0);
-            }, [manualMembersHook?.manualMembers]);
+            }, [manualMembersHook?.manualMembers, selectedStore, allowedStoreNames]);
             const totalExpectedRevenue = (memberData.expectedRevenue || 0) + cashActiveRevenue;
             const [dateRange, setDateRange] = useState('month');
 
@@ -5494,6 +5515,39 @@
             const ITEMS_PER_PAGE = 30;
             const ITEMS_PER_PAGE_MOBILE = 20;
 
+            // 現金サブスク会員のアクティブ数（店舗フィルタ適用）
+            const cashActiveMemberCount = useMemo(() => {
+                if (!manualMembersHook?.manualMembers) return 0;
+                const stores = memberData?.stores || [];
+                return manualMembersHook.manualMembers.filter(m => {
+                    if (m.status !== 'ACTIVE' || m.paymentMethod !== 'CASH') return false;
+                    // activeStoreIdでフィルタ（Square IDなので店舗名に変換して照合）
+                    if (activeStoreId && activeStoreId !== 'all') {
+                        const storeObj = stores.find(s => s.id === activeStoreId);
+                        if (storeObj) return m.storeName === storeObj.name;
+                        return false;
+                    }
+                    return true;
+                }).length;
+            }, [manualMembersHook?.manualMembers, activeStoreId, memberData?.stores]);
+            const cashActiveRevenue = useMemo(() => {
+                if (!manualMembersHook?.manualMembers) return 0;
+                const stores = memberData?.stores || [];
+                return manualMembersHook.manualMembers
+                    .filter(m => {
+                        if (m.status !== 'ACTIVE' || m.paymentMethod !== 'CASH') return false;
+                        if (activeStoreId && activeStoreId !== 'all') {
+                            const storeObj = stores.find(s => s.id === activeStoreId);
+                            if (storeObj) return m.storeName === storeObj.name;
+                            return false;
+                        }
+                        return true;
+                    })
+                    .reduce((sum, m) => sum + (m.monthlyPrice || 0), 0);
+            }, [manualMembersHook?.manualMembers, activeStoreId, memberData?.stores]);
+            const combinedActiveMembers = (memberData.activeMembers || 0) + cashActiveMemberCount;
+            const combinedExpectedRevenue = (memberData.expectedRevenue || 0) + cashActiveRevenue;
+
             const handleRefresh = async () => {
                 setIsRefreshing(true);
                 await refreshSquareData();
@@ -5640,16 +5694,16 @@
                     <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 md:gap-4">
                         <KpiCard
                             title="アクティブ会員"
-                            value={memberData.activeMembers}
-                            subValue={`累計: ${memberData.totalMembers}人`}
+                            value={combinedActiveMembers}
+                            subValue={cashActiveMemberCount > 0 ? `Square: ${memberData.activeMembers} / 現金: ${cashActiveMemberCount}` : `累計: ${memberData.totalMembers}人`}
                             icon="users"
                             gradientFrom="from-sise-400" gradientTo="to-sise-600"
                             loading={memberData.loading}
                         />
                         <KpiCard
                             title="月間想定売上"
-                            value={formatCurrency(memberData.expectedRevenue)}
-                            subValue={`@${formatCurrency(monthlyPrice)}/月`}
+                            value={formatCurrency(combinedExpectedRevenue)}
+                            subValue={cashActiveRevenue > 0 ? `Square: ${formatCurrency(memberData.expectedRevenue)} / 現金: ${formatCurrency(cashActiveRevenue)}` : `@${formatCurrency(monthlyPrice)}/月`}
                             icon="trending-up"
                             gradientFrom="from-emerald-400" gradientTo="to-emerald-600"
                             loading={memberData.loading}
@@ -16669,7 +16723,7 @@
                         return <MarketingView marketingHook={marketingHook} />;
                     case 'settings':
                         return isStaffMode
-                            ? <DashboardView memberData={memberData} reportData={reportData} selectedStore={selectedStore} setSelectedStore={setSelectedStore} allowedStoreNames={allowedStoreNames} />
+                            ? <DashboardView memberData={memberData} reportData={reportData} selectedStore={selectedStore} setSelectedStore={setSelectedStore} allowedStoreNames={allowedStoreNames} manualMembersHook={manualMembersHook} />
                             : <SettingsView onSettingsSaved={() => { refreshReportData(); }} />;
                     default:
                         return <DashboardView
