@@ -20,6 +20,7 @@
  *    ─ 店舗管理       （GASが自動で作成・読み書き）
  *    ─ ダッシュボード設定 （GASが自動で作成・読み書き）
  *    ─ HPBデータ      （GASが自動で作成・読み書き）
+ *    ─ メニュー        （GASが自動で作成・読み書き）
  *
  * 2. 拡張機能 → Apps Script を開く
  * 3. このコードを貼り付ける
@@ -56,6 +57,11 @@
  * POST { type:"hpb", action:"delete", yearMonth:"2026-03" }
  * POST { type:"ticket", action:"saveTickets", plans:[...], tickets:[...] }
  * POST { type:"members", action:"saveManualMembers", members:[...] }
+ * GET ?type=menuItems                  → メニュー一覧
+ * POST { type:"menuItems", action:"addItem", item:{name,category,price,itemType} }
+ * POST { type:"menuItems", action:"updateItem", itemId:"xxx", updates:{...} }
+ * POST { type:"menuItems", action:"deleteItem", itemId:"xxx" }
+ * POST { type:"menuItems", action:"saveAll", menuItems:[...] }
  * POST { type:"cashbook", action:"saveCashbook", entries:[...] }
  */
 
@@ -82,7 +88,8 @@ const SHEETS = {
   LINE_TEMPLATES: 'LINEテンプレート',
   LINE_AUTO_REPLIES: 'LINE自動応答',
   LINE_TAGS: 'LINEタグ',
-  LINE_USER_TAGS: 'LINEユーザータグ'
+  LINE_USER_TAGS: 'LINEユーザータグ',
+  MENU_ITEMS: 'メニュー'
 };
 
 const COUNSELING_STORES = {
@@ -199,6 +206,7 @@ function doGet(e) {
       case 'lineTags': return jsonResponse(handleLineTagsGet(params));
       case 'lineUserTags': return jsonResponse(handleLineUserTagsGet(params));
       case 'lineAnalytics': return jsonResponse(handleLineAnalyticsGet(params));
+      case 'menuItems':    return jsonResponse(handleMenuItemsGet(params));
       default:            return jsonResponse({ error: '不明なtype: ' + type }, 400);
     }
   } catch (error) {
@@ -228,6 +236,7 @@ function doPost(e) {
       case 'lineAutoReply': return jsonResponse(handleLineAutoReplyPost(body));
       case 'lineTag': return jsonResponse(handleLineTagPost(body));
       case 'lineUserTag': return jsonResponse(handleLineUserTagPost(body));
+      case 'menuItems':   return jsonResponse(handleMenuItemsPost(body));
       default:         return jsonResponse({ error: '不明なtype: ' + type }, 400);
     }
   } catch (error) {
@@ -2191,6 +2200,129 @@ function handleLineAnalyticsGet(params) {
       hourlyStats: hourlyArray
     }
   };
+}
+
+// ============================================================
+// メニュー管理（出納帳プルダウン用）
+// ============================================================
+// シート列: A=ID, B=メニュー名, C=カテゴリ, D=金額, E=種別(menu/coupon), F=有効, G=作成日
+
+function ensureMenuItemsSheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEETS.MENU_ITEMS);
+  if (!sheet) {
+    sheet = ss.insertSheet(SHEETS.MENU_ITEMS);
+    sheet.appendRow(['ID', 'メニュー名', 'カテゴリ', '金額', '種別', '有効', '作成日']);
+    sheet.setFrozenRows(1);
+    sheet.getRange('A1:G1').setFontWeight('bold');
+  }
+  return sheet;
+}
+
+function handleMenuItemsGet(params) {
+  var sheet = ensureMenuItemsSheet();
+  var rows = sheet.getDataRange().getValues();
+  if (rows.length <= 1) return { menuItems: [] };
+
+  var includeInactive = params.includeInactive === 'true';
+  var items = [];
+  for (var i = 1; i < rows.length; i++) {
+    var r = rows[i];
+    if (!r[0]) continue;
+    var active = r[5] !== false && r[5] !== 'FALSE' && String(r[5]) !== 'false';
+    if (!includeInactive && !active) continue;
+    items.push({
+      id: String(r[0]),
+      name: String(r[1] || ''),
+      category: String(r[2] || ''),
+      price: toInt(r[3]),
+      itemType: String(r[4] || 'menu'),
+      active: active,
+      createdAt: formatDate(r[6])
+    });
+  }
+  return { menuItems: items };
+}
+
+function handleMenuItemsPost(body) {
+  var action = body.action || '';
+  switch (action) {
+    case 'saveAll':    return saveAllMenuItems(body.menuItems || []);
+    case 'addItem':    return addMenuItem(body.item || {});
+    case 'updateItem': return updateMenuItem(body.itemId, body.updates || {});
+    case 'deleteItem': return deleteMenuItem(body.itemId);
+    default: return { error: '不明なmenuItems action: ' + action };
+  }
+}
+
+function saveAllMenuItems(items) {
+  var sheet = ensureMenuItemsSheet();
+  var lastRow = sheet.getLastRow();
+  if (lastRow > 1) {
+    sheet.getRange(2, 1, lastRow - 1, 7).clearContent();
+  }
+  var rows = items.map(function(item) {
+    return [
+      item.id || '',
+      item.name || '',
+      item.category || '',
+      item.price || 0,
+      item.itemType || 'menu',
+      item.active !== false,
+      item.createdAt || new Date()
+    ];
+  });
+  if (rows.length > 0) {
+    sheet.getRange(2, 1, rows.length, 7).setValues(rows);
+  }
+  return { success: true, count: rows.length };
+}
+
+function addMenuItem(item) {
+  if (!item.name) return { error: 'メニュー名が必要です' };
+  var sheet = ensureMenuItemsSheet();
+  var id = item.id || 'menu_' + new Date().getTime().toString(36) + Math.random().toString(36).slice(2, 5);
+  sheet.appendRow([
+    id,
+    item.name,
+    item.category || '',
+    item.price || 0,
+    item.itemType || 'menu',
+    true,
+    new Date()
+  ]);
+  return { success: true, item: { id: id, name: item.name, category: item.category || '', price: item.price || 0, itemType: item.itemType || 'menu', active: true } };
+}
+
+function updateMenuItem(itemId, updates) {
+  if (!itemId) return { error: 'itemIdが必要です' };
+  var sheet = ensureMenuItemsSheet();
+  var rows = sheet.getDataRange().getValues();
+  for (var i = 1; i < rows.length; i++) {
+    if (String(rows[i][0]) === String(itemId)) {
+      if (updates.name !== undefined) sheet.getRange(i + 1, 2).setValue(updates.name);
+      if (updates.category !== undefined) sheet.getRange(i + 1, 3).setValue(updates.category);
+      if (updates.price !== undefined) sheet.getRange(i + 1, 4).setValue(updates.price);
+      if (updates.itemType !== undefined) sheet.getRange(i + 1, 5).setValue(updates.itemType);
+      if (updates.active !== undefined) sheet.getRange(i + 1, 6).setValue(updates.active);
+      return { success: true, itemId: itemId };
+    }
+  }
+  return { error: 'メニューが見つかりませ��: ' + itemId };
+}
+
+function deleteMenuItem(itemId) {
+  if (!itemId) return { error: 'itemIdが必要です' };
+  var sheet = ensureMenuItemsSheet();
+  var rows = sheet.getDataRange().getValues();
+  for (var i = 1; i < rows.length; i++) {
+    if (String(rows[i][0]) === String(itemId)) {
+      // 論理削除（有効フラグをfalseに）
+      sheet.getRange(i + 1, 6).setValue(false);
+      return { success: true, itemId: itemId };
+    }
+  }
+  return { error: 'メニューが見つかりません: ' + itemId };
 }
 
 function jsonResponse(data) {

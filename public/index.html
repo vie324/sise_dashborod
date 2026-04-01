@@ -3013,6 +3013,98 @@
         };
 
         // ========================================
+        // メニュー管理（出納帳プルダウン用）- GASのみ
+        // ========================================
+
+        const useMenuItems = () => {
+            const [menuItems, setMenuItems] = useState([]);
+            const [loading, setLoading] = useState(false);
+            const [saving, setSaving] = useState(false);
+
+            const fetchMenuItems = useCallback(async () => {
+                if (UNIFIED_GAS_URL === 'YOUR_UNIFIED_GAS_URL') return;
+                setLoading(true);
+                try {
+                    const res = await fetch(UNIFIED_GAS_URL + '?type=menuItems&includeInactive=true');
+                    const data = await res.json();
+                    if (data && data.menuItems) {
+                        setMenuItems(data.menuItems);
+                    }
+                } catch (e) {
+                    console.error('[メニュー] 取得エラー:', e);
+                } finally {
+                    setLoading(false);
+                }
+            }, []);
+
+            useEffect(() => { fetchMenuItems(); }, [fetchMenuItems]);
+
+            const addItem = useCallback(async (item) => {
+                setSaving(true);
+                try {
+                    const res = await fetch(UNIFIED_GAS_URL, {
+                        method: 'POST', headers: { 'Content-Type': 'text/plain' },
+                        body: JSON.stringify({ type: 'menuItems', action: 'addItem', item })
+                    });
+                    const data = await res.json();
+                    if (data.success && data.item) {
+                        setMenuItems(prev => [...prev, data.item]);
+                        showToast('メニューを追加しました', 'success');
+                        return data.item;
+                    }
+                    if (data.error) showToast(data.error, 'error');
+                } catch (e) {
+                    showToast('メニュー追加に失敗しました', 'error');
+                } finally { setSaving(false); }
+                return null;
+            }, []);
+
+            const updateItem = useCallback(async (itemId, updates) => {
+                setSaving(true);
+                try {
+                    const res = await fetch(UNIFIED_GAS_URL, {
+                        method: 'POST', headers: { 'Content-Type': 'text/plain' },
+                        body: JSON.stringify({ type: 'menuItems', action: 'updateItem', itemId, updates })
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                        setMenuItems(prev => prev.map(m => m.id === itemId ? { ...m, ...updates } : m));
+                        showToast('メニューを更新しました', 'success');
+                        return true;
+                    }
+                    if (data.error) showToast(data.error, 'error');
+                } catch (e) {
+                    showToast('メニュー更新に失敗しました', 'error');
+                } finally { setSaving(false); }
+                return false;
+            }, []);
+
+            const deleteItem = useCallback(async (itemId) => {
+                setSaving(true);
+                try {
+                    const res = await fetch(UNIFIED_GAS_URL, {
+                        method: 'POST', headers: { 'Content-Type': 'text/plain' },
+                        body: JSON.stringify({ type: 'menuItems', action: 'deleteItem', itemId })
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                        setMenuItems(prev => prev.map(m => m.id === itemId ? { ...m, active: false } : m));
+                        showToast('メニューを削除しました', 'success');
+                        return true;
+                    }
+                } catch (e) {
+                    showToast('メニュー削除に失敗しました', 'error');
+                } finally { setSaving(false); }
+                return false;
+            }, []);
+
+            const activeMenus = useMemo(() => menuItems.filter(m => m.active && m.itemType === 'menu'), [menuItems]);
+            const activeCoupons = useMemo(() => menuItems.filter(m => m.active && m.itemType === 'coupon'), [menuItems]);
+
+            return { menuItems, activeMenus, activeCoupons, loading, saving, addItem, updateItem, deleteItem, refresh: fetchMenuItems };
+        };
+
+        // ========================================
         // 出納帳（キャッシュブック）- スプレッドシートファースト
         // ========================================
 
@@ -3387,6 +3479,30 @@
                 setSelectedCustomer(null);
                 fetchCustomerList();
             }, [counselingStore, fetchCustomerList]);
+
+            // 自動リロード（30秒ごと）- お客様がフォームを送信した際に更新ボタンなしで反映
+            useEffect(() => {
+                if (COUNSELING_GAS_URL === 'YOUR_UNIFIED_GAS_URL') return;
+                const interval = setInterval(() => {
+                    // バックグラウンドで取得（loadingフラグは立てない）
+                    fetch(COUNSELING_GAS_URL + '?type=counseling&action=recent&limit=50' + storeParam)
+                        .then(r => r.json())
+                        .then(data => {
+                            if (data && data.customers) {
+                                setCustomers(prev => {
+                                    // 件数やタイムスタンプが変わっていたら更新
+                                    if (prev.length !== data.customers.length ||
+                                        (prev[0]?.timestamp !== data.customers[0]?.timestamp)) {
+                                        return data.customers;
+                                    }
+                                    return prev;
+                                });
+                            }
+                        })
+                        .catch(() => {});
+                }, 30000);
+                return () => clearInterval(interval);
+            }, [storeParam]);
 
             return {
                 customers, selectedCustomer, setSelectedCustomer,
@@ -3770,7 +3886,20 @@
             );
         };
 
-        const DashboardView = ({ memberData, reportData, selectedStore, setSelectedStore, allowedStoreNames }) => {
+        const DashboardView = ({ memberData, reportData, selectedStore, setSelectedStore, allowedStoreNames, manualMembersHook }) => {
+            // サブスクで現金入金の方をアクティブ会員として計上
+            const cashActiveMembers = useMemo(() => {
+                if (!manualMembersHook?.manualMembers) return 0;
+                return manualMembersHook.manualMembers.filter(m => m.status === 'ACTIVE' && m.paymentMethod === 'CASH').length;
+            }, [manualMembersHook?.manualMembers]);
+            const totalActiveMembers = (memberData.activeMembers || 0) + cashActiveMembers;
+            const cashActiveRevenue = useMemo(() => {
+                if (!manualMembersHook?.manualMembers) return 0;
+                return manualMembersHook.manualMembers
+                    .filter(m => m.status === 'ACTIVE' && m.paymentMethod === 'CASH')
+                    .reduce((sum, m) => sum + (m.monthlyPrice || 0), 0);
+            }, [manualMembersHook?.manualMembers]);
+            const totalExpectedRevenue = (memberData.expectedRevenue || 0) + cashActiveRevenue;
             const [dateRange, setDateRange] = useState('month');
 
             if (!window.Recharts) return <div className="p-8 text-center">チャートを読み込み中...</div>;
@@ -3947,11 +4076,11 @@
 
                     {/* Square会員データ KPIカード */}
                     <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 md:gap-4">
-                        <KpiCard title="アクティブ会員" value={formatNumber(memberData.activeMembers)}
-                            subValue={`総会員: ${formatNumber(memberData.totalMembers)}人`} trend={null} icon="users"
+                        <KpiCard title="アクティブ会員" value={formatNumber(totalActiveMembers)}
+                            subValue={cashActiveMembers > 0 ? `Square: ${formatNumber(memberData.activeMembers)} / 現金: ${cashActiveMembers}` : `総会員: ${formatNumber(memberData.totalMembers)}人`} trend={null} icon="users"
                             gradientFrom="from-sise-400" gradientTo="to-sise-600" accentColor="#33a065" loading={memberData.loading} />
-                        <KpiCard title="想定月間売上" value={formatCurrency(memberData.expectedRevenue)}
-                            subValue="サブスク収益" trend={null} icon="wallet"
+                        <KpiCard title="想定月間売上" value={formatCurrency(totalExpectedRevenue)}
+                            subValue={cashActiveRevenue > 0 ? `Square: ${formatCurrency(memberData.expectedRevenue)} / 現金: ${formatCurrency(cashActiveRevenue)}` : 'サブスク収益'} trend={null} icon="wallet"
                             gradientFrom="from-emerald-400" gradientTo="to-emerald-600" accentColor="#059669" loading={memberData.loading} />
                         <KpiCard title="新規入会" value={formatNumber(memberData.newMembersThisMonth)}
                             subValue="今月の入会者" trend={null} icon="user-plus"
@@ -7865,7 +7994,7 @@
         // 出納帳ビュー
         // ========================================
 
-        const CashbookView = ({ cashbookHook, memberData, manualMembersHook, activeStoreId, squareData }) => {
+        const CashbookView = ({ cashbookHook, memberData, manualMembersHook, activeStoreId, squareData, menuItemsHook }) => {
             const { entries: rawEntries, addEntry: rawAddEntry, updateEntry, deleteEntry, saving, loading,
                     dailyCloses, auditLogs, lastSynced, syncError, closeDailyBooks, isDayClosed, refresh } = cashbookHook;
             const stores = memberData?.stores || [];
@@ -7918,12 +8047,45 @@
                 cashType: 'register',
                 store: activeStoreId || '',
                 recorder: '',
-                notes: ''
+                notes: '',
+                selectedMenuId: '',
+                pointDiscount: ''
             });
+
+            // メニュー管理UI
+            const [showMenuManager, setShowMenuManager] = useState(false);
+            const [menuForm, setMenuForm] = useState({ name: '', category: '', price: '', itemType: 'menu' });
+            const [editingMenuId, setEditingMenuId] = useState(null);
 
             const incomeCategories = ['施術売上', 'サブスク月額', '回数券販売', '物販', 'その他収入'];
             const expenseCategories = ['家賃', '水道光熱費', '消耗品', '広告費', '人件費', '設備', '交通費', 'その他経費'];
             const cashTypeLabels = { register: 'レジ', safe: '金庫', pettyCash: '小口現金' };
+
+            // メニュー選択時の自動金額反映
+            const handleMenuSelect = (menuId) => {
+                if (!menuId) {
+                    setFormData(p => ({ ...p, selectedMenuId: '', description: '', amount: '' }));
+                    return;
+                }
+                const allItems = [...(menuItemsHook?.activeMenus || []), ...(menuItemsHook?.activeCoupons || [])];
+                const item = allItems.find(m => m.id === menuId);
+                if (item) {
+                    setFormData(p => ({
+                        ...p,
+                        selectedMenuId: menuId,
+                        description: item.name,
+                        amount: String(item.price),
+                        category: item.itemType === 'coupon' ? '回数券販売' : '施術売上'
+                    }));
+                }
+            };
+
+            // ポイント割引適用後の実金額
+            const effectiveAmount = useMemo(() => {
+                const base = parseInt(formData.amount) || 0;
+                const discount = parseInt(formData.pointDiscount) || 0;
+                return Math.max(0, base - discount);
+            }, [formData.amount, formData.pointDiscount]);
 
             // 月別フィルタ
             const monthEntries = useMemo(() => {
@@ -8024,23 +8186,32 @@
                     cashType: 'register',
                     store: filterStore !== 'all' ? filterStore : (activeStoreId || ''),
                     recorder: currentAccess ? currentAccess.name : '',
-                    notes: ''
+                    notes: '',
+                    selectedMenuId: '',
+                    pointDiscount: ''
                 });
                 setEditingId(null);
             };
 
             const handleSubmit = () => {
                 if (!formData.amount || parseInt(formData.amount) <= 0) return;
+                const finalAmount = formData.type === 'income' ? effectiveAmount : parseInt(formData.amount);
+                const discount = parseInt(formData.pointDiscount) || 0;
+                const descWithDiscount = discount > 0
+                    ? (formData.description || '') + '（ポイント割引 -' + formatCurrency(discount) + '）'
+                    : formData.description;
                 if (editingId) {
                     updateEntry(editingId, {
                         ...formData,
-                        amount: parseInt(formData.amount),
+                        description: descWithDiscount,
+                        amount: finalAmount,
                         treatmentCount: parseInt(formData.treatmentCount) || 0
                     });
                 } else {
                     addEntry({
                         ...formData,
-                        amount: parseInt(formData.amount),
+                        description: descWithDiscount,
+                        amount: finalAmount,
                         treatmentCount: parseInt(formData.treatmentCount) || 0
                     });
                 }
@@ -8485,22 +8656,53 @@
                                         ))}
                                     </select>
                                 </div>
+                                {/* メニュー / クーポン選択プルダウン（入金時のみ） */}
+                                {formData.type === 'income' && (menuItemsHook?.activeMenus?.length > 0 || menuItemsHook?.activeCoupons?.length > 0) && (
+                                    <div>
+                                        <label className="block text-xs font-medium text-slate-600 mb-1">
+                                            メニュー / クーポン
+                                            <button onClick={() => setShowMenuManager(true)} className="ml-2 text-[10px] text-sise-600 hover:text-sise-700 font-bold">
+                                                <Icon name="settings" size={10} className="inline -mt-0.5 mr-0.5" />管理
+                                            </button>
+                                        </label>
+                                        <select value={formData.selectedMenuId} onChange={e => handleMenuSelect(e.target.value)}
+                                            className="w-full px-3 py-2.5 border border-sise-200 rounded-xl text-sm outline-none bg-sise-50/30">
+                                            <option value="">-- 手動入力 --</option>
+                                            {(menuItemsHook?.activeMenus || []).length > 0 && (
+                                                <optgroup label="メニュー">
+                                                    {(menuItemsHook?.activeMenus || []).map(m => (
+                                                        <option key={m.id} value={m.id}>{m.name}（{formatCurrency(m.price)}）</option>
+                                                    ))}
+                                                </optgroup>
+                                            )}
+                                            {(menuItemsHook?.activeCoupons || []).length > 0 && (
+                                                <optgroup label="クーポン">
+                                                    {(menuItemsHook?.activeCoupons || []).map(m => (
+                                                        <option key={m.id} value={m.id}>{m.name}（{formatCurrency(m.price)}）</option>
+                                                    ))}
+                                                </optgroup>
+                                            )}
+                                        </select>
+                                    </div>
+                                )}
                                 <div>
                                     <label className="block text-xs font-medium text-slate-600 mb-1">金額（円） *</label>
-                                    <input type="number" value={formData.amount} onChange={e => setFormData(p => ({...p, amount: e.target.value}))}
+                                    <input type="number" value={formData.amount} onChange={e => setFormData(p => ({...p, amount: e.target.value, selectedMenuId: ''}))}
                                         placeholder="0" className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm outline-none" />
                                 </div>
-                                <div>
-                                    <label className="block text-xs font-medium text-slate-600 mb-1">支払方法</label>
-                                    <select value={formData.paymentMethod} onChange={e => setFormData(p => ({...p, paymentMethod: e.target.value}))}
-                                        className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm outline-none">
-                                        <option value="CASH">現金</option>
-                                        <option value="QR">QR決済</option>
-                                        <option value="CARD">カード</option>
-                                        <option value="SQUARE">Square</option>
-                                        <option value="TRANSFER">振込</option>
-                                    </select>
-                                </div>
+                                {/* ポイント割引（入金時のみ） */}
+                                {formData.type === 'income' && (
+                                    <div>
+                                        <label className="block text-xs font-medium text-slate-600 mb-1">ポイント割引 / ギフト券（円）</label>
+                                        <input type="number" value={formData.pointDiscount} onChange={e => setFormData(p => ({...p, pointDiscount: e.target.value}))}
+                                            placeholder="0" min="0" className="w-full px-3 py-2.5 border border-amber-200 rounded-xl text-sm outline-none bg-amber-50/30" />
+                                        {parseInt(formData.pointDiscount) > 0 && parseInt(formData.amount) > 0 && (
+                                            <p className="text-[11px] text-amber-600 font-bold mt-1">
+                                                実入金額: {formatCurrency(effectiveAmount)}（{formatCurrency(parseInt(formData.amount))} - {formatCurrency(parseInt(formData.pointDiscount))}）
+                                            </p>
+                                        )}
+                                    </div>
+                                )}
                                 <div>
                                     <label className="block text-xs font-medium text-slate-600 mb-1">現金区分</label>
                                     <select value={formData.cashType} onChange={e => setFormData(p => ({...p, cashType: e.target.value}))}
@@ -8540,6 +8742,16 @@
                                 </div>
                             </div>
 
+                            {/* メニュー未登録時の案内 */}
+                            {formData.type === 'income' && (!menuItemsHook?.activeMenus?.length && !menuItemsHook?.activeCoupons?.length) && (
+                                <div className="mt-3 p-3 bg-slate-50 rounded-xl border border-slate-200 flex items-center justify-between">
+                                    <span className="text-xs text-slate-500">メニューを登録するとプルダウンから選択でき、金額が自動反映されます</span>
+                                    <button onClick={() => setShowMenuManager(true)} className="text-xs text-sise-600 font-bold hover:text-sise-700 whitespace-nowrap ml-2">
+                                        <Icon name="plus" size={12} className="inline -mt-0.5 mr-0.5" />メニュー登録
+                                    </button>
+                                </div>
+                            )}
+
                             <div className="flex justify-end gap-2 mt-4">
                                 <button onClick={() => { setShowForm(false); resetForm(); }}
                                     className="px-4 py-2.5 text-sm text-slate-600 hover:bg-slate-100 rounded-xl transition-colors">キャンセル</button>
@@ -8547,6 +8759,82 @@
                                     className="px-5 py-2.5 btn-gradient rounded-xl text-sm font-medium">
                                     {editingId ? '更新' : '記録する'}
                                 </button>
+                            </div>
+                        </Card>
+                    )}
+
+                    {/* メニュー管理モーダル */}
+                    {showMenuManager && (
+                        <Card className="animate-scale-in !border-sise-200">
+                            <div className="flex items-center justify-between mb-4">
+                                <h4 className="font-bold text-slate-800 flex items-center">
+                                    <Icon name="clipboard-list" size={18} className="mr-2 text-sise-500" />
+                                    メニュー・クーポン管理
+                                </h4>
+                                <button onClick={() => { setShowMenuManager(false); setEditingMenuId(null); setMenuForm({ name: '', category: '', price: '', itemType: 'menu' }); }}
+                                    className="text-slate-400 hover:text-slate-600 text-xl">&times;</button>
+                            </div>
+                            <p className="text-xs text-slate-400 mb-3">登録したメニューは出納帳の入力時にプルダウンから選択でき、金額が自動反映されます。GASスプシに保存されます。</p>
+
+                            {/* 新規追加/編集フォーム */}
+                            <div className="grid grid-cols-1 md:grid-cols-5 gap-2 mb-4 p-3 bg-slate-50 rounded-xl border border-slate-200">
+                                <div>
+                                    <label className="block text-[10px] font-medium text-slate-500 mb-0.5">種別</label>
+                                    <select value={menuForm.itemType} onChange={e => setMenuForm(p => ({...p, itemType: e.target.value}))}
+                                        className="w-full px-2 py-2 border border-slate-200 rounded-lg text-xs outline-none">
+                                        <option value="menu">メニュー</option>
+                                        <option value="coupon">クーポン</option>
+                                    </select>
+                                </div>
+                                <div className="md:col-span-2">
+                                    <label className="block text-[10px] font-medium text-slate-500 mb-0.5">名前 *</label>
+                                    <input type="text" value={menuForm.name} onChange={e => setMenuForm(p => ({...p, name: e.target.value}))}
+                                        placeholder="例: 全身整体60分" className="w-full px-2 py-2 border border-slate-200 rounded-lg text-xs outline-none" />
+                                </div>
+                                <div>
+                                    <label className="block text-[10px] font-medium text-slate-500 mb-0.5">金額（円） *</label>
+                                    <input type="number" value={menuForm.price} onChange={e => setMenuForm(p => ({...p, price: e.target.value}))}
+                                        placeholder="0" className="w-full px-2 py-2 border border-slate-200 rounded-lg text-xs outline-none" />
+                                </div>
+                                <div className="flex items-end">
+                                    <button onClick={async () => {
+                                        if (!menuForm.name || !menuForm.price) return;
+                                        if (editingMenuId) {
+                                            await menuItemsHook.updateItem(editingMenuId, { name: menuForm.name, category: menuForm.category, price: parseInt(menuForm.price), itemType: menuForm.itemType });
+                                            setEditingMenuId(null);
+                                        } else {
+                                            await menuItemsHook.addItem({ name: menuForm.name, category: menuForm.category, price: parseInt(menuForm.price), itemType: menuForm.itemType });
+                                        }
+                                        setMenuForm({ name: '', category: '', price: '', itemType: 'menu' });
+                                    }} disabled={!menuForm.name || !menuForm.price || menuItemsHook?.saving}
+                                        className="w-full px-3 py-2 btn-gradient rounded-lg text-xs font-medium disabled:opacity-50">
+                                        {editingMenuId ? '更新' : '追加'}
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* メニュー一覧 */}
+                            <div className="space-y-1.5 max-h-64 overflow-y-auto">
+                                {(menuItemsHook?.menuItems || []).filter(m => m.active).map(item => (
+                                    <div key={item.id} className="flex items-center justify-between p-2.5 bg-white rounded-lg border border-slate-100 hover:border-sise-200 transition-colors">
+                                        <div className="flex items-center gap-2">
+                                            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${item.itemType === 'coupon' ? 'bg-amber-100 text-amber-700' : 'bg-sise-100 text-sise-700'}`}>
+                                                {item.itemType === 'coupon' ? 'クーポン' : 'メニュー'}
+                                            </span>
+                                            <span className="text-sm font-medium text-slate-700">{item.name}</span>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-sm font-bold text-slate-800">{formatCurrency(item.price)}</span>
+                                            <button onClick={() => { setEditingMenuId(item.id); setMenuForm({ name: item.name, category: item.category, price: String(item.price), itemType: item.itemType }); }}
+                                                className="text-slate-400 hover:text-sise-600 transition-colors"><Icon name="edit" size={14} /></button>
+                                            <button onClick={() => { if (confirm(item.name + 'を削除しますか？')) menuItemsHook.deleteItem(item.id); }}
+                                                className="text-slate-400 hover:text-red-500 transition-colors"><Icon name="trash-2" size={14} /></button>
+                                        </div>
+                                    </div>
+                                ))}
+                                {(menuItemsHook?.menuItems || []).filter(m => m.active).length === 0 && (
+                                    <p className="text-xs text-slate-400 text-center py-4">メニューが登録されていません</p>
+                                )}
                             </div>
                         </Card>
                     )}
@@ -12023,6 +12311,9 @@
             const [compData, setCompData] = useState({ before_front: null, before_back: null, before_side: null, before_seated: null, after_front: null, after_back: null, after_side: null, after_seated: null });
             // each slot: { image, landmarks, analysis }
 
+            // 拡大比較モーダル（正面・背面などをクリックして横並び比較）
+            const [compViewerOpen, setCompViewerOpen] = useState(null); // null | 'front' | 'back' | 'side' | 'seated'
+
             // 論文根拠モーダル
             const [refModal, setRefModal] = useState(null);
 
@@ -12978,6 +13269,127 @@
                                         <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M24 10.314C24 4.943 18.615.572 12 .572S0 4.943 0 10.314c0 4.811 4.27 8.842 10.035 9.608.391.082.923.258 1.058.59.12.301.079.766.038 1.08l-.164 1.02c-.045.301-.24 1.186 1.049.645 1.291-.539 6.916-4.078 9.436-6.975C23.176 14.393 24 12.458 24 10.314"/></svg>
                                         LINEで送信
                                     </button>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* 比較モード: 横並び写真比較 — クリックで拡大 */}
+                        {analysisMode==='comparison' && hasAnyPair && (
+                            <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 mb-3">
+                                <h3 className="font-bold text-sm text-teal-700 mb-3">写真比較（タップで拡大）</h3>
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                                    {[
+                                        { key: 'front', label: '正面', has: hasFrontPair },
+                                        { key: 'back', label: '背面', has: hasBackPair },
+                                        { key: 'side', label: '側面', has: hasSidePair },
+                                        { key: 'seated', label: '座位', has: hasSeatedPair }
+                                    ].filter(v => v.has).map(v => (
+                                        <button key={v.key} onClick={() => setCompViewerOpen(v.key)}
+                                            className="relative rounded-xl overflow-hidden border-2 border-teal-200 hover:border-teal-400 transition-all active:scale-95 group">
+                                            <div className="flex">
+                                                <div className="w-1/2 relative">
+                                                    <img src={compData['before_' + v.key]?.image} alt="Before" className="w-full h-auto object-cover" />
+                                                    <div className="absolute bottom-0 left-0 right-0 bg-black/50 text-white text-[9px] text-center py-0.5 font-bold">Before</div>
+                                                </div>
+                                                <div className="w-1/2 relative">
+                                                    <img src={compData['after_' + v.key]?.image} alt="After" className="w-full h-auto object-cover" />
+                                                    <div className="absolute bottom-0 left-0 right-0 bg-teal-600/70 text-white text-[9px] text-center py-0.5 font-bold">After</div>
+                                                </div>
+                                            </div>
+                                            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center">
+                                                <span className="bg-white/90 text-teal-700 text-xs font-bold px-2 py-1 rounded-lg shadow opacity-0 group-hover:opacity-100 transition-opacity">{v.label}</span>
+                                            </div>
+                                            <div className="text-center py-1.5 bg-gray-50">
+                                                <span className="text-[11px] font-bold text-teal-700">{v.label}</span>
+                                                {(() => {
+                                                    const bT = postureGetTotal(compData['before_' + v.key]?.analysis);
+                                                    const aT = postureGetTotal(compData['after_' + v.key]?.analysis);
+                                                    const d = aT - bT;
+                                                    return <span className={`ml-1.5 text-[10px] font-bold ${d >= 0 ? 'text-teal-600' : 'text-red-500'}`}>{d >= 0 ? '+' : ''}{d}点</span>;
+                                                })()}
+                                            </div>
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* 拡大比較モーダル */}
+                        {compViewerOpen && compData['before_' + compViewerOpen] && compData['after_' + compViewerOpen] && (
+                            <div className="fixed inset-0 bg-black/90 z-[9999] flex flex-col" onClick={() => setCompViewerOpen(null)}>
+                                {/* ヘッダー */}
+                                <div className="flex items-center justify-between px-4 py-3 bg-black/50" onClick={e => e.stopPropagation()}>
+                                    <div className="flex items-center gap-2">
+                                        {[
+                                            { key: 'front', label: '正面', has: hasFrontPair },
+                                            { key: 'back', label: '背面', has: hasBackPair },
+                                            { key: 'side', label: '側面', has: hasSidePair },
+                                            { key: 'seated', label: '座位', has: hasSeatedPair }
+                                        ].filter(v => v.has).map(v => (
+                                            <button key={v.key} onClick={() => setCompViewerOpen(v.key)}
+                                                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${compViewerOpen === v.key ? 'bg-teal-500 text-white' : 'bg-white/20 text-white/70 hover:bg-white/30'}`}>
+                                                {v.label}
+                                            </button>
+                                        ))}
+                                    </div>
+                                    <button onClick={() => setCompViewerOpen(null)}
+                                        className="text-white/80 hover:text-white text-2xl font-bold w-10 h-10 flex items-center justify-center">&times;</button>
+                                </div>
+                                {/* 横並び比較 */}
+                                <div className="flex-1 flex items-center justify-center p-2 gap-2 overflow-auto" onClick={e => e.stopPropagation()}>
+                                    <div className="flex-1 max-w-[48%] text-center">
+                                        <div className="text-white/60 text-xs font-bold mb-2">Before（施術前）</div>
+                                        <div className="relative rounded-xl overflow-hidden border-2 border-white/20">
+                                            <img src={compData['before_' + compViewerOpen]?.image} alt="Before" className="w-full h-auto" />
+                                        </div>
+                                        <div className="mt-2 inline-block px-3 py-1.5 rounded-lg" style={{background: postureScoreBg(postureGetTotal(compData['before_' + compViewerOpen]?.analysis))}}>
+                                            <span className="text-lg font-bold" style={{color: postureScoreColor(postureGetTotal(compData['before_' + compViewerOpen]?.analysis))}}>{postureGetTotal(compData['before_' + compViewerOpen]?.analysis)}</span>
+                                            <span className="text-xs ml-1" style={{color: postureScoreColor(postureGetTotal(compData['before_' + compViewerOpen]?.analysis))}}>点</span>
+                                        </div>
+                                    </div>
+                                    <div className="flex flex-col items-center gap-1">
+                                        {(() => {
+                                            const bT = postureGetTotal(compData['before_' + compViewerOpen]?.analysis);
+                                            const aT = postureGetTotal(compData['after_' + compViewerOpen]?.analysis);
+                                            const d = aT - bT;
+                                            return (
+                                                <>
+                                                    <div className={`text-2xl font-bold ${d >= 0 ? 'text-teal-400' : 'text-red-400'}`}>{d >= 0 ? '+' : ''}{d}</div>
+                                                    <div className={`text-[10px] font-bold ${d >= 0 ? 'text-teal-400' : 'text-red-400'}`}>{d >= 0 ? '改善' : '低下'}</div>
+                                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={d >= 0 ? '#2dd4bf' : '#f87171'} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                                        <polyline points="18 15 12 9 6 15" transform={d < 0 ? 'rotate(180 12 12)' : ''} />
+                                                    </svg>
+                                                </>
+                                            );
+                                        })()}
+                                    </div>
+                                    <div className="flex-1 max-w-[48%] text-center">
+                                        <div className="text-white/60 text-xs font-bold mb-2">After（施術後）</div>
+                                        <div className="relative rounded-xl overflow-hidden border-2 border-teal-400/40">
+                                            <img src={compData['after_' + compViewerOpen]?.image} alt="After" className="w-full h-auto" />
+                                        </div>
+                                        <div className="mt-2 inline-block px-3 py-1.5 rounded-lg" style={{background: postureScoreBg(postureGetTotal(compData['after_' + compViewerOpen]?.analysis))}}>
+                                            <span className="text-lg font-bold" style={{color: postureScoreColor(postureGetTotal(compData['after_' + compViewerOpen]?.analysis))}}>{postureGetTotal(compData['after_' + compViewerOpen]?.analysis)}</span>
+                                            <span className="text-xs ml-1" style={{color: postureScoreColor(postureGetTotal(compData['after_' + compViewerOpen]?.analysis))}}>点</span>
+                                        </div>
+                                    </div>
+                                </div>
+                                {/* 項目別スコア比較 */}
+                                <div className="px-4 pb-4 max-h-[30vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+                                    <div className="bg-white/10 backdrop-blur rounded-xl p-3">
+                                        {compData['before_' + compViewerOpen]?.analysis?.items?.map((bI, i) => {
+                                            const aI = compData['after_' + compViewerOpen]?.analysis?.items?.[i];
+                                            if (!aI) return null;
+                                            const d = aI.score - bI.score;
+                                            return (
+                                                <div key={bI.key} className="flex items-center text-xs py-1.5 border-b border-white/10 last:border-0">
+                                                    <span className="flex-1 font-bold text-white/80">{bI.label}</span>
+                                                    <span className="text-white/40 w-20 text-right">{bI.score} → {aI.score}</span>
+                                                    <span className={`w-12 text-right font-bold ${d >= 0 ? 'text-teal-400' : 'text-red-400'}`}>{d >= 0 ? '+' : ''}{d}</span>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
                                 </div>
                             </div>
                         )}
@@ -15978,6 +16390,8 @@
             const ticketHook = useTicketManagement();
             // QR・現金決済会員管理
             const manualMembersHook = useManualMembers();
+            // メニュー管理
+            const menuItemsHook = useMenuItems();
             // 出納帳
             const cashbookHook = useCashbook();
             // マーケティング管理
@@ -16082,13 +16496,14 @@
                             selectedStore={selectedStore}
                             setSelectedStore={setSelectedStore}
                             allowedStoreNames={allowedStoreNames}
+                            manualMembersHook={manualMembersHook}
                         />;
                     case 'reports':
                         return <DailyReportListView reportData={reportData} allowedStoreNames={allowedStoreNames} />;
                     case 'members':
                         return <MemberManagementView memberData={memberData} refreshSquareData={refreshSquareData} operateSubscription={operateSubscription} activeStoreId={activeStoreId} manualMembersHook={manualMembersHook} />;
                     case 'cashbook':
-                        return <CashbookView cashbookHook={cashbookHook} memberData={memberData} manualMembersHook={manualMembersHook} activeStoreId={activeStoreId} squareData={memberData} />;
+                        return <CashbookView cashbookHook={cashbookHook} memberData={memberData} manualMembersHook={manualMembersHook} activeStoreId={activeStoreId} squareData={memberData} menuItemsHook={menuItemsHook} />;
                     case 'usage':
                         return <MemberUsageView memberData={memberData} usageHook={usageHook} />;
                     case 'tickets':
@@ -16104,7 +16519,7 @@
                     case 'marketing':
                         // マーケティングは本部のみアクセス可
                         if (isStaffMode && (!currentAccess || currentAccess.role !== 'headquarter')) {
-                            return <DashboardView memberData={memberData} reportData={reportData} selectedStore={selectedStore} setSelectedStore={setSelectedStore} allowedStoreNames={allowedStoreNames} />;
+                            return <DashboardView memberData={memberData} reportData={reportData} selectedStore={selectedStore} setSelectedStore={setSelectedStore} allowedStoreNames={allowedStoreNames} manualMembersHook={manualMembersHook} />;
                         }
                         return <MarketingView marketingHook={marketingHook} />;
                     case 'settings':
@@ -16118,6 +16533,7 @@
                             selectedStore={selectedStore}
                             setSelectedStore={setSelectedStore}
                             allowedStoreNames={allowedStoreNames}
+                            manualMembersHook={manualMembersHook}
                         />;
                 }
             };
