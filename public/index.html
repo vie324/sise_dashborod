@@ -3343,6 +3343,159 @@
         };
 
         // ========================================
+        // 勤怠管理
+        // ========================================
+
+        const useAttendance = () => {
+            const [records, setRecords] = useState([]);
+            const [loading, setLoading] = useState(false);
+            const [saving, setSaving] = useState(false);
+            const [todayRecord, setTodayRecord] = useState(null);
+
+            const fetchRecords = useCallback(async (params = {}) => {
+                if (UNIFIED_GAS_URL === 'YOUR_UNIFIED_GAS_URL') return;
+                setLoading(true);
+                try {
+                    let url = UNIFIED_GAS_URL + '?type=attendance';
+                    if (params.store) url += '&store=' + params.store;
+                    if (params.month) url += '&month=' + params.month;
+                    if (params.staffId) url += '&staffId=' + params.staffId;
+                    if (params.date) url += '&date=' + params.date;
+                    const res = await fetch(url);
+                    const data = await res.json();
+                    if (data && data.records) setRecords(data.records);
+                } catch (e) {
+                    console.error('[勤怠] 取得エラー:', e);
+                } finally { setLoading(false); }
+            }, []);
+
+            // 今日の自分の出勤状態を取得
+            const checkTodayStatus = useCallback(async (staffId) => {
+                if (!staffId || UNIFIED_GAS_URL === 'YOUR_UNIFIED_GAS_URL') return;
+                try {
+                    const today = new Date().toISOString().slice(0, 10);
+                    const res = await fetch(UNIFIED_GAS_URL + '?type=attendance&staffId=' + staffId + '&date=' + today);
+                    const data = await res.json();
+                    if (data && data.records && data.records.length > 0) {
+                        const latest = data.records.find(r => !r.clockOut) || data.records[0];
+                        setTodayRecord(latest);
+                    } else {
+                        setTodayRecord(null);
+                    }
+                } catch (e) { console.error('[勤怠] ステータス取得エラー:', e); }
+            }, []);
+
+            const clockIn = useCallback(async (staffId, staffName, storeId, lat, lng, method, qrToken) => {
+                setSaving(true);
+                try {
+                    const body = { type: 'attendance', action: 'clockIn', staffId, staffName, storeId, lat, lng, method: method || 'gps' };
+                    if (qrToken) body.qrToken = qrToken;
+                    const res = await fetch(UNIFIED_GAS_URL, {
+                        method: 'POST', headers: { 'Content-Type': 'text/plain' },
+                        body: JSON.stringify(body)
+                    });
+                    const data = await res.json();
+                    if (data.error) { showToast(data.error, 'error'); return null; }
+                    if (data.success) {
+                        showToast('出勤を記録しました', 'success');
+                        setTodayRecord(data.record);
+                        return data.record;
+                    }
+                } catch (e) { showToast('出勤記録に失敗しました', 'error'); }
+                finally { setSaving(false); }
+                return null;
+            }, []);
+
+            const clockOut = useCallback(async (staffId, lat, lng) => {
+                setSaving(true);
+                try {
+                    const res = await fetch(UNIFIED_GAS_URL, {
+                        method: 'POST', headers: { 'Content-Type': 'text/plain' },
+                        body: JSON.stringify({ type: 'attendance', action: 'clockOut', staffId, lat, lng })
+                    });
+                    const data = await res.json();
+                    if (data.error) { showToast(data.error, 'error'); return null; }
+                    if (data.success) {
+                        showToast('退勤を記録しました', 'success');
+                        setTodayRecord(prev => prev ? { ...prev, clockOut: data.record.clockOut, workMinutes: data.record.workMinutes } : null);
+                        return data.record;
+                    }
+                } catch (e) { showToast('退勤記録に失敗しました', 'error'); }
+                finally { setSaving(false); }
+                return null;
+            }, []);
+
+            // QRトークン生成（店舗端末用）
+            const generateQrToken = useCallback(async (storeId) => {
+                try {
+                    const res = await fetch(UNIFIED_GAS_URL, {
+                        method: 'POST', headers: { 'Content-Type': 'text/plain' },
+                        body: JSON.stringify({ type: 'qrToken', action: 'generate', storeId })
+                    });
+                    return await res.json();
+                } catch (e) { return { error: 'QR生成失敗' }; }
+            }, []);
+
+            // QRトークン取得（有効なものがあればそれを返す）
+            const getQrToken = useCallback(async (storeId) => {
+                try {
+                    const res = await fetch(UNIFIED_GAS_URL + '?type=qrToken&store=' + storeId);
+                    return await res.json();
+                } catch (e) { return { error: 'QR取得失敗' }; }
+            }, []);
+
+            // QRトークン検証
+            const validateQrToken = useCallback(async (token, storeId) => {
+                try {
+                    const res = await fetch(UNIFIED_GAS_URL, {
+                        method: 'POST', headers: { 'Content-Type': 'text/plain' },
+                        body: JSON.stringify({ type: 'qrToken', action: 'validate', token, storeId })
+                    });
+                    return await res.json();
+                } catch (e) { return { valid: false, error: '検証失敗' }; }
+            }, []);
+
+            // 店舗座標更新
+            const updateStoreCoordinates = useCallback(async (storeId, lat, lng) => {
+                try {
+                    const res = await fetch(UNIFIED_GAS_URL, {
+                        method: 'POST', headers: { 'Content-Type': 'text/plain' },
+                        body: JSON.stringify({ type: 'storeManage', action: 'updateCoordinates', storeId, lat, lng })
+                    });
+                    const data = await res.json();
+                    if (data.success) showToast('店舗座標を保存しました', 'success');
+                    else showToast(data.error || '保存失敗', 'error');
+                    return data;
+                } catch (e) { showToast('座標保存に失敗しました', 'error'); return { error: e.message }; }
+            }, []);
+
+            return {
+                records, loading, saving, todayRecord,
+                fetchRecords, checkTodayStatus, clockIn, clockOut,
+                generateQrToken, getQrToken, validateQrToken, updateStoreCoordinates
+            };
+        };
+
+        // GPS位置チェックユーティリティ
+        const getGPSPosition = () => new Promise((resolve, reject) => {
+            if (!navigator.geolocation) { reject(new Error('GPS非対応')); return; }
+            navigator.geolocation.getCurrentPosition(
+                pos => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy }),
+                err => reject(new Error(err.code === 1 ? '位置情報の許可が必要です' : err.code === 2 ? '位置情報を取得できません' : '位置情報取得タイムアウト')),
+                { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+            );
+        });
+
+        const calcDistanceM = (lat1, lng1, lat2, lng2) => {
+            const R = 6371e3;
+            const p = Math.PI / 180;
+            const a = 0.5 - Math.cos((lat2 - lat1) * p) / 2 + Math.cos(lat1 * p) * Math.cos(lat2 * p) * (1 - Math.cos((lng2 - lng1) * p)) / 2;
+            return R * 2 * Math.asin(Math.sqrt(a));
+        };
+
+        const ATTENDANCE_RADIUS_M = 300;
+
+        // ========================================
         // カウンセリングデータ連携（5店舗対応）
         // ========================================
         const COUNSELING_GAS_URL = UNIFIED_GAS_URL;
@@ -6788,6 +6941,434 @@
                             </div>
                         </div>
                     </Card>
+                </div>
+            );
+        };
+
+        // ========================================
+        // 勤怠ビュー
+        // ========================================
+
+        const AttendanceView = ({ attendanceHook, activeStoreId, memberData }) => {
+            const { records, loading, saving, todayRecord, fetchRecords, checkTodayStatus,
+                    clockIn, clockOut, generateQrToken, getQrToken, validateQrToken, updateStoreCoordinates } = attendanceHook;
+            // serverStores（GAS storeManage由来、lat/lng含む）を使用
+            const stores = serverStores.filter(s => s.status !== 'inactive');
+            const [viewMonth, setViewMonth] = useState(new Date().toISOString().slice(0, 7));
+            const [gpsStatus, setGpsStatus] = useState(null); // null | 'checking' | {ok, dist, lat, lng, store} | {error}
+            const [showQrScanner, setShowQrScanner] = useState(false);
+            const [qrInput, setQrInput] = useState('');
+            const [showQrDisplay, setShowQrDisplay] = useState(false);
+            const [qrDisplayData, setQrDisplayData] = useState(null);
+            const [qrDisplayStore, setQrDisplayStore] = useState('');
+            const [attTab, setAttTab] = useState('clock'); // clock | history | qr | settings
+
+            const staffId = currentAccess ? currentAccess.id : '';
+            const staffName = currentAccess ? currentAccess.name : '';
+
+            // 初回: 今日のステータス + 履歴取得
+            useEffect(() => {
+                if (staffId) checkTodayStatus(staffId);
+                fetchRecords({ month: viewMonth, store: activeStoreId !== 'all' ? activeStoreId : '' });
+            }, [staffId, viewMonth, activeStoreId]);
+
+            // GPS位置チェック
+            const checkGPS = useCallback(async () => {
+                setGpsStatus({ checking: true });
+                try {
+                    const pos = await getGPSPosition();
+                    // 全店舗との距離チェック
+                    let nearest = null;
+                    for (const store of stores) {
+                        if (!store.lat || !store.lng) continue;
+                        const dist = calcDistanceM(pos.lat, pos.lng, store.lat, store.lng);
+                        if (!nearest || dist < nearest.dist) nearest = { store, dist };
+                    }
+                    if (!nearest) {
+                        setGpsStatus({ error: '店舗の座標が登録されていません。設定画面から登録してください。' });
+                    } else if (nearest.dist <= ATTENDANCE_RADIUS_M) {
+                        setGpsStatus({ ok: true, dist: Math.round(nearest.dist), lat: pos.lat, lng: pos.lng, store: nearest.store, accuracy: pos.accuracy });
+                    } else {
+                        setGpsStatus({ ok: false, dist: Math.round(nearest.dist), lat: pos.lat, lng: pos.lng, store: nearest.store, accuracy: pos.accuracy });
+                    }
+                } catch (e) {
+                    setGpsStatus({ error: e.message });
+                }
+            }, [stores]);
+
+            // 出勤処理
+            const handleClockIn = useCallback(async (method) => {
+                if (!staffId) { showToast('ログインが必要です', 'error'); return; }
+                const storeId = gpsStatus?.store?.id || activeStoreId;
+                if (!storeId || storeId === 'all') { showToast('店舗を特定できません', 'error'); return; }
+                await clockIn(staffId, staffName, storeId, gpsStatus?.lat, gpsStatus?.lng, method);
+                checkTodayStatus(staffId);
+            }, [staffId, staffName, gpsStatus, activeStoreId, clockIn, checkTodayStatus]);
+
+            // 退勤処理
+            const handleClockOut = useCallback(async () => {
+                if (!staffId) return;
+                let lat, lng;
+                try { const pos = await getGPSPosition(); lat = pos.lat; lng = pos.lng; } catch(e) {}
+                await clockOut(staffId, lat, lng);
+                checkTodayStatus(staffId);
+            }, [staffId, clockOut, checkTodayStatus]);
+
+            // QRスキャン → バリデート → 出勤
+            const handleQrClockIn = useCallback(async (token) => {
+                if (!token) return;
+                const result = await validateQrToken(token);
+                if (!result.valid) { showToast(result.error || 'QRコードが無効です', 'error'); return; }
+                const storeId = result.storeId;
+                let lat, lng;
+                try { const pos = await getGPSPosition(); lat = pos.lat; lng = pos.lng; } catch(e) {}
+                await clockIn(staffId, staffName, storeId, lat, lng, 'qr');
+                checkTodayStatus(staffId);
+                setShowQrScanner(false);
+                setQrInput('');
+            }, [staffId, staffName, validateQrToken, clockIn, checkTodayStatus]);
+
+            // QR表示（店舗端末用）- 5分ごと自動更新
+            const startQrDisplay = useCallback(async (storeId) => {
+                setQrDisplayStore(storeId);
+                setShowQrDisplay(true);
+                const data = await getQrToken(storeId);
+                setQrDisplayData(data);
+            }, [getQrToken]);
+
+            useEffect(() => {
+                if (!showQrDisplay || !qrDisplayStore) return;
+                const interval = setInterval(async () => {
+                    const data = await generateQrToken(qrDisplayStore);
+                    setQrDisplayData(data);
+                }, 4.5 * 60 * 1000); // 4.5分ごとに新しいトークン
+                return () => clearInterval(interval);
+            }, [showQrDisplay, qrDisplayStore, generateQrToken]);
+
+            // 月別フィルタ済み記録
+            const monthRecords = useMemo(() => {
+                return records.filter(r => r.date && r.date.startsWith(viewMonth));
+            }, [records, viewMonth]);
+
+            // 月の合計労働時間
+            const monthTotalMinutes = useMemo(() => {
+                return monthRecords.reduce((s, r) => s + (r.workMinutes || 0), 0);
+            }, [monthRecords]);
+
+            const formatMinutes = (m) => Math.floor(m / 60) + '時間' + (m % 60) + '分';
+            const getStoreName = (id) => { const s = stores.find(st => st.id === id); return s ? s.name : id; };
+
+            const changeMonth = (d) => {
+                const dt = new Date(viewMonth + '-01');
+                dt.setMonth(dt.getMonth() + d);
+                setViewMonth(dt.toISOString().slice(0, 7));
+            };
+
+            const isClockedIn = todayRecord && todayRecord.clockIn && !todayRecord.clockOut;
+            const isClockedOut = todayRecord && todayRecord.clockOut;
+
+            return (
+                <div className="space-y-5 md:space-y-6 animate-fade-in">
+                    <SectionHeader title="勤怠管理" subtitle="ATTENDANCE" icon="clock">
+                        <div className="flex items-center gap-2">
+                            <button onClick={() => { checkTodayStatus(staffId); fetchRecords({ month: viewMonth }); }} disabled={loading}
+                                className="flex items-center px-3 py-2 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-xl text-xs font-medium transition-all active:scale-95 disabled:opacity-50">
+                                <Icon name="refresh-cw" size={14} className={`mr-1 ${loading ? 'animate-spin' : ''}`} />最新取得
+                            </button>
+                        </div>
+                    </SectionHeader>
+
+                    {/* タブ */}
+                    <div className="flex items-center gap-1 bg-slate-100 rounded-xl p-1">
+                        {[
+                            { id: 'clock', label: '打刻', icon: 'log-in' },
+                            { id: 'history', label: '勤怠履歴', icon: 'calendar' },
+                            { id: 'qr', label: 'QR表示', icon: 'qr-code' },
+                        ].map(t => (
+                            <button key={t.id} onClick={() => setAttTab(t.id)}
+                                className={`flex-1 flex items-center justify-center gap-1 px-3 py-2 rounded-lg text-xs font-semibold transition-all ${attTab === t.id ? 'bg-white text-sise-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+                                <Icon name={t.icon} size={13} />{t.label}
+                            </button>
+                        ))}
+                    </div>
+
+                    {/* ===== 打刻タブ ===== */}
+                    {attTab === 'clock' && (
+                        <div className="space-y-4">
+                            {/* 今日のステータス */}
+                            <Card className={isClockedIn ? '!border-green-300 !bg-green-50/30' : isClockedOut ? '!border-blue-300 !bg-blue-50/30' : ''}>
+                                <div className="text-center py-4">
+                                    <p className="text-xs text-slate-400 font-medium mb-1">{new Date().toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'short' })}</p>
+                                    <p className="text-sm font-bold text-slate-600 mb-3">{staffName || 'ゲスト'}</p>
+
+                                    {!todayRecord && !isClockedIn && (
+                                        <div className="space-y-3">
+                                            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-100 text-slate-500 text-sm font-medium">
+                                                <Icon name="clock" size={16} /> 未出勤
+                                            </div>
+                                            {/* GPS チェック */}
+                                            <div>
+                                                <button onClick={checkGPS} disabled={gpsStatus?.checking}
+                                                    className="px-5 py-3 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl text-sm font-bold transition-all active:scale-95 disabled:opacity-50">
+                                                    <Icon name="map-pin" size={16} className="inline mr-1.5 -mt-0.5" />
+                                                    {gpsStatus?.checking ? 'GPS確認中...' : '位置情報を確認'}
+                                                </button>
+                                            </div>
+                                            {gpsStatus && !gpsStatus.checking && !gpsStatus.error && (
+                                                <div className={`inline-block px-4 py-2 rounded-xl text-xs font-bold ${gpsStatus.ok ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                                                    <Icon name={gpsStatus.ok ? 'check-circle' : 'x-circle'} size={14} className="inline mr-1 -mt-0.5" />
+                                                    {gpsStatus.ok
+                                                        ? `${gpsStatus.store.name}から${gpsStatus.dist}m（範囲内）`
+                                                        : `最寄り店舗: ${gpsStatus.store.name}（${gpsStatus.dist}m — 範囲外）`
+                                                    }
+                                                    {gpsStatus.accuracy && <span className="ml-1 text-[10px] opacity-60">精度: {Math.round(gpsStatus.accuracy)}m</span>}
+                                                </div>
+                                            )}
+                                            {gpsStatus?.error && (
+                                                <p className="text-xs text-red-500 font-medium">{gpsStatus.error}</p>
+                                            )}
+                                            {/* 出勤ボタン */}
+                                            <div className="flex items-center justify-center gap-3 pt-2">
+                                                <button onClick={() => handleClockIn('gps')}
+                                                    disabled={saving || !gpsStatus?.ok}
+                                                    className="px-8 py-4 rounded-2xl text-white font-extrabold text-base shadow-lg transition-all active:scale-95 disabled:opacity-40"
+                                                    style={{background: gpsStatus?.ok ? 'linear-gradient(135deg, #0d9488, #14b8a6)' : '#94a3b8'}}>
+                                                    <Icon name="log-in" size={20} className="inline mr-2 -mt-0.5" />GPS出勤
+                                                </button>
+                                                <button onClick={() => setShowQrScanner(true)}
+                                                    className="px-6 py-4 rounded-2xl bg-white border-2 border-slate-200 text-slate-700 font-extrabold text-base shadow-sm hover:border-sise-300 transition-all active:scale-95">
+                                                    <Icon name="qr-code" size={20} className="inline mr-2 -mt-0.5" />QR出勤
+                                                </button>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {isClockedIn && (
+                                        <div className="space-y-3">
+                                            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-green-100 text-green-700 text-sm font-bold">
+                                                <div className="w-2.5 h-2.5 rounded-full bg-green-500 animate-pulse" /> 勤務中
+                                            </div>
+                                            <p className="text-lg font-extrabold text-slate-800">出勤: {todayRecord.clockIn}</p>
+                                            <button onClick={handleClockOut} disabled={saving}
+                                                className="px-8 py-4 rounded-2xl text-white font-extrabold text-base shadow-lg transition-all active:scale-95 disabled:opacity-50"
+                                                style={{background: 'linear-gradient(135deg, #ef4444, #f87171)'}}>
+                                                <Icon name="log-out" size={20} className="inline mr-2 -mt-0.5" />退勤する
+                                            </button>
+                                        </div>
+                                    )}
+
+                                    {isClockedOut && (
+                                        <div className="space-y-2">
+                                            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-100 text-blue-700 text-sm font-bold">
+                                                <Icon name="check-circle" size={16} /> 勤務完了
+                                            </div>
+                                            <div className="flex items-center justify-center gap-6 text-slate-700">
+                                                <div className="text-center">
+                                                    <p className="text-[10px] text-slate-400">出勤</p>
+                                                    <p className="text-lg font-extrabold">{todayRecord.clockIn}</p>
+                                                </div>
+                                                <Icon name="arrow-right" size={16} className="text-slate-300" />
+                                                <div className="text-center">
+                                                    <p className="text-[10px] text-slate-400">退勤</p>
+                                                    <p className="text-lg font-extrabold">{todayRecord.clockOut}</p>
+                                                </div>
+                                                <div className="text-center pl-3 border-l border-slate-200">
+                                                    <p className="text-[10px] text-slate-400">勤務時間</p>
+                                                    <p className="text-lg font-extrabold text-sise-600">{formatMinutes(todayRecord.workMinutes || 0)}</p>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            </Card>
+
+                            {/* QRスキャンモーダル */}
+                            {showQrScanner && (
+                                <Card className="animate-scale-in !border-sise-300">
+                                    <h4 className="font-bold text-slate-800 mb-3 flex items-center">
+                                        <Icon name="qr-code" size={18} className="mr-2 text-sise-500" />
+                                        QRコード出勤
+                                    </h4>
+                                    <p className="text-xs text-slate-500 mb-3">店舗端末に表示されたQRコードの文字列を入力してください</p>
+                                    <div className="flex gap-2">
+                                        <input type="text" value={qrInput} onChange={e => setQrInput(e.target.value)}
+                                            placeholder="QRコード（qr_...）" className="flex-1 px-3 py-2.5 border border-slate-200 rounded-xl text-sm outline-none" autoFocus />
+                                        <button onClick={() => handleQrClockIn(qrInput)} disabled={!qrInput || saving}
+                                            className="px-4 py-2.5 btn-gradient rounded-xl text-sm font-medium disabled:opacity-50">出勤</button>
+                                    </div>
+                                    <div className="flex justify-end mt-2">
+                                        <button onClick={() => { setShowQrScanner(false); setQrInput(''); }}
+                                            className="text-xs text-slate-500 hover:text-slate-700">キャンセル</button>
+                                    </div>
+                                </Card>
+                            )}
+                        </div>
+                    )}
+
+                    {/* ===== 勤怠履歴タブ ===== */}
+                    {attTab === 'history' && (
+                        <div className="space-y-4">
+                            {/* 月間サマリー */}
+                            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
+                                <KpiCard title="出勤日数" value={monthRecords.filter(r => r.clockIn).length + '日'} icon="calendar"
+                                    gradientFrom="from-sise-400" gradientTo="to-sise-600" />
+                                <KpiCard title="総労働時間" value={formatMinutes(monthTotalMinutes)} icon="clock"
+                                    gradientFrom="from-blue-400" gradientTo="to-blue-600" />
+                                <KpiCard title="平均勤務" value={monthRecords.length > 0 ? formatMinutes(Math.round(monthTotalMinutes / monthRecords.filter(r => r.workMinutes > 0).length) || 0) : '-'} icon="bar-chart-2"
+                                    gradientFrom="from-emerald-400" gradientTo="to-emerald-600" />
+                                <KpiCard title="退勤忘れ" value={monthRecords.filter(r => r.clockIn && !r.clockOut).length + '件'} icon="alert-triangle"
+                                    gradientFrom={monthRecords.filter(r => r.clockIn && !r.clockOut).length > 0 ? 'from-red-400' : 'from-slate-400'}
+                                    gradientTo={monthRecords.filter(r => r.clockIn && !r.clockOut).length > 0 ? 'to-red-600' : 'to-slate-500'} />
+                            </div>
+
+                            {/* 月ナビ */}
+                            <Card>
+                                <div className="flex items-center justify-between mb-4">
+                                    <button onClick={() => changeMonth(-1)} className="p-2 rounded-xl hover:bg-sise-50 text-slate-500"><Icon name="chevron-left" size={20} /></button>
+                                    <h3 className="text-lg font-bold text-slate-800">{new Date(viewMonth + '-01').toLocaleDateString('ja-JP', { year: 'numeric', month: 'long' })}</h3>
+                                    <button onClick={() => changeMonth(1)} className="p-2 rounded-xl hover:bg-sise-50 text-slate-500"><Icon name="chevron-right" size={20} /></button>
+                                </div>
+                                <div className="overflow-x-auto">
+                                    <table className="w-full text-xs">
+                                        <thead>
+                                            <tr className="border-b-2 border-slate-200">
+                                                <th className="text-left py-2.5 px-2 text-slate-500 font-semibold">日付</th>
+                                                <th className="text-left py-2.5 px-2 text-slate-500 font-semibold">店舗</th>
+                                                <th className="text-center py-2.5 px-2 text-green-600 font-semibold">出勤</th>
+                                                <th className="text-center py-2.5 px-2 text-red-500 font-semibold">退勤</th>
+                                                <th className="text-center py-2.5 px-2 text-sise-600 font-semibold">勤務時間</th>
+                                                <th className="text-center py-2.5 px-2 text-slate-400 font-semibold">方法</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {monthRecords.length === 0 && (
+                                                <tr><td colSpan="6" className="text-center py-8 text-slate-400">記録がありません</td></tr>
+                                            )}
+                                            {monthRecords.map(r => (
+                                                <tr key={r.id} className="border-b border-slate-50 hover:bg-slate-50/50">
+                                                    <td className="py-2.5 px-2 font-bold text-slate-700">{r.date}</td>
+                                                    <td className="py-2.5 px-2 text-slate-600">{getStoreName(r.storeId)}</td>
+                                                    <td className="py-2.5 px-2 text-center font-bold text-green-600">{r.clockIn || '-'}</td>
+                                                    <td className="py-2.5 px-2 text-center font-bold text-red-500">{r.clockOut || <span className="text-amber-500 text-[10px]">未退勤</span>}</td>
+                                                    <td className="py-2.5 px-2 text-center font-bold text-sise-700">{r.workMinutes > 0 ? formatMinutes(r.workMinutes) : '-'}</td>
+                                                    <td className="py-2.5 px-2 text-center">
+                                                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${r.method === 'qr' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>
+                                                            {r.method === 'qr' ? 'QR' : 'GPS'}
+                                                        </span>
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </Card>
+                        </div>
+                    )}
+
+                    {/* ===== QR表示タブ（店舗端末用） ===== */}
+                    {attTab === 'qr' && (
+                        <div className="space-y-4">
+                            <Card>
+                                <h4 className="font-bold text-slate-800 mb-3 flex items-center">
+                                    <Icon name="qr-code" size={18} className="mr-2 text-sise-500" />
+                                    店舗QRコード表示（この画面を店舗端末に表示）
+                                </h4>
+                                <p className="text-xs text-slate-500 mb-4">スタッフがこのQRコードを読み取ると出勤を記録できます。5分ごとに自動更新されます。</p>
+                                {!showQrDisplay ? (
+                                    <div className="space-y-2">
+                                        <p className="text-xs text-slate-600 font-medium">表示する店舗を選択:</p>
+                                        <div className="flex flex-wrap gap-2">
+                                            {stores.map(s => (
+                                                <button key={s.id} onClick={() => startQrDisplay(s.id)}
+                                                    className="px-4 py-2.5 bg-sise-50 hover:bg-sise-100 border border-sise-200 text-sise-700 rounded-xl text-sm font-bold transition-all active:scale-95">
+                                                    <Icon name="map-pin" size={14} className="inline mr-1.5 -mt-0.5" />{s.name}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="text-center py-6">
+                                        <p className="text-xs text-slate-400 mb-2">{getStoreName(qrDisplayStore)}</p>
+                                        {qrDisplayData?.token ? (
+                                            <>
+                                                <div className="inline-block p-6 bg-white rounded-3xl border-2 border-sise-200 shadow-lg mb-3">
+                                                    {/* QRコードはテキストで表示（ライブラリ不要） */}
+                                                    <div className="bg-slate-900 text-white font-mono text-lg px-6 py-4 rounded-xl break-all select-all"
+                                                        style={{wordBreak:'break-all', letterSpacing: '1px'}}>
+                                                        {qrDisplayData.token}
+                                                    </div>
+                                                </div>
+                                                <p className="text-xs text-slate-400">
+                                                    有効期限: {new Date(qrDisplayData.expiresAt).toLocaleTimeString('ja-JP')}
+                                                    <span className="ml-2 text-[10px]">（5分ごとに自動更新）</span>
+                                                </p>
+                                                <p className="text-[11px] text-sise-600 font-medium mt-2">スタッフはこのコードを「QR出勤」画面で入力してください</p>
+                                            </>
+                                        ) : (
+                                            <p className="text-sm text-slate-500">QRトークンを生成中...</p>
+                                        )}
+                                        <button onClick={() => { setShowQrDisplay(false); setQrDisplayData(null); }}
+                                            className="mt-4 px-4 py-2 text-sm text-slate-500 hover:text-slate-700">表示を終了</button>
+                                    </div>
+                                )}
+                            </Card>
+
+                            {/* 店舗座標設定 */}
+                            {(!currentAccess || currentAccess.role === 'manager' || currentAccess.role === 'headquarter') && (
+                                <Card>
+                                    <h4 className="font-bold text-slate-800 mb-3 flex items-center">
+                                        <Icon name="map-pin" size={18} className="mr-2 text-sise-500" />
+                                        店舗GPS座標設定
+                                    </h4>
+                                    <p className="text-xs text-slate-400 mb-3">各店舗の緯度・経度を設定します。「現在地を取得」ボタンで店舗にいる時に設定できます。</p>
+                                    <div className="space-y-3">
+                                        {stores.map(s => (
+                                            <StoreCoordinateEditor key={s.id} store={s} onSave={updateStoreCoordinates} />
+                                        ))}
+                                    </div>
+                                </Card>
+                            )}
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        // 店舗座標エディター小コンポーネント
+        const StoreCoordinateEditor = ({ store, onSave }) => {
+            const [lat, setLat] = useState(store.lat ? String(store.lat) : '');
+            const [lng, setLng] = useState(store.lng ? String(store.lng) : '');
+            const [saving, setSaving] = useState(false);
+
+            const handleGetCurrentLocation = async () => {
+                try {
+                    const pos = await getGPSPosition();
+                    setLat(String(pos.lat));
+                    setLng(String(pos.lng));
+                    showToast(`現在地を取得しました（精度: ${Math.round(pos.accuracy)}m）`, 'success');
+                } catch (e) { showToast(e.message, 'error'); }
+            };
+
+            const handleSave = async () => {
+                if (!lat || !lng) return;
+                setSaving(true);
+                await onSave(store.id, parseFloat(lat), parseFloat(lng));
+                setSaving(false);
+            };
+
+            return (
+                <div className="flex items-center gap-2 p-3 bg-slate-50 rounded-xl border border-slate-200">
+                    <span className="text-xs font-bold text-slate-700 w-20 shrink-0">{store.name}</span>
+                    <input type="text" value={lat} onChange={e => setLat(e.target.value)}
+                        placeholder="緯度" className="flex-1 min-w-0 px-2 py-1.5 border border-slate-200 rounded-lg text-xs outline-none" />
+                    <input type="text" value={lng} onChange={e => setLng(e.target.value)}
+                        placeholder="経度" className="flex-1 min-w-0 px-2 py-1.5 border border-slate-200 rounded-lg text-xs outline-none" />
+                    <button onClick={handleGetCurrentLocation} className="text-blue-500 hover:text-blue-700 shrink-0" title="現在地を取得">
+                        <Icon name="crosshair" size={16} />
+                    </button>
+                    <button onClick={handleSave} disabled={!lat || !lng || saving}
+                        className="px-3 py-1.5 btn-gradient rounded-lg text-[11px] font-medium disabled:opacity-50 shrink-0">{saving ? '...' : '保存'}</button>
+                    {store.lat && store.lng && <Icon name="check-circle" size={14} className="text-green-500 shrink-0" />}
                 </div>
             );
         };
@@ -16599,6 +17180,8 @@
             const counselingHook = useCounselingData();
             // LINEチャット管理
             const lineChatHook = useLineChat();
+            // 勤怠管理
+            const attendanceHook = useAttendance();
 
             // ダークモード切り替え
             useEffect(() => {
@@ -16676,6 +17259,7 @@
                 { id: 'reports', label: '日報一覧', icon: 'clipboard-list', mobileLabel: '日報' },
                 { id: 'members', label: '会員管理', icon: 'users', mobileLabel: '会員' },
                 { id: 'cashbook', label: '出納帳', icon: 'book-open', mobileLabel: '出納帳' },
+                { id: 'attendance', label: '勤怠管理', icon: 'clock', mobileLabel: '勤怠' },
                 { id: 'usage', label: '利用管理', icon: 'clipboard-check', mobileLabel: '利用' },
                 { id: 'tickets', label: '回数券', icon: 'ticket', mobileLabel: '回数券' },
                 { id: 'counseling', label: 'カウンセリング', icon: 'heart-handshake', mobileLabel: '案内' },
@@ -16703,6 +17287,8 @@
                         return <MemberManagementView memberData={memberData} refreshSquareData={refreshSquareData} operateSubscription={operateSubscription} activeStoreId={activeStoreId} manualMembersHook={manualMembersHook} />;
                     case 'cashbook':
                         return <CashbookView cashbookHook={cashbookHook} memberData={memberData} manualMembersHook={manualMembersHook} activeStoreId={activeStoreId} squareData={memberData} menuItemsHook={menuItemsHook} />;
+                    case 'attendance':
+                        return <AttendanceView attendanceHook={attendanceHook} activeStoreId={activeStoreId} memberData={memberData} />;
                     case 'usage':
                         return <MemberUsageView memberData={memberData} usageHook={usageHook} />;
                     case 'tickets':
