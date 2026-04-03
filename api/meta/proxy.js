@@ -34,6 +34,14 @@ export default async function handler(req, res) {
     metaPath = path;
   }
 
+  // /api/meta/config → 設定情報を返す
+  if (metaPath === 'config') {
+    return res.status(200).json({
+      configured: !!(token && adAccountId && token !== 'YOUR_META_ACCESS_TOKEN'),
+      adAccountId: adAccountId ? `act_${adAccountId.replace('act_', '')}` : null
+    });
+  }
+
   if (!metaPath) {
     return res.status(400).json({ error: 'Missing path parameter' });
   }
