@@ -4,6 +4,9 @@
   "buildCommand": "",
   "outputDirectory": "public",
   "rewrites": [
+    { "source": "/api/db/stores", "destination": "/api/db/stores" },
+    { "source": "/api/db/dash-config", "destination": "/api/db/dash-config" },
+    { "source": "/api/db/reports", "destination": "/api/db/reports" },
     { "source": "/api/claude/advice", "destination": "/api/claude/advice" },
     { "source": "/api/photos/upload", "destination": "/api/photos" },
     { "source": "/api/photos/list", "destination": "/api/photos" },
