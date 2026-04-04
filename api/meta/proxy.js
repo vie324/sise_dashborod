@@ -18,13 +18,7 @@ export default async function handler(req, res) {
 
   const token = process.env.META_ACCESS_TOKEN;
   const adAccountId = process.env.META_AD_ACCOUNT_ID;
-
-  if (!token || !adAccountId || token === 'YOUR_META_ACCESS_TOKEN') {
-    return res.status(500).json({
-      error: 'Meta Ads API not configured',
-      message: 'Set META_ACCESS_TOKEN and META_AD_ACCOUNT_ID in Vercel environment variables.'
-    });
-  }
+  const isConfigured = !!(token && adAccountId && token !== 'YOUR_META_ACCESS_TOKEN');
 
   const { path } = req.query;
   let metaPath = '';
@@ -34,11 +28,18 @@ export default async function handler(req, res) {
     metaPath = path;
   }
 
-  // /api/meta/config → 設定情報を返す
+  // /api/meta/config → 設定情報を返す (未設定でもエラーにしない)
   if (metaPath === 'config') {
     return res.status(200).json({
-      configured: !!(token && adAccountId && token !== 'YOUR_META_ACCESS_TOKEN'),
+      configured: isConfigured,
       adAccountId: adAccountId ? `act_${adAccountId.replace('act_', '')}` : null
+    });
+  }
+
+  if (!isConfigured) {
+    return res.status(500).json({
+      error: 'Meta Ads API not configured',
+      message: 'Set META_ACCESS_TOKEN and META_AD_ACCOUNT_ID in Vercel environment variables.'
     });
   }
 
