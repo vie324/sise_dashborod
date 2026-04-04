@@ -1284,72 +1284,85 @@
             }
         };
 
+        // ============================================================
+        // Supabase API ヘルパー
+        // ============================================================
+        const DB_API_URL = '/api/db';
+
+        const dbGet = async (table, params = {}) => {
+            try {
+                const qs = new URLSearchParams({ table, ...params }).toString();
+                const resp = await fetch(DB_API_URL + '?' + qs);
+                return await resp.json();
+            } catch (e) {
+                console.warn('DB GET エラー [' + table + ']:', e);
+                return null;
+            }
+        };
+
+        const dbPost = async (table, body) => {
+            try {
+                const resp = await fetch(DB_API_URL + '?table=' + table, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                return await resp.json();
+            } catch (e) {
+                console.warn('DB POST エラー [' + table + ']:', e);
+                return null;
+            }
+        };
+
+        // ============================================================
+        // スタッフ管理 → Supabase
+        // ============================================================
         const fetchStaffFromGas = async (includeInactive = true) => {
-            const gasUrl = localStorage.getItem('sise_unified_gas_url');
-            if (!gasUrl) return null;
-            try {
-                const resp = await fetch(gasUrl + '?type=staff&includeInactive=' + (includeInactive ? 'true' : 'false'));
-                const data = await resp.json();
-                return data.staff || [];
-            } catch (e) {
-                console.warn('GASスタッフ取得エラー:', e);
-                return null;
-            }
+            const data = await dbGet('staff', { includeInactive: includeInactive ? 'true' : 'false' });
+            return data ? (data.staff || []) : null;
         };
 
-        const saveStaffToGas = async (staffList) => gasPostRequest({ type: 'staff', action: 'saveStaff', staff: staffList });
-        const updateStaffGas = async (staffId, updates) => gasPostRequest({ type: 'staff', action: 'updateStaff', staffId, updates });
-        const softDeleteStaffGas = async (staffId) => gasPostRequest({ type: 'staff', action: 'deleteStaff', staffId });
-        const restoreStaffGas = async (staffId) => gasPostRequest({ type: 'staff', action: 'restoreStaff', staffId });
+        const saveStaffToGas = async (staffList) => dbPost('staff', { action: 'saveStaff', staff: staffList });
+        const updateStaffGas = async (staffId, updates) => dbPost('staff', { action: 'updateStaff', staffId, updates });
+        const softDeleteStaffGas = async (staffId) => dbPost('staff', { action: 'deleteStaff', staffId });
+        const restoreStaffGas = async (staffId) => dbPost('staff', { action: 'restoreStaff', staffId });
 
-        // GASスプレッドシート経由の店舗管理
+        // ============================================================
+        // 店舗管理 → Supabase
+        // ============================================================
         const fetchStoresFromGas = async (includeInactive = true) => {
-            const gasUrl = localStorage.getItem('sise_unified_gas_url');
-            if (!gasUrl) return null;
-            try {
-                const resp = await fetch(gasUrl + '?type=storeManage&includeInactive=' + (includeInactive ? 'true' : 'false'));
-                const data = await resp.json();
-                return data.stores || [];
-            } catch (e) {
-                console.warn('GAS店舗取得エラー:', e);
-                return null;
-            }
+            const data = await dbGet('stores', { includeInactive: includeInactive ? 'true' : 'false' });
+            return data ? (data.stores || []) : null;
         };
 
-        const addStoreToGas = async (store) => gasPostRequest({ type: 'storeManage', action: 'addStore', store });
-        const updateStoreInGas = async (store) => gasPostRequest({ type: 'storeManage', action: 'updateStore', store });
-        const softDeleteStoreGas = async (storeId) => gasPostRequest({ type: 'storeManage', action: 'deleteStore', storeId });
-        const restoreStoreGas = async (storeId) => gasPostRequest({ type: 'storeManage', action: 'restoreStore', storeId });
+        const addStoreToGas = async (store) => dbPost('stores', { action: 'addStore', store });
+        const updateStoreInGas = async (store) => dbPost('stores', { action: 'updateStore', store });
+        const softDeleteStoreGas = async (storeId) => dbPost('stores', { action: 'deleteStore', storeId });
+        const restoreStoreGas = async (storeId) => dbPost('stores', { action: 'restoreStore', storeId });
 
-        // GASダッシュボード設定（キー・バリュー）
+        // ============================================================
+        // ダッシュボード設定 → Supabase
+        // ============================================================
         const fetchDashConfig = async (key) => {
-            const gasUrl = localStorage.getItem('sise_unified_gas_url');
-            if (!gasUrl) return null;
-            try {
-                const url = key ? gasUrl + '?type=dashConfig&key=' + encodeURIComponent(key) : gasUrl + '?type=dashConfig';
-                const resp = await fetch(url);
-                const data = await resp.json();
-                return key ? data.value : (data.config || {});
-            } catch (e) { return null; }
+            const data = await dbGet('dashConfig', key ? { key } : {});
+            if (!data) return null;
+            return key ? data.value : (data.config || {});
         };
 
-        const saveDashConfig = async (key, value) => gasPostRequest({ type: 'dashConfig', action: 'set', key, value });
-        const saveDashConfigBulk = async (entries) => gasPostRequest({ type: 'dashConfig', action: 'setBulk', entries });
+        const saveDashConfig = async (key, value) => dbPost('dashConfig', { action: 'set', key, value });
+        const saveDashConfigBulk = async (entries) => dbPost('dashConfig', { action: 'setBulk', entries });
 
-        // GAS HPBデータ
+        // ============================================================
+        // HPBデータ → Supabase
+        // ============================================================
         const fetchHpbFromGas = async () => {
-            const gasUrl = localStorage.getItem('sise_unified_gas_url');
-            if (!gasUrl) return null;
-            try {
-                const resp = await fetch(gasUrl + '?type=hpb');
-                const data = await resp.json();
-                return data.monthly || null;
-            } catch (e) { return null; }
+            const data = await dbGet('hpb');
+            return data ? (data.monthly || null) : null;
         };
 
-        const upsertHpbMonthGas = async (entry) => gasPostRequest({ type: 'hpb', action: 'upsert', entry });
-        const deleteHpbMonthGas = async (yearMonth) => gasPostRequest({ type: 'hpb', action: 'delete', yearMonth });
-        const saveHpbAllGas = async (monthly) => gasPostRequest({ type: 'hpb', action: 'saveAll', monthly });
+        const upsertHpbMonthGas = async (entry) => dbPost('hpb', { action: 'upsert', entry });
+        const deleteHpbMonthGas = async (yearMonth) => dbPost('hpb', { action: 'delete', yearMonth });
+        const saveHpbAllGas = async (monthly) => dbPost('hpb', { action: 'saveAll', monthly });
 
         // パスワード検証（URLアクセス時のスタッフ照合）
         const verifyStaffPassword = async (staffId, password) => {
@@ -3458,11 +3471,7 @@
             // 店舗座標更新
             const updateStoreCoordinates = useCallback(async (storeId, lat, lng) => {
                 try {
-                    const res = await fetch(UNIFIED_GAS_URL, {
-                        method: 'POST', headers: { 'Content-Type': 'text/plain' },
-                        body: JSON.stringify({ type: 'storeManage', action: 'updateCoordinates', storeId, lat, lng })
-                    });
-                    const data = await res.json();
+                    const data = await dbPost('stores', { action: 'updateCoordinates', storeId, lat, lng });
                     if (data.success) showToast('店舗座標を保存しました', 'success');
                     else showToast(data.error || '保存失敗', 'error');
                     return data;
