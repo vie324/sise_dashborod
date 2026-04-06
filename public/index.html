@@ -4934,7 +4934,7 @@
                                     <select value={newManualMember.storeName} onChange={e => setNewManualMember(p => ({...p, storeName: e.target.value}))}
                                         className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm outline-none bg-white">
                                         <option value="">-- 店舗を選択 --</option>
-                                        {(stores || []).filter(s => s.status !== 'inactive').map(s => (
+                                        {(stores || []).filter(s => s.status !== 'inactive').filter(s => !currentAccess || currentAccess.storeIds.includes(s.id)).map(s => (
                                             <option key={s.id} value={s.name}>{s.name}</option>
                                         ))}
                                     </select>
@@ -6963,7 +6963,7 @@
             const { records, loading, saving, todayRecord, fetchRecords, checkTodayStatus,
                     clockIn, clockOut, generateQrToken, getQrToken, validateQrToken, updateStoreCoordinates } = attendanceHook;
             // serverStores（GAS storeManage由来、lat/lng含む）を使用
-            const stores = serverStores.filter(s => s.status !== 'inactive');
+            const stores = serverStores.filter(s => s.status !== 'inactive').filter(s => !currentAccess || currentAccess.storeIds.includes(s.id));
             const [viewMonth, setViewMonth] = useState(new Date().toISOString().slice(0, 7));
             const [gpsStatus, setGpsStatus] = useState(null); // null | 'checking' | {ok, dist, lat, lng, store} | {error}
             const [showQrScanner, setShowQrScanner] = useState(false);
@@ -8643,7 +8643,8 @@
             const { entries: rawEntries, addEntry: rawAddEntry, updateEntry, deleteEntry, saving, loading,
                     dailyCloses, auditLogs, lastSynced, syncError, closeDailyBooks, isDayClosed, refresh } = cashbookHook;
             const stores = memberData?.stores || [];
-            const activeStores = stores.filter(s => s.status !== 'inactive');
+            const allActiveStores = stores.filter(s => s.status !== 'inactive');
+            const activeStores = currentAccess ? allActiveStores.filter(s => currentAccess.storeIds.includes(s.id)) : allActiveStores;
 
             // 店舗フィルタ
             const [filterStore, setFilterStore] = useState('all');
@@ -8840,6 +8841,9 @@
 
             const handleSubmit = () => {
                 if (!formData.amount || parseInt(formData.amount) <= 0) return;
+                if (currentAccess && formData.store && !currentAccess.storeIds.includes(formData.store)) {
+                    showToast('この店舗への入力権限がありません', 'error'); return;
+                }
                 const finalAmount = formData.type === 'income' ? effectiveAmount : parseInt(formData.amount);
                 const discount = parseInt(formData.pointDiscount) || 0;
                 const descWithDiscount = discount > 0
@@ -10408,9 +10412,9 @@
                     </div>
 
                     {/* 店舗選択 */}
-                    {lineConfig.stores.length > 1 && (
+                    {(() => { const ls = currentAccess ? lineConfig.stores.filter(s => currentAccess.storeIds.includes(s.id)) : lineConfig.stores; return ls.length > 1 ? (
                         <div className="flex gap-2 mb-4 overflow-x-auto pb-1" style={{scrollbarWidth: 'none'}}>
-                            {lineConfig.stores.map(store => (
+                            {ls.map(store => (
                                 <button
                                     key={store.id}
                                     onClick={() => setLineStoreId(store.id)}
@@ -10424,7 +10428,7 @@
                                 </button>
                             ))}
                         </div>
-                    )}
+                    ) : null; })()}
 
                     {/* GAS接続ステータス */}
                     {gasStatus !== 'checking' && (
@@ -13317,9 +13321,10 @@
                 if (!lineChatHook || !lineChatHook.lineConfig?.configured) {
                     alert('LINE連携が設定されていません。設定画面からLINE APIを設定してください。'); return;
                 }
-                if (lineChatHook.lineStoreId) { lineChatHook.fetchThreads(lineChatHook.lineStoreId); }
-                else if (lineChatHook.lineConfig.stores.length > 0) {
-                    const fs = lineChatHook.lineConfig.stores[0].id;
+                const allowedLineStores = currentAccess ? lineChatHook.lineConfig.stores.filter(s => currentAccess.storeIds.includes(s.id)) : lineChatHook.lineConfig.stores;
+                if (lineChatHook.lineStoreId && (!currentAccess || currentAccess.storeIds.includes(lineChatHook.lineStoreId))) { lineChatHook.fetchThreads(lineChatHook.lineStoreId); }
+                else if (allowedLineStores.length > 0) {
+                    const fs = allowedLineStores[0].id;
                     lineChatHook.setLineStoreId(fs); lineChatHook.fetchThreads(fs);
                 }
                 setLineSelectedUser(null); setLineSearchQuery(''); setLineSendStatus('');
@@ -14439,14 +14444,14 @@
                                     </div>
                                     <button onClick={()=>setLineModalOpen(false)} className="text-white/80 hover:text-white text-xl">&times;</button>
                                 </div>
-                                {lineChatHook && lineChatHook.lineConfig.stores.length > 1 && (
+                                {lineChatHook && (() => { const ls = currentAccess ? lineChatHook.lineConfig.stores.filter(s => currentAccess.storeIds.includes(s.id)) : lineChatHook.lineConfig.stores; return ls.length > 1 ? (
                                     <div className="px-4 pt-3 flex gap-2 flex-wrap">
-                                        {lineChatHook.lineConfig.stores.map(s=>(
+                                        {ls.map(s=>(
                                             <button key={s.id} onClick={()=>{lineChatHook.setLineStoreId(s.id);lineChatHook.fetchThreads(s.id);setLineSelectedUser(null);}}
                                                 className={`text-xs px-3 py-1 rounded-full border transition ${lineChatHook.lineStoreId===s.id?'bg-green-600 text-white border-green-600':'bg-white text-gray-600 border-gray-300'}`}>{s.name}</button>
                                         ))}
                                     </div>
-                                )}
+                                ) : null; })()}
                                 <div className="px-4 pt-3">
                                     <input type="text" value={lineSearchQuery} onChange={e=>setLineSearchQuery(e.target.value)} placeholder="ユーザー名で検索..."
                                         className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 outline-none"/>
@@ -14796,11 +14801,12 @@
                     alert('LINE連携が設定されていません。設定画面からLINE APIを設定してください。');
                     return;
                 }
+                const allowedLineStores = currentAccess ? lineChatHook.lineConfig.stores.filter(s => currentAccess.storeIds.includes(s.id)) : lineChatHook.lineConfig.stores;
                 // 初回はスレッド取得
-                if (lineChatHook.lineStoreId) {
+                if (lineChatHook.lineStoreId && (!currentAccess || currentAccess.storeIds.includes(lineChatHook.lineStoreId))) {
                     lineChatHook.fetchThreads(lineChatHook.lineStoreId);
-                } else if (lineChatHook.lineConfig.stores.length > 0) {
-                    const firstStore = lineChatHook.lineConfig.stores[0].id;
+                } else if (allowedLineStores.length > 0) {
+                    const firstStore = allowedLineStores[0].id;
                     lineChatHook.setLineStoreId(firstStore);
                     lineChatHook.fetchThreads(firstStore);
                 }
@@ -15238,16 +15244,16 @@
                                 </div>
 
                                 {/* Store Selector */}
-                                {lineChatHook && lineChatHook.lineConfig.stores.length > 1 && (
+                                {lineChatHook && (() => { const ls = currentAccess ? lineChatHook.lineConfig.stores.filter(s => currentAccess.storeIds.includes(s.id)) : lineChatHook.lineConfig.stores; return ls.length > 1 ? (
                                     <div className="px-4 pt-3 flex gap-2 flex-wrap">
-                                        {lineChatHook.lineConfig.stores.map(s => (
+                                        {ls.map(s => (
                                             <button key={s.id} onClick={() => { lineChatHook.setLineStoreId(s.id); lineChatHook.fetchThreads(s.id); setLineSelectedUser(null); }}
                                                 className={`text-xs px-3 py-1 rounded-full border transition ${lineChatHook.lineStoreId === s.id ? 'bg-green-600 text-white border-green-600' : 'bg-white text-gray-600 border-gray-300 hover:border-green-400'}`}>
                                                 {s.name}
                                             </button>
                                         ))}
                                     </div>
-                                )}
+                                ) : null; })()}
 
                                 {/* Search */}
                                 <div className="px-4 pt-3">
