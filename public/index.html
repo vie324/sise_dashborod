@@ -15844,6 +15844,29 @@
                 setTimeout(() => setQrCopied(false), 2000);
             };
 
+            // フロー等で selectedCustomer が事前セットされていた場合、自動で concerns をマッピング
+            const initialSyncDone = React.useRef(false);
+            useEffect(() => {
+                if (initialSyncDone.current) return;
+                if (selectedCustomer && selectedCustomer.concerns && selectedCustomer.concerns.length > 0) {
+                    initialSyncDone.current = true;
+                    const mapped = {};
+                    selectedCustomer.concerns.forEach(fc => {
+                        const fcTrim = fc.trim();
+                        if (!fcTrim) return;
+                        CONCERN_ITEMS.forEach(item => {
+                            if (item.formLabels.some(fl => fcTrim.includes(fl) || fl.includes(fcTrim))) {
+                                mapped[item.id] = true;
+                            }
+                        });
+                    });
+                    if (Object.keys(mapped).length > 0) {
+                        setConcerns(mapped);
+                        console.log('[カウンセリング] フローから自動マッピング:', mapped);
+                    }
+                }
+            }, [selectedCustomer]);
+
             // Googleフォームのお悩み箇所をチェック項目にマッピング
             const mapFormConcerns = useCallback((formConcerns) => {
                 const newConcerns = {};
@@ -16227,6 +16250,12 @@
                             />
                         </div>
                         <select
+                            value={selectedCustomer && customers.length > 0
+                                ? (() => {
+                                    const match = customers.find(c => c.name === selectedCustomer.name);
+                                    return match ? match.index + '::' + match.name : '';
+                                })()
+                                : ''}
                             onChange={e => {
                                 if (!e.target.value) return;
                                 const [idx, name] = e.target.value.split('::');
