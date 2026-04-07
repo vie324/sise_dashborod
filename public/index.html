@@ -1208,6 +1208,69 @@
         .cf-flow-chip{font-size:14px;padding:5px 14px}
 
         /* =============================================
+           来店フローナビゲーション
+           ============================================= */
+        .flow-nav-container{min-height:100vh;background:linear-gradient(135deg,#f8faf9 0%,#f0f7f3 100%)}
+        .flow-progress-bar{display:flex;align-items:center;gap:0;padding:12px 16px;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+        .flow-progress-bar::-webkit-scrollbar{display:none}
+        .flow-step-dot{display:flex;flex-direction:column;align-items:center;gap:4px;min-width:48px;cursor:pointer;transition:all .3s}
+        .flow-step-circle{width:32px;height:32px;border-radius:50%;border:2.5px solid #ddd;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;transition:all .3s;background:#fff;color:#bbb;flex-shrink:0;position:relative}
+        .flow-step-dot.active .flow-step-circle{border-color:#33a065;background:#33a065;color:#fff;box-shadow:0 0 0 4px rgba(51,160,101,.15)}
+        .flow-step-dot.done .flow-step-circle{border-color:#55b87f;background:#55b87f;color:#fff}
+        .flow-step-dot.skipped .flow-step-circle{border-color:#cbd5e1;background:#f1f5f9;color:#94a3b8}
+        .flow-step-label{font-size:10px;font-weight:600;color:#94a3b8;text-align:center;white-space:nowrap;transition:color .3s}
+        .flow-step-dot.active .flow-step-label{color:#33a065;font-weight:700}
+        .flow-step-dot.done .flow-step-label{color:#55b87f}
+        .flow-step-connector{width:24px;height:2px;background:#e2e8f0;flex-shrink:0;margin-top:-16px;transition:background .3s}
+        .flow-step-connector.filled{background:#55b87f}
+        .flow-content-card{background:#fff;border-radius:20px;border:1px solid rgba(0,0,0,.06);box-shadow:0 4px 24px rgba(0,0,0,.04);padding:20px;margin:0 12px 12px;animation:flowCardIn .4s ease}
+        @keyframes flowCardIn{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+        .flow-action-bar{position:fixed;bottom:0;left:0;right:0;background:rgba(255,255,255,.95);backdrop-filter:blur(12px);border-top:1px solid rgba(0,0,0,.06);padding:12px 16px;display:flex;gap:10px;z-index:40;padding-bottom:max(12px,env(safe-area-inset-bottom))}
+        .flow-btn{flex:1;padding:14px;border-radius:14px;font-size:14px;font-weight:700;text-align:center;transition:all .2s;border:none;cursor:pointer}
+        .flow-btn-primary{background:linear-gradient(135deg,#33a065,#2d8f5a);color:#fff;box-shadow:0 4px 12px rgba(51,160,101,.25)}
+        .flow-btn-primary:active{transform:scale(.97)}
+        .flow-btn-secondary{background:#f1f5f9;color:#64748b;border:1px solid #e2e8f0}
+        .flow-btn-secondary:active{transform:scale(.97)}
+        .flow-btn-skip{background:transparent;color:#94a3b8;font-weight:600;font-size:13px;flex:0 0 auto;padding:14px 16px}
+        .flow-customer-card{display:flex;align-items:center;gap:14px;padding:16px;background:linear-gradient(135deg,#f0f9f4,#e8f5ee);border-radius:16px;border:1.5px solid #c3e6d2}
+        .flow-customer-avatar{width:48px;height:48px;border-radius:14px;background:linear-gradient(135deg,#33a065,#2d8f5a);color:#fff;display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:800;flex-shrink:0}
+        .flow-customer-info{flex:1;min-width:0}
+        .flow-customer-name{font-size:16px;font-weight:700;color:#1a3a2a}
+        .flow-customer-meta{font-size:12px;color:#6b8f7b;margin-top:2px}
+        .flow-line-badge{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:600;padding:3px 10px;border-radius:8px}
+        .flow-line-badge.connected{background:#dcfce7;color:#16a34a}
+        .flow-line-badge.not-connected{background:#fef3c7;color:#d97706}
+        .flow-step-summary{display:flex;flex-direction:column;gap:8px;padding:12px 0}
+        .flow-summary-item{display:flex;align-items:center;gap:10px;padding:10px 14px;background:#f8fafc;border-radius:12px;font-size:13px;font-weight:500;color:#475569}
+        .flow-summary-icon{width:28px;height:28px;border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+        .flow-search-input{width:100%;padding:14px 16px 14px 44px;border:2px solid #e2e8f0;border-radius:14px;font-size:15px;outline:none;transition:border-color .2s;background:#fff}
+        .flow-search-input:focus{border-color:#33a065;box-shadow:0 0 0 3px rgba(51,160,101,.1)}
+        .flow-member-list{display:flex;flex-direction:column;gap:6px;max-height:320px;overflow-y:auto;margin-top:12px}
+        .flow-member-item{display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:12px;border:1.5px solid #eee;cursor:pointer;transition:all .2s}
+        .flow-member-item:hover,.flow-member-item.selected{border-color:#33a065;background:#f0f9f4}
+        .flow-member-item .avatar{width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,#e2e8f0,#cbd5e1);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:#64748b;flex-shrink:0}
+        .flow-embed-placeholder{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:40px 20px;text-align:center}
+        .flow-embed-icon{width:56px;height:56px;border-radius:16px;background:linear-gradient(135deg,#e8f5ee,#d0f0db);display:flex;align-items:center;justify-content:center}
+        .flow-section-title{font-size:15px;font-weight:700;color:#1e293b;margin-bottom:12px;display:flex;align-items:center;gap:8px}
+        .flow-quick-note{width:100%;min-height:80px;padding:12px 14px;border:1.5px solid #e2e8f0;border-radius:12px;font-size:14px;resize:vertical;outline:none;transition:border-color .2s;font-family:inherit}
+        .flow-quick-note:focus{border-color:#33a065}
+        .flow-result-card{padding:16px;border-radius:14px;border:1.5px solid;display:flex;align-items:center;gap:14px;cursor:pointer;transition:all .2s}
+        .flow-result-card:hover{transform:translateY(-1px);box-shadow:0 4px 12px rgba(0,0,0,.06)}
+        .flow-result-card.contract{border-color:#86efac;background:linear-gradient(135deg,#f0fdf4,#dcfce7)}
+        .flow-result-card.follow-up{border-color:#fde68a;background:linear-gradient(135deg,#fffbeb,#fef3c7)}
+        .flow-complete-badge{display:flex;flex-direction:column;align-items:center;gap:12px;padding:24px;text-align:center}
+        .flow-complete-check{width:64px;height:64px;border-radius:50%;background:linear-gradient(135deg,#33a065,#2d8f5a);color:#fff;display:flex;align-items:center;justify-content:center;box-shadow:0 8px 24px rgba(51,160,101,.3);animation:flowCheckPop .5s ease}
+        @keyframes flowCheckPop{0%{transform:scale(0);opacity:0}60%{transform:scale(1.15)}100%{transform:scale(1);opacity:1}}
+        @media(min-width:768px){
+            .flow-progress-bar{padding:16px 24px;justify-content:center}
+            .flow-content-card{max-width:640px;margin:0 auto 16px;padding:28px}
+            .flow-action-bar{max-width:640px;margin:0 auto;left:50%;transform:translateX(-50%);border-radius:20px 20px 0 0;border:1px solid rgba(0,0,0,.06);border-bottom:none}
+            .flow-step-circle{width:36px;height:36px;font-size:14px}
+            .flow-step-label{font-size:11px}
+            .flow-step-connector{width:40px}
+        }
+
+        /* =============================================
            si'se解決カード 動的強調アニメーション
            ============================================= */
         @keyframes cfSolBounceIn{
@@ -4144,7 +4207,7 @@
             );
         };
 
-        const DashboardView = ({ memberData, reportData, selectedStore, setSelectedStore, allowedStoreNames, manualMembersHook }) => {
+        const DashboardView = ({ memberData, reportData, selectedStore, setSelectedStore, allowedStoreNames, manualMembersHook, onStartFlow }) => {
             // サブスクで現金入金の方をアクティブ会員として計上（店舗フィルタ適用）
             const cashActiveMembers = useMemo(() => {
                 if (!manualMembersHook?.manualMembers) return 0;
@@ -4315,6 +4378,25 @@
                             </div>
                         </div>
                     </Card>
+
+                    {/* 来店フロー開始ボタン */}
+                    {onStartFlow && (
+                        <button
+                            onClick={onStartFlow}
+                            className="w-full p-4 rounded-2xl border-2 border-sise-200 bg-gradient-to-r from-sise-50 to-emerald-50 hover:from-sise-100 hover:to-emerald-100 transition-all duration-300 active:scale-[0.98] group animate-slide-up-fade"
+                        >
+                            <div className="flex items-center gap-4">
+                                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-sise-400 to-sise-600 text-white flex items-center justify-center shadow-lg shadow-sise-500/25 group-hover:scale-105 transition-transform">
+                                    <Icon name="footprints" size={22} />
+                                </div>
+                                <div className="text-left flex-1">
+                                    <h3 className="text-sm font-extrabold text-sise-800">来店フローを開始</h3>
+                                    <p className="text-[11px] text-sise-500 mt-0.5">受付 → カウンセリング → 施術 → レポート → 契約</p>
+                                </div>
+                                <Icon name="chevron-right" size={20} className="text-sise-400 group-hover:translate-x-1 transition-transform" />
+                            </div>
+                        </button>
+                    )}
 
                     {/* 本日のハイライト */}
                     {aggregatedData.todayReports.length > 0 && (
@@ -17176,6 +17258,595 @@
         };
 
         // ========================================
+        // 来店フローナビゲーション
+        // ========================================
+        const FLOW_STEPS = [
+            { id: 'checkin', label: '受付', icon: 'log-in', description: 'お客様の来店受付・LINE登録確認' },
+            { id: 'counseling', label: 'カウンセリング', icon: 'heart-handshake', description: 'お悩みヒアリング・カウンセリングシート確認' },
+            { id: 'posture', label: '姿勢チェック', icon: 'scan', description: 'ビフォー撮影・姿勢分析' },
+            { id: 'treatment', label: '施術', icon: 'activity', description: '施術の実施・メモ記録' },
+            { id: 'report', label: 'レポート', icon: 'file-heart', description: 'アフター撮影・施術レポート作成' },
+            { id: 'plan', label: 'プラン説明', icon: 'presentation', description: 'プラン説明・契約手続き' },
+            { id: 'complete', label: '完了', icon: 'check-circle', description: '次回予約・フォローアップ' },
+        ];
+
+        const FlowNavigationView = ({ onClose, memberData, counselingHook, lineChatHook, activeStoreId }) => {
+            const { useState, useEffect, useCallback, useMemo, useRef } = React;
+
+            // Flow state
+            const [currentStep, setCurrentStep] = useState(0);
+            const [flowCustomer, setFlowCustomer] = useState(null); // { id, name, phone, email, lineConnected, source }
+            const [stepStatus, setStepStatus] = useState({}); // { stepId: 'done'|'skipped' }
+            const [searchQuery, setSearchQuery] = useState('');
+            const [treatmentNotes, setTreatmentNotes] = useState('');
+            const [treatmentMenus, setTreatmentMenus] = useState({ '骨盤矯正': false, '姿勢矯正': false, '小顔矯正': false, 'ほぐし': false });
+            const [contractResult, setContractResult] = useState(null); // 'contract' | 'follow-up' | null
+            const [followUpSent, setFollowUpSent] = useState(false);
+            const contentRef = useRef(null);
+
+            // Merge Square customers + manual members for search
+            const allCustomers = useMemo(() => {
+                const list = [];
+                // Square members
+                if (memberData?.members) {
+                    memberData.members.forEach(m => {
+                        list.push({
+                            id: m.id || m.customerId,
+                            name: m.name || `${m.givenName || ''} ${m.familyName || ''}`.trim(),
+                            phone: m.phone || '',
+                            email: m.email || '',
+                            source: 'Square',
+                            planName: m.planName || '',
+                            status: m.status || '',
+                        });
+                    });
+                }
+                return list;
+            }, [memberData?.members]);
+
+            // Search filtered customers
+            const filteredCustomers = useMemo(() => {
+                if (!searchQuery.trim()) return allCustomers.slice(0, 20);
+                const q = searchQuery.toLowerCase();
+                return allCustomers.filter(c =>
+                    (c.name && c.name.toLowerCase().includes(q)) ||
+                    (c.phone && c.phone.includes(q)) ||
+                    (c.email && c.email.toLowerCase().includes(q))
+                ).slice(0, 20);
+            }, [allCustomers, searchQuery]);
+
+            // Check if customer has LINE connection
+            const checkLineConnection = useCallback((customer) => {
+                if (!lineChatHook?.threads || !customer) return false;
+                // Check if customer name matches any LINE thread display name
+                return lineChatHook.threads.some(t => {
+                    const profile = lineChatHook.profiles?.[t.userId];
+                    if (!profile) return false;
+                    return profile.displayName && customer.name &&
+                        profile.displayName.includes(customer.name);
+                });
+            }, [lineChatHook?.threads, lineChatHook?.profiles]);
+
+            const goToStep = useCallback((idx) => {
+                if (idx < 0 || idx >= FLOW_STEPS.length) return;
+                setCurrentStep(idx);
+                if (contentRef.current) contentRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            }, []);
+
+            const markDone = useCallback((stepId) => {
+                setStepStatus(prev => ({ ...prev, [stepId]: 'done' }));
+            }, []);
+
+            const markSkipped = useCallback((stepId) => {
+                setStepStatus(prev => ({ ...prev, [stepId]: 'skipped' }));
+            }, []);
+
+            const handleNext = useCallback(() => {
+                const step = FLOW_STEPS[currentStep];
+                if (!stepStatus[step.id]) markDone(step.id);
+                goToStep(currentStep + 1);
+            }, [currentStep, stepStatus, markDone, goToStep]);
+
+            const handleSkip = useCallback(() => {
+                markSkipped(FLOW_STEPS[currentStep].id);
+                goToStep(currentStep + 1);
+            }, [currentStep, markSkipped, goToStep]);
+
+            const selectCustomer = useCallback((customer) => {
+                const lineConnected = checkLineConnection(customer);
+                setFlowCustomer({ ...customer, lineConnected });
+                setSearchQuery('');
+            }, [checkLineConnection]);
+
+            // Step 1: 受付 (Check-in)
+            const renderCheckin = () => (
+                <div>
+                    <div className="flow-section-title">
+                        <Icon name="search" size={16} className="text-sise-500" />
+                        お客様を選択
+                    </div>
+
+                    {!flowCustomer ? (
+                        <>
+                            <div style={{ position: 'relative' }}>
+                                <Icon name="search" size={18} className="text-slate-400" style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)' }} />
+                                <input
+                                    type="text"
+                                    className="flow-search-input"
+                                    placeholder="名前・電話番号で検索..."
+                                    value={searchQuery}
+                                    onChange={(e) => setSearchQuery(e.target.value)}
+                                    autoFocus
+                                />
+                            </div>
+                            <div className="flow-member-list">
+                                {filteredCustomers.length === 0 ? (
+                                    <div className="text-center py-8 text-slate-400 text-sm">
+                                        {searchQuery ? '該当するお客様が見つかりません' : 'お客様データを読み込み中...'}
+                                    </div>
+                                ) : (
+                                    filteredCustomers.map(c => (
+                                        <div key={c.id} className="flow-member-item" onClick={() => selectCustomer(c)}>
+                                            <div className="avatar">{(c.name || '?')[0]}</div>
+                                            <div style={{ flex: 1, minWidth: 0 }}>
+                                                <div style={{ fontSize: 14, fontWeight: 600, color: '#1e293b' }}>{c.name || '名前なし'}</div>
+                                                <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 1 }}>
+                                                    {c.phone || c.email || c.source}
+                                                    {c.planName && <span style={{ marginLeft: 8, color: '#33a065', fontWeight: 600 }}>{c.planName}</span>}
+                                                </div>
+                                            </div>
+                                            <Icon name="chevron-right" size={16} className="text-slate-300" />
+                                        </div>
+                                    ))
+                                )}
+                            </div>
+                            <button
+                                onClick={() => selectCustomer({ id: 'new_' + Date.now(), name: searchQuery || '新規のお客様', phone: '', email: '', source: '新規', isNew: true })}
+                                className="w-full mt-3 py-3 rounded-xl border-2 border-dashed border-sise-300 text-sise-600 font-semibold text-sm hover:bg-sise-50 transition-colors flex items-center justify-center gap-2"
+                            >
+                                <Icon name="user-plus" size={16} />
+                                新規のお客様として開始
+                            </button>
+                        </>
+                    ) : (
+                        <>
+                            <div className="flow-customer-card">
+                                <div className="flow-customer-avatar">{flowCustomer.name[0]}</div>
+                                <div className="flow-customer-info">
+                                    <div className="flow-customer-name">{flowCustomer.name}</div>
+                                    <div className="flow-customer-meta">
+                                        {flowCustomer.phone || flowCustomer.email || flowCustomer.source}
+                                        {flowCustomer.planName && ` ・ ${flowCustomer.planName}`}
+                                    </div>
+                                    <div style={{ marginTop: 6 }}>
+                                        <span className={`flow-line-badge ${flowCustomer.lineConnected ? 'connected' : 'not-connected'}`}>
+                                            <Icon name="message-circle" size={12} />
+                                            {flowCustomer.lineConnected ? 'LINE連携済み' : 'LINE未連携'}
+                                        </span>
+                                    </div>
+                                </div>
+                                <button onClick={() => setFlowCustomer(null)} className="p-2 rounded-lg hover:bg-white/60 transition-colors">
+                                    <Icon name="x" size={16} className="text-slate-400" />
+                                </button>
+                            </div>
+
+                            {!flowCustomer.lineConnected && (
+                                <div style={{ marginTop: 16, padding: 16, background: '#fffbeb', borderRadius: 14, border: '1.5px solid #fde68a' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                                        <Icon name="alert-triangle" size={16} className="text-amber-500" />
+                                        <span style={{ fontSize: 13, fontWeight: 700, color: '#92400e' }}>LINE登録をご案内ください</span>
+                                    </div>
+                                    <p style={{ fontSize: 12, color: '#a16207', lineHeight: 1.6 }}>
+                                        カウンセリングシートの入力やアフターフォローにLINE登録が必要です。リッチメニューからカウンセリングフォームに進めます。
+                                    </p>
+                                </div>
+                            )}
+                        </>
+                    )}
+                </div>
+            );
+
+            // Step 2: カウンセリング
+            const renderCounseling = () => (
+                <div>
+                    <div className="flow-customer-card" style={{ marginBottom: 16 }}>
+                        <div className="flow-customer-avatar" style={{ width: 40, height: 40, fontSize: 15 }}>{flowCustomer?.name?.[0] || '?'}</div>
+                        <div className="flow-customer-info">
+                            <div className="flow-customer-name" style={{ fontSize: 14 }}>{flowCustomer?.name || 'お客様'}</div>
+                        </div>
+                    </div>
+
+                    <div className="flow-embed-placeholder">
+                        <div className="flow-embed-icon">
+                            <Icon name="heart-handshake" size={28} className="text-sise-500" />
+                        </div>
+                        <div>
+                            <p style={{ fontSize: 15, fontWeight: 700, color: '#1e293b', marginBottom: 4 }}>カウンセリング画面を開く</p>
+                            <p style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.6 }}>
+                                カウンセリングシートの確認・お悩みのヒアリングを行います
+                            </p>
+                        </div>
+                        <button
+                            onClick={() => {
+                                markDone('counseling');
+                                onClose('counseling');
+                            }}
+                            className="flow-btn flow-btn-primary"
+                            style={{ flex: 'none', padding: '12px 28px', marginTop: 8 }}
+                        >
+                            <Icon name="external-link" size={15} style={{ display: 'inline', verticalAlign: -2, marginRight: 6 }} />
+                            カウンセリング画面へ
+                        </button>
+                    </div>
+
+                    <div style={{ marginTop: 16 }}>
+                        <div className="flow-section-title">
+                            <Icon name="clipboard" size={16} className="text-slate-400" />
+                            簡易メモ
+                        </div>
+                        <textarea
+                            className="flow-quick-note"
+                            placeholder="ヒアリング内容を簡単にメモ..."
+                            value={treatmentNotes}
+                            onChange={(e) => setTreatmentNotes(e.target.value)}
+                        />
+                    </div>
+                </div>
+            );
+
+            // Step 3: 姿勢チェック
+            const renderPosture = () => (
+                <div>
+                    <div className="flow-customer-card" style={{ marginBottom: 16 }}>
+                        <div className="flow-customer-avatar" style={{ width: 40, height: 40, fontSize: 15 }}>{flowCustomer?.name?.[0] || '?'}</div>
+                        <div className="flow-customer-info">
+                            <div className="flow-customer-name" style={{ fontSize: 14 }}>{flowCustomer?.name || 'お客様'}</div>
+                        </div>
+                    </div>
+
+                    <div className="flow-embed-placeholder">
+                        <div className="flow-embed-icon">
+                            <Icon name="scan" size={28} className="text-sise-500" />
+                        </div>
+                        <div>
+                            <p style={{ fontSize: 15, fontWeight: 700, color: '#1e293b', marginBottom: 4 }}>姿勢分析を開始</p>
+                            <p style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.6 }}>
+                                ビフォー写真の撮影・姿勢のチェックを行います
+                            </p>
+                        </div>
+                        <button
+                            onClick={() => {
+                                markDone('posture');
+                                onClose('posture');
+                            }}
+                            className="flow-btn flow-btn-primary"
+                            style={{ flex: 'none', padding: '12px 28px', marginTop: 8 }}
+                        >
+                            <Icon name="external-link" size={15} style={{ display: 'inline', verticalAlign: -2, marginRight: 6 }} />
+                            姿勢分析画面へ
+                        </button>
+                    </div>
+                </div>
+            );
+
+            // Step 4: 施術
+            const renderTreatment = () => (
+                <div>
+                    <div className="flow-customer-card" style={{ marginBottom: 16 }}>
+                        <div className="flow-customer-avatar" style={{ width: 40, height: 40, fontSize: 15 }}>{flowCustomer?.name?.[0] || '?'}</div>
+                        <div className="flow-customer-info">
+                            <div className="flow-customer-name" style={{ fontSize: 14 }}>{flowCustomer?.name || 'お客様'}</div>
+                        </div>
+                    </div>
+
+                    <div className="flow-section-title">
+                        <Icon name="list-checks" size={16} className="text-sise-500" />
+                        施術メニュー
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 20 }}>
+                        {Object.entries(treatmentMenus).map(([menu, checked]) => (
+                            <button
+                                key={menu}
+                                onClick={() => setTreatmentMenus(prev => ({ ...prev, [menu]: !prev[menu] }))}
+                                style={{
+                                    padding: '12px 14px', borderRadius: 12,
+                                    border: `2px solid ${checked ? '#33a065' : '#e2e8f0'}`,
+                                    background: checked ? '#f0f9f4' : '#fff',
+                                    color: checked ? '#166534' : '#64748b',
+                                    fontSize: 13, fontWeight: 600,
+                                    display: 'flex', alignItems: 'center', gap: 8,
+                                    cursor: 'pointer', transition: 'all .2s',
+                                }}
+                            >
+                                <Icon name={checked ? 'check-square' : 'square'} size={16} />
+                                {menu}
+                            </button>
+                        ))}
+                    </div>
+
+                    <div className="flow-section-title">
+                        <Icon name="pen-line" size={16} className="text-slate-400" />
+                        施術メモ
+                    </div>
+                    <textarea
+                        className="flow-quick-note"
+                        placeholder="施術中の気づき・お客様の反応など..."
+                        value={treatmentNotes}
+                        onChange={(e) => setTreatmentNotes(e.target.value)}
+                        rows={4}
+                    />
+                </div>
+            );
+
+            // Step 5: レポート
+            const renderReport = () => (
+                <div>
+                    <div className="flow-customer-card" style={{ marginBottom: 16 }}>
+                        <div className="flow-customer-avatar" style={{ width: 40, height: 40, fontSize: 15 }}>{flowCustomer?.name?.[0] || '?'}</div>
+                        <div className="flow-customer-info">
+                            <div className="flow-customer-name" style={{ fontSize: 14 }}>{flowCustomer?.name || 'お客様'}</div>
+                        </div>
+                    </div>
+
+                    <div className="flow-embed-placeholder">
+                        <div className="flow-embed-icon">
+                            <Icon name="file-heart" size={28} className="text-sise-500" />
+                        </div>
+                        <div>
+                            <p style={{ fontSize: 15, fontWeight: 700, color: '#1e293b', marginBottom: 4 }}>施術レポートを作成</p>
+                            <p style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.6 }}>
+                                アフター写真の撮影・施術結果のレポートを作成してLINEで送信します
+                            </p>
+                        </div>
+                        <button
+                            onClick={() => {
+                                markDone('report');
+                                onClose('treatment-report');
+                            }}
+                            className="flow-btn flow-btn-primary"
+                            style={{ flex: 'none', padding: '12px 28px', marginTop: 8 }}
+                        >
+                            <Icon name="external-link" size={15} style={{ display: 'inline', verticalAlign: -2, marginRight: 6 }} />
+                            レポート作成画面へ
+                        </button>
+                    </div>
+
+                    {treatmentNotes && (
+                        <div style={{ marginTop: 16, padding: 14, background: '#f8fafc', borderRadius: 12, border: '1px solid #e2e8f0' }}>
+                            <div style={{ fontSize: 12, fontWeight: 600, color: '#64748b', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <Icon name="pen-line" size={13} />
+                                施術中のメモ
+                            </div>
+                            <p style={{ fontSize: 13, color: '#475569', whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>{treatmentNotes}</p>
+                        </div>
+                    )}
+                </div>
+            );
+
+            // Step 6: プラン説明・契約
+            const renderPlan = () => (
+                <div>
+                    <div className="flow-customer-card" style={{ marginBottom: 20 }}>
+                        <div className="flow-customer-avatar" style={{ width: 40, height: 40, fontSize: 15 }}>{flowCustomer?.name?.[0] || '?'}</div>
+                        <div className="flow-customer-info">
+                            <div className="flow-customer-name" style={{ fontSize: 14 }}>{flowCustomer?.name || 'お客様'}</div>
+                        </div>
+                    </div>
+
+                    <div className="flow-section-title">
+                        <Icon name="git-branch" size={16} className="text-sise-500" />
+                        お客様の結果を選択
+                    </div>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                        <div
+                            className={`flow-result-card contract ${contractResult === 'contract' ? 'ring-2 ring-green-400' : ''}`}
+                            onClick={() => setContractResult('contract')}
+                        >
+                            <div style={{ width: 44, height: 44, borderRadius: 12, background: 'linear-gradient(135deg,#22c55e,#16a34a)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                                <Icon name="file-check" size={22} className="text-white" />
+                            </div>
+                            <div>
+                                <div style={{ fontSize: 15, fontWeight: 700, color: '#166534' }}>ご契約</div>
+                                <div style={{ fontSize: 12, color: '#4ade80', marginTop: 2 }}>Squareで契約手続きへ進みます</div>
+                            </div>
+                            {contractResult === 'contract' && <Icon name="check-circle" size={20} className="text-green-500 ml-auto" />}
+                        </div>
+
+                        <div
+                            className={`flow-result-card follow-up ${contractResult === 'follow-up' ? 'ring-2 ring-amber-400' : ''}`}
+                            onClick={() => setContractResult('follow-up')}
+                        >
+                            <div style={{ width: 44, height: 44, borderRadius: 12, background: 'linear-gradient(135deg,#fbbf24,#f59e0b)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                                <Icon name="mail" size={22} className="text-white" />
+                            </div>
+                            <div>
+                                <div style={{ fontSize: 15, fontWeight: 700, color: '#92400e' }}>ご検討中（フォローアップ）</div>
+                                <div style={{ fontSize: 12, color: '#d97706', marginTop: 2 }}>施術レポート＋割引体験のLINEを送信</div>
+                            </div>
+                            {contractResult === 'follow-up' && <Icon name="check-circle" size={20} className="text-amber-500 ml-auto" />}
+                        </div>
+                    </div>
+
+                    {contractResult === 'contract' && (
+                        <div style={{ marginTop: 16, padding: 16, background: '#f0fdf4', borderRadius: 14, border: '1.5px solid #bbf7d0' }}>
+                            <p style={{ fontSize: 13, fontWeight: 600, color: '#166534', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <Icon name="credit-card" size={15} />
+                                Squareで契約手続き
+                            </p>
+                            <button
+                                onClick={() => onClose('counseling')}
+                                className="w-full py-3 rounded-xl font-semibold text-sm text-white transition-all"
+                                style={{ background: 'linear-gradient(135deg,#33a065,#2d8f5a)' }}
+                            >
+                                カウンセリング画面で契約QRを発行
+                            </button>
+                        </div>
+                    )}
+
+                    {contractResult === 'follow-up' && (
+                        <div style={{ marginTop: 16, padding: 16, background: '#fffbeb', borderRadius: 14, border: '1.5px solid #fde68a' }}>
+                            <p style={{ fontSize: 13, fontWeight: 600, color: '#92400e', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <Icon name="message-circle" size={15} />
+                                フォローアップLINE送信
+                            </p>
+                            <p style={{ fontSize: 12, color: '#a16207', marginBottom: 12, lineHeight: 1.6 }}>
+                                施術レポートと割引体験の案内をLINEで送信します。LINEチャット画面から送信できます。
+                            </p>
+                            <button
+                                onClick={() => {
+                                    setFollowUpSent(true);
+                                    onClose('line');
+                                }}
+                                className="w-full py-3 rounded-xl font-semibold text-sm transition-all"
+                                style={{ background: '#06c755', color: '#fff' }}
+                            >
+                                <Icon name="send" size={14} style={{ display: 'inline', verticalAlign: -2, marginRight: 6 }} />
+                                LINEチャット画面を開く
+                            </button>
+                        </div>
+                    )}
+                </div>
+            );
+
+            // Step 7: 完了
+            const renderComplete = () => {
+                const doneCount = Object.values(stepStatus).filter(s => s === 'done').length;
+                const skippedCount = Object.values(stepStatus).filter(s => s === 'skipped').length;
+
+                return (
+                    <div>
+                        <div className="flow-complete-badge">
+                            <div className="flow-complete-check">
+                                <Icon name="check" size={32} />
+                            </div>
+                            <div>
+                                <p style={{ fontSize: 18, fontWeight: 800, color: '#1e293b' }}>お疲れさまでした</p>
+                                <p style={{ fontSize: 13, color: '#64748b', marginTop: 4 }}>
+                                    {flowCustomer?.name || 'お客様'}の来店対応が完了しました
+                                </p>
+                            </div>
+                        </div>
+
+                        <div className="flow-step-summary">
+                            {FLOW_STEPS.slice(0, -1).map(step => {
+                                const status = stepStatus[step.id];
+                                return (
+                                    <div key={step.id} className="flow-summary-item">
+                                        <div className="flow-summary-icon" style={{
+                                            background: status === 'done' ? '#dcfce7' : status === 'skipped' ? '#f1f5f9' : '#fef3c7',
+                                            color: status === 'done' ? '#16a34a' : status === 'skipped' ? '#94a3b8' : '#d97706',
+                                        }}>
+                                            <Icon name={status === 'done' ? 'check' : status === 'skipped' ? 'minus' : 'clock'} size={14} />
+                                        </div>
+                                        <span style={{ flex: 1 }}>{step.label}</span>
+                                        <span style={{
+                                            fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 6,
+                                            background: status === 'done' ? '#dcfce7' : status === 'skipped' ? '#f1f5f9' : '#fef3c7',
+                                            color: status === 'done' ? '#16a34a' : status === 'skipped' ? '#94a3b8' : '#d97706',
+                                        }}>
+                                            {status === 'done' ? '完了' : status === 'skipped' ? 'スキップ' : '未実施'}
+                                        </span>
+                                    </div>
+                                );
+                            })}
+                        </div>
+
+                        {contractResult === 'contract' && (
+                            <div style={{ marginTop: 16, padding: 14, background: '#f0fdf4', borderRadius: 12, border: '1px solid #bbf7d0' }}>
+                                <p style={{ fontSize: 13, fontWeight: 600, color: '#166534', display: 'flex', alignItems: 'center', gap: 6 }}>
+                                    <Icon name="calendar" size={14} />
+                                    次回予約のご案内
+                                </p>
+                                <p style={{ fontSize: 12, color: '#4ade80', marginTop: 4, lineHeight: 1.6 }}>
+                                    その場で次回予約、またはホットペッパーからネット予約をご案内ください。
+                                </p>
+                            </div>
+                        )}
+
+                        <button
+                            onClick={() => onClose('dashboard')}
+                            className="flow-btn flow-btn-primary w-full"
+                            style={{ marginTop: 20, flex: 'none' }}
+                        >
+                            ダッシュボードに戻る
+                        </button>
+                    </div>
+                );
+            };
+
+            const stepRenderers = [renderCheckin, renderCounseling, renderPosture, renderTreatment, renderReport, renderPlan, renderComplete];
+            const isFirstStep = currentStep === 0;
+            const isLastStep = currentStep === FLOW_STEPS.length - 1;
+            const canProceed = currentStep === 0 ? !!flowCustomer : true;
+
+            return (
+                <div className="flow-nav-container">
+                    {/* Header */}
+                    <div style={{ position: 'sticky', top: 56, zIndex: 30, background: 'rgba(255,255,255,.92)', backdropFilter: 'blur(12px)', borderBottom: '1px solid rgba(0,0,0,.06)' }}>
+                        <div className="flow-progress-bar">
+                            {FLOW_STEPS.map((step, idx) => {
+                                const status = stepStatus[step.id];
+                                const isActive = idx === currentStep;
+                                const isDone = status === 'done';
+                                const isSkipped = status === 'skipped';
+                                return React.createElement(React.Fragment, { key: step.id },
+                                    idx > 0 && <div className={`flow-step-connector ${isDone || isSkipped || (idx <= currentStep && idx > 0) ? 'filled' : ''}`} />,
+                                    <div className={`flow-step-dot ${isActive ? 'active' : ''} ${isDone ? 'done' : ''} ${isSkipped ? 'skipped' : ''}`} onClick={() => goToStep(idx)}>
+                                        <div className="flow-step-circle">
+                                            {isDone ? <Icon name="check" size={14} /> : isSkipped ? <Icon name="minus" size={14} /> : idx + 1}
+                                        </div>
+                                        <span className="flow-step-label">{step.label}</span>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+
+                    {/* Step title */}
+                    <div style={{ padding: '16px 16px 8px', maxWidth: 640, margin: '0 auto' }}>
+                        <p style={{ fontSize: 11, fontWeight: 600, color: '#94a3b8', letterSpacing: '0.1em' }}>STEP {currentStep + 1} / {FLOW_STEPS.length}</p>
+                        <h2 style={{ fontSize: 20, fontWeight: 800, color: '#1e293b', marginTop: 2 }}>{FLOW_STEPS[currentStep].label}</h2>
+                        <p style={{ fontSize: 12, color: '#94a3b8', marginTop: 2 }}>{FLOW_STEPS[currentStep].description}</p>
+                    </div>
+
+                    {/* Content */}
+                    <div className="flow-content-card" ref={contentRef}>
+                        {stepRenderers[currentStep]()}
+                    </div>
+
+                    {/* Spacer for action bar */}
+                    <div style={{ height: 80 }} />
+
+                    {/* Action bar */}
+                    {!isLastStep && (
+                        <div className="flow-action-bar">
+                            {!isFirstStep && (
+                                <button className="flow-btn flow-btn-secondary" onClick={() => goToStep(currentStep - 1)} style={{ flex: '0 0 auto', padding: '14px 18px' }}>
+                                    <Icon name="chevron-left" size={16} style={{ display: 'inline', verticalAlign: -3 }} />
+                                </button>
+                            )}
+                            {currentStep > 0 && currentStep < FLOW_STEPS.length - 1 && (
+                                <button className="flow-btn-skip" onClick={handleSkip}>
+                                    スキップ
+                                </button>
+                            )}
+                            <button
+                                className={`flow-btn flow-btn-primary ${!canProceed ? 'opacity-50' : ''}`}
+                                onClick={handleNext}
+                                disabled={!canProceed}
+                            >
+                                {currentStep === 0 ? (flowCustomer ? '次へ' : 'お客様を選択してください') : '次のステップへ'}
+                                {canProceed && <Icon name="chevron-right" size={16} style={{ display: 'inline', verticalAlign: -3, marginLeft: 4 }} />}
+                            </button>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        // ========================================
         // メインアプリケーション
         // ========================================
 
@@ -17258,6 +17929,7 @@
             const [selectedStore, setSelectedStore] = useState('all');
             const [isSidebarOpen, setIsSidebarOpen] = useState(false);
             const [isDarkMode, setIsDarkMode] = useState(false);
+            const [flowMode, setFlowMode] = useState(false);
 
             const isStaffMode = !!currentAccess;
             const [activeStoreId, setActiveStoreId] = useState(
@@ -17419,6 +18091,7 @@
                             setSelectedStore={setSelectedStore}
                             allowedStoreNames={allowedStoreNames}
                             manualMembersHook={manualMembersHook}
+                            onStartFlow={() => setFlowMode(true)}
                         />;
                     case 'reports':
                         return <DailyReportListView reportData={reportData} allowedStoreNames={allowedStoreNames} />;
@@ -17460,12 +18133,12 @@
                     case 'marketing':
                         // マーケティングは本部のみアクセス可
                         if (isStaffMode && (!currentAccess || currentAccess.role !== 'headquarter')) {
-                            return <DashboardView memberData={memberData} reportData={reportData} selectedStore={selectedStore} setSelectedStore={setSelectedStore} allowedStoreNames={allowedStoreNames} manualMembersHook={manualMembersHook} />;
+                            return <DashboardView memberData={memberData} reportData={reportData} selectedStore={selectedStore} setSelectedStore={setSelectedStore} allowedStoreNames={allowedStoreNames} manualMembersHook={manualMembersHook} onStartFlow={() => setFlowMode(true)} />;
                         }
                         return <MarketingView marketingHook={marketingHook} />;
                     case 'settings':
                         return isStaffMode
-                            ? <DashboardView memberData={memberData} reportData={reportData} selectedStore={selectedStore} setSelectedStore={setSelectedStore} allowedStoreNames={allowedStoreNames} manualMembersHook={manualMembersHook} />
+                            ? <DashboardView memberData={memberData} reportData={reportData} selectedStore={selectedStore} setSelectedStore={setSelectedStore} allowedStoreNames={allowedStoreNames} manualMembersHook={manualMembersHook} onStartFlow={() => setFlowMode(true)} />
                             : <SettingsView onSettingsSaved={() => { refreshReportData(); }} />;
                     default:
                         return <DashboardView
@@ -17475,11 +18148,58 @@
                             setSelectedStore={setSelectedStore}
                             allowedStoreNames={allowedStoreNames}
                             manualMembersHook={manualMembersHook}
+                            onStartFlow={() => setFlowMode(true)}
                         />;
                 }
             };
 
             const isFullscreenView = currentView === 'counseling' || currentView === 'treatment-report';
+
+            // 来店フローモードのハンドラ
+            const handleFlowClose = useCallback((navigateTo) => {
+                setFlowMode(false);
+                if (navigateTo) {
+                    setCurrentView(navigateTo);
+                }
+            }, []);
+
+            // 来店フローモード: 専用UIを全面表示
+            if (flowMode) {
+                return (
+                    <div className="min-h-screen bg-slate-50 relative">
+                        <ToastContainer />
+                        {/* Flow Header */}
+                        <header className="fixed top-0 left-0 right-0 z-50 glass-panel safe-top">
+                            <div className="flex items-center justify-between px-4 h-14">
+                                <div className="flex items-center gap-2">
+                                    <button
+                                        onClick={() => setFlowMode(false)}
+                                        className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-sise-100 border border-sise-300 hover:bg-sise-200 transition-colors active:scale-90 shadow-sm"
+                                    >
+                                        <Icon name="arrow-left" size={16} className="text-sise-700" />
+                                        <span className="text-sm font-medium text-sise-700">戻る</span>
+                                    </button>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <span className="text-xs font-bold text-sise-600 px-3 py-1.5 bg-sise-50/80 border border-sise-200 rounded-xl flex items-center gap-1.5">
+                                        <Icon name="footprints" size={13} />
+                                        来店フロー
+                                    </span>
+                                </div>
+                            </div>
+                        </header>
+                        <main className="pt-14">
+                            <FlowNavigationView
+                                onClose={handleFlowClose}
+                                memberData={memberData}
+                                counselingHook={counselingHook}
+                                lineChatHook={lineChatHook}
+                                activeStoreId={activeStoreId}
+                            />
+                        </main>
+                    </div>
+                );
+            }
 
             return (
                 <div className="min-h-screen bg-slate-50 bg-mesh relative">
