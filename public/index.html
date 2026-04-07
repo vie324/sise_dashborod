@@ -17624,42 +17624,54 @@
                 </div>
             );
 
-            // GAS顧客詳細の情報チップ描画
-            const renderGasDetailInfo = (detail) => {
-                if (!detail) return null;
-                const chipStyle = { display: 'inline-flex', alignItems: 'center', gap: 4, padding: '5px 12px', borderRadius: 10, fontSize: 12, fontWeight: 600, margin: 2 };
-                const items = [];
-                if (detail.birthday) items.push({ label: '生年月日', value: detail.birthday, bg: '#f0f9f4', color: '#166534' });
-                if (detail.occupation) items.push({ label: '職業', value: detail.occupation, bg: '#f0f9f4', color: '#166534' });
-                if (detail.address) items.push({ label: 'お住まい', value: detail.address, bg: '#f0f9f4', color: '#166534' });
-                if (detail.improvementTimeline) items.push({ label: '目標時期', value: detail.improvementTimeline, bg: '#eff6ff', color: '#1e40af' });
-                if (detail.treatmentRequest) items.push({ label: '施術のご要望', value: detail.treatmentRequest, bg: '#eff6ff', color: '#1e40af', wide: true });
-                if (detail.treatmentExperience?.length > 0) items.push({ label: '施術経験', value: detail.treatmentExperience.join('、'), bg: '#e4f4f7', color: '#1a7a8a', wide: true });
-                if (detail.visitPurpose?.length > 0) items.push({ label: 'ご来店きっかけ', value: detail.visitPurpose.join('、'), bg: '#f5f0e0', color: '#8a7540', wide: true });
-                if (detail.surgeryHistory && detail.surgeryHistory !== 'いいえ' && detail.surgeryHistory !== 'なし') items.push({ label: '手術歴', value: detail.surgeryHistory, bg: '#fdf0f1', color: '#d94050' });
-                if (detail.currentTreatment && detail.currentTreatment !== 'いいえ' && detail.currentTreatment !== 'なし') items.push({ label: '治療中', value: detail.currentTreatment, bg: '#fdf5e8', color: '#d68c1a' });
-                if (detail.allergy && detail.allergy !== 'いいえ' && detail.allergy !== 'なし') items.push({ label: 'アレルギー', value: detail.allergy, bg: '#fdf0f1', color: '#d94050' });
-                if (detail.pregnancyCheck && detail.pregnancyCheck !== 'いいえ' && detail.pregnancyCheck !== 'なし') items.push({ label: '美容整形', value: detail.pregnancyCheck, bg: '#f5f0e0', color: '#8a7540' });
-                if (detail.cosmeticSurgery && detail.cosmeticSurgery !== 'いいえ' && detail.cosmeticSurgery !== 'なし' && detail.cosmeticSurgery !== '該当なし') items.push({ label: '妊娠・特定疾患', value: detail.cosmeticSurgery, bg: '#fdf5e8', color: '#d68c1a' });
-                // お悩み（concerns）
-                const concerns = detail.concerns;
-                if (concerns && Array.isArray(concerns) && concerns.length > 0) {
-                    items.push({ label: 'お悩み', value: concerns.join('、'), bg: '#fef3c7', color: '#92400e', wide: true });
-                }
-                if (items.length === 0) return null;
-                return (
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 8 }}>
-                        {items.map((item, i) => (
-                            <div key={i} style={{ ...chipStyle, background: item.bg, color: item.color, ...(item.wide ? { width: '100%' } : {}) }}>
-                                <span style={{ opacity: 0.7 }}>{item.label}:</span> <strong style={{ fontWeight: 700 }}>{item.value}</strong>
-                            </div>
-                        ))}
-                    </div>
-                );
-            };
+            // Googleフォームのお悩み → チェック項目マッピング（ConceptFormViewと同じロジック）
+            const mapFormConcernsForFlow = useCallback((formConcerns) => {
+                const mapped = {};
+                if (!formConcerns || !formConcerns.length) return mapped;
+                formConcerns.forEach(fc => {
+                    const fcTrim = fc.trim();
+                    if (!fcTrim) return;
+                    CONCERN_ITEMS.forEach(item => {
+                        if (item.formLabels.some(fl => fcTrim.includes(fl) || fl.includes(fcTrim))) {
+                            mapped[item.id] = true;
+                        }
+                    });
+                });
+                return mapped;
+            }, []);
+
+            // GAS顧客詳細から算出したお悩みチェック状態
+            const gasMappedConcerns = useMemo(() => {
+                if (!gasCustomerDetail?.concerns) return {};
+                return mapFormConcernsForFlow(gasCustomerDetail.concerns);
+            }, [gasCustomerDetail, mapFormConcernsForFlow]);
+
+            // カテゴリ情報
+            const concernCatInfo = { face: { label: '小顔', bg: '#f5f0e0', color: '#8a7540' }, posture: { label: '姿勢', bg: '#e4f4f7', color: '#1a7a8a' }, pelvis: { label: '骨盤', bg: '#e8f7ee', color: '#1e7a49' } };
 
             // Step 2: カウンセリング
-            const renderCounseling = () => (
+            const renderCounseling = () => {
+                const detail = gasCustomerDetail;
+                const hasConcerns = Object.keys(gasMappedConcerns).length > 0;
+                // 基本情報チップ
+                const profileItems = [];
+                if (detail) {
+                    if (detail.birthday) profileItems.push({ label: '生年月日', value: detail.birthday });
+                    if (detail.occupation) profileItems.push({ label: '職業', value: detail.occupation });
+                    if (detail.address) profileItems.push({ label: 'お住まい', value: detail.address });
+                    if (detail.improvementTimeline) profileItems.push({ label: '目標時期', value: detail.improvementTimeline });
+                }
+                // 医療・注意事項
+                const medicalItems = [];
+                if (detail) {
+                    if (detail.surgeryHistory && detail.surgeryHistory !== 'いいえ' && detail.surgeryHistory !== 'なし') medicalItems.push({ label: '手術歴', value: detail.surgeryHistory, warn: true });
+                    if (detail.currentTreatment && detail.currentTreatment !== 'いいえ' && detail.currentTreatment !== 'なし') medicalItems.push({ label: '治療中', value: detail.currentTreatment, warn: true });
+                    if (detail.allergy && detail.allergy !== 'いいえ' && detail.allergy !== 'なし') medicalItems.push({ label: 'アレルギー', value: detail.allergy, warn: true });
+                    if (detail.pregnancyCheck && detail.pregnancyCheck !== 'いいえ' && detail.pregnancyCheck !== 'なし') medicalItems.push({ label: '美容整形', value: detail.pregnancyCheck });
+                    if (detail.cosmeticSurgery && detail.cosmeticSurgery !== 'いいえ' && detail.cosmeticSurgery !== 'なし' && detail.cosmeticSurgery !== '該当なし') medicalItems.push({ label: '妊娠・特定疾患', value: detail.cosmeticSurgery, warn: true });
+                }
+
+                return (
                 <div>
                     {/* 顧客カード */}
                     <div className="flow-customer-card" style={{ marginBottom: 16 }}>
@@ -17672,34 +17684,146 @@
                         </div>
                     </div>
 
-                    {/* GAS顧客の詳細情報（取得済みの場合） */}
+                    {/* GAS詳細: ローディング */}
                     {gasDetailLoading && (
                         <div style={{ padding: 20, textAlign: 'center', color: '#94a3b8', fontSize: 13 }}>
                             <Icon name="loader" size={20} className="animate-spin" style={{ display: 'inline-block', verticalAlign: -4, marginRight: 8 }} />
                             カウンセリング情報を読み込み中...
                         </div>
                     )}
-                    {gasCustomerDetail && !gasDetailLoading && (
-                        <div style={{ marginBottom: 16, padding: 16, background: '#f8faf9', borderRadius: 16, border: '1px solid #e2e8f0' }}>
-                            <div className="flow-section-title" style={{ marginBottom: 8 }}>
-                                <Icon name="file-text" size={16} className="text-sise-500" />
-                                カウンセリングシートの内容
+
+                    {/* GAS詳細: 取得済み */}
+                    {detail && !gasDetailLoading && (
+                        <>
+                            {/* 基本情報 */}
+                            {profileItems.length > 0 && (
+                                <div style={{ marginBottom: 12, padding: 14, background: '#f0f9f4', borderRadius: 14, border: '1px solid #c3e6d2' }}>
+                                    <div style={{ fontSize: 12, fontWeight: 700, color: '#166534', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+                                        <Icon name="user" size={14} /> お客様情報
+                                    </div>
+                                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                                        {profileItems.map((item, i) => (
+                                            <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '4px 10px', borderRadius: 8, fontSize: 12, fontWeight: 600, background: '#fff', color: '#166534', border: '1px solid #d1e7dd' }}>
+                                                <span style={{ opacity: 0.6, fontWeight: 500 }}>{item.label}</span> {item.value}
+                                            </span>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* 医療・注意事項 */}
+                            {medicalItems.length > 0 && (
+                                <div style={{ marginBottom: 12, padding: 14, background: '#fef2f2', borderRadius: 14, border: '1.5px solid #fecaca' }}>
+                                    <div style={{ fontSize: 12, fontWeight: 700, color: '#dc2626', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+                                        <Icon name="alert-triangle" size={14} /> 注意事項
+                                    </div>
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                                        {medicalItems.map((item, i) => (
+                                            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', borderRadius: 8, background: '#fff', border: '1px solid #fecaca', fontSize: 12, fontWeight: 600, color: '#991b1b' }}>
+                                                <Icon name={item.warn ? 'alert-circle' : 'info'} size={13} style={{ flexShrink: 0, opacity: 0.6 }} />
+                                                <span style={{ opacity: 0.6, fontWeight: 500 }}>{item.label}:</span> {item.value}
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* 施術のご要望 */}
+                            {detail.treatmentRequest && (
+                                <div style={{ marginBottom: 12, padding: 14, background: '#eff6ff', borderRadius: 14, border: '1px solid #bfdbfe' }}>
+                                    <div style={{ fontSize: 12, fontWeight: 700, color: '#1e40af', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+                                        <Icon name="message-square" size={14} /> 施術に関するご要望
+                                    </div>
+                                    <p style={{ fontSize: 13, color: '#1e3a5f', lineHeight: 1.6 }}>{detail.treatmentRequest}</p>
+                                </div>
+                            )}
+
+                            {/* 施術経験・来店きっかけ */}
+                            {(detail.treatmentExperience?.length > 0 || detail.visitPurpose?.length > 0) && (
+                                <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+                                    {detail.treatmentExperience?.length > 0 && (
+                                        <div style={{ flex: 1, minWidth: 140, padding: 12, background: '#e4f4f7', borderRadius: 12, border: '1px solid #b2dfe8' }}>
+                                            <div style={{ fontSize: 11, fontWeight: 700, color: '#1a7a8a', marginBottom: 4 }}>施術経験</div>
+                                            <div style={{ fontSize: 12, color: '#155e6b', fontWeight: 600 }}>{detail.treatmentExperience.join('、')}</div>
+                                        </div>
+                                    )}
+                                    {detail.visitPurpose?.length > 0 && (
+                                        <div style={{ flex: 1, minWidth: 140, padding: 12, background: '#f5f0e0', borderRadius: 12, border: '1px solid #e0d5b3' }}>
+                                            <div style={{ fontSize: 11, fontWeight: 700, color: '#8a7540', marginBottom: 4 }}>ご来店きっかけ</div>
+                                            <div style={{ fontSize: 12, color: '#6b5a30', fontWeight: 600 }}>{detail.visitPurpose.join('、')}</div>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            {/* ===== お悩みチェック項目（Googleフォームからマッピング） ===== */}
+                            <div style={{ marginBottom: 12, padding: 16, background: '#fff', borderRadius: 16, border: '1.5px solid #e2e8f0' }}>
+                                <div style={{ fontSize: 13, fontWeight: 700, color: '#1e293b', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+                                    <div style={{ width: 26, height: 26, borderRadius: 7, background: 'linear-gradient(135deg,#e8f7ee,#d0f0db)', color: '#1e7a49', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, flexShrink: 0 }}>✓</div>
+                                    お悩み箇所
+                                    {hasConcerns && <span style={{ fontSize: 11, fontWeight: 600, color: '#33a065', background: '#dcfce7', padding: '2px 8px', borderRadius: 6 }}>
+                                        {Object.keys(gasMappedConcerns).length}件チェック
+                                    </span>}
+                                </div>
+
+                                {/* カテゴリ別に表示 */}
+                                {['face', 'posture', 'pelvis'].map(cat => {
+                                    const catItems = CONCERN_ITEMS.filter(c => c.cat === cat);
+                                    const info = concernCatInfo[cat];
+                                    return (
+                                        <div key={cat} style={{ marginBottom: 10 }}>
+                                            <div style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 5, display: 'inline-flex', alignItems: 'center', gap: 4, background: info.bg, color: info.color, marginBottom: 6 }}>
+                                                {info.label}
+                                            </div>
+                                            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                                                {catItems.map(item => {
+                                                    const checked = !!gasMappedConcerns[item.id];
+                                                    return (
+                                                        <div key={item.id} style={{
+                                                            display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px', borderRadius: 8,
+                                                            background: checked ? '#f0f9f4' : 'transparent',
+                                                            transition: 'background .2s',
+                                                        }}>
+                                                            <div style={{
+                                                                width: 18, height: 18, borderRadius: 5, flexShrink: 0,
+                                                                border: `2px solid ${checked ? '#33a065' : '#d1d5db'}`,
+                                                                background: checked ? '#33a065' : '#fff',
+                                                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                                                transition: 'all .2s',
+                                                            }}>
+                                                                {checked && <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round"><polyline points="2,6 5,9 10,3"/></svg>}
+                                                            </div>
+                                                            <span style={{ fontSize: 13, fontWeight: checked ? 700 : 500, color: checked ? '#166534' : '#94a3b8' }}>
+                                                                {item.label}
+                                                            </span>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+
+                                {!hasConcerns && !gasDetailLoading && (
+                                    <p style={{ fontSize: 12, color: '#94a3b8', textAlign: 'center', padding: '8px 0' }}>
+                                        Googleフォームのお悩みデータがありません
+                                    </p>
+                                )}
                             </div>
-                            {renderGasDetailInfo(gasCustomerDetail)}
-                        </div>
+                        </>
                     )}
 
                     {/* カウンセリング画面リンク */}
-                    <div className="flow-embed-placeholder" style={{ padding: gasCustomerDetail ? '20px 20px' : '40px 20px' }}>
+                    <div className="flow-embed-placeholder" style={{ padding: detail ? '20px 20px' : '40px 20px' }}>
                         <div className="flow-embed-icon">
                             <Icon name="heart-handshake" size={28} className="text-sise-500" />
                         </div>
                         <div>
                             <p style={{ fontSize: 15, fontWeight: 700, color: '#1e293b', marginBottom: 4 }}>
-                                {gasCustomerDetail ? 'フルカウンセリング画面を開く' : 'カウンセリング画面を開く'}
+                                {detail ? 'プランシミュレーション画面へ' : 'カウンセリング画面を開く'}
                             </p>
                             <p style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.6 }}>
-                                {gasCustomerDetail ? 'プランシミュレーション・提案を行う場合はこちら' : 'カウンセリングシートの確認・お悩みのヒアリングを行います'}
+                                {detail ? 'フィードバック入力・プラン提案を行う場合はこちら' : 'カウンセリングシートの確認・お悩みのヒアリングを行います'}
                             </p>
                         </div>
                         <button
@@ -17728,7 +17852,8 @@
                         />
                     </div>
                 </div>
-            );
+                );
+            };
 
             // Step 3: 姿勢チェック
             const renderPosture = () => (
