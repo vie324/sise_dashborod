@@ -17278,6 +17278,8 @@
             const [flowCustomer, setFlowCustomer] = useState(null); // { id, name, phone, email, lineConnected, source }
             const [stepStatus, setStepStatus] = useState({}); // { stepId: 'done'|'skipped' }
             const [searchQuery, setSearchQuery] = useState('');
+            const [customerTab, setCustomerTab] = useState('gas'); // 'gas' | 'square'
+            const [gasSearchInput, setGasSearchInput] = useState('');
             const [treatmentNotes, setTreatmentNotes] = useState('');
             const [treatmentMenus, setTreatmentMenus] = useState({ '骨盤矯正': false, '姿勢矯正': false, '小顔矯正': false, 'ほぐし': false });
             const [contractResult, setContractResult] = useState(null); // 'contract' | 'follow-up' | null
@@ -17357,7 +17359,24 @@
                 const lineConnected = checkLineConnection(customer);
                 setFlowCustomer({ ...customer, lineConnected });
                 setSearchQuery('');
+                setGasSearchInput('');
             }, [checkLineConnection]);
+
+            // GAS顧客の検索ハンドラ
+            const handleGasSearch = useCallback(() => {
+                if (!gasSearchInput.trim() || !counselingHook) return;
+                counselingHook.searchCustomers(gasSearchInput.trim());
+            }, [gasSearchInput, counselingHook]);
+
+            // GAS顧客の初回読み込み
+            useEffect(() => {
+                if (counselingHook && customerTab === 'gas') {
+                    counselingHook.fetchCustomerList();
+                }
+            }, [customerTab]);
+
+            // GAS店舗一覧
+            const allowedCounselingStores = useMemo(() => getAllowedCounselingStores(), []);
 
             // Step 1: 受付 (Check-in)
             const renderCheckin = () => (
@@ -17369,40 +17388,180 @@
 
                     {!flowCustomer ? (
                         <>
-                            <div style={{ position: 'relative' }}>
-                                <Icon name="search" size={18} className="text-slate-400" style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)' }} />
-                                <input
-                                    type="text"
-                                    className="flow-search-input"
-                                    placeholder="名前・電話番号で検索..."
-                                    value={searchQuery}
-                                    onChange={(e) => setSearchQuery(e.target.value)}
-                                    autoFocus
-                                />
+                            {/* タブ切り替え: 新規(GAS) / 既存(Square) */}
+                            <div style={{ display: 'flex', gap: 4, padding: 4, background: '#f1f5f9', borderRadius: 14, marginBottom: 14 }}>
+                                <button
+                                    onClick={() => setCustomerTab('gas')}
+                                    style={{
+                                        flex: 1, padding: '10px 12px', borderRadius: 11, fontSize: 13, fontWeight: 700, border: 'none', cursor: 'pointer',
+                                        background: customerTab === 'gas' ? '#fff' : 'transparent',
+                                        color: customerTab === 'gas' ? '#33a065' : '#94a3b8',
+                                        boxShadow: customerTab === 'gas' ? '0 2px 8px rgba(0,0,0,.06)' : 'none',
+                                        transition: 'all .2s',
+                                        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                                    }}
+                                >
+                                    <Icon name="file-text" size={14} />
+                                    新規（カウンセリング）
+                                </button>
+                                <button
+                                    onClick={() => setCustomerTab('square')}
+                                    style={{
+                                        flex: 1, padding: '10px 12px', borderRadius: 11, fontSize: 13, fontWeight: 700, border: 'none', cursor: 'pointer',
+                                        background: customerTab === 'square' ? '#fff' : 'transparent',
+                                        color: customerTab === 'square' ? '#33a065' : '#94a3b8',
+                                        boxShadow: customerTab === 'square' ? '0 2px 8px rgba(0,0,0,.06)' : 'none',
+                                        transition: 'all .2s',
+                                        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                                    }}
+                                >
+                                    <Icon name="credit-card" size={14} />
+                                    既存会員
+                                </button>
                             </div>
-                            <div className="flow-member-list">
-                                {filteredCustomers.length === 0 ? (
-                                    <div className="text-center py-8 text-slate-400 text-sm">
-                                        {searchQuery ? '該当するお客様が見つかりません' : 'お客様データを読み込み中...'}
-                                    </div>
-                                ) : (
-                                    filteredCustomers.map(c => (
-                                        <div key={c.id} className="flow-member-item" onClick={() => selectCustomer(c)}>
-                                            <div className="avatar">{(c.name || '?')[0]}</div>
-                                            <div style={{ flex: 1, minWidth: 0 }}>
-                                                <div style={{ fontSize: 14, fontWeight: 600, color: '#1e293b' }}>{c.name || '名前なし'}</div>
-                                                <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 1 }}>
-                                                    {c.phone || c.email || c.source}
-                                                    {c.planName && <span style={{ marginLeft: 8, color: '#33a065', fontWeight: 600 }}>{c.planName}</span>}
-                                                </div>
-                                            </div>
-                                            <Icon name="chevron-right" size={16} className="text-slate-300" />
+
+                            {/* ===== GAS（カウンセリング）タブ ===== */}
+                            {customerTab === 'gas' && (
+                                <>
+                                    {/* 店舗セレクター */}
+                                    {allowedCounselingStores.length > 1 && (
+                                        <div style={{ display: 'flex', gap: 6, marginBottom: 12, flexWrap: 'wrap' }}>
+                                            {allowedCounselingStores.map(s => (
+                                                <button
+                                                    key={s.id}
+                                                    onClick={() => counselingHook.setCounselingStore(s.id)}
+                                                    style={{
+                                                        padding: '6px 14px', borderRadius: 10, fontSize: 12, fontWeight: 600, border: '1.5px solid',
+                                                        cursor: 'pointer', transition: 'all .2s',
+                                                        borderColor: counselingHook.counselingStore === s.id ? '#33a065' : '#e2e8f0',
+                                                        background: counselingHook.counselingStore === s.id ? '#f0f9f4' : '#fff',
+                                                        color: counselingHook.counselingStore === s.id ? '#166534' : '#64748b',
+                                                    }}
+                                                >
+                                                    {s.name}
+                                                </button>
+                                            ))}
                                         </div>
-                                    ))
-                                )}
-                            </div>
+                                    )}
+
+                                    {/* GAS検索 */}
+                                    <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                                        <div style={{ position: 'relative', flex: 1 }}>
+                                            <Icon name="search" size={18} className="text-slate-400" style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)' }} />
+                                            <input
+                                                type="text"
+                                                className="flow-search-input"
+                                                placeholder="名前で検索..."
+                                                value={gasSearchInput}
+                                                onChange={(e) => setGasSearchInput(e.target.value)}
+                                                onKeyDown={(e) => e.key === 'Enter' && handleGasSearch()}
+                                                autoFocus
+                                            />
+                                        </div>
+                                        <button
+                                            onClick={handleGasSearch}
+                                            disabled={counselingHook.loading}
+                                            style={{
+                                                padding: '0 18px', borderRadius: 14, fontSize: 13, fontWeight: 700, border: 'none', cursor: 'pointer',
+                                                background: 'linear-gradient(135deg,#33a065,#2d8f5a)', color: '#fff',
+                                                opacity: counselingHook.loading ? 0.6 : 1,
+                                            }}
+                                        >
+                                            {counselingHook.loading ? '...' : '検索'}
+                                        </button>
+                                    </div>
+
+                                    {/* GAS顧客リスト */}
+                                    <div className="flow-member-list">
+                                        {counselingHook.loading ? (
+                                            <div className="text-center py-8 text-slate-400 text-sm">読み込み中...</div>
+                                        ) : counselingHook.customers.length === 0 ? (
+                                            <div className="text-center py-8 text-slate-400 text-sm">
+                                                カウンセリングデータがありません
+                                            </div>
+                                        ) : (
+                                            counselingHook.customers.map((c, idx) => (
+                                                <div
+                                                    key={c.index + '_' + c.name}
+                                                    className="flow-member-item"
+                                                    onClick={() => selectCustomer({
+                                                        id: 'gas_' + (c.index || idx),
+                                                        name: c.name || '名前なし',
+                                                        phone: '',
+                                                        email: '',
+                                                        source: 'カウンセリング',
+                                                        gasIndex: c.index,
+                                                        isNew: true,
+                                                    })}
+                                                >
+                                                    <div className="avatar" style={{ background: 'linear-gradient(135deg,#fbbf24,#f59e0b)', color: '#fff' }}>
+                                                        {(c.name || '?')[0]}
+                                                    </div>
+                                                    <div style={{ flex: 1, minWidth: 0 }}>
+                                                        <div style={{ fontSize: 14, fontWeight: 600, color: '#1e293b' }}>{c.name || '名前なし'}</div>
+                                                        <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 1, display: 'flex', alignItems: 'center', gap: 6 }}>
+                                                            <span>{c.timestamp ? new Date(c.timestamp).toLocaleDateString('ja-JP') : ''}</span>
+                                                            <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 4, background: '#fef3c7', color: '#d97706', fontWeight: 600 }}>新規</span>
+                                                        </div>
+                                                    </div>
+                                                    <Icon name="chevron-right" size={16} className="text-slate-300" />
+                                                </div>
+                                            ))
+                                        )}
+                                    </div>
+
+                                    {/* 更新ボタン */}
+                                    <button
+                                        onClick={() => counselingHook.fetchCustomerList()}
+                                        disabled={counselingHook.loading}
+                                        className="w-full mt-2 py-2.5 rounded-xl border border-slate-200 text-slate-500 font-semibold text-xs hover:bg-slate-50 transition-colors flex items-center justify-center gap-1.5"
+                                    >
+                                        <Icon name="refresh-cw" size={13} className={counselingHook.loading ? 'animate-spin' : ''} />
+                                        最新データを取得
+                                    </button>
+                                </>
+                            )}
+
+                            {/* ===== Square会員タブ ===== */}
+                            {customerTab === 'square' && (
+                                <>
+                                    <div style={{ position: 'relative' }}>
+                                        <Icon name="search" size={18} className="text-slate-400" style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)' }} />
+                                        <input
+                                            type="text"
+                                            className="flow-search-input"
+                                            placeholder="名前・電話番号で検索..."
+                                            value={searchQuery}
+                                            onChange={(e) => setSearchQuery(e.target.value)}
+                                            autoFocus
+                                        />
+                                    </div>
+                                    <div className="flow-member-list">
+                                        {filteredCustomers.length === 0 ? (
+                                            <div className="text-center py-8 text-slate-400 text-sm">
+                                                {searchQuery ? '該当するお客様が見つかりません' : 'お客様データを読み込み中...'}
+                                            </div>
+                                        ) : (
+                                            filteredCustomers.map(c => (
+                                                <div key={c.id} className="flow-member-item" onClick={() => selectCustomer(c)}>
+                                                    <div className="avatar">{(c.name || '?')[0]}</div>
+                                                    <div style={{ flex: 1, minWidth: 0 }}>
+                                                        <div style={{ fontSize: 14, fontWeight: 600, color: '#1e293b' }}>{c.name || '名前なし'}</div>
+                                                        <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 1 }}>
+                                                            {c.phone || c.email || c.source}
+                                                            {c.planName && <span style={{ marginLeft: 8, color: '#33a065', fontWeight: 600 }}>{c.planName}</span>}
+                                                        </div>
+                                                    </div>
+                                                    <Icon name="chevron-right" size={16} className="text-slate-300" />
+                                                </div>
+                                            ))
+                                        )}
+                                    </div>
+                                </>
+                            )}
+
                             <button
-                                onClick={() => selectCustomer({ id: 'new_' + Date.now(), name: searchQuery || '新規のお客様', phone: '', email: '', source: '新規', isNew: true })}
+                                onClick={() => selectCustomer({ id: 'new_' + Date.now(), name: gasSearchInput || searchQuery || '新規のお客様', phone: '', email: '', source: '新規', isNew: true })}
                                 className="w-full mt-3 py-3 rounded-xl border-2 border-dashed border-sise-300 text-sise-600 font-semibold text-sm hover:bg-sise-50 transition-colors flex items-center justify-center gap-2"
                             >
                                 <Icon name="user-plus" size={16} />
