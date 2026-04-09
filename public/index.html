@@ -13128,18 +13128,36 @@
             const [landmarks, setLandmarks] = useState(null);
             const [analysis, setAnalysis] = useState(null);
             const [overlayOn, setOverlayOn] = useState(true);
-            const [gridOn, setGridOn] = useState(false);
+            const [gridOn, setGridOn] = useState(true);
             const [scoreOverlayOn, setScoreOverlayOn] = useState(true);
             const [capturedImage, setCapturedImage] = useState(null);
+
+            // カメラ傾き検出
+            const [cameraTilt, setCameraTilt] = useState({ beta: 0, gamma: 0 });
+            const orientationRef = useRef(null);
+
+            // 手書き注釈モード
+            const [drawMode, setDrawMode] = useState(false);
+            const [drawColor, setDrawColor] = useState('#E24B4A');
+            const [drawLineWidth, setDrawLineWidth] = useState(4);
+            const [drawPaths, setDrawPaths] = useState([]); // [{points:[{x,y}], color, width}]
+            const drawCanvasRef = useRef(null);
+            const isDrawing = useRef(false);
 
             // ランドマーク手動修正モード
             const [editMode, setEditMode] = useState(false);
             const [draggingIdx, setDraggingIdx] = useState(null);
             const editContainerRef = useRef(null);
 
-            // ビフォーアフター比較モード
-            const [analysisMode, setAnalysisMode] = useState('single'); // 'single' | 'comparison'
-            const [captureSlot, setCaptureSlot] = useState('before'); // 'before' | 'after'
+            // 統合フロー: Before/After
+            const [flowPhase, setFlowPhase] = useState('before'); // 'before' | 'after'
+            const [beforeData, setBeforeData] = useState({ front: null, back: null, side: null, seated: null });
+            // each: { image, landmarks, analysis }
+
+            // 後方互換のため analysisMode を flowPhase から自動導出
+            const analysisMode = flowPhase === 'after' && Object.values(beforeData).some(v => v) ? 'comparison' : 'single';
+            const captureSlot = flowPhase; // 'before' | 'after'
+
             const [compData, setCompData] = useState({ before_front: null, before_back: null, before_side: null, before_seated: null, after_front: null, after_back: null, after_side: null, after_seated: null });
             // each slot: { image, landmarks, analysis }
 
@@ -13183,6 +13201,8 @@
                 if (animRef.current) cancelAnimationFrame(animRef.current);
                 if (streamRef.current) { streamRef.current.getTracks().forEach(t => t.stop()); streamRef.current = null; }
                 if (videoRef.current) videoRef.current.srcObject = null;
+                // 傾きセンサー停止
+                if (orientationRef.current) { window.removeEventListener('deviceorientation', orientationRef.current); orientationRef.current = null; }
             }, []);
 
             const startCamera = useCallback(async () => {
@@ -13240,6 +13260,18 @@
                         animRef.current = requestAnimationFrame(detect);
                     };
                     detect();
+                    // カメラ傾きセンサーを起動
+                    const onOrientation = (e) => {
+                        setCameraTilt({ beta: Math.round(e.beta || 0), gamma: Math.round(e.gamma || 0) });
+                    };
+                    orientationRef.current = onOrientation;
+                    if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+                        DeviceOrientationEvent.requestPermission().then(state => {
+                            if (state === 'granted') window.addEventListener('deviceorientation', onOrientation);
+                        }).catch(() => {});
+                    } else {
+                        window.addEventListener('deviceorientation', onOrientation);
+                    }
                 } catch (e) {
                     setPhase('idle'); setErrorMsg(e.message || 'カメラ起動失敗');
                 }
@@ -13282,14 +13314,92 @@
                 setPhase('captured');
             }, [stopCam, getAveragedLandmarks]);
 
+            // 手書き注釈: 描画関数
+            const redrawPaths = useCallback((paths) => {
+                const canvas = drawCanvasRef.current;
+                if (!canvas) return;
+                const ctx = canvas.getContext('2d');
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                paths.forEach(path => {
+                    if (path.points.length < 2) return;
+                    ctx.beginPath();
+                    ctx.strokeStyle = path.color;
+                    ctx.lineWidth = path.width;
+                    ctx.lineCap = 'round';
+                    ctx.lineJoin = 'round';
+                    ctx.moveTo(path.points[0].x, path.points[0].y);
+                    for (let i = 1; i < path.points.length; i++) ctx.lineTo(path.points[i].x, path.points[i].y);
+                    ctx.stroke();
+                });
+            }, []);
+
+            const getDrawPos = useCallback((e) => {
+                const canvas = drawCanvasRef.current;
+                if (!canvas) return { x: 0, y: 0 };
+                const rect = canvas.getBoundingClientRect();
+                const touch = e.touches ? e.touches[0] : e;
+                return {
+                    x: (touch.clientX - rect.left) * (canvas.width / rect.width),
+                    y: (touch.clientY - rect.top) * (canvas.height / rect.height),
+                };
+            }, []);
+
+            const onDrawStart = useCallback((e) => {
+                e.preventDefault();
+                isDrawing.current = true;
+                const pos = getDrawPos(e);
+                setDrawPaths(prev => [...prev, { points: [pos], color: drawColor, width: drawLineWidth }]);
+            }, [getDrawPos, drawColor, drawLineWidth]);
+
+            const onDrawMove = useCallback((e) => {
+                e.preventDefault();
+                if (!isDrawing.current) return;
+                const pos = getDrawPos(e);
+                setDrawPaths(prev => {
+                    const updated = [...prev];
+                    const last = { ...updated[updated.length - 1] };
+                    last.points = [...last.points, pos];
+                    updated[updated.length - 1] = last;
+                    redrawPaths(updated);
+                    return updated;
+                });
+            }, [getDrawPos, redrawPaths]);
+
+            const onDrawEnd = useCallback(() => { isDrawing.current = false; }, []);
+
+            const undoDraw = useCallback(() => {
+                setDrawPaths(prev => {
+                    const updated = prev.slice(0, -1);
+                    redrawPaths(updated);
+                    return updated;
+                });
+            }, [redrawPaths]);
+
+            const clearDraw = useCallback(() => {
+                setDrawPaths([]);
+                const canvas = drawCanvasRef.current;
+                if (canvas) canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+            }, []);
+
             // 比較モードでキャプチャを保存
             const saveToCompSlot = useCallback(() => {
                 if (!capturedImage || !landmarks || !analysis) return;
-                const key = captureSlot + '_' + viewMode;
-                setCompData(prev => ({ ...prev, [key]: { image: capturedImage, landmarks: [...landmarks], analysis: JSON.parse(JSON.stringify(analysis)) } }));
-                // 次のスロットへ自動遷移
-                setCapturedImage(null); setAnalysis(null); setLandmarks(null); setPhase('idle');
-            }, [capturedImage, landmarks, analysis, captureSlot, viewMode]);
+                const data = { image: capturedImage, landmarks: [...landmarks], analysis: JSON.parse(JSON.stringify(analysis)) };
+                if (flowPhase === 'before') {
+                    // Before保存: beforeDataとcompDataの両方に格納
+                    setBeforeData(prev => ({ ...prev, [viewMode]: data }));
+                    setCompData(prev => ({ ...prev, ['before_' + viewMode]: data }));
+                } else {
+                    // After保存: compDataに格納 + beforeDataからbeforeスロットも確保
+                    setCompData(prev => {
+                        const updated = { ...prev, ['after_' + viewMode]: data };
+                        // beforeDataに保存済みならbeforeスロットも設定
+                        if (beforeData[viewMode]) updated['before_' + viewMode] = beforeData[viewMode];
+                        return updated;
+                    });
+                }
+                setCapturedImage(null); setAnalysis(null); setLandmarks(null); setPhase('idle'); setDrawPaths([]); setDrawMode(false);
+            }, [capturedImage, landmarks, analysis, flowPhase, viewMode, beforeData]);
 
             const retake = useCallback(() => {
                 setCapturedImage(null); setAnalysis(null); setLandmarks(null); setEditMode(false);
@@ -13303,8 +13413,10 @@
 
             const resetComparison = useCallback(() => {
                 stopCam(); setCapturedImage(null); setAnalysis(null); setLandmarks(null); setEditMode(false);
-                setPhase('idle'); setCaptureSlot('before');
+                setPhase('idle'); setFlowPhase('before');
+                setBeforeData({ front: null, back: null, side: null, seated: null });
                 setCompData({ before_front: null, before_back: null, before_side: null, before_seated: null, after_front: null, after_back: null, after_side: null, after_seated: null });
+                setDrawPaths([]); setDrawMode(false);
             }, [stopCam]);
 
             // Run analysis when landmarks change
@@ -13644,15 +13756,44 @@
                             </div>
                         </div>
 
-                        {/* 分析モード切替 */}
-                        <div className="flex gap-1 p-1 rounded-xl" style={{background:'rgba(0,0,0,0.05)'}}>
-                            {[{k:'single',l:'通常分析'},{k:'comparison',l:'ビフォーアフター比較'}].map(m=>(
-                                <button key={m.k} onClick={()=>{setAnalysisMode(m.k);resetAll();setCaptureSlot('before');setCompData({before_front:null,before_back:null,before_side:null,before_seated:null,after_front:null,after_back:null,after_side:null,after_seated:null});}}
-                                    className={`flex-1 py-2 rounded-lg text-sm font-bold transition ${analysisMode===m.k?'bg-white shadow text-teal-700':'text-gray-400'}`}>
-                                    {m.l}
-                                </button>
-                            ))}
+                        {/* Before/After 切替 */}
+                        <div className="flex gap-1 p-1 rounded-xl" style={{background: flowPhase === 'before' ? 'rgba(20,184,166,0.08)' : 'rgba(245,158,11,0.08)'}}>
+                            <button onClick={()=>{ setFlowPhase('before'); if(phase==='captured'){setCapturedImage(null);setAnalysis(null);setLandmarks(null);setPhase('idle');setDrawPaths([]);setDrawMode(false);} }}
+                                className={`flex-1 py-2.5 rounded-lg text-sm font-bold transition flex items-center justify-center gap-1.5 ${flowPhase==='before'?'bg-white shadow text-teal-700':'text-gray-400'}`}>
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+                                Before（施術前）
+                                {Object.values(beforeData).some(v=>v) && <span className="w-2 h-2 rounded-full bg-teal-400 inline-block"/>}
+                            </button>
+                            <button onClick={()=>{ setFlowPhase('after'); if(phase==='captured'){setCapturedImage(null);setAnalysis(null);setLandmarks(null);setPhase('idle');setDrawPaths([]);setDrawMode(false);} }}
+                                className={`flex-1 py-2.5 rounded-lg text-sm font-bold transition flex items-center justify-center gap-1.5 ${flowPhase==='after'?'bg-white shadow text-amber-700':'text-gray-400'}`}>
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                                After（施術後）
+                            </button>
                         </div>
+                        {/* Before保存済みサムネイル */}
+                        {Object.values(beforeData).some(v=>v) && (
+                            <div className="flex gap-2 p-3 bg-teal-50 rounded-xl border border-teal-200">
+                                <div className="text-xs font-bold text-teal-700 flex items-center gap-1 whitespace-nowrap">
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                                    Before保存済み
+                                </div>
+                                <div className="flex gap-1.5 flex-1">
+                                    {['front','back','side','seated'].map(v => {
+                                        const d = beforeData[v];
+                                        return d ? (
+                                            <div key={v} className="relative w-10 h-14 rounded-lg overflow-hidden border-2 border-teal-300 flex-shrink-0">
+                                                <img src={d.image} className="w-full h-full object-cover" alt={v} />
+                                                <div className="absolute bottom-0 inset-x-0 text-center bg-black/50 text-white" style={{fontSize:7,fontWeight:700,padding:'1px 0'}}>{v==='front'?'正面':v==='back'?'背面':v==='side'?'側面':'座位'}</div>
+                                            </div>
+                                        ) : (
+                                            <div key={v} className="w-10 h-14 rounded-lg border-2 border-dashed border-teal-200 flex items-center justify-center flex-shrink-0">
+                                                <span style={{fontSize:7,color:'#94a3b8'}}>{v==='front'?'正面':v==='back'?'背面':v==='side'?'側面':'座位'}</span>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        )}
 
                         {/* レポート情報 */}
                         <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100 space-y-3">
@@ -13667,64 +13808,25 @@
                             </div>
                         </div>
 
-                        {/* 比較モード: Before/After + 正面/側面 切替 */}
-                        {analysisMode==='comparison' && (
-                            <div className="space-y-2">
-                                <div className="flex gap-1 p-1 rounded-xl bg-amber-50 border border-amber-200">
-                                    {['before','after'].map(s=>(
-                                        <button key={s} onClick={()=>{setCaptureSlot(s);if(phase==='captured'){setCapturedImage(null);setAnalysis(null);setLandmarks(null);setPhase('idle');}}}
-                                            className={`flex-1 py-2 rounded-lg text-sm font-bold transition ${captureSlot===s?'bg-white shadow text-amber-700':'text-amber-400'}`}>
-                                            {s==='before'?'Before（施術前）':'After（施術後）'}
-                                        </button>
-                                    ))}
-                                </div>
-                                <div className="flex gap-1 p-1 rounded-xl" style={{background:'rgba(0,0,0,0.05)'}}>
-                                    {[{k:'front',l:'正面'},{k:'back',l:'背面'},{k:'side',l:'側面'},{k:'seated',l:'座位'}].map(m=>(
-                                        <button key={m.k} onClick={()=>{setViewMode(m.k);if(phase==='captured'){setCapturedImage(null);setAnalysis(null);setLandmarks(null);setPhase('idle');}}}
-                                            className={`flex-1 py-2 rounded-lg text-sm font-bold transition ${viewMode===m.k?'bg-white shadow text-teal-700':'text-gray-400'}`}>
-                                            {m.l}
-                                        </button>
-                                    ))}
-                                </div>
-                                {/* 撮影済みサムネイルグリッド */}
-                                <div className="grid grid-cols-4 gap-2">
-                                    {[{k:'before_front',l:'B正面'},{k:'before_back',l:'B背面'},{k:'before_side',l:'B側面'},{k:'before_seated',l:'B座位'},{k:'after_front',l:'A正面'},{k:'after_back',l:'A背面'},{k:'after_side',l:'A側面'},{k:'after_seated',l:'A座位'}].map(slot=>{
-                                        const d = compData[slot.k];
-                                        const isActive = captureSlot+'_'+viewMode === slot.k;
-                                        return (
-                                            <div key={slot.k} onClick={()=>{const [s,v]=slot.k.split('_');setCaptureSlot(s);setViewMode(v);if(phase==='captured'){setCapturedImage(null);setAnalysis(null);setLandmarks(null);setPhase('idle');}}}
-                                                className={`rounded-lg overflow-hidden border-2 cursor-pointer transition aspect-[3/4] ${isActive?'border-teal-500 ring-2 ring-teal-200':d?'border-green-300':'border-gray-200 border-dashed'}`}>
-                                                {d ? (
-                                                    <div className="relative w-full h-full">
-                                                        <img src={d.image} className="w-full h-full object-cover" alt={slot.l}/>
-                                                        <div className="absolute bottom-0 inset-x-0 bg-black/60 text-white text-[8px] text-center py-0.5 font-bold">
-                                                            {slot.l} {postureGetTotal(d.analysis)}点
-                                                        </div>
-                                                    </div>
-                                                ) : (
-                                                    <div className="w-full h-full flex flex-col items-center justify-center bg-gray-50 gap-0.5">
-                                                        <span className="text-gray-300 text-lg">+</span>
-                                                        <span className="text-[8px] text-gray-400 font-bold">{slot.l}</span>
-                                                    </div>
-                                                )}
-                                            </div>
-                                        );
-                                    })}
-                                </div>
-                            </div>
-                        )}
-
-                        {/* 通常モード: 正面/側面/座位切替 */}
-                        {analysisMode==='single' && (
-                            <div className="flex gap-1 p-1 rounded-xl" style={{background:'rgba(0,0,0,0.05)'}}>
-                                {[{k:'front',l:'正面'},{k:'back',l:'背面'},{k:'side',l:'側面'},{k:'seated',l:'座位'}].map(m=>(
-                                    <button key={m.k} onClick={()=>setViewMode(m.k)}
-                                        className={`flex-1 py-2 rounded-lg text-sm font-bold transition ${viewMode===m.k?'bg-white shadow text-teal-700':'text-gray-400'}`}>
+                        {/* 正面/背面/側面/座位切替（常時表示） */}
+                        <div className="flex gap-1 p-1 rounded-xl" style={{background:'rgba(0,0,0,0.05)'}}>
+                            {[{k:'front',l:'正面'},{k:'back',l:'背面'},{k:'side',l:'側面'},{k:'seated',l:'座位'}].map(m=>{
+                                const hasBefore = !!beforeData[m.k];
+                                const hasAfter = !!compData['after_'+m.k];
+                                return (
+                                    <button key={m.k} onClick={()=>{setViewMode(m.k);if(phase==='captured'){setCapturedImage(null);setAnalysis(null);setLandmarks(null);setPhase('idle');setDrawPaths([]);setDrawMode(false);}}}
+                                        className={`flex-1 py-2 rounded-lg text-sm font-bold transition relative ${viewMode===m.k?'bg-white shadow text-teal-700':'text-gray-400'}`}>
                                         {m.l}
+                                        {(hasBefore || hasAfter) && (
+                                            <span className="absolute -top-1 -right-1 flex gap-0.5">
+                                                {hasBefore && <span className="w-1.5 h-1.5 rounded-full bg-teal-400"/>}
+                                                {hasAfter && <span className="w-1.5 h-1.5 rounded-full bg-amber-400"/>}
+                                            </span>
+                                        )}
                                     </button>
-                                ))}
-                            </div>
-                        )}
+                                );
+                            })}
+                        </div>
 
                         {/* Viewport */}
                         <div ref={vpRef} className="relative rounded-2xl overflow-hidden bg-gray-900 shadow-lg" style={{aspectRatio:'9/16'}}>
@@ -13833,8 +13935,31 @@
                                 </svg>
                             )}
                             {phase==='live' && (
-                                <div className="absolute top-3 right-3 flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-black/50 backdrop-blur">
-                                    <div className="w-2 h-2 rounded-full bg-red-400 animate-pulse"/><span className="text-white text-xs font-bold">LIVE</span>
+                                <div className="absolute top-3 right-3 flex flex-col items-end gap-1.5 z-10">
+                                    <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-black/50 backdrop-blur">
+                                        <div className="w-2 h-2 rounded-full bg-red-400 animate-pulse"/><span className="text-white text-xs font-bold">LIVE</span>
+                                    </div>
+                                    {/* カメラ傾き表示 */}
+                                    {(() => {
+                                        const absBeta = Math.abs(cameraTilt.beta - 90); // 90°が垂直=理想
+                                        const absGamma = Math.abs(cameraTilt.gamma);
+                                        const tiltOk = absBeta <= 3 && absGamma <= 3;
+                                        const tiltWarn = absBeta <= 6 && absGamma <= 6;
+                                        const tiltColor = tiltOk ? '#22c55e' : tiltWarn ? '#eab308' : '#ef4444';
+                                        const bgColor = tiltOk ? 'rgba(22,163,74,0.25)' : tiltWarn ? 'rgba(234,179,8,0.25)' : 'rgba(239,68,68,0.3)';
+                                        return (
+                                            <div className="px-2.5 py-1.5 rounded-xl backdrop-blur" style={{ background: bgColor, border: `1px solid ${tiltColor}40` }}>
+                                                <div className="flex items-center gap-2 text-white" style={{ fontSize: 10, fontWeight: 700 }}>
+                                                    <span style={{ color: tiltColor }}>傾き</span>
+                                                    <span>前後 {cameraTilt.beta > 0 ? cameraTilt.beta - 90 : cameraTilt.beta}°</span>
+                                                    <span>左右 {cameraTilt.gamma}°</span>
+                                                </div>
+                                                {!tiltOk && !tiltWarn && (
+                                                    <div style={{ fontSize: 9, color: '#fca5a5', marginTop: 2 }}>カメラを水平にしてください</div>
+                                                )}
+                                            </div>
+                                        );
+                                    })()}
                                 </div>
                             )}
                             {phase==='captured' && (
@@ -13926,6 +14051,35 @@
                                     </React.Fragment>
                                 );
                             })()}
+                            {/* 手書き注釈キャンバス */}
+                            {phase==='captured' && drawMode && (
+                                <canvas
+                                    ref={drawCanvasRef}
+                                    className="absolute inset-0 w-full h-full"
+                                    style={{ zIndex: 8, touchAction: 'none', cursor: 'crosshair' }}
+                                    width={1080} height={1920}
+                                    onTouchStart={onDrawStart} onTouchMove={onDrawMove} onTouchEnd={onDrawEnd}
+                                    onMouseDown={onDrawStart} onMouseMove={onDrawMove} onMouseUp={onDrawEnd} onMouseLeave={onDrawEnd}
+                                />
+                            )}
+                            {/* 手書きツールバー */}
+                            {phase==='captured' && drawMode && (
+                                <div className="absolute top-3 left-3 z-20 flex flex-col gap-2">
+                                    <div className="flex gap-1 p-1.5 rounded-xl bg-black/60 backdrop-blur">
+                                        {[{c:'#E24B4A',l:'赤'},{c:'#3B82F6',l:'青'},{c:'#FBBF24',l:'黄'},{c:'#FFFFFF',l:'白'},{c:'#1E293B',l:'黒'}].map(item => (
+                                            <button key={item.c} onClick={() => setDrawColor(item.c)}
+                                                style={{width:28,height:28,borderRadius:8,background:item.c,border:drawColor===item.c?'3px solid #fff':'2px solid rgba(255,255,255,0.3)',transition:'all .15s',flexShrink:0}} />
+                                        ))}
+                                    </div>
+                                    <div className="flex gap-1 p-1.5 rounded-xl bg-black/60 backdrop-blur">
+                                        <button onClick={() => setDrawLineWidth(3)} className="px-3 py-1 rounded-lg text-white text-xs font-bold" style={{background:drawLineWidth===3?'rgba(255,255,255,0.25)':'transparent'}}>細</button>
+                                        <button onClick={() => setDrawLineWidth(7)} className="px-3 py-1 rounded-lg text-white text-xs font-bold" style={{background:drawLineWidth===7?'rgba(255,255,255,0.25)':'transparent'}}>太</button>
+                                        <div style={{width:1,background:'rgba(255,255,255,0.2)',margin:'2px 4px'}} />
+                                        <button onClick={undoDraw} className="px-3 py-1 rounded-lg text-white text-xs font-bold hover:bg-white/10" disabled={drawPaths.length===0}>戻す</button>
+                                        <button onClick={clearDraw} className="px-3 py-1 rounded-lg text-white text-xs font-bold hover:bg-white/10">クリア</button>
+                                    </div>
+                                </div>
+                            )}
                             {/* Floating buttons inside viewport */}
                             {phase==='live' && (
                                 <div className="absolute bottom-0 left-0 right-0 p-4 flex gap-2 z-10" style={{background:'linear-gradient(transparent, rgba(0,0,0,0.6))'}}>
@@ -13937,17 +14091,18 @@
                                     </button>
                                 </div>
                             )}
-                            {phase==='captured' && !editMode && (
+                            {phase==='captured' && !editMode && !drawMode && (
                                 <div className="absolute bottom-0 left-0 right-0 p-4 flex gap-2 z-10" style={{background:'linear-gradient(transparent, rgba(0,0,0,0.6))'}}>
-                                    {analysisMode==='comparison' && analysis && (
-                                        <button onClick={saveToCompSlot} className="flex-1 py-3.5 rounded-xl text-white font-bold text-sm shadow-lg backdrop-blur" style={{background:'rgba(234,160,24,0.95)'}}>
-                                            保存して次へ
+                                    {analysis && (
+                                        <button onClick={saveToCompSlot} className="flex-1 py-3.5 rounded-xl text-white font-bold text-sm shadow-lg backdrop-blur"
+                                            style={{background: flowPhase==='before' ? 'rgba(20,184,166,0.95)' : 'rgba(234,160,24,0.95)'}}>
+                                            {flowPhase==='before' ? 'Beforeを保存' : 'Afterを保存'}
                                         </button>
                                     )}
-                                    <button onClick={retake} className={`${analysisMode==='comparison'?'':'flex-1'} py-3.5 rounded-xl text-white font-bold text-sm shadow-lg backdrop-blur`} style={{background:'rgba(15,110,86,0.9)',padding:analysisMode==='comparison'?'0 16px':''}}>
+                                    <button onClick={retake} className="py-3.5 rounded-xl text-white font-bold text-sm shadow-lg backdrop-blur" style={{background:'rgba(15,110,86,0.9)', padding:'0 16px'}}>
                                         再撮影
                                     </button>
-                                    <button onClick={analysisMode==='comparison'?resetComparison:resetAll} className="px-4 py-3.5 rounded-xl font-bold text-sm shadow-lg backdrop-blur" style={{background:'rgba(255,255,255,0.9)', color:'#555'}}>
+                                    <button onClick={resetAll} className="px-4 py-3.5 rounded-xl font-bold text-sm shadow-lg backdrop-blur" style={{background:'rgba(255,255,255,0.9)', color:'#555'}}>
                                         リセット
                                     </button>
                                 </div>
@@ -13990,10 +14145,17 @@
                                         </button>
                                     </div>
                                 </div>
-                                {phase==='captured' && analysis && landmarks && (
+                                {phase==='captured' && analysis && landmarks && !drawMode && (
                                     <button onClick={startEdit} className="flex items-center gap-1.5 px-4 py-3 rounded-xl text-sm font-bold border-2 border-red-300 text-red-500 bg-white hover:bg-red-50 transition whitespace-nowrap">
                                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
                                         位置を修正
+                                    </button>
+                                )}
+                                {phase==='captured' && !editMode && (
+                                    <button onClick={() => { setDrawMode(!drawMode); if (drawMode) setDrawMode(false); else { setEditMode(false); setDrawMode(true); } }}
+                                        className={`flex items-center gap-1.5 px-4 py-3 rounded-xl text-sm font-bold border-2 transition whitespace-nowrap ${drawMode ? 'border-amber-400 text-amber-600 bg-amber-50' : 'border-blue-300 text-blue-500 bg-white hover:bg-blue-50'}`}>
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M12 20h9"/><path d="M16.376 3.622a1 1 0 0 1 3.002 3.002L7.368 18.635a2 2 0 0 1-.855.506l-2.872.838.838-2.872a2 2 0 0 1 .506-.855z"/></svg>
+                                        {drawMode ? '手書き中' : '手書き'}
                                     </button>
                                 )}
                             </div>
@@ -14372,7 +14534,6 @@
                             </div>
                             );
                         })()}
-                        )}
 
                         {/* 比較モード: Before/After 比較結果 */}
                         {analysisMode==='comparison' && hasAnyPair && (
