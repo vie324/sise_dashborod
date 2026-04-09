@@ -13178,8 +13178,8 @@
             const [lineSelectedUser, setLineSelectedUser] = useState(null);
             const [lineSendStatus, setLineSendStatus] = useState('');
 
-            // Report fields
-            const [customerName, setCustomerName] = useState('');
+            // Report fields（来店フローから遷移した場合はsessionStorageから顧客名を自動反映）
+            const [customerName, setCustomerName] = useState(() => sessionStorage.getItem('sise_flow_customer_name') || '');
             const [staffName, setStaffName] = useState('');
             const [visitDate, setVisitDate] = useState(() => new Date().toISOString().split('T')[0]);
 
@@ -14855,8 +14855,8 @@
             const [lineSelectedUser, setLineSelectedUser] = useState(null);
             const [lineSendStatus, setLineSendStatus] = useState(''); // '' | 'sending' | 'sent' | 'error'
 
-            // --- State ---
-            const [customerName, setCustomerName] = useState('');
+            // --- State ---（来店フローから遷移した場合はsessionStorageから顧客名を自動反映）
+            const [customerName, setCustomerName] = useState(() => sessionStorage.getItem('sise_flow_customer_name') || '');
             const [visitDate, setVisitDate] = useState(() => new Date().toISOString().split('T')[0]);
             const [menuChecks, setMenuChecks] = useState({ '骨盤矯正': true, '姿勢矯正': true, '小顔矯正': false, 'ほぐし': false });
             const [scores, setScores] = useState({ posture: 0, pelvis: 0, face: 0, flow: 0, flex: 0 });
@@ -17554,6 +17554,15 @@
                 goToStep(currentStep + 1);
             }, [currentStep, markSkipped, goToStep]);
 
+            // フローから別画面に一時遷移する（顧客名をsessionStorageに保存）
+            const navigateOut = useCallback((stepId, targetView) => {
+                markDone(stepId);
+                if (flowCustomer?.name) {
+                    sessionStorage.setItem('sise_flow_customer_name', flowCustomer.name);
+                }
+                onClose(targetView);
+            }, [markDone, flowCustomer, onClose]);
+
             const selectCustomer = useCallback(async (customer) => {
                 const lineConnected = checkLineConnection(customer);
                 setFlowCustomer({ ...customer, lineConnected });
@@ -17804,18 +17813,6 @@
                                     <Icon name="x" size={16} className="text-slate-400" />
                                 </button>
                             </div>
-
-                            {!flowCustomer.lineConnected && (
-                                <div style={{ marginTop: 16, padding: 16, background: '#fffbeb', borderRadius: 14, border: '1.5px solid #fde68a' }}>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                                        <Icon name="alert-triangle" size={16} className="text-amber-500" />
-                                        <span style={{ fontSize: 13, fontWeight: 700, color: '#92400e' }}>LINE登録をご案内ください</span>
-                                    </div>
-                                    <p style={{ fontSize: 12, color: '#a16207', lineHeight: 1.6 }}>
-                                        カウンセリングシートの入力やアフターフォローにLINE登録が必要です。リッチメニューからカウンセリングフォームに進めます。
-                                    </p>
-                                </div>
-                            )}
                         </>
                     )}
                 </div>
@@ -18024,10 +18021,7 @@
                             </p>
                         </div>
                         <button
-                            onClick={() => {
-                                markDone('counseling');
-                                onClose('counseling');
-                            }}
+                            onClick={() => navigateOut('counseling', 'counseling')}
                             className="flow-btn flow-btn-primary"
                             style={{ flex: 'none', padding: '12px 28px', marginTop: 8 }}
                         >
@@ -18073,10 +18067,7 @@
                             </p>
                         </div>
                         <button
-                            onClick={() => {
-                                markDone('posture');
-                                onClose('posture');
-                            }}
+                            onClick={() => navigateOut('posture', 'treatment')}
                             className="flow-btn flow-btn-primary"
                             style={{ flex: 'none', padding: '12px 28px', marginTop: 8 }}
                         >
@@ -18157,10 +18148,7 @@
                             </p>
                         </div>
                         <button
-                            onClick={() => {
-                                markDone('report');
-                                onClose('treatment-report');
-                            }}
+                            onClick={() => navigateOut('report', 'treatment-report')}
                             className="flow-btn flow-btn-primary"
                             style={{ flex: 'none', padding: '12px 28px', marginTop: 8 }}
                         >
@@ -18233,7 +18221,7 @@
                                 Squareで契約手続き
                             </p>
                             <button
-                                onClick={() => onClose('counseling')}
+                                onClick={() => navigateOut('plan', 'counseling')}
                                 className="w-full py-3 rounded-xl font-semibold text-sm text-white transition-all"
                                 style={{ background: 'linear-gradient(135deg,#33a065,#2d8f5a)' }}
                             >
@@ -18254,7 +18242,7 @@
                             <button
                                 onClick={() => {
                                     setFollowUpSent(true);
-                                    onClose('line');
+                                    navigateOut('plan', 'line');
                                 }}
                                 className="w-full py-3 rounded-xl font-semibold text-sm transition-all"
                                 style={{ background: '#06c755', color: '#fff' }}
@@ -18713,11 +18701,23 @@
             const isFullscreenView = currentView === 'counseling' || currentView === 'treatment-report';
 
             // 来店フローモードのハンドラ
+            const [flowPaused, setFlowPaused] = useState(false); // フロー一時離脱中
             const handleFlowClose = useCallback((navigateTo) => {
-                setFlowMode(false);
-                if (navigateTo) {
+                if (navigateTo && navigateTo !== 'dashboard') {
+                    // 一時離脱: フローを閉じずに別画面へ遷移（戻るボタンで復帰可能）
+                    setFlowMode(false);
+                    setFlowPaused(true);
                     setCurrentView(navigateTo);
+                } else {
+                    // 完全終了
+                    setFlowMode(false);
+                    setFlowPaused(false);
+                    if (navigateTo) setCurrentView(navigateTo);
                 }
+            }, []);
+            const returnToFlow = useCallback(() => {
+                setFlowPaused(false);
+                setFlowMode(true);
             }, []);
 
             // 来店フローモード: 専用UIを全面表示
@@ -18775,11 +18775,11 @@
                             <div className="flex items-center">
                                 {isFullscreenView ? (
                                     <button
-                                        onClick={() => setCurrentView('dashboard')}
+                                        onClick={() => flowPaused ? returnToFlow() : setCurrentView('dashboard')}
                                         className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-sise-100 border border-sise-300 hover:bg-sise-200 mr-1 transition-colors active:scale-90 shadow-sm"
                                     >
                                         <Icon name="arrow-left" size={16} className="text-sise-700" />
-                                        <span className="text-sm font-medium text-sise-700">戻る</span>
+                                        <span className="text-sm font-medium text-sise-700">{flowPaused ? 'フローに戻る' : '戻る'}</span>
                                     </button>
                                 ) : (
                                     <button
@@ -18990,8 +18990,18 @@
                         </>
                     )}
 
+                    {/* 来店フロー一時離脱バナー */}
+                    {flowPaused && !isFullscreenView && (
+                        <div className="fixed top-14 md:top-16 left-0 right-0 z-40 lg:pl-56">
+                            <button onClick={returnToFlow} className="w-full flex items-center justify-center gap-2 py-2.5 text-sm font-bold text-white transition-all active:scale-[0.99]" style={{ background: 'linear-gradient(135deg, #33a065, #2d8f5a)' }}>
+                                <Icon name="arrow-left" size={15} />
+                                来店フローに戻る
+                            </button>
+                        </div>
+                    )}
+
                     {/* Main Content */}
-                    <main className={`min-h-screen relative z-10 transition-all duration-300 ${isFullscreenView ? 'pt-14 md:pt-16' : 'pt-[102px] md:pt-16'} ${isFullscreenView ? '' : 'lg:pl-56'}`}>
+                    <main className={`min-h-screen relative z-10 transition-all duration-300 ${isFullscreenView ? 'pt-14 md:pt-16' : flowPaused ? 'pt-[140px] md:pt-[104px]' : 'pt-[102px] md:pt-16'} ${isFullscreenView ? '' : 'lg:pl-56'}`}>
                         <div className={`${isFullscreenView ? 'p-0' : 'px-3 py-2 md:p-5 lg:p-8'} max-w-7xl mx-auto ${isFullscreenView ? 'pb-4' : 'pb-8'}`}>
                             <ViewTransition viewKey={currentView}>
                                 {renderView()}
