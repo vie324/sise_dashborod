@@ -13212,6 +13212,14 @@
             const startCamera = useCallback(async () => {
                 setPhase('loading'); setErrorMsg(''); setAnalysis(null); setLandmarks(null); lmBufferRef.current = [];
                 setCapturedImage(null);
+                // iOS: ジャイロのパーミッション要求はユーザージェスチャの同期コンテキスト内で実行する必要あり（awaitの前）
+                let orientationPermitted = true;
+                try {
+                    if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+                        const perm = await DeviceOrientationEvent.requestPermission();
+                        orientationPermitted = (perm === 'granted');
+                    }
+                } catch (oe) { orientationPermitted = false; }
                 try {
                     // 超広角レンズを優先的に選択し、zoom を最小にして最大画角を確保
                     const s = await navigator.mediaDevices.getUserMedia({
@@ -13264,26 +13272,16 @@
                         animRef.current = requestAnimationFrame(detect);
                     };
                     detect();
-                    // カメラ傾きセンサーを起動
-                    const onOrientation = (e) => {
-                        if (e.beta == null && e.gamma == null) return;
-                        setCameraTilt({ beta: Math.round(e.beta ?? 0), gamma: Math.round(e.gamma ?? 0) });
-                    };
-                    const startOrientation = () => {
+                    // カメラ傾きセンサーを起動（パーミッションは事前取得済み）
+                    if (orientationPermitted) {
+                        const onOrientation = (e) => {
+                            if (e.beta == null && e.gamma == null) return;
+                            setCameraTilt({ beta: Math.round(e.beta ?? 0), gamma: Math.round(e.gamma ?? 0) });
+                        };
                         orientationRef.current = onOrientation;
                         window.addEventListener('deviceorientation', onOrientation);
-                        // フォールバック: absolute版も試行
                         window.addEventListener('deviceorientationabsolute', onOrientation);
-                    };
-                    try {
-                        if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
-                            DeviceOrientationEvent.requestPermission().then(state => {
-                                if (state === 'granted') startOrientation();
-                            }).catch(() => {});
-                        } else {
-                            startOrientation();
-                        }
-                    } catch (oe) { console.warn('[傾き] センサー初期化エラー:', oe); }
+                    }
                 } catch (e) {
                     setPhase('idle'); setErrorMsg(e.message || 'カメラ起動失敗');
                 }
@@ -14135,42 +14133,37 @@
 
                         {/* Overlay toggle + Grid toggle + 位置修正ボタン */}
                         {(phase==='live'||phase==='captured') && !editMode && (
-                            <div className="flex items-center gap-2">
-                                <div className="flex-1 grid grid-cols-3 gap-2">
-                                    <div className="flex items-center justify-between bg-white rounded-xl p-3 border border-gray-100">
-                                        <span className="text-xs font-bold text-gray-700">骨格</span>
-                                        <button onClick={()=>setOverlayOn(!overlayOn)}
-                                            className={`w-11 h-6 rounded-full relative transition ${overlayOn?'bg-teal-400':'bg-gray-300'}`}>
-                                            <div className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${overlayOn?'left-[22px]':'left-0.5'}`}/>
+                            <div className="space-y-2">
+                                <div className="flex gap-3 bg-white rounded-xl p-3 border border-gray-100">
+                                    {[
+                                        { label: '骨格', on: overlayOn, toggle: () => setOverlayOn(!overlayOn), color: 'bg-teal-400' },
+                                        { label: '点数', on: scoreOverlayOn, toggle: () => setScoreOverlayOn(!scoreOverlayOn), color: 'bg-blue-400' },
+                                        { label: '方眼', on: gridOn, toggle: () => setGridOn(!gridOn), color: 'bg-red-400' },
+                                    ].map(item => (
+                                        <button key={item.label} onClick={item.toggle}
+                                            className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-xs font-bold transition-all ${item.on ? 'text-white shadow-sm' : 'text-gray-400 bg-gray-50'}`}
+                                            style={item.on ? { background: item.color.replace('bg-', '').includes('teal') ? '#2dd4bf' : item.color.includes('blue') ? '#60a5fa' : '#f87171' } : {}}>
+                                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points={item.on ? "20 6 9 17 4 12" : "18 6 6 18"}/>{!item.on && <line x1="6" y1="6" x2="18" y2="18" stroke="currentColor" strokeWidth="3"/>}</svg>
+                                            {item.label}
                                         </button>
-                                    </div>
-                                    <div className="flex items-center justify-between bg-white rounded-xl p-3 border border-gray-100">
-                                        <span className="text-xs font-bold text-gray-700">点数</span>
-                                        <button onClick={()=>setScoreOverlayOn(!scoreOverlayOn)}
-                                            className={`w-11 h-6 rounded-full relative transition ${scoreOverlayOn?'bg-blue-400':'bg-gray-300'}`}>
-                                            <div className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${scoreOverlayOn?'left-[22px]':'left-0.5'}`}/>
-                                        </button>
-                                    </div>
-                                    <div className="flex items-center justify-between bg-white rounded-xl p-3 border border-gray-100">
-                                        <span className="text-xs font-bold text-gray-700">方眼</span>
-                                        <button onClick={()=>setGridOn(!gridOn)}
-                                            className={`w-11 h-6 rounded-full relative transition ${gridOn?'bg-red-400':'bg-gray-300'}`}>
-                                            <div className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${gridOn?'left-[22px]':'left-0.5'}`}/>
-                                        </button>
-                                    </div>
+                                    ))}
                                 </div>
-                                {phase==='captured' && analysis && landmarks && !drawMode && (
-                                    <button onClick={startEdit} className="flex items-center gap-1.5 px-4 py-3 rounded-xl text-sm font-bold border-2 border-red-300 text-red-500 bg-white hover:bg-red-50 transition whitespace-nowrap">
-                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
-                                        位置を修正
-                                    </button>
-                                )}
-                                {phase==='captured' && !editMode && (
-                                    <button onClick={() => { setDrawMode(!drawMode); if (drawMode) setDrawMode(false); else { setEditMode(false); setDrawMode(true); } }}
-                                        className={`flex items-center gap-1.5 px-4 py-3 rounded-xl text-sm font-bold border-2 transition whitespace-nowrap ${drawMode ? 'border-amber-400 text-amber-600 bg-amber-50' : 'border-blue-300 text-blue-500 bg-white hover:bg-blue-50'}`}>
-                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M12 20h9"/><path d="M16.376 3.622a1 1 0 0 1 3.002 3.002L7.368 18.635a2 2 0 0 1-.855.506l-2.872.838.838-2.872a2 2 0 0 1 .506-.855z"/></svg>
-                                        {drawMode ? '手書き中' : '手書き'}
-                                    </button>
+                                {phase==='captured' && (
+                                    <div className="flex gap-2">
+                                        {analysis && landmarks && !drawMode && (
+                                            <button onClick={startEdit} className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-sm font-bold border-2 border-red-300 text-red-500 bg-white hover:bg-red-50 transition">
+                                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+                                                位置を修正
+                                            </button>
+                                        )}
+                                        {!editMode && (
+                                            <button onClick={() => { if (drawMode) setDrawMode(false); else { setEditMode(false); setDrawMode(true); } }}
+                                                className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-sm font-bold border-2 transition ${drawMode ? 'border-amber-400 text-amber-600 bg-amber-50' : 'border-blue-300 text-blue-500 bg-white hover:bg-blue-50'}`}>
+                                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M12 20h9"/><path d="M16.376 3.622a1 1 0 0 1 3.002 3.002L7.368 18.635a2 2 0 0 1-.855.506l-2.872.838.838-2.872a2 2 0 0 1 .506-.855z"/></svg>
+                                                {drawMode ? '手書き中' : '手書き'}
+                                            </button>
+                                        )}
+                                    </div>
                                 )}
                             </div>
                         )}
