@@ -1210,7 +1210,7 @@
         /* =============================================
            来店フローナビゲーション
            ============================================= */
-        .flow-nav-container{min-height:100vh;background:linear-gradient(135deg,#f8faf9 0%,#f0f7f3 100%)}
+        .flow-nav-container{min-height:100vh;background:linear-gradient(135deg,#f8faf9 0%,#f0f7f3 100%);-webkit-overflow-scrolling:touch}
         .flow-progress-bar{display:flex;align-items:center;gap:0;padding:12px 16px;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none}
         .flow-progress-bar::-webkit-scrollbar{display:none}
         .flow-step-dot{display:flex;flex-direction:column;align-items:center;gap:4px;min-width:48px;cursor:pointer;transition:all .3s}
@@ -1218,12 +1218,12 @@
         .flow-step-dot.active .flow-step-circle{border-color:#33a065;background:#33a065;color:#fff;box-shadow:0 0 0 4px rgba(51,160,101,.15)}
         .flow-step-dot.done .flow-step-circle{border-color:#55b87f;background:#55b87f;color:#fff}
         .flow-step-dot.skipped .flow-step-circle{border-color:#cbd5e1;background:#f1f5f9;color:#94a3b8}
-        .flow-step-label{font-size:10px;font-weight:600;color:#94a3b8;text-align:center;white-space:nowrap;transition:color .3s}
+        .flow-step-label{font-size:10px;font-weight:600;color:#94a3b8;text-align:center;white-space:nowrap;transition:color .3s;max-width:48px;overflow:hidden;text-overflow:ellipsis}
         .flow-step-dot.active .flow-step-label{color:#33a065;font-weight:700}
         .flow-step-dot.done .flow-step-label{color:#55b87f}
         .flow-step-connector{width:24px;height:2px;background:#e2e8f0;flex-shrink:0;margin-top:-16px;transition:background .3s}
         .flow-step-connector.filled{background:#55b87f}
-        .flow-content-card{background:#fff;border-radius:20px;border:1px solid rgba(0,0,0,.06);box-shadow:0 4px 24px rgba(0,0,0,.04);padding:20px;margin:0 12px 12px;animation:flowCardIn .4s ease}
+        .flow-content-card{background:#fff;border-radius:20px;border:1px solid rgba(0,0,0,.06);box-shadow:0 4px 24px rgba(0,0,0,.04);padding:20px;margin:0 12px 12px;animation:flowCardIn .4s ease;overflow-wrap:break-word;word-break:break-word}
         @keyframes flowCardIn{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
         .flow-action-bar{position:fixed;bottom:0;left:0;right:0;background:rgba(255,255,255,.95);backdrop-filter:blur(12px);border-top:1px solid rgba(0,0,0,.06);padding:12px 16px;display:flex;gap:10px;z-index:40;padding-bottom:max(12px,env(safe-area-inset-bottom))}
         .flow-btn{flex:1;padding:14px;border-radius:14px;font-size:14px;font-weight:700;text-align:center;transition:all .2s;border:none;cursor:pointer}
@@ -1245,7 +1245,7 @@
         .flow-summary-icon{width:28px;height:28px;border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
         .flow-search-input{width:100%;padding:14px 16px 14px 44px;border:2px solid #e2e8f0;border-radius:14px;font-size:15px;outline:none;transition:border-color .2s;background:#fff}
         .flow-search-input:focus{border-color:#33a065;box-shadow:0 0 0 3px rgba(51,160,101,.1)}
-        .flow-member-list{display:flex;flex-direction:column;gap:6px;max-height:320px;overflow-y:auto;margin-top:12px}
+        .flow-member-list{display:flex;flex-direction:column;gap:6px;max-height:min(320px, calc(50vh - 100px));overflow-y:auto;margin-top:12px;-webkit-overflow-scrolling:touch}
         .flow-member-item{display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:12px;border:1.5px solid #eee;cursor:pointer;transition:all .2s}
         .flow-member-item:hover,.flow-member-item.selected{border-color:#33a065;background:#f0f9f4}
         .flow-member-item .avatar{width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,#e2e8f0,#cbd5e1);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:#64748b;flex-shrink:0}
@@ -1266,7 +1266,7 @@
             .flow-content-card{max-width:640px;margin:0 auto 16px;padding:28px}
             .flow-action-bar{max-width:640px;margin:0 auto;left:50%;transform:translateX(-50%);border-radius:20px 20px 0 0;border:1px solid rgba(0,0,0,.06);border-bottom:none}
             .flow-step-circle{width:36px;height:36px;font-size:14px}
-            .flow-step-label{font-size:11px}
+            .flow-step-label{font-size:11px;max-width:none}
             .flow-step-connector{width:40px}
         }
 
@@ -13751,8 +13751,8 @@
             const total = analysis ? postureGetTotal(analysis) : null;
 
             return (
-                <div className="h-[calc(100vh-3.5rem)] md:h-[calc(100vh-4rem)] overflow-y-auto" style={{background:'linear-gradient(135deg,#f8f7f4 0%,#f0efeb 100%)'}}>
-                    <div className="max-w-xl mx-auto p-4 pb-24 space-y-4">
+                <div className="h-[calc(100vh-3.5rem)] md:h-[calc(100vh-4rem)] overflow-y-auto" style={{background:'linear-gradient(135deg,#f8f7f4 0%,#f0efeb 100%)', WebkitOverflowScrolling:'touch'}}>
+                    <div className="max-w-xl md:max-w-2xl lg:max-w-3xl mx-auto p-4 pb-24 space-y-4">
                         {/* Header */}
                         <div className="rounded-2xl p-5 text-white" style={{background:'linear-gradient(135deg,#085041 0%,#0F6E56 50%,#1D9E75 100%)'}}>
                             <div className="flex items-center gap-3">
@@ -13808,12 +13808,12 @@
                         {/* レポート情報 */}
                         <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100 space-y-3">
                             <h3 className="text-sm font-bold text-teal-700">レポート情報</h3>
-                            <div className="grid grid-cols-3 gap-3">
+                            <div className="grid grid-cols-2 md:grid-cols-3 gap-2 md:gap-3">
                                 <div><label className="block text-[10px] font-bold text-gray-400 mb-1">お客様名</label>
                                     <input type="text" value={customerName} onChange={e=>setCustomerName(e.target.value)} className="w-full border rounded px-2 py-1.5 text-sm" placeholder="山田 花子"/></div>
                                 <div><label className="block text-[10px] font-bold text-gray-400 mb-1">担当</label>
                                     <input type="text" value={staffName} onChange={e=>setStaffName(e.target.value)} className="w-full border rounded px-2 py-1.5 text-sm" placeholder="田中"/></div>
-                                <div><label className="block text-[10px] font-bold text-gray-400 mb-1">日付</label>
+                                <div className="col-span-2 md:col-span-1"><label className="block text-[10px] font-bold text-gray-400 mb-1">日付</label>
                                     <input type="date" value={visitDate} onChange={e=>setVisitDate(e.target.value)} className="w-full border rounded px-2 py-1.5 text-sm"/></div>
                             </div>
                         </div>
@@ -14187,8 +14187,8 @@
                         {/* 通常モード: Results */}
                         {phase==='captured' && analysis && total !== null && (
                             <div className="space-y-3">
-                                <div className="bg-white rounded-2xl p-5 shadow-sm flex items-center gap-5">
-                                    <svg width="100" height="100" style={{flexShrink:0}}>
+                                <div className="bg-white rounded-2xl p-4 md:p-5 shadow-sm flex items-center gap-3 md:gap-5">
+                                    <svg viewBox="0 0 100 100" className="w-16 h-16 md:w-[100px] md:h-[100px] flex-shrink-0">
                                         <circle cx="50" cy="50" r="44" fill="none" stroke="rgba(128,128,128,0.12)" strokeWidth="8"/>
                                         <circle cx="50" cy="50" r="44" fill="none" stroke={postureScoreColor(total)} strokeWidth="8"
                                             strokeLinecap="round" strokeDasharray={2*Math.PI*44} strokeDashoffset={2*Math.PI*44*(1-total/100)}
