@@ -13133,7 +13133,7 @@
             const [capturedImage, setCapturedImage] = useState(null);
 
             // カメラ傾き検出
-            const [cameraTilt, setCameraTilt] = useState({ beta: 0, gamma: 0 });
+            const [cameraTilt, setCameraTilt] = useState(null); // null = センサー未取得
             const orientationRef = useRef(null);
 
             // 手書き注釈モード
@@ -13202,7 +13202,11 @@
                 if (streamRef.current) { streamRef.current.getTracks().forEach(t => t.stop()); streamRef.current = null; }
                 if (videoRef.current) videoRef.current.srcObject = null;
                 // 傾きセンサー停止
-                if (orientationRef.current) { window.removeEventListener('deviceorientation', orientationRef.current); orientationRef.current = null; }
+                if (orientationRef.current) {
+                    window.removeEventListener('deviceorientation', orientationRef.current);
+                    window.removeEventListener('deviceorientationabsolute', orientationRef.current);
+                    orientationRef.current = null;
+                }
             }, []);
 
             const startCamera = useCallback(async () => {
@@ -13262,16 +13266,24 @@
                     detect();
                     // カメラ傾きセンサーを起動
                     const onOrientation = (e) => {
-                        setCameraTilt({ beta: Math.round(e.beta || 0), gamma: Math.round(e.gamma || 0) });
+                        if (e.beta == null && e.gamma == null) return;
+                        setCameraTilt({ beta: Math.round(e.beta ?? 0), gamma: Math.round(e.gamma ?? 0) });
                     };
-                    orientationRef.current = onOrientation;
-                    if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
-                        DeviceOrientationEvent.requestPermission().then(state => {
-                            if (state === 'granted') window.addEventListener('deviceorientation', onOrientation);
-                        }).catch(() => {});
-                    } else {
+                    const startOrientation = () => {
+                        orientationRef.current = onOrientation;
                         window.addEventListener('deviceorientation', onOrientation);
-                    }
+                        // フォールバック: absolute版も試行
+                        window.addEventListener('deviceorientationabsolute', onOrientation);
+                    };
+                    try {
+                        if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+                            DeviceOrientationEvent.requestPermission().then(state => {
+                                if (state === 'granted') startOrientation();
+                            }).catch(() => {});
+                        } else {
+                            startOrientation();
+                        }
+                    } catch (oe) { console.warn('[傾き] センサー初期化エラー:', oe); }
                 } catch (e) {
                     setPhase('idle'); setErrorMsg(e.message || 'カメラ起動失敗');
                 }
@@ -13625,7 +13637,7 @@
                 setLineSendStatus('sending');
                 try {
                     let sendOk = false;
-                    if (analysisMode === 'comparison' && hasAnyPair) {
+                    if (hasAnyPair) {
                         // ビフォーアフター比較送信
                         let frontImageUrl = null, backImageUrl = null, sideImageUrl = null, seatedImageUrl = null;
                         try {
@@ -13671,7 +13683,7 @@
                         const flexMsg = buildPostureFlexMessage({ customerName, visitDate, viewMode, analysis, totalScore: total, staffName });
                         sendOk = await lineChatHook.sendFlexMessage(lineSelectedUser.userId, flexMsg);
                     } else {
-                        console.error('LINE送信エラー: 送信可能な分析データがありません', { analysisMode, hasAnyPair, analysis: !!analysis });
+                        console.error('LINE送信エラー: 送信可能な分析データがありません', { flowPhase, hasAnyPair, analysis: !!analysis });
                     }
                     setLineSendStatus(sendOk ? 'sent' : 'error');
                     if (sendOk) {
@@ -13681,7 +13693,7 @@
                     console.error('LINE送信エラー:', e);
                     setLineSendStatus('error');
                 }
-            }, [lineSelectedUser, lineChatHook, analysis, analysisMode, hasAnyPair, hasFrontPair, hasBackPair, hasSidePair, hasSeatedPair, compData, customerName, visitDate, viewMode, staffName, uploadToBlob, scoreOverlayOn]);
+            }, [lineSelectedUser, lineChatHook, analysis, hasAnyPair, hasFrontPair, hasBackPair, hasSidePair, hasSeatedPair, compData, customerName, visitDate, viewMode, staffName, uploadToBlob, scoreOverlayOn]);
 
             // ビフォーアフター比較画像ダウンロード
             const [compDownloading, setCompDownloading] = useState(false);
@@ -13940,19 +13952,21 @@
                                         <div className="w-2 h-2 rounded-full bg-red-400 animate-pulse"/><span className="text-white text-xs font-bold">LIVE</span>
                                     </div>
                                     {/* カメラ傾き表示 */}
-                                    {(() => {
-                                        const absBeta = Math.abs(cameraTilt.beta - 90); // 90°が垂直=理想
-                                        const absGamma = Math.abs(cameraTilt.gamma);
-                                        const tiltOk = absBeta <= 3 && absGamma <= 3;
-                                        const tiltWarn = absBeta <= 6 && absGamma <= 6;
+                                    {cameraTilt && (() => {
+                                        const fbTilt = cameraTilt.beta - 90; // 端末を縦持ち時: 0°が理想
+                                        const lrTilt = cameraTilt.gamma;     // 左右の傾き: 0°が理想
+                                        const absFb = Math.abs(fbTilt);
+                                        const absLr = Math.abs(lrTilt);
+                                        const tiltOk = absFb <= 3 && absLr <= 3;
+                                        const tiltWarn = absFb <= 6 && absLr <= 6;
                                         const tiltColor = tiltOk ? '#22c55e' : tiltWarn ? '#eab308' : '#ef4444';
                                         const bgColor = tiltOk ? 'rgba(22,163,74,0.25)' : tiltWarn ? 'rgba(234,179,8,0.25)' : 'rgba(239,68,68,0.3)';
                                         return (
                                             <div className="px-2.5 py-1.5 rounded-xl backdrop-blur" style={{ background: bgColor, border: `1px solid ${tiltColor}40` }}>
                                                 <div className="flex items-center gap-2 text-white" style={{ fontSize: 10, fontWeight: 700 }}>
                                                     <span style={{ color: tiltColor }}>傾き</span>
-                                                    <span>前後 {cameraTilt.beta > 0 ? cameraTilt.beta - 90 : cameraTilt.beta}°</span>
-                                                    <span>左右 {cameraTilt.gamma}°</span>
+                                                    <span>前後 {fbTilt > 0 ? '+' : ''}{fbTilt}°</span>
+                                                    <span>左右 {lrTilt > 0 ? '+' : ''}{lrTilt}°</span>
                                                 </div>
                                                 {!tiltOk && !tiltWarn && (
                                                     <div style={{ fontSize: 9, color: '#fca5a5', marginTop: 2 }}>カメラを水平にしてください</div>
@@ -14178,7 +14192,7 @@
                         )}
 
                         {/* 通常モード: Results */}
-                        {analysisMode==='single' && phase==='captured' && analysis && total !== null && (
+                        {phase==='captured' && analysis && total !== null && (
                             <div className="space-y-3">
                                 <div className="bg-white rounded-2xl p-5 shadow-sm flex items-center gap-5">
                                     <svg width="100" height="100" style={{flexShrink:0}}>
@@ -14271,7 +14285,7 @@
                         )}
 
                         {/* 比較モード: 横並び写真比較 — クリックで拡大 */}
-                        {analysisMode==='comparison' && hasAnyPair && (
+                        {hasAnyPair && (
                             <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 mb-3">
                                 <h3 className="font-bold text-sm text-teal-700 mb-3 flex items-center">
                                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="mr-1.5"><rect x="2" y="2" width="20" height="20" rx="2"/><line x1="12" y1="2" x2="12" y2="22"/></svg>
@@ -14536,7 +14550,7 @@
                         })()}
 
                         {/* 比較モード: Before/After 比較結果 */}
-                        {analysisMode==='comparison' && hasAnyPair && (
+                        {hasAnyPair && (
                             <div className="space-y-3">
                                 <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
                                     <h3 className="font-bold text-sm text-teal-700 mb-3">Before / After 比較結果</h3>
@@ -14704,7 +14718,7 @@
                         {phase!=='captured' && (
                             <div className="bg-white rounded-xl p-4 border border-gray-100">
                                 <div className="font-bold text-sm mb-2">
-                                    {analysisMode==='comparison' ? (captureSlot==='before'?'Before（施術前）':'After（施術後）') + ' — ' : ''}
+                                    {(flowPhase==='before'?'Before（施術前）':'After（施術後）') + ' — '}
                                     {viewMode==='front'?'正面':viewMode==='back'?'背面':viewMode==='seated'?'座位':'側面'}撮影ガイド
                                 </div>
                                 <div className="text-xs text-gray-400 leading-relaxed" dangerouslySetInnerHTML={{__html:viewMode==='front'
@@ -14825,7 +14839,7 @@
                                     {lineSendStatus!=='sent'&&(
                                         <button onClick={handleLineSend} disabled={!lineSelectedUser||lineSendStatus==='sending'}
                                             className={`w-full py-3 rounded-xl font-bold text-white text-sm transition shadow-lg ${lineSelectedUser&&lineSendStatus!=='sending'?'bg-[#06C755] hover:bg-[#05b34c]':'bg-gray-300 cursor-not-allowed'}`}>
-                                            {lineSendStatus==='sending'?'送信中...':(analysisMode==='comparison'&&hasAnyPair)?'比較レポートをLINEで送信':'姿勢分析をLINEで送信'}
+                                            {lineSendStatus==='sending'?'送信中...':hasAnyPair?'比較レポートをLINEで送信':'姿勢分析をLINEで送信'}
                                         </button>
                                     )}
                                 </div>
