@@ -3861,8 +3861,14 @@
                         setLineConfig(data);
                         console.log('[LINE] stores:', data.stores, 'current lineStoreId:', lineStoreId);
                         if (data.stores && data.stores.length > 0 && !lineStoreId) {
-                            console.log('[LINE] setting lineStoreId to:', data.stores[0].id);
-                            setLineStoreId(data.stores[0].id);
+                            // スタッフ専用URLの場合は、紐づけられた店舗のみを候補とする
+                            const allowedStores = (currentAccess && currentAccess.storeIds && currentAccess.storeIds.length > 0)
+                                ? data.stores.filter(s => currentAccess.storeIds.includes(s.id))
+                                : data.stores;
+                            if (allowedStores.length > 0) {
+                                console.log('[LINE] setting lineStoreId to:', allowedStores[0].id);
+                                setLineStoreId(allowedStores[0].id);
+                            }
                         }
                     })
                     .catch(e => {
