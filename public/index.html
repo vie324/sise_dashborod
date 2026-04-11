@@ -1542,7 +1542,10 @@
         // storeIds は Square の店舗ID（例: "LID..."）、r.store は店舗名（例: "本厚木店"）
         // serverStores（{id, name}の配列）を使って名前→ID変換して判定
         const isStoreAllowed = (storeName) => {
-            if (!currentAccess || !currentAccess.storeIds || currentAccess.storeIds.length === 0) return true;
+            // 非スタッフモード（管理者ログイン）: 全店舗表示
+            if (!currentAccess) return true;
+            // スタッフモードで storeIds が未設定: アクセスなし（デフォルト拒否）
+            if (!currentAccess.storeIds || currentAccess.storeIds.length === 0) return false;
             // serverStoresがロード済みならID→名前マッピングで判定
             if (serverStores.length > 0) {
                 const allowedNames = currentAccess.storeIds.map(sid => {
@@ -3678,13 +3681,14 @@
         // スタッフ権限のSquare店舗IDからカウンセリング店舗を特定するヘルパー
         // currentAccess.storeIds（Square ID）→ serverStores（name）→ COUNSELING_STORES（id）
         const getAllowedCounselingStores = () => {
-            if (!currentAccess || !currentAccess.storeIds || currentAccess.storeIds.length === 0) {
-                return COUNSELING_STORES; // 管理者は全店舗
-            }
-            // serverStores未ロード時はマッピング不可のため全店舗を仮表示
-            // （ConceptFormViewのuseEffectでロード後に再検証される）
+            // 非スタッフモード（管理者ログイン）: 全店舗
+            if (!currentAccess) return COUNSELING_STORES;
+            // スタッフモードで storeIds が未設定: アクセスなし（デフォルト拒否）
+            if (!currentAccess.storeIds || currentAccess.storeIds.length === 0) return [];
+            // serverStores未ロード時はマッピング不可
+            // serverStoresがロード完了次第、ConceptFormViewのuseEffectで再計算される
             if (serverStores.length === 0) {
-                return COUNSELING_STORES;
+                return []; // ロード完了まで空を返し、他店舗が見えるのを防ぐ
             }
             // Square IDから店舗名を取得し、カウンセリング店舗名と照合
             const allowedNames = currentAccess.storeIds.map(sid => {
@@ -3694,8 +3698,7 @@
             const allowed = COUNSELING_STORES.filter(cs =>
                 allowedNames.includes(cs.name)
             );
-            // マッピング解決済みだが一致なし → アクセス権なしとして空配列を返さず最低1店舗は表示
-            return allowed.length > 0 ? allowed : [];
+            return allowed;
         };
 
         const useCounselingData = () => {
@@ -3704,21 +3707,23 @@
             const [loading, setLoading] = useState(false);
             const [searchQuery, setSearchQuery] = useState('');
             const [counselingStore, setCounselingStore] = useState(() => {
-                const saved = localStorage.getItem('sise_counseling_store') || 'honatsugi';
-                // 権限のある店舗のみ許可（Square IDと名前ベースで照合）
-                const allowed = getAllowedCounselingStores();
-                if (allowed.length > 0 && allowed.length < COUNSELING_STORES.length) {
-                    // 制限あり: 保存値が許可リストにあればそれを使う
-                    if (allowed.find(s => s.id === saved)) return saved;
+                // スタッフモードでは、権限店舗が判明するまで空文字を返して誤った店舗データ取得を防ぐ
+                // 管理者モードは localStorage / デフォルト値を使用
+                if (currentAccess) {
+                    const allowed = getAllowedCounselingStores();
+                    if (allowed.length === 0) return ''; // serverStores 未ロード → 判明後に再設定
+                    const saved = localStorage.getItem('sise_counseling_store') || '';
+                    if (saved && allowed.find(s => s.id === saved)) return saved;
                     return allowed[0].id;
                 }
-                return saved;
+                return localStorage.getItem('sise_counseling_store') || 'honatsugi';
             });
 
             const storeParam = '&store=' + counselingStore;
 
             const fetchCustomerList = useCallback(async () => {
                 if (COUNSELING_GAS_URL === 'YOUR_UNIFIED_GAS_URL') return;
+                if (!counselingStore) return; // 権限店舗が未確定（serverStores ロード待ち）
                 setLoading(true);
                 try {
                     const url = COUNSELING_GAS_URL + '?type=counseling&action=recent&limit=50' + storeParam;
@@ -3745,6 +3750,7 @@
 
             const searchCustomers = useCallback(async (q) => {
                 if (COUNSELING_GAS_URL === 'YOUR_UNIFIED_GAS_URL' || !q) return;
+                if (!counselingStore) return; // 権限店舗が未確定
                 setLoading(true);
                 try {
                     const res = await fetch(COUNSELING_GAS_URL + '?type=counseling&action=search&q=' + encodeURIComponent(q) + storeParam);
@@ -3761,6 +3767,7 @@
 
             const fetchCustomerDetail = useCallback(async (name, index) => {
                 if (COUNSELING_GAS_URL === 'YOUR_UNIFIED_GAS_URL') return null;
+                if (!counselingStore) return null; // 権限店舗が未確定
                 setLoading(true);
                 try {
                     let url = COUNSELING_GAS_URL + '?type=counseling&action=detail' + storeParam;
@@ -3794,6 +3801,7 @@
 
             // 店舗変更時にリロード
             useEffect(() => {
+                if (!counselingStore) { setCustomers([]); setSelectedCustomer(null); return; }
                 localStorage.setItem('sise_counseling_store', counselingStore);
                 setCustomers([]);
                 setSelectedCustomer(null);
@@ -3803,6 +3811,7 @@
             // 自動リロード（30秒ごと）- お客様がフォームを送信した際に更新ボタンなしで反映
             useEffect(() => {
                 if (COUNSELING_GAS_URL === 'YOUR_UNIFIED_GAS_URL') return;
+                if (!counselingStore) return; // 権限店舗が未確定
                 const interval = setInterval(() => {
                     // バックグラウンドで取得（loadingフラグは立てない）
                     fetch(COUNSELING_GAS_URL + '?type=counseling&action=recent&limit=50' + storeParam)
@@ -8029,8 +8038,8 @@
             };
 
             const handleSoftDelete = async (id) => {
-                if (!confirm('このスタッフを無効にしますか？（データは保持されます）')) return;
                 const staff = staffList.find(s => s.id === id);
+                if (!confirm(`スタッフ「${staff?.name || ''}」を削除しますか？\n\n※ 過去の日報・勤怠・売上などのデータはそのまま保持されます。\n※ 「削除済みスタッフ」から復元可能です。`)) return;
                 setStaffList(prev => {
                     const updated = prev.map(s => s.id === id ? { ...s, status: 'inactive' } : s);
                     saveStaffListLocal(updated);
@@ -8039,7 +8048,7 @@
                 setGasSyncing(true);
                 await softDeleteStaffGas(id);
                 setGasSyncing(false);
-                showToast(`「${staff?.name || ''}」を無効にしました`, 'success', 2000);
+                showToast(`「${staff?.name || ''}」を削除しました（データは保持されています）`, 'success', 2500);
             };
 
             const handleRestore = async (id) => {
@@ -8091,7 +8100,7 @@
                                     <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${inactive ? 'bg-slate-100 text-slate-400' : staff.role === 'headquarter' ? 'bg-violet-100 text-violet-700' : staff.role === 'manager' ? 'bg-amber-100 text-amber-700' : 'bg-sise-100 text-sise-700'}`}>
                                         {staff.role === 'headquarter' ? '本部' : staff.role === 'manager' ? '店舗責任者' : 'スタッフ'}
                                     </span>
-                                    {inactive && <span className="text-xs px-2 py-0.5 rounded-full bg-red-50 text-red-500 font-medium">無効</span>}
+                                    {inactive && <span className="text-xs px-2 py-0.5 rounded-full bg-red-50 text-red-500 font-medium">削除済み</span>}
                                     {!inactive && staff.password && (
                                         <span className="text-xs px-2 py-0.5 rounded-full bg-blue-50 text-blue-600 font-medium">
                                             <Icon name="lock" size={10} className="inline mr-0.5" />PW設定済
@@ -8134,10 +8143,10 @@
                                     </button>
                                     <button
                                         onClick={() => handleSoftDelete(staff.id)}
-                                        className="p-1.5 rounded-lg hover:bg-red-50 text-slate-400 hover:text-red-500 transition-colors"
-                                        title="無効にする"
+                                        className="flex items-center px-2.5 py-1.5 rounded-lg text-xs font-medium bg-slate-100 hover:bg-red-50 text-slate-600 hover:text-red-600 transition-all"
+                                        title="スタッフを削除（データは保持されます）"
                                     >
-                                        <Icon name="user-minus" size={14} />
+                                        <Icon name="trash-2" size={14} className="mr-1" />削除
                                     </button>
                                 </>
                             )}
@@ -8315,7 +8324,7 @@
                         )
                     )}
 
-                    {/* 無効スタッフ（折りたたみ） */}
+                    {/* 削除済みスタッフ（折りたたみ） */}
                     {inactiveStaff.length > 0 && (
                         <div className="mt-4">
                             <button
@@ -8323,7 +8332,7 @@
                                 className="flex items-center gap-2 w-full px-3 py-2 bg-slate-50 hover:bg-slate-100 rounded-lg text-xs text-slate-500 font-medium transition-colors"
                             >
                                 <Icon name={showInactive ? 'chevron-down' : 'chevron-right'} size={14} />
-                                無効なスタッフ（{inactiveStaff.length}名）
+                                削除済みスタッフ（{inactiveStaff.length}名）
                                 <span className="ml-auto text-slate-400">データは保持されています</span>
                             </button>
                             {showInactive && (
@@ -8338,7 +8347,7 @@
                     <div className="mt-4 p-3 bg-slate-50 rounded-lg border border-slate-200">
                         <p className="text-xs text-slate-500 leading-relaxed">
                             <Icon name="info" size={12} className="inline mr-1" />
-                            スタッフを無効にしてもデータは「スタッフ管理」シートに残ります。いつでも復元可能です。<br />
+                            スタッフを削除しても、過去の日報・勤怠・売上などのデータはそのまま残ります。削除済みスタッフは「削除済みスタッフ」セクションからいつでも復元可能です。<br />
                             パスワードを設定するとURL共有時にパスワード入力が必要になります。
                         </p>
                     </div>
@@ -15794,7 +15803,9 @@
             useEffect(() => {
                 if (!currentAccess || !memberData.stores || memberData.stores.length === 0) return;
                 const allowed = getAllowedCounselingStores();
-                if (allowed.length > 0 && allowed.length < COUNSELING_STORES.length && !allowed.find(s => s.id === counselingStore)) {
+                // スタッフの権限のある店舗のみに強制: 現在の店舗が許可リストになければ最初の許可店舗に切替
+                // また、counselingStore が未設定（スタッフモード初期化待ち）の場合にも設定する
+                if (allowed.length > 0 && (!counselingStore || !allowed.find(s => s.id === counselingStore))) {
                     setCounselingStore(allowed[0].id);
                 }
             }, [memberData.stores]);
@@ -16194,9 +16205,9 @@
                 const lines = [
                     { id:'l1', c:'#d94050', w:2.8, gl:true, v:[{freq:4,months:6}], b:[385,280,195,130,108,100,96], a:[40,32,24,16,12,10,8], recFreq:4 },
                     { id:'l2', c:'#c96088', w:2.8, gl:true, v:[{freq:4,months:3},{freq:2,months:3}], b:[385,280,195,130,120,112,107], a:[40,32,24,16,14,12,10], at:3, atxt:'月2回へ', recFreq:4, primary:true },
-                    { id:'l3', c:'#d68c1a', w:2.8, v:[{freq:4,months:3},{freq:1,months:3}], b:[385,280,195,130,140,148,152], a:[40,32,24,16,20,22,22], at:3, atxt:'月1回へ', recFreq:4 },
+                    { id:'l3', c:'#d68c1a', w:2.8, v:[{freq:4,months:3},{freq:1,months:3}], b:[385,280,195,130,130,130,130], a:[40,32,24,16,16,16,16], at:3, atxt:'月1回で維持', recFreq:4 },
                     { id:'l4', c:'#2a8fa0', w:2.8, gl:true, v:[{freq:2,months:6}], b:[385,325,270,225,195,170,155], a:[35,28,22,18,15,13,11], recFreq:2, primary:true },
-                    { id:'l5', c:'#4a78c9', w:2.8, v:[{freq:2,months:3},{freq:1,months:3}], b:[385,325,270,225,240,248,252], a:[35,28,22,18,22,24,24], at:3, atxt:'月1回へ', recFreq:2 },
+                    { id:'l5', c:'#4a78c9', w:2.8, v:[{freq:2,months:3},{freq:1,months:3}], b:[385,325,270,225,225,225,225], a:[35,28,22,18,18,18,18], at:3, atxt:'月1回で維持', recFreq:2 },
                     { id:'l6', c:'#999999', w:2.5, gl:false, isRevert:true, recFreq:0 },
                 ];
 
