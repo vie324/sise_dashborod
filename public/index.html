@@ -1475,9 +1475,13 @@
         // ============================================================
         // スタッフ管理 → Supabase
         // ============================================================
+        // 応答: { ok: true, staff: [...] } または { ok: false, error: '...' }
         const fetchStaffFromGas = async (includeInactive = true) => {
             const data = await dbGet('staff', { includeInactive: includeInactive ? 'true' : 'false' });
-            return data ? (data.staff || []) : null;
+            if (!data) return { ok: false, error: 'API接続エラー（/api/db に到達できません）' };
+            if (data.error) return { ok: false, error: data.error };
+            if (!Array.isArray(data.staff)) return { ok: false, error: '不正なレスポンス形式' };
+            return { ok: true, staff: data.staff };
         };
 
         const saveStaffToGas = async (staffList) => dbPost('staff', { action: 'saveStaff', staff: staffList });
@@ -1524,10 +1528,10 @@
 
         // パスワード検証（URLアクセス時のスタッフ照合）
         const verifyStaffPassword = async (staffId, password) => {
-            // まずGASから最新のスタッフリストを取得
-            const gasStaff = await fetchStaffFromGas();
-            // GASが空配列やnullの場合、localStorageにフォールバック
-            const list = (gasStaff && gasStaff.length > 0) ? gasStaff : loadStaffList();
+            // まずSupabaseから最新のスタッフリストを取得
+            const result = await fetchStaffFromGas();
+            // Supabase取得失敗時または空の場合は localStorage にフォールバック
+            const list = (result.ok && result.staff.length > 0) ? result.staff : loadStaffList();
             const staff = list.find(s => s.id === staffId);
             if (!staff) return { ok: false, reason: 'スタッフが見つかりません' };
             if (!staff.password) return { ok: true }; // パスワード未設定なら通過
@@ -7980,22 +7984,27 @@
             const [copiedId, setCopiedId] = useState(null);
             const [gasSyncing, setGasSyncing] = useState(false);
             const [gasConnected, setGasConnected] = useState(false);
+            const [dbError, setDbError] = useState(null);
             const [showInactive, setShowInactive] = useState(false);
             const [formData, setFormData] = useState({ name: '', role: 'staff', password: '', storeIds: [] });
 
-            // GASからスタッフリストを初回取得（inactive含む）
-            useEffect(() => {
-                (async () => {
-                    const gasStaff = await fetchStaffFromGas(true);
-                    if (gasStaff) {
-                        setStaffList(gasStaff);
-                        saveStaffListLocal(gasStaff);
-                        setGasConnected(true);
-                    } else {
-                        setStaffList(loadStaffList());
-                    }
-                })();
-            }, []);
+            // Supabase からスタッフリストを初回取得（inactive含む）
+            const reloadStaffList = async () => {
+                const result = await fetchStaffFromGas(true);
+                if (result.ok) {
+                    setStaffList(result.staff);
+                    saveStaffListLocal(result.staff);
+                    setGasConnected(true);
+                    setDbError(null);
+                } else {
+                    // 接続失敗時は localStorage のローカルデータを表示
+                    setStaffList(loadStaffList());
+                    setGasConnected(false);
+                    setDbError(result.error);
+                    console.error('[Staff] Supabase取得失敗:', result.error);
+                }
+            };
+            useEffect(() => { reloadStaffList(); }, []);
 
             const activeStaff = staffList.filter(s => s.status !== 'inactive');
             const inactiveStaff = staffList.filter(s => s.status === 'inactive');
@@ -8300,11 +8309,31 @@
                         </div>
                     )}
 
-                    {/* GAS同期ステータス */}
-                    <div className={`mb-3 flex items-center gap-2 px-3 py-2 rounded-lg text-xs ${gasConnected ? 'bg-green-50 border border-green-200 text-green-700' : 'bg-slate-50 border border-slate-200 text-slate-500'}`}>
-                        <Icon name={gasConnected ? 'cloud' : 'hard-drive'} size={13} />
-                        {gasConnected ? 'スプレッドシート同期中' : 'ローカル保存（GAS URL未設定）'}
-                        {gasSyncing && <span className="ml-auto animate-pulse">保存中...</span>}
+                    {/* DB同期ステータス */}
+                    <div className={`mb-3 flex items-start gap-2 px-3 py-2 rounded-lg text-xs ${gasConnected ? 'bg-green-50 border border-green-200 text-green-700' : dbError ? 'bg-red-50 border border-red-200 text-red-600' : 'bg-slate-50 border border-slate-200 text-slate-500'}`}>
+                        <Icon name={gasConnected ? 'cloud' : dbError ? 'alert-triangle' : 'hard-drive'} size={13} className="mt-0.5 flex-shrink-0" />
+                        <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                                <span>{gasConnected ? 'Supabase 接続済み' : dbError ? 'Supabase 接続エラー' : 'ローカル保存'}</span>
+                                {gasSyncing && <span className="animate-pulse">保存中...</span>}
+                                <button
+                                    onClick={reloadStaffList}
+                                    className="ml-auto px-2 py-0.5 rounded bg-white/50 hover:bg-white border border-current/20 text-[10px] font-medium transition-colors"
+                                    title="再取得"
+                                >
+                                    <Icon name="refresh-cw" size={10} className="inline mr-0.5" />再読込
+                                </button>
+                            </div>
+                            {dbError && (
+                                <p className="mt-1 text-[11px] text-red-600/80 break-all">
+                                    {dbError}
+                                    <br />
+                                    <span className="text-[10px] text-red-500/70">
+                                        Vercel の環境変数 SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY が設定されているか確認してください。
+                                    </span>
+                                </p>
+                            )}
+                        </div>
                     </div>
 
                     {/* アクティブスタッフ一覧 */}
@@ -8504,10 +8533,10 @@
                         </div>
                     )}
 
-                    {/* GAS同期ステータス */}
+                    {/* DB同期ステータス */}
                     <div className={`mb-3 flex items-center gap-2 px-3 py-2 rounded-lg text-xs ${gasConnected ? 'bg-green-50 border border-green-200 text-green-700' : 'bg-slate-50 border border-slate-200 text-slate-500'}`}>
                         <Icon name={gasConnected ? 'cloud' : 'hard-drive'} size={13} />
-                        {gasConnected ? 'スプレッドシート同期中' : 'GAS URL未設定'}
+                        {gasConnected ? 'Supabase 接続済み' : 'ローカル保存（Supabase 未接続）'}
                         {gasSyncing && <span className="ml-auto animate-pulse">保存中...</span>}
                     </div>
 
