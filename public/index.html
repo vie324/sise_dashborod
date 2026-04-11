@@ -1934,9 +1934,13 @@
                 const defaultMonthlyPrice = serverConfig.defaultMonthlyPrice;
 
                 // 取得対象の店舗を決定（アクセス制限適用）
-                let availStores = stores;
-                if (allowedStoreIds && allowedStoreIds.length > 0) {
+                // allowedStoreIds が渡されている（スタッフモード）時は必ずその制限を適用する。
+                // 空配列の場合は「許可店舗なし」として扱い、全店舗取得を防ぐ（セキュリティ上の既定拒否）
+                let availStores;
+                if (allowedStoreIds !== null && allowedStoreIds !== undefined) {
                     availStores = stores.filter(s => allowedStoreIds.includes(s.id));
+                } else {
+                    availStores = stores;
                 }
                 const targetStores = (activeStoreId && activeStoreId !== 'all')
                     ? availStores.filter(s => s.id === activeStoreId)
@@ -4951,7 +4955,14 @@
             // Square + 手動会員の統合リスト
             const combinedMembers = useMemo(() => {
                 if (viewMode !== 'combined') return [];
-                const sq = (squareMembers || []).map(m => ({ ...m, source: 'square' }));
+                // スタッフ権限による Square 会員の店舗フィルタ（二重防御）
+                const sq = (squareMembers || [])
+                    .filter(m => {
+                        if (!currentAccess) return true;
+                        const sn = m._storeName || m.storeName;
+                        return !sn || isStoreAllowed(sn);
+                    })
+                    .map(m => ({ ...m, source: 'square' }));
                 const man = storeFilteredManual.filter(m => m.status === 'ACTIVE').map(m => ({
                     id: m.id, name: m.name, phone: m.phone || '', email: m.email || '',
                     status: m.status, startDate: m.startDate, planName: m.planName,
@@ -5886,6 +5897,8 @@
                         if (storeObj) return m.storeName === storeObj.name;
                         return false;
                     }
+                    // 'all' 選択時でもスタッフ権限の店舗に絞る
+                    if (currentAccess) return !m.storeName || isStoreAllowed(m.storeName);
                     return true;
                 }).length;
             }, [manualMembersHook?.manualMembers, activeStoreId, memberData?.stores]);
@@ -5900,6 +5913,7 @@
                             if (storeObj) return m.storeName === storeObj.name;
                             return false;
                         }
+                        if (currentAccess) return !m.storeName || isStoreAllowed(m.storeName);
                         return true;
                     })
                     .reduce((sum, m) => sum + (m.monthlyPrice || 0), 0);
@@ -5942,6 +5956,14 @@
             // 会員フィルタリング
             const filteredMembers = useMemo(() => {
                 let filtered = memberData.members || [];
+
+                // スタッフ権限による店舗フィルタ（二重防御: useSquareData でも絞っているが念のため）
+                if (currentAccess) {
+                    filtered = filtered.filter(m => {
+                        const sn = m._storeName || m.storeName;
+                        return !sn || isStoreAllowed(sn);
+                    });
+                }
 
                 // ステータスフィルタ
                 if (filterStatus !== 'all') {
@@ -7599,6 +7621,13 @@
             // 会員に請求期間情報を付与（残回数・繰越含む）
             const membersWithBilling = useMemo(() => {
                 let members = (memberData.members || []).filter(m => m.status === 'ACTIVE');
+                // スタッフ権限による店舗フィルタ
+                if (currentAccess) {
+                    members = members.filter(m => {
+                        const sn = m._storeName || m.storeName;
+                        return !sn || isStoreAllowed(sn);
+                    });
+                }
                 return members.map(m => {
                     const billing = getCurrentBillingPeriod(m.startDate);
                     const periodKey = billing ? billing.periodKey : null;
@@ -8011,7 +8040,12 @@
 
             const handleSave = async () => {
                 if (!formData.name.trim()) return;
+                if (!formData.storeIds || formData.storeIds.length === 0) {
+                    showToast('閲覧可能な店舗を1つ以上選択してください', 'error', 3000);
+                    return;
+                }
                 let updated;
+                let resp;
                 if (editingStaff) {
                     // 編集: 個別更新
                     const changes = { name: formData.name, role: formData.role, password: formData.password, storeIds: formData.storeIds };
@@ -8019,8 +8053,12 @@
                     setStaffList(updated);
                     saveStaffListLocal(updated);
                     setGasSyncing(true);
-                    await updateStaffGas(editingStaff.id, changes);
+                    resp = await updateStaffGas(editingStaff.id, changes);
                     setGasSyncing(false);
+                    if (!resp || resp.error) {
+                        showToast(`保存エラー: ${resp?.error || 'サーバーに接続できません'}`, 'error', 5000);
+                        return;
+                    }
                     // 名前・店舗・役割が変わった場合、URLも変わるので注意喚起
                     const nameChanged = editingStaff.name !== formData.name;
                     const storeChanged = JSON.stringify(editingStaff.storeIds || []) !== JSON.stringify(formData.storeIds);
@@ -8037,10 +8075,16 @@
                     setStaffList(updated);
                     saveStaffListLocal(updated);
                     setGasSyncing(true);
-                    await saveStaffToGas(updated);
+                    resp = await saveStaffToGas(updated);
                     setGasSyncing(false);
+                    if (!resp || resp.error) {
+                        showToast(`保存エラー: ${resp?.error || 'サーバーに接続できません'}`, 'error', 5000);
+                        return;
+                    }
                     showToast(`「${formData.name}」を追加しました`, 'success', 2000);
                 }
+                // 保存成功時は Supabase から最新を再取得して storeIds の反映を保証
+                await reloadStaffList();
                 setEditingStaff(null);
                 setIsAdding(false);
                 setFormData({ name: '', role: 'staff', password: '', storeIds: [] });

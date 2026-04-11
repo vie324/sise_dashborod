@@ -45,6 +45,26 @@ export async function staffPost(body) {
   }
 }
 
+// staff_stores.store_id は stores(id) への FK があるため、まだ stores に無い
+// Square 由来の店舗 ID（"1" ～ "20"）を参照すると挿入が失敗する。
+// 欠けている store レコードを事前にアップサートして FK エラーを防ぐ。
+async function ensureStoresExist(storeIds) {
+  if (!storeIds || storeIds.length === 0) return;
+  const uniqIds = [...new Set(storeIds)];
+  const rows = uniqIds.map(id => ({
+    id: String(id),
+    name: `店舗 ${id}`,
+    status: 'active'
+  }));
+  // 既存レコードを上書きしないよう ignoreDuplicates: true で挿入のみ
+  const { error } = await supabase
+    .from('stores')
+    .upsert(rows, { onConflict: 'id', ignoreDuplicates: true });
+  if (error) {
+    console.warn('[staff] ensureStoresExist warning:', error.message);
+  }
+}
+
 async function staffSaveAll(staffArr) {
   for (const s of staffArr) {
     const storeIds = s.storeIds || [];
@@ -58,7 +78,9 @@ async function staffSaveAll(staffArr) {
     // staff_stores を更新
     await supabase.from('staff_stores').delete().eq('staff_id', s.id);
     if (storeIds.length > 0) {
-      const rows = storeIds.map(sid => ({ staff_id: s.id, store_id: sid }));
+      // FK エラー回避のため欠けている stores レコードを事前に作成
+      await ensureStoresExist(storeIds);
+      const rows = storeIds.map(sid => ({ staff_id: s.id, store_id: String(sid) }));
       const { error: ssErr } = await supabase.from('staff_stores').insert(rows);
       if (ssErr) throw ssErr;
     }
@@ -82,7 +104,9 @@ async function staffUpdate(staffId, updates) {
   if (updates.storeIds !== undefined) {
     await supabase.from('staff_stores').delete().eq('staff_id', staffId);
     if (updates.storeIds.length > 0) {
-      const rows = updates.storeIds.map(sid => ({ staff_id: staffId, store_id: sid }));
+      // FK エラー回避のため欠けている stores レコードを事前に作成
+      await ensureStoresExist(updates.storeIds);
+      const rows = updates.storeIds.map(sid => ({ staff_id: staffId, store_id: String(sid) }));
       const { error } = await supabase.from('staff_stores').insert(rows);
       if (error) throw error;
     }
