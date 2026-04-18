@@ -13804,12 +13804,21 @@
                 try {
                     const viewLabel = viewMode === 'front' ? '正面' : viewMode === 'back' ? '背面' : viewMode === 'seated' ? '座位' : '側面';
                     const phaseLabel = flowPhase === 'after' ? 'After' : flowPhase === 'before' ? 'Before' : '分析';
-                    const composed = await postureComposeImage(capturedImage, landmarks, analysis, viewMode, scoreOverlayOn);
                     const name = customerName ? customerName.replace(/\s+/g, '_') : 'posture';
                     const date = (visitDate || new Date().toISOString().slice(0, 10)).replace(/-/g, '');
                     const baseName = `Posture_${name}_${date}_${viewLabel}_${phaseLabel}`;
 
-                    // 分析JSON
+                    // 1. 合成画像（骨格+スコア）
+                    let composed;
+                    try {
+                        composed = await postureComposeImage(capturedImage, landmarks, analysis, viewMode, scoreOverlayOn);
+                    } catch (e) {
+                        console.error('画像合成エラー:', e);
+                        alert('画像の合成に失敗しました: ' + (e.message || e));
+                        return;
+                    }
+
+                    // 2. 分析JSON
                     const analysisJson = JSON.stringify({
                         customerName, visitDate, staffName,
                         viewMode, viewLabel, flowPhase,
@@ -13818,38 +13827,44 @@
                         exportedAt: new Date().toISOString()
                     }, null, 2);
                     const jsonBlob = new Blob([analysisJson], { type: 'application/json' });
-                    const jsonFile = new File([jsonBlob], baseName + '.json', { type: 'application/json' });
-                    const imageFile = dataUrlToFile(composed, baseName + '.jpg');
 
-                    // iOS/モバイル: Web Share APIで写真アプリに直接保存
+                    // 3. iOS/Android: Web Share APIで写真アプリに保存（画像のみ）
+                    let shared = false;
                     if (navigator.share && navigator.canShare) {
-                        const shareData = { files: [imageFile, jsonFile] };
-                        if (navigator.canShare(shareData)) {
-                            await navigator.share(shareData);
-                            return;
-                        }
-                        const imageOnly = { files: [imageFile] };
-                        if (navigator.canShare(imageOnly)) {
-                            await navigator.share(imageOnly);
-                            return;
+                        try {
+                            const imageFile = dataUrlToFile(composed, baseName + '.jpg');
+                            if (navigator.canShare({ files: [imageFile] })) {
+                                await navigator.share({ files: [imageFile], title: baseName });
+                                shared = true;
+                            }
+                        } catch (e) {
+                            if (e.name === 'AbortError') return; // ユーザーがキャンセル
+                            console.warn('Web Share失敗、ダウンロードにフォールバック:', e);
                         }
                     }
-                    // フォールバック: ダウンロードリンク
-                    const imgLink = document.createElement('a');
-                    imgLink.download = baseName + '.jpg';
-                    imgLink.href = composed;
-                    imgLink.click();
+
+                    // 4. フォールバック（PC or Web Share非対応）: 画像をダウンロードリンクで保存
+                    if (!shared) {
+                        const imgLink = document.createElement('a');
+                        imgLink.download = baseName + '.jpg';
+                        imgLink.href = composed;
+                        document.body.appendChild(imgLink);
+                        imgLink.click();
+                        document.body.removeChild(imgLink);
+                    }
+
+                    // 5. JSONは常にダウンロードリンクで保存（Web Shareで送れない環境が多いため）
                     const jsonUrl = URL.createObjectURL(jsonBlob);
                     const jsonLink = document.createElement('a');
                     jsonLink.download = baseName + '.json';
                     jsonLink.href = jsonUrl;
+                    document.body.appendChild(jsonLink);
                     jsonLink.click();
-                    setTimeout(() => URL.revokeObjectURL(jsonUrl), 1000);
+                    document.body.removeChild(jsonLink);
+                    setTimeout(() => URL.revokeObjectURL(jsonUrl), 2000);
                 } catch (e) {
-                    if (e.name !== 'AbortError') {
-                        console.error('保存エラー:', e);
-                        alert('画像の保存に失敗しました。');
-                    }
+                    console.error('保存エラー:', e);
+                    alert('保存に失敗しました: ' + (e.message || e));
                 } finally {
                     setSingleDownloading(false);
                 }
