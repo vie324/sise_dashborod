@@ -41,7 +41,9 @@ export async function cashbookGet(params) {
     entries: (data || []).map(r => ({
       id: r.id, date: r.date, type: r.type, category: r.category || '',
       description: r.description || '', amount: r.amount,
-      customerName: r.customer_name || '', therapyCount: r.treatment_count || 0,
+      customerName: r.customer_name || '',
+      treatmentCount: r.treatment_count || 0,
+      therapyCount: r.treatment_count || 0,
       paymentMethod: r.payment_method, cashType: r.cash_type,
       memberId: r.member_id || '', store: r.store_id,
       recorder: r.recorder || '', notes: r.notes || '',
@@ -69,11 +71,33 @@ export async function cashbookPost(body) {
     case 'getDailyCloses': return cbGetDailyCloses(body.store || '');
     case 'getLogs':       return cbGetLogs(body.store || '', body.limit || 100);
     case 'saveCashbook':  return cbSaveAll(body.entries || [], body.operator || '');
+    case 'saveDailyCloses': return cbSaveDailyCloses(body.dailyCloses || []);
     default: return { error: '不明なaction: ' + action };
   }
 }
 
+async function cbSaveDailyCloses(closes) {
+  const rows = closes.map(c => ({
+    date: c.date, store_id: c.storeId,
+    safe_balance: c.safeBalance || 0,
+    petty_balance: c.pettyCashBalance || 0,
+    register_balance: c.registerBalance || 0,
+    closed_by: c.closedBy || '',
+    closed_at: c.closedAt || new Date().toISOString(),
+    notes: c.notes || '',
+    locked: c.locked !== undefined ? !!c.locked : true
+  }));
+  if (rows.length > 0) {
+    const { error } = await supabase.from('daily_close').upsert(rows, { onConflict: 'date,store_id' });
+    if (error) throw error;
+  }
+  return { success: true, count: rows.length };
+}
+
 async function cbAddEntry(entry, operator) {
+  // 店舗ID必須チェック（FK制約対応）
+  if (!entry.store) return { error: '店舗IDが必要です' };
+
   // 日次締めロック確認
   if (entry.store) {
     const { data: dc } = await supabase.from('daily_close')
@@ -84,8 +108,9 @@ async function cbAddEntry(entry, operator) {
   const id = entry.id || ('cb_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5));
   const row = {
     id, date: entry.date, type: entry.type || '', category: entry.category || '',
-    description: entry.description || '', amount: entry.amount || 0,
-    customer_name: entry.customerName || '', treatment_count: entry.therapyCount || 0,
+    description: entry.description || '', amount: parseInt(entry.amount) || 0,
+    customer_name: entry.customerName || '',
+    treatment_count: parseInt(entry.treatmentCount ?? entry.therapyCount) || 0,
     payment_method: entry.paymentMethod || 'CASH', cash_type: entry.cashType || 'register',
     member_id: entry.memberId || '', store_id: entry.store || '',
     recorder: entry.recorder || operator, notes: entry.notes || '',
@@ -93,7 +118,10 @@ async function cbAddEntry(entry, operator) {
   };
 
   const { error } = await supabase.from('cashbook').insert(row);
-  if (error) throw error;
+  if (error) {
+    if (error.code === '23503') return { error: '指定された店舗IDが存在しません: ' + entry.store };
+    throw error;
+  }
 
   await cbLog('create', id, row.store_id, operator, null, row);
   return { success: true, entry: { ...row, id } };
@@ -116,13 +144,15 @@ async function cbUpdateEntry(entryId, updates, operator) {
   if (updates.type !== undefined) dbUpdates.type = updates.type;
   if (updates.category !== undefined) dbUpdates.category = updates.category;
   if (updates.description !== undefined) dbUpdates.description = updates.description;
-  if (updates.amount !== undefined) dbUpdates.amount = updates.amount;
+  if (updates.amount !== undefined) dbUpdates.amount = parseInt(updates.amount) || 0;
   if (updates.customerName !== undefined) dbUpdates.customer_name = updates.customerName;
-  if (updates.therapyCount !== undefined) dbUpdates.treatment_count = updates.therapyCount;
+  if (updates.treatmentCount !== undefined) dbUpdates.treatment_count = parseInt(updates.treatmentCount) || 0;
+  else if (updates.therapyCount !== undefined) dbUpdates.treatment_count = parseInt(updates.therapyCount) || 0;
   if (updates.paymentMethod !== undefined) dbUpdates.payment_method = updates.paymentMethod;
   if (updates.cashType !== undefined) dbUpdates.cash_type = updates.cashType;
   if (updates.memberId !== undefined) dbUpdates.member_id = updates.memberId;
   if (updates.notes !== undefined) dbUpdates.notes = updates.notes;
+  if (updates.store !== undefined) dbUpdates.store_id = updates.store;
 
   const { error } = await supabase.from('cashbook').update(dbUpdates).eq('id', entryId);
   if (error) throw error;

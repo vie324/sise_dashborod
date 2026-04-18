@@ -6,7 +6,7 @@ import {
   lineMessagesGet, lineMessagesPost, lineProfilesGet, lineProfilesPost,
   lineBroadcastsGet, lineBroadcastsPost, lineTemplatesGet, lineTemplatesPost,
   lineAutoRepliesGet, lineAutoRepliesPost, lineTagsGet, lineTagsPost,
-  lineUserTagsGet, lineUserTagsPost
+  lineUserTagsGet, lineUserTagsPost, lineAnalyticsGet
 } from '../_lib/db-handlers-line.js';
 import {
   usageGet, usagePost, ticketGet, ticketPost,
@@ -40,6 +40,7 @@ const HANDLERS = {
   lineAutoReplies: { get: lineAutoRepliesGet, post: lineAutoRepliesPost },
   lineTags:        { get: lineTagsGet,       post: lineTagsPost },
   lineUserTags:    { get: lineUserTagsGet,   post: lineUserTagsPost },
+  lineAnalytics:   { get: lineAnalyticsGet,  post: async () => ({ error: 'lineAnalyticsはGET専用です' }) },
 };
 
 export default async function handler(req, res) {
@@ -268,6 +269,32 @@ async function reportsPost(body) {
       const { error } = await supabase.from('daily_reports').delete().eq('id', body.id);
       if (error) throw error;
       return { success: true, id: body.id };
+    }
+    case 'saveAll': {
+      const reports = body.reports || [];
+      const rows = reports.map(r => ({
+        timestamp: r.timestamp || new Date().toISOString(),
+        store: r.store || '',
+        hpb_new: parseInt(r.hpbNew) || 0,
+        meta_new: parseInt(r.metaNew) || 0,
+        referral_new: parseInt(r.referralNew) || 0,
+        discount_new: parseInt(r.discountNew) || 0,
+        hpb_contract: parseInt(r.hpbContract) || 0,
+        meta_contract: parseInt(r.metaContract) || 0,
+        referral_contract: parseInt(r.referralContract) || 0,
+        discount_contract: parseInt(r.discountContract) || 0,
+        existing_treatments: parseInt(r.existingTreatments) || 0,
+        task_complete: !!r.taskComplete,
+        prep_complete: !!r.prepComplete
+      }));
+      if (body.replace) {
+        await supabase.from('daily_reports').delete().neq('id', 0);
+      }
+      if (rows.length > 0) {
+        const { error } = await supabase.from('daily_reports').insert(rows);
+        if (error) throw error;
+      }
+      return { success: true, count: rows.length };
     }
     default: return { error: '不明なaction: ' + action };
   }

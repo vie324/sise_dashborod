@@ -40,6 +40,30 @@ export async function lineMessagesGet(params) {
 }
 
 export async function lineMessagesPost(body) {
+  // 移行用: direction を保持した一括保存
+  if (body.action === 'saveAll') {
+    const messages = body.messages || [];
+    const rows = messages.map(m => ({
+      store_id: m.storeId || '',
+      user_id: m.userId || '',
+      direction: m.direction || 'received',
+      message_type: m.messageType || 'text',
+      message_text: m.messageText || '',
+      message_id: m.messageId || '',
+      timestamp: m.timestamp || new Date().toISOString()
+    }));
+    if (body.replace) {
+      let del = supabase.from('line_messages').delete();
+      del = body.storeId ? del.eq('store_id', body.storeId) : del.neq('id', 0);
+      await del;
+    }
+    if (rows.length > 0) {
+      const { error } = await supabase.from('line_messages').insert(rows);
+      if (error) throw error;
+    }
+    return { success: true, count: rows.length };
+  }
+
   // Webhook形式 (events配列)
   if (body.events) {
     const rows = (body.events || []).map(ev => ({
@@ -126,6 +150,28 @@ export async function lineBroadcastsGet(params) {
 }
 
 export async function lineBroadcastsPost(body) {
+  if (body.action === 'saveAll') {
+    const broadcasts = body.broadcasts || [];
+    const rows = broadcasts.map(b => ({
+      store_id: b.storeId || '',
+      broadcast_type: b.broadcastType || '',
+      message_content: b.messageContent || '',
+      recipient_count: b.recipientCount || 0,
+      status: b.status || '',
+      timestamp: b.timestamp || new Date().toISOString()
+    }));
+    if (body.replace) {
+      let del = supabase.from('line_broadcasts').delete();
+      del = body.storeId ? del.eq('store_id', body.storeId) : del.neq('id', 0);
+      await del;
+    }
+    if (rows.length > 0) {
+      const { error } = await supabase.from('line_broadcasts').insert(rows);
+      if (error) throw error;
+    }
+    return { success: true, count: rows.length };
+  }
+
   const { error } = await supabase.from('line_broadcasts').insert({
     store_id: body.storeId || '',
     broadcast_type: body.broadcastType || 'broadcast',
@@ -160,6 +206,28 @@ export async function lineTemplatesGet(params) {
 export async function lineTemplatesPost(body) {
   const action = body.action || 'create';
   switch (action) {
+    case 'saveAll': {
+      const templates = body.templates || [];
+      const rows = templates.map(t => ({
+        template_id: t.templateId || ('tmpl_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6)),
+        store_id: t.storeId || '',
+        name: t.name || '',
+        category: t.category || '',
+        message_type: t.messageType || 'text',
+        message_content: t.messageContent || '',
+        created_at: t.createdAt || new Date().toISOString()
+      }));
+      if (body.replace) {
+        let del = supabase.from('line_templates').delete();
+        del = body.storeId ? del.eq('store_id', body.storeId) : del.neq('template_id', '');
+        await del;
+      }
+      if (rows.length > 0) {
+        const { error } = await supabase.from('line_templates').upsert(rows, { onConflict: 'template_id' });
+        if (error) throw error;
+      }
+      return { success: true, count: rows.length };
+    }
     case 'create': {
       const templateId = 'tmpl_' + Date.now();
       const { error } = await supabase.from('line_templates').insert({
@@ -214,6 +282,30 @@ export async function lineAutoRepliesGet(params) {
 export async function lineAutoRepliesPost(body) {
   const action = body.action || 'create';
   switch (action) {
+    case 'saveAll': {
+      const rules = body.rules || [];
+      const rows = rules.map(r => ({
+        rule_id: r.ruleId || ('rule_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6)),
+        store_id: r.storeId || '',
+        keyword: r.keyword || '',
+        match_method: r.matchMethod || 'contains',
+        reply_type: r.replyType || 'text',
+        reply_content: r.replyContent || '',
+        priority: r.priority || 0,
+        enabled: r.enabled !== false,
+        created_at: r.createdAt || new Date().toISOString()
+      }));
+      if (body.replace) {
+        let del = supabase.from('line_auto_replies').delete();
+        del = body.storeId ? del.eq('store_id', body.storeId) : del.neq('rule_id', '');
+        await del;
+      }
+      if (rows.length > 0) {
+        const { error } = await supabase.from('line_auto_replies').upsert(rows, { onConflict: 'rule_id' });
+        if (error) throw error;
+      }
+      return { success: true, count: rows.length };
+    }
     case 'create': {
       const ruleId = 'rule_' + Date.now();
       const { error } = await supabase.from('line_auto_replies').insert({
@@ -268,6 +360,26 @@ export async function lineTagsGet(params) {
 export async function lineTagsPost(body) {
   const action = body.action || 'create';
   switch (action) {
+    case 'saveAll': {
+      const tags = body.tags || [];
+      const rows = tags.map(t => ({
+        tag_id: t.tagId || ('tag_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6)),
+        store_id: t.storeId || '',
+        name: t.name || '',
+        color: t.color || '#06C755',
+        created_at: t.createdAt || new Date().toISOString()
+      }));
+      if (body.replace) {
+        let del = supabase.from('line_tags').delete();
+        del = body.storeId ? del.eq('store_id', body.storeId) : del.neq('tag_id', '');
+        await del;
+      }
+      if (rows.length > 0) {
+        const { error } = await supabase.from('line_tags').upsert(rows, { onConflict: 'tag_id' });
+        if (error) throw error;
+      }
+      return { success: true, count: rows.length };
+    }
     case 'create': {
       const tagId = 'tag_' + Date.now();
       const { error } = await supabase.from('line_tags').insert({
@@ -310,9 +422,109 @@ export async function lineUserTagsGet(params) {
   };
 }
 
+// ============================================================
+// LINE分析 (lineAnalytics) - 計算専用・読み取り
+// ============================================================
+
+export async function lineAnalyticsGet(params) {
+  let query = supabase.from('line_messages').select('timestamp, store_id, user_id, direction, message_type');
+  if (params.store) query = query.eq('store_id', params.store);
+  const { data, error } = await query;
+  if (error) throw error;
+
+  const now = new Date();
+  const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+  const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+
+  let totalReceived = 0, totalSent = 0;
+  let last30Received = 0, last30Sent = 0;
+  let last7Received = 0, last7Sent = 0;
+  let follows = 0, unfollows = 0;
+  const uniqueUsers = {};
+  const dailyStats = {};
+  const hourlyStats = {};
+
+  for (const row of data || []) {
+    const ts = new Date(row.timestamp);
+    const direction = row.direction;
+    const msgType = row.message_type;
+    const userId = row.user_id;
+
+    if (msgType === 'follow') { follows++; continue; }
+    if (msgType === 'unfollow') { unfollows++; continue; }
+
+    if (direction === 'received') {
+      totalReceived++;
+      uniqueUsers[userId] = true;
+      if (ts >= thirtyDaysAgo) last30Received++;
+      if (ts >= sevenDaysAgo) last7Received++;
+    } else {
+      totalSent++;
+      if (ts >= thirtyDaysAgo) last30Sent++;
+      if (ts >= sevenDaysAgo) last7Sent++;
+    }
+
+    if (ts >= thirtyDaysAgo) {
+      const dateKey = ts.toISOString().slice(0, 10);
+      if (!dailyStats[dateKey]) dailyStats[dateKey] = { received: 0, sent: 0 };
+      if (direction === 'received') dailyStats[dateKey].received++;
+      else dailyStats[dateKey].sent++;
+    }
+
+    const hour = ts.getHours();
+    if (!hourlyStats[hour]) hourlyStats[hour] = { received: 0, sent: 0 };
+    if (direction === 'received') hourlyStats[hour].received++;
+    else hourlyStats[hour].sent++;
+  }
+
+  const dailyArray = Object.keys(dailyStats).sort().map(date => ({
+    date, received: dailyStats[date].received, sent: dailyStats[date].sent
+  }));
+
+  const hourlyArray = [];
+  for (let h = 0; h < 24; h++) {
+    hourlyArray.push({
+      hour: h,
+      received: (hourlyStats[h] || { received: 0 }).received,
+      sent: (hourlyStats[h] || { sent: 0 }).sent
+    });
+  }
+
+  return {
+    analytics: {
+      total: { received: totalReceived, sent: totalSent },
+      last30Days: { received: last30Received, sent: last30Sent },
+      last7Days: { received: last7Received, sent: last7Sent },
+      follows, unfollows,
+      uniqueUsers: Object.keys(uniqueUsers).length,
+      dailyStats: dailyArray,
+      hourlyStats: hourlyArray
+    }
+  };
+}
+
 export async function lineUserTagsPost(body) {
   const action = body.action || 'add';
   switch (action) {
+    case 'saveAll': {
+      const userTags = body.userTags || [];
+      const rows = userTags.map(ut => ({
+        store_id: ut.storeId || '',
+        user_id: ut.userId || '',
+        tag_id: ut.tagId || '',
+        assigned_at: ut.assignedAt || new Date().toISOString()
+      }));
+      if (body.replace) {
+        let del = supabase.from('line_user_tags').delete();
+        del = body.storeId ? del.eq('store_id', body.storeId) : del.neq('tag_id', '');
+        await del;
+      }
+      if (rows.length > 0) {
+        const { error } = await supabase.from('line_user_tags').upsert(rows, { onConflict: 'store_id,user_id,tag_id' });
+        if (error) throw error;
+      }
+      return { success: true, count: rows.length };
+    }
     case 'add': {
       const { error } = await supabase.from('line_user_tags').upsert({
         store_id: body.storeId || '', user_id: body.userId || '',
