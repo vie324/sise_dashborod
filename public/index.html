@@ -492,6 +492,8 @@
             0% { background-position: 200% 0; }
             100% { background-position: -200% 0; }
         }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes scaleIn { from { opacity: 0; transform: scale(.92); } to { opacity: 1; transform: scale(1); } }
 
         /* Table hover & alternating rows */
         .table-row-hover {
@@ -1677,6 +1679,171 @@
                 </div>
             );
         };
+
+        // ========================================
+        // 共通 UX ユーティリティ
+        // ========================================
+
+        // debounce 値カスタムフック
+        const useDebounce = (value, delay = 300) => {
+            const [debounced, setDebounced] = useState(value);
+            useEffect(() => {
+                const t = setTimeout(() => setDebounced(value), delay);
+                return () => clearTimeout(t);
+            }, [value, delay]);
+            return debounced;
+        };
+
+        // グローバル確認ダイアログ
+        const confirmState = { listeners: [], current: null };
+        const confirmDialog = (options) => {
+            return new Promise((resolve) => {
+                confirmState.current = { ...options, resolve };
+                confirmState.listeners.forEach(fn => fn(confirmState.current));
+            });
+        };
+
+        const ConfirmDialogContainer = () => {
+            const [opts, setOpts] = useState(null);
+            useEffect(() => {
+                const fn = (v) => setOpts(v);
+                confirmState.listeners.push(fn);
+                return () => { confirmState.listeners = confirmState.listeners.filter(l => l !== fn); };
+            }, []);
+            if (!opts) return null;
+            const handleClose = (result) => {
+                const resolve = opts.resolve;
+                setOpts(null);
+                confirmState.current = null;
+                confirmState.listeners.forEach(fn => fn(null));
+                resolve(result);
+            };
+            const isDanger = opts.variant === 'danger';
+            return (
+                <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.4)', backdropFilter:'blur(4px)', zIndex:9999, display:'flex', alignItems:'center', justifyContent:'center', padding:16, animation:'fadeIn .15s ease' }}
+                     onClick={() => handleClose(false)}>
+                    <div onClick={e => e.stopPropagation()} style={{ background:'#fff', borderRadius:20, width:'100%', maxWidth:380, padding:24, boxShadow:'0 20px 48px rgba(0,0,0,.2)', animation:'scaleIn .2s ease' }}>
+                        <div style={{ display:'flex', alignItems:'center', gap:14, marginBottom:14 }}>
+                            <div style={{ width:44, height:44, borderRadius:14, display:'flex', alignItems:'center', justifyContent:'center', background: isDanger ? '#fef2f2' : '#eff6ff', color: isDanger ? '#dc2626' : '#3b82f6', flexShrink:0 }}>
+                                <Icon name={isDanger ? 'alert-triangle' : 'help-circle'} size={22} />
+                            </div>
+                            <div style={{ flex:1, minWidth:0 }}>
+                                <div style={{ fontSize:16, fontWeight:700, color:'#1e293b', marginBottom:2 }}>{opts.title || '確認'}</div>
+                                {opts.message && <div style={{ fontSize:13, color:'#64748b', lineHeight:1.5 }}>{opts.message}</div>}
+                            </div>
+                        </div>
+                        <div style={{ display:'flex', gap:8, justifyContent:'flex-end', marginTop:18 }}>
+                            <button onClick={() => handleClose(false)} style={{ padding:'10px 18px', borderRadius:10, fontSize:14, fontWeight:600, color:'#64748b', background:'#f1f5f9', border:'none', cursor:'pointer' }}>
+                                {opts.cancelLabel || 'キャンセル'}
+                            </button>
+                            <button onClick={() => handleClose(true)} style={{ padding:'10px 18px', borderRadius:10, fontSize:14, fontWeight:700, color:'#fff', background: isDanger ? '#ef4444' : '#3b82f6', border:'none', cursor:'pointer' }}>
+                                {opts.confirmLabel || 'OK'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // 空状態コンポーネント
+        const EmptyState = ({ icon = 'inbox', title, message, actionLabel, onAction, compact = false }) => (
+            <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding: compact ? '24px 16px' : '48px 20px', textAlign:'center', color:'#94a3b8' }}>
+                <div style={{ width: compact ? 52 : 72, height: compact ? 52 : 72, borderRadius: compact ? 16 : 22, background:'linear-gradient(135deg,#f1f5f9,#e2e8f0)', display:'flex', alignItems:'center', justifyContent:'center', marginBottom:14 }}>
+                    <Icon name={icon} size={compact ? 24 : 32} className="text-slate-400" />
+                </div>
+                <div style={{ fontSize: compact ? 14 : 15, fontWeight:700, color:'#475569', marginBottom:6 }}>{title}</div>
+                {message && <div style={{ fontSize:12, color:'#94a3b8', maxWidth:320, lineHeight:1.6 }}>{message}</div>}
+                {actionLabel && onAction && (
+                    <button onClick={onAction} style={{ marginTop:16, padding:'10px 20px', borderRadius:12, fontSize:13, fontWeight:700, background:'linear-gradient(135deg,#33a065,#2d8f5a)', color:'#fff', border:'none', cursor:'pointer', boxShadow:'0 4px 12px rgba(51,160,101,.25)' }}>
+                        {actionLabel}
+                    </button>
+                )}
+            </div>
+        );
+
+        // スケルトン行
+        const SkeletonRow = ({ count = 3, variant = 'list' }) => {
+            const rows = Array.from({ length: count }, (_, i) => i);
+            if (variant === 'card') return (
+                <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(240px, 1fr))', gap:12 }}>
+                    {rows.map(i => <div key={i} className="skeleton" style={{ height:96, borderRadius:14 }} />)}
+                </div>
+            );
+            return (
+                <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+                    {rows.map(i => (
+                        <div key={i} style={{ display:'flex', alignItems:'center', gap:12, padding:'12px 14px', borderRadius:12, background:'#fff', border:'1px solid #f1f5f9' }}>
+                            <div className="skeleton" style={{ width:36, height:36, borderRadius:10, flexShrink:0 }} />
+                            <div style={{ flex:1, display:'flex', flexDirection:'column', gap:6 }}>
+                                <div className="skeleton" style={{ height:12, width:'50%', borderRadius:4 }} />
+                                <div className="skeleton" style={{ height:10, width:'70%', borderRadius:4 }} />
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            );
+        };
+
+        // イニシャル生成ヘルパー
+        const getInitial = (name) => (name && typeof name === 'string' && name.trim()) ? name.trim()[0] : '?';
+
+        // フォールバック付き画像
+        const ImageWithFallback = ({ src, alt = '', fallbackText, className, style, ...rest }) => {
+            const [failed, setFailed] = useState(false);
+            if (!src || failed) {
+                return (
+                    <div className={className} style={{ ...style, display:'flex', alignItems:'center', justifyContent:'center', background:'linear-gradient(135deg,#e2e8f0,#cbd5e1)', color:'#64748b', fontSize:'60%', fontWeight:700 }}>
+                        {fallbackText || getInitial(alt) || '?'}
+                    </div>
+                );
+            }
+            return <img src={src} alt={alt} loading="lazy" onError={() => setFailed(true)} className={className} style={style} {...rest} />;
+        };
+
+        // 背景更新インジケータ用グローバル状態
+        const backgroundSyncState = { count: 0, listeners: [] };
+        const startBackgroundSync = () => {
+            backgroundSyncState.count++;
+            backgroundSyncState.listeners.forEach(fn => fn(backgroundSyncState.count > 0));
+        };
+        const endBackgroundSync = () => {
+            backgroundSyncState.count = Math.max(0, backgroundSyncState.count - 1);
+            backgroundSyncState.listeners.forEach(fn => fn(backgroundSyncState.count > 0));
+        };
+        const useBackgroundSync = () => {
+            const [syncing, setSyncing] = useState(false);
+            useEffect(() => {
+                const fn = (s) => setSyncing(s);
+                backgroundSyncState.listeners.push(fn);
+                return () => { backgroundSyncState.listeners = backgroundSyncState.listeners.filter(l => l !== fn); };
+            }, []);
+            return syncing;
+        };
+        const BackgroundSyncIndicator = () => {
+            const syncing = useBackgroundSync();
+            if (!syncing) return null;
+            return (
+                <div title="データを同期中" style={{ display:'flex', alignItems:'center', gap:4, padding:'4px 10px', borderRadius:999, background:'rgba(51,160,101,0.12)', border:'1px solid rgba(51,160,101,0.25)' }}>
+                    <div style={{ width:6, height:6, borderRadius:'50%', background:'#33a065', animation:'pulse 1.4s ease-in-out infinite' }} />
+                    <span style={{ fontSize:10, fontWeight:700, color:'#166534' }}>同期中</span>
+                </div>
+            );
+        };
+
+        // グローバルキーボードショートカット
+        const keyboardState = { handlers: [] };
+        const registerShortcut = (handler) => {
+            keyboardState.handlers.push(handler);
+            return () => { keyboardState.handlers = keyboardState.handlers.filter(h => h !== handler); };
+        };
+        if (typeof window !== 'undefined' && !window.__siseKeyHandlerAttached) {
+            window.__siseKeyHandlerAttached = true;
+            window.addEventListener('keydown', (e) => {
+                for (const h of keyboardState.handlers) {
+                    try { if (h(e) === true) { e.preventDefault(); return; } } catch(_) {}
+                }
+            });
+        }
 
         // ========================================
         // ビュー切り替えアニメーション
@@ -3804,7 +3971,8 @@
             useEffect(() => {
                 if (COUNSELING_GAS_URL === 'YOUR_UNIFIED_GAS_URL') return;
                 const interval = setInterval(() => {
-                    // バックグラウンドで取得（loadingフラグは立てない）
+                    // バックグラウンドで取得（loadingフラグは立てない、代わりに同期インジケーターを点灯）
+                    startBackgroundSync();
                     fetch(COUNSELING_GAS_URL + '?type=counseling&action=recent&limit=50' + storeParam)
                         .then(r => r.json())
                         .then(data => {
@@ -3819,7 +3987,8 @@
                                 });
                             }
                         })
-                        .catch(() => {});
+                        .catch(() => {})
+                        .finally(() => endBackgroundSync());
                 }, 30000);
                 return () => clearInterval(interval);
             }, [storeParam]);
@@ -4834,6 +5003,12 @@
                                 </tbody>
                             </table>
                         </div>
+                        {reportData.loading && filteredReports.length === 0 && (
+                            <div className="py-3"><SkeletonRow count={5} /></div>
+                        )}
+                        {!reportData.loading && filteredReports.length === 0 && (
+                            <EmptyState icon="clipboard-list" title="日報がまだありません" message="Googleフォームから日報を送信すると表示されます" compact />
+                        )}
                         {filteredReports.length > 50 && (
                             <div className="text-center py-4 text-sm text-slate-400">{filteredReports.length}件中50件を表示</div>
                         )}
@@ -5057,7 +5232,9 @@
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                 <div>
                                     <label className="block text-xs font-medium text-slate-600 mb-1">会員名 *</label>
-                                    <input type="text" value={newManualMember.name} onChange={e => setNewManualMember(p => ({...p, name: e.target.value}))}
+                                    <input type="text" value={newManualMember.name}
+                                        onChange={e => setNewManualMember(p => ({...p, name: e.target.value}))}
+                                        onKeyDown={e => { if (e.key === 'Enter' && newManualMember.name.trim()) { addMember({ ...newManualMember, monthlyPrice: parseInt(newManualMember.monthlyPrice) || 0 }); setNewManualMember({ name: '', phone: '', email: '', paymentMethod: 'QR', planName: '', monthlyPrice: '', storeName: '', startDate: new Date().toISOString().slice(0, 10), notes: '' }); setShowManualAddForm(false); } }}
                                         placeholder="例: 山田太郎" className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm outline-none" />
                                 </div>
                                 <div>
@@ -5179,7 +5356,8 @@
                     {viewMode === 'combined' && (
                         <div className="space-y-1.5">
                             {combinedMembers.length === 0 && (
-                                <div className="text-center py-6 text-slate-400 text-sm">会員データがありません</div>
+                                <EmptyState icon="users" title="会員データがありません" message="新規入会のお客様を登録してください" compact />
+
                             )}
                             {combinedMembers.map(member => (
                                 <div key={member.id} className="flex items-center p-3 rounded-xl border border-slate-100 hover:border-sise-200 transition-colors bg-white/60">
@@ -5303,19 +5481,19 @@
                                                                 className="flex items-center px-3.5 py-2.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-600 rounded-xl text-xs font-semibold transition-all active:scale-95">
                                                                 <Icon name="repeat" size={14} className="mr-1" /> プラン変更
                                                             </button>
-                                                            <button onClick={(e) => { e.stopPropagation(); if(confirm(`${member.name}を退会処理しますか？`)) cancelMember(member.id); }}
+                                                            <button onClick={async (e) => { e.stopPropagation(); if(await confirmDialog({ title:'退会処理', message:`${member.name}を退会処理しますか？`, confirmLabel:'退会', variant:'danger' })) cancelMember(member.id); }}
                                                                 className="flex items-center px-3.5 py-2.5 bg-red-50 hover:bg-red-100 border border-red-200 text-red-600 rounded-xl text-xs font-semibold transition-all active:scale-95">
                                                                 <Icon name="user-minus" size={14} className="mr-1" /> 退会
                                                             </button>
                                                         </>
                                                     )}
                                                     {member.status === 'CANCELED' && (
-                                                        <button onClick={(e) => { e.stopPropagation(); if(confirm(`${member.name}を再入会しますか？`)) reactivateMember(member.id); }}
+                                                        <button onClick={async (e) => { e.stopPropagation(); if(await confirmDialog({ title:'再入会', message:`${member.name}を再入会処理しますか？`, confirmLabel:'再入会' })) reactivateMember(member.id); }}
                                                             className="flex items-center px-3.5 py-2.5 bg-sise-50 hover:bg-sise-100 border border-sise-200 text-sise-700 rounded-xl text-xs font-semibold transition-all active:scale-95">
                                                             <Icon name="user-plus" size={14} className="mr-1" /> 再入会
                                                         </button>
                                                     )}
-                                                    <button onClick={(e) => { e.stopPropagation(); if(confirm('この会員データを完全に削除しますか？')) deleteMember(member.id); }}
+                                                    <button onClick={async (e) => { e.stopPropagation(); if(await confirmDialog({ title:'会員削除', message:'この会員データを完全に削除します。元に戻せません。', confirmLabel:'削除する', variant:'danger' })) deleteMember(member.id); }}
                                                         className="flex items-center px-3 py-2 hover:bg-red-50 text-slate-400 hover:text-red-400 rounded-xl text-xs transition-all active:scale-95 ml-auto">
                                                         <Icon name="trash-2" size={13} className="mr-1" /> 削除
                                                     </button>
@@ -5385,7 +5563,7 @@
                                                                     </div>
                                                                     <div className="flex items-center gap-2">
                                                                         <span className="font-bold text-slate-800">{formatCurrency(payment.amount)}</span>
-                                                                        <button onClick={(e) => { e.stopPropagation(); if(confirm('この支払記録を削除しますか？')) removePayment(member.id, payment.id); }}
+                                                                        <button onClick={async (e) => { e.stopPropagation(); if(await confirmDialog({ title:'支払記録の削除', message:'この支払記録を削除しますか？', confirmLabel:'削除', variant:'danger' })) removePayment(member.id, payment.id); }}
                                                                             className="md:opacity-0 md:group-hover:opacity-100 p-1.5 rounded-lg hover:bg-red-50 text-slate-300 hover:text-red-400 transition-all">
                                                                             <Icon name="x" size={14} />
                                                                         </button>
@@ -5843,10 +6021,12 @@
             );
         };
 
-        const MemberManagementView = ({ memberData, refreshSquareData, operateSubscription, activeStoreId, manualMembersHook }) => {
+        const MemberManagementView = ({ memberData, refreshSquareData, operateSubscription, activeStoreId, manualMembersHook, counselingHook, lineChatHook, reportData }) => {
+            const [c360Customer, setC360Customer] = useState(null);
             const [isRefreshing, setIsRefreshing] = useState(false);
             const [filterStatus, setFilterStatus] = useState('all'); // all, ACTIVE, CANCELED, PENDING
             const [searchQuery, setSearchQuery] = useState('');
+            const debouncedSearch = useDebounce(searchQuery, 250);
             const [selectedMember, setSelectedMember] = useState(null);
             const [actionLoading, setActionLoading] = useState(null); // 'cancel'|'pause'|'resume'
             const [actionMessage, setActionMessage] = useState(null); // { type, text }
@@ -5896,7 +6076,7 @@
 
             const handleAction = async (member, action) => {
                 const labels = { cancel: '解約', pause: '一時停止', resume: '再開' };
-                if (!confirm(`${member.name} のサブスクリプションを${labels[action]}しますか？`)) return;
+                if (!await confirmDialog({ title:'サブスクリプション操作', message:`${member.name} のサブスクリプションを${labels[action]}します。`, confirmLabel:labels[action], variant: action === 'cancel' ? 'danger' : 'default' })) return;
 
                 setActionLoading(action);
                 setActionMessage(null);
@@ -5929,9 +6109,9 @@
                     filtered = filtered.filter(m => m.status === filterStatus);
                 }
 
-                // 検索クエリ
-                if (searchQuery) {
-                    const query = searchQuery.toLowerCase();
+                // 検索クエリ（debounce）
+                if (debouncedSearch) {
+                    const query = debouncedSearch.toLowerCase();
                     filtered = filtered.filter(m =>
                         m.name.toLowerCase().includes(query) ||
                         m.email.toLowerCase().includes(query) ||
@@ -5940,10 +6120,10 @@
                 }
 
                 return filtered;
-            }, [memberData.members, filterStatus, searchQuery]);
+            }, [memberData.members, filterStatus, debouncedSearch]);
 
             // フィルタ変更時にページリセット
-            useEffect(() => { setCurrentPage(1); }, [filterStatus, searchQuery]);
+            useEffect(() => { setCurrentPage(1); }, [filterStatus, debouncedSearch]);
 
             const totalPages = Math.ceil(filteredMembers.length / ITEMS_PER_PAGE);
             const totalPagesMobile = Math.ceil(filteredMembers.length / ITEMS_PER_PAGE_MOBILE);
@@ -6387,12 +6567,13 @@
                             </div>
                         )}
                         {!memberData.loading && filteredMembers.length === 0 && (
-                            <div className="text-center py-10 text-slate-400">
-                                <div className="w-16 h-16 bg-slate-100 rounded-2xl flex items-center justify-center mx-auto mb-3">
-                                    <Icon name="users" size={28} className="text-slate-300" />
-                                </div>
-                                <p className="font-medium">該当する会員がありません</p>
-                            </div>
+                            <EmptyState
+                                icon="users"
+                                title={searchQuery || filterStatus !== 'all' ? '該当する会員がありません' : '会員データがまだありません'}
+                                message={searchQuery ? '検索条件を変更してみてください' : 'Square連携を有効にすると、会員が自動表示されます'}
+                                actionLabel={searchQuery ? 'クリア' : null}
+                                onAction={searchQuery ? () => setSearchQuery('') : null}
+                            />
                         )}
                     </Card>
 
@@ -6402,9 +6583,17 @@
                             <div className="bg-white/95 backdrop-blur-xl rounded-2xl shadow-2xl max-w-2xl w-full p-4 md:p-6 max-h-[90vh] overflow-y-auto animate-scale-in border border-slate-200/50 mx-2 md:mx-0" onClick={(e) => e.stopPropagation()}>
                                 <div className="flex items-center justify-between mb-4">
                                     <h3 className="text-lg font-bold text-slate-900">{selectedMember.name}</h3>
-                                    <button onClick={() => { setSelectedMember(null); setActionMessage(null); }} className="p-2 hover:bg-slate-100 rounded-lg">
-                                        <Icon name="x" size={20} />
-                                    </button>
+                                    <div className="flex items-center gap-2">
+                                        <button onClick={() => setC360Customer(selectedMember)}
+                                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-white shadow-sm transition"
+                                            style={{ background: 'linear-gradient(135deg,#33a065,#2d8f5a)' }}>
+                                            <Icon name="layers" size={13} />
+                                            360°ビュー
+                                        </button>
+                                        <button onClick={() => { setSelectedMember(null); setActionMessage(null); }} className="p-2 hover:bg-slate-100 rounded-lg">
+                                            <Icon name="x" size={20} />
+                                        </button>
+                                    </div>
                                 </div>
 
                                 {/* 操作メッセージ */}
@@ -6558,6 +6747,16 @@
                             </div>
                         </div>
                     </Card>
+                    {c360Customer && (
+                        <Customer360Modal
+                            customer={c360Customer}
+                            onClose={() => setC360Customer(null)}
+                            memberData={memberData}
+                            counselingHook={counselingHook}
+                            lineChatHook={lineChatHook}
+                            manualMembersHook={manualMembersHook}
+                        />
+                    )}
                 </div>
             );
         };
@@ -6581,6 +6780,7 @@
             const [selectedTicket, setSelectedTicket] = useState(null);
             const [filterStatus, setFilterStatus] = useState('active'); // 'all' | 'active' | 'expiring' | 'expired' | 'completed'
             const [searchQuery, setSearchQuery] = useState('');
+            const debouncedTicketSearch = useDebounce(searchQuery, 250);
             const [showSaved, setShowSaved] = useState(false);
 
             // 新規回数券フォーム
@@ -6637,12 +6837,12 @@
                 if (filterStatus !== 'all') {
                     list = list.filter(t => getTicketStatus(t) === filterStatus);
                 }
-                if (searchQuery) {
-                    const q = searchQuery.toLowerCase();
+                if (debouncedTicketSearch) {
+                    const q = debouncedTicketSearch.toLowerCase();
                     list = list.filter(t => t.customerName.toLowerCase().includes(q) || (t.customerPhone && t.customerPhone.includes(q)));
                 }
                 return list.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-            }, [customerTickets, filterStatus, searchQuery]);
+            }, [customerTickets, filterStatus, debouncedTicketSearch]);
 
             // プランが変わったら有効期限を自動計算
             const handlePlanChange = (planId) => {
@@ -6968,7 +7168,7 @@
                                                     </span>
                                                 )}
                                                 <button
-                                                    onClick={() => { if (confirm(`${ticket.customerName}の回数券を削除しますか？`)) deleteCustomerTicket(ticket.id); }}
+                                                    onClick={async () => { if (await confirmDialog({ title:'回数券削除', message:`${ticket.customerName}の回数券を削除しますか？`, confirmLabel:'削除', variant:'danger' })) deleteCustomerTicket(ticket.id); }}
                                                     className="py-2.5 px-3 border border-slate-200 hover:bg-red-50 hover:border-red-200 hover:text-red-500 rounded-xl text-xs text-slate-400 transition-all"
                                                 >
                                                     <Icon name="trash-2" size={14} />
@@ -6980,13 +7180,11 @@
                             </div>
 
                             {filteredTickets.length === 0 && (
-                                <div className="text-center py-12 text-slate-400">
-                                    <div className="w-16 h-16 bg-slate-100 rounded-2xl flex items-center justify-center mx-auto mb-3">
-                                        <Icon name="ticket" size={28} className="text-slate-300" />
-                                    </div>
-                                    <p className="font-medium">回数券データがありません</p>
-                                    <p className="text-xs mt-1">「新規発行」から追加してください</p>
-                                </div>
+                                <EmptyState
+                                    icon="ticket"
+                                    title="回数券データがありません"
+                                    message="「新規発行」から回数券を追加できます"
+                                />
                             )}
                         </div>
                     )}
@@ -7102,7 +7300,7 @@
                                                     <Icon name="pencil" size={14} className="inline mr-1" />編集
                                                 </button>
                                                 <button
-                                                    onClick={() => { if (confirm(`「${plan.name}」を削除しますか？`)) deletePlan(plan.id); }}
+                                                    onClick={async () => { if (await confirmDialog({ title:'プラン削除', message:`「${plan.name}」を削除しますか？`, confirmLabel:'削除', variant:'danger' })) deletePlan(plan.id); }}
                                                     className="py-2.5 px-3 border border-slate-200 hover:bg-red-50 hover:border-red-200 hover:text-red-500 rounded-xl text-xs text-slate-400 transition-all active:scale-95"
                                                 >
                                                     <Icon name="trash-2" size={13} />
@@ -8023,7 +8221,7 @@
             };
 
             const handleSoftDelete = async (id) => {
-                if (!confirm('このスタッフを無効にしますか？（データは保持されます）')) return;
+                if (!await confirmDialog({ title:'スタッフの無効化', message:'このスタッフを無効にしますか？データは保持されます。', confirmLabel:'無効にする', variant:'danger' })) return;
                 const staff = staffList.find(s => s.id === id);
                 setStaffList(prev => {
                     const updated = prev.map(s => s.id === id ? { ...s, status: 'inactive' } : s);
@@ -8390,11 +8588,13 @@
             };
 
             const handleSoftDelete = async (id) => {
-                if (!confirm('この店舗を無効にしますか？（データは保持されます）')) return;
+                if (!await confirmDialog({ title:'店舗の無効化', message:'この店舗を無効にしますか？データは保持されます。', confirmLabel:'無効にする', variant:'danger' })) return;
+                const store = storeList.find(s => s.id === id);
                 setStoreList(prev => prev.map(s => s.id === id ? { ...s, status: 'inactive' } : s));
                 setGasSyncing(true);
                 await softDeleteStoreGas(id);
                 setGasSyncing(false);
+                showToast(`「${store?.name || '店舗'}」を無効にしました`, 'success', 2000);
             };
 
             const handleRestore = async (id) => {
@@ -9612,31 +9812,39 @@
                                         <option value="coupon">クーポン</option>
                                     </select>
                                 </div>
-                                <div className="md:col-span-2">
-                                    <label className="block text-[10px] font-medium text-slate-500 mb-0.5">名前 *</label>
-                                    <input type="text" value={menuForm.name} onChange={e => setMenuForm(p => ({...p, name: e.target.value}))}
-                                        placeholder="例: 全身整体60分" className="w-full px-2 py-2 border border-slate-200 rounded-lg text-xs outline-none" />
-                                </div>
-                                <div>
-                                    <label className="block text-[10px] font-medium text-slate-500 mb-0.5">金額（円） *</label>
-                                    <input type="number" value={menuForm.price} onChange={e => setMenuForm(p => ({...p, price: e.target.value}))}
-                                        placeholder="0" className="w-full px-2 py-2 border border-slate-200 rounded-lg text-xs outline-none" />
-                                </div>
-                                <div className="flex items-end">
-                                    <button onClick={async () => {
+                                {(() => {
+                                    const submitMenu = async () => {
                                         if (!menuForm.name || !menuForm.price) return;
                                         if (editingMenuId) {
                                             await menuItemsHook.updateItem(editingMenuId, { name: menuForm.name, category: menuForm.category, price: parseInt(menuForm.price), itemType: menuForm.itemType });
                                             setEditingMenuId(null);
+                                            showToast('メニューを更新しました', 'success');
                                         } else {
                                             await menuItemsHook.addItem({ name: menuForm.name, category: menuForm.category, price: parseInt(menuForm.price), itemType: menuForm.itemType });
+                                            showToast('メニューを追加しました', 'success');
                                         }
                                         setMenuForm({ name: '', category: '', price: '', itemType: 'menu' });
-                                    }} disabled={!menuForm.name || !menuForm.price || menuItemsHook?.saving}
-                                        className="w-full px-3 py-2 btn-gradient rounded-lg text-xs font-medium disabled:opacity-50">
-                                        {editingMenuId ? '更新' : '追加'}
-                                    </button>
-                                </div>
+                                    };
+                                    const onEnter = (e) => { if (e.key === 'Enter') submitMenu(); };
+                                    return (<>
+                                        <div className="md:col-span-2">
+                                            <label className="block text-[10px] font-medium text-slate-500 mb-0.5">名前 *</label>
+                                            <input type="text" value={menuForm.name} onChange={e => setMenuForm(p => ({...p, name: e.target.value}))} onKeyDown={onEnter}
+                                                placeholder="例: 全身整体60分" className="w-full px-2 py-2 border border-slate-200 rounded-lg text-xs outline-none" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-[10px] font-medium text-slate-500 mb-0.5">金額（円） *</label>
+                                            <input type="number" value={menuForm.price} onChange={e => setMenuForm(p => ({...p, price: e.target.value}))} onKeyDown={onEnter}
+                                                placeholder="0" className="w-full px-2 py-2 border border-slate-200 rounded-lg text-xs outline-none" />
+                                        </div>
+                                        <div className="flex items-end">
+                                            <button onClick={submitMenu} disabled={!menuForm.name || !menuForm.price || menuItemsHook?.saving}
+                                                className="w-full px-3 py-2 btn-gradient rounded-lg text-xs font-medium disabled:opacity-50">
+                                                {editingMenuId ? '更新' : '追加'}
+                                            </button>
+                                        </div>
+                                    </>);
+                                })()}
                             </div>
 
                             {/* メニュー一覧 */}
@@ -9653,7 +9861,7 @@
                                             <span className="text-sm font-bold text-slate-800">{formatCurrency(item.price)}</span>
                                             <button onClick={() => { setEditingMenuId(item.id); setMenuForm({ name: item.name, category: item.category, price: String(item.price), itemType: item.itemType }); }}
                                                 className="text-slate-400 hover:text-sise-600 transition-colors"><Icon name="edit" size={14} /></button>
-                                            <button onClick={() => { if (confirm(item.name + 'を削除しますか？')) menuItemsHook.deleteItem(item.id); }}
+                                            <button onClick={async () => { if (await confirmDialog({ title:'メニュー削除', message:item.name + 'を削除しますか？', confirmLabel:'削除', variant:'danger' })) menuItemsHook.deleteItem(item.id); }}
                                                 className="text-slate-400 hover:text-red-500 transition-colors"><Icon name="trash-2" size={14} /></button>
                                         </div>
                                     </div>
@@ -9815,7 +10023,7 @@
                                                                 className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors">
                                                                 <Icon name="edit-2" size={14} />
                                                             </button>
-                                                            <button onClick={() => { if(confirm('この記録を削除しますか？')) deleteEntry(entry.id); }}
+                                                            <button onClick={async () => { if(await confirmDialog({ title:'記録削除', message:'この記録を削除しますか？', confirmLabel:'削除', variant:'danger' })) deleteEntry(entry.id); }}
                                                                 className="p-1.5 rounded-lg hover:bg-red-50 text-slate-300 hover:text-red-400 transition-colors">
                                                                 <Icon name="trash-2" size={14} />
                                                             </button>
@@ -10460,7 +10668,7 @@
                                 <span className="text-xs font-semibold">戻る</span>
                             </button>
                             {profile.pictureUrl ? (
-                                <img src={profile.pictureUrl} alt="" className="w-10 h-10 rounded-full object-cover" />
+                                <ImageWithFallback src={profile.pictureUrl} alt={profile.displayName || ''} className="w-10 h-10 rounded-full object-cover" />
                             ) : (
                                 <div className="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center">
                                     <Icon name="user" size={20} className="text-green-600" />
@@ -10665,7 +10873,7 @@
                                     className="w-full flex items-center gap-3 p-3 rounded-2xl bg-white hover:bg-green-50/50 border border-slate-100 hover:border-green-200 transition-all active:scale-[0.98] text-left"
                                 >
                                     {profile.pictureUrl ? (
-                                        <img src={profile.pictureUrl} alt="" className="w-12 h-12 rounded-full object-cover flex-shrink-0" />
+                                        <ImageWithFallback src={profile.pictureUrl} alt={profile.displayName || ''} className="w-12 h-12 rounded-full object-cover flex-shrink-0" />
                                     ) : (
                                         <div className="w-12 h-12 rounded-full bg-green-100 flex items-center justify-center flex-shrink-0">
                                             <Icon name="user" size={22} className="text-green-600" />
@@ -10940,7 +11148,7 @@
                                                                 <button onClick={() => startEdit(m)} className="p-1 text-sise-600 hover:bg-sise-50 rounded dark:hover:bg-gray-700" title="編集">
                                                                     <Icon name="pencil" size={14} />
                                                                 </button>
-                                                                <button onClick={() => { if (confirm(`${m.yearMonth}のデータを削除しますか？`)) deleteHpbMonth(m.yearMonth); }}
+                                                                <button onClick={async () => { if (await confirmDialog({ title:'HPBデータ削除', message:`${m.yearMonth}のデータを削除しますか？`, confirmLabel:'削除', variant:'danger' })) deleteHpbMonth(m.yearMonth); }}
                                                                     className="p-1 text-red-500 hover:bg-red-50 rounded dark:hover:bg-gray-700" title="削除">
                                                                     <Icon name="trash-2" size={14} />
                                                                 </button>
@@ -13823,7 +14031,7 @@
                                         const d = beforeData[v];
                                         return d ? (
                                             <div key={v} className="relative w-10 h-14 rounded-lg overflow-hidden border-2 border-teal-300 flex-shrink-0">
-                                                <img src={d.image} className="w-full h-full object-cover" alt={v} />
+                                                <img src={d.image} className="w-full h-full object-cover" alt={v} loading="lazy" />
                                                 <div className="absolute bottom-0 inset-x-0 text-center bg-black/50 text-white" style={{fontSize:7,fontWeight:700,padding:'1px 0'}}>{v==='front'?'正面':v==='back'?'背面':v==='side'?'側面':'座位'}</div>
                                             </div>
                                         ) : (
@@ -14331,7 +14539,7 @@
                                             style={{background: 'linear-gradient(135deg, #f0fdfa 0%, #e0f7fa 100%)'}}>
                                             <div className="flex aspect-[4/3] overflow-hidden">
                                                 <div className="w-1/2 relative overflow-hidden">
-                                                    <img src={compData['before_' + v.key]?.image} alt="Before" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                                                    <img src={compData['before_' + v.key]?.image} alt="Before" loading="lazy" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
                                                     <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
                                                     <div className="absolute bottom-0 left-0 right-0 py-1 text-center">
                                                         <span className="text-[9px] text-white/90 font-bold tracking-wider uppercase">Before</span>
@@ -14343,7 +14551,7 @@
                                                     </div>
                                                 </div>
                                                 <div className="w-1/2 relative overflow-hidden">
-                                                    <img src={compData['after_' + v.key]?.image} alt="After" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                                                    <img src={compData['after_' + v.key]?.image} alt="After" loading="lazy" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
                                                     <div className="absolute inset-0 bg-gradient-to-t from-teal-800/60 via-transparent to-transparent" />
                                                     <div className="absolute bottom-0 left-0 right-0 py-1 text-center">
                                                         <span className="text-[9px] text-white/90 font-bold tracking-wider uppercase">After</span>
@@ -14834,7 +15042,9 @@
                                 </div>
                                 <div className="flex-1 overflow-y-auto px-4 py-3 space-y-1">
                                     {lineChatHook && lineChatHook.threads.length===0 && (
-                                        <p className="text-center text-gray-400 text-sm py-8">{lineChatHook.loading?'読み込み中...':'LINEスレッドがありません'}</p>
+                                        lineChatHook.loading
+                                            ? <SkeletonRow count={3} />
+                                            : <EmptyState icon="message-circle" title="LINEスレッドがありません" message="お客様からのメッセージがあると表示されます" compact />
                                     )}
                                     {lineChatHook && lineChatHook.threads
                                         .filter(t=>!lineSearchQuery||(lineChatHook.profiles[t.userId]?.displayName||'').toLowerCase().includes(lineSearchQuery.toLowerCase()))
@@ -14845,7 +15055,7 @@
                                                 <button key={t.userId} onClick={()=>setLineSelectedUser({userId:t.userId,displayName:pr.displayName||t.userId})}
                                                     className={`w-full flex items-center gap-3 p-3 rounded-xl text-left transition ${sel?'bg-green-50 border-2 border-green-500':'hover:bg-gray-50 border-2 border-transparent'}`}>
                                                     {pr.pictureUrl
-                                                        ?<img src={pr.pictureUrl} className="w-10 h-10 rounded-full object-cover border-2 border-gray-200" alt=""/>
+                                                        ?<ImageWithFallback src={pr.pictureUrl} className="w-10 h-10 rounded-full object-cover border-2 border-gray-200" alt={pr.displayName || ''}/>
                                                         :<div className="w-10 h-10 rounded-full bg-gray-300 flex items-center justify-center text-white text-sm font-bold">{(pr.displayName||'?')[0]}</div>}
                                                     <div className="flex-1 min-w-0">
                                                         <p className="font-bold text-sm truncate">{pr.displayName||t.userId}</p>
@@ -15127,8 +15337,8 @@
                 }
             }, []);
 
-            const resetForm = useCallback(() => {
-                if (!confirm('入力をリセットしますか？')) return;
+            const resetForm = useCallback(async () => {
+                if (!await confirmDialog({ title:'入力リセット', message:'入力内容をすべてリセットしますか？', confirmLabel:'リセット' })) return;
                 setCustomerName('');
                 setVisitDate(new Date().toISOString().split('T')[0]);
                 setMenuChecks({ '骨盤矯正': false, '姿勢矯正': false, '小顔矯正': false, 'ほぐし': false });
@@ -15658,7 +15868,7 @@
                                                 <button key={t.userId} onClick={() => setLineSelectedUser({ userId: t.userId, displayName: profile.displayName || t.userId })}
                                                     className={`w-full flex items-center gap-3 p-3 rounded-xl text-left transition ${isSelected ? 'bg-green-50 border-2 border-green-500 shadow-sm' : 'hover:bg-gray-50 border-2 border-transparent'}`}>
                                                     {profile.pictureUrl
-                                                        ? <img src={profile.pictureUrl} className="w-10 h-10 rounded-full object-cover border-2 border-gray-200" alt="" />
+                                                        ? <ImageWithFallback src={profile.pictureUrl} className="w-10 h-10 rounded-full object-cover border-2 border-gray-200" alt={profile.displayName || ''} />
                                                         : <div className="w-10 h-10 rounded-full bg-gray-300 flex items-center justify-center text-white text-sm font-bold">{(profile.displayName || '?')[0]}</div>
                                                     }
                                                     <div className="flex-1 min-w-0">
@@ -17536,16 +17746,17 @@
                 return list;
             }, [memberData?.members]);
 
-            // Search filtered customers
+            // Search filtered customers (debounced)
+            const debouncedSearchQuery = useDebounce(searchQuery, 250);
             const filteredCustomers = useMemo(() => {
-                if (!searchQuery.trim()) return allCustomers.slice(0, 20);
-                const q = searchQuery.toLowerCase();
+                if (!debouncedSearchQuery.trim()) return allCustomers.slice(0, 20);
+                const q = debouncedSearchQuery.toLowerCase();
                 return allCustomers.filter(c =>
                     (c.name && c.name.toLowerCase().includes(q)) ||
                     (c.phone && c.phone.includes(q)) ||
                     (c.email && c.email.toLowerCase().includes(q))
                 ).slice(0, 20);
-            }, [allCustomers, searchQuery]);
+            }, [allCustomers, debouncedSearchQuery]);
 
             // Check if customer has LINE connection
             const checkLineConnection = useCallback((customer) => {
@@ -17729,11 +17940,9 @@
                                     {/* GAS顧客リスト */}
                                     <div className="flow-member-list">
                                         {counselingHook.loading ? (
-                                            <div className="text-center py-8 text-slate-400 text-sm">読み込み中...</div>
+                                            <SkeletonRow count={4} />
                                         ) : counselingHook.customers.length === 0 ? (
-                                            <div className="text-center py-8 text-slate-400 text-sm">
-                                                カウンセリングデータがありません
-                                            </div>
+                                            <EmptyState icon="file-text" title="カウンセリングデータがありません" message="お客様がGoogleフォームを送信すると表示されます" compact />
                                         ) : (
                                             counselingHook.customers.map((c, idx) => (
                                                 <div
@@ -18506,6 +18715,7 @@
             const [isSidebarOpen, setIsSidebarOpen] = useState(false);
             const [isDarkMode, setIsDarkMode] = useState(false);
             const [flowMode, setFlowMode] = useState(false);
+            const [quickSearchOpen, setQuickSearchOpen] = useState(false);
 
             const isStaffMode = !!currentAccess;
             const [activeStoreId, setActiveStoreId] = useState(
@@ -18614,6 +18824,30 @@
             const [treatmentSubTab, setTreatmentSubTab] = useState('posture'); // 'posture' | 'report'
             const [moreMenuOpen, setMoreMenuOpen] = useState(false);
 
+            // キーボードショートカット
+            useEffect(() => {
+                const unregister = registerShortcut((e) => {
+                    // 入力中でもCmd/Ctrl+Kは受け付ける
+                    const target = e.target;
+                    const isTyping = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
+                    const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
+                    const modKey = isMac ? e.metaKey : e.ctrlKey;
+                    // Cmd/Ctrl + K: クイック検索
+                    if (modKey && e.key.toLowerCase() === 'k') {
+                        setQuickSearchOpen(true);
+                        return true;
+                    }
+                    // Esc: モーダル/メニューを閉じる（入力中でも有効）
+                    if (e.key === 'Escape') {
+                        if (quickSearchOpen) { setQuickSearchOpen(false); return true; }
+                        if (moreMenuOpen) { setMoreMenuOpen(false); return true; }
+                        if (isSidebarOpen) { setIsSidebarOpen(false); return true; }
+                    }
+                    return false;
+                });
+                return unregister;
+            }, [quickSearchOpen, moreMenuOpen, isSidebarOpen]);
+
             // モバイル上部タブ: 常時表示5つ
             const primaryTabs = [
                 { id: 'dashboard', label: 'ホーム', icon: 'layout-dashboard' },
@@ -18672,7 +18906,7 @@
                     case 'reports':
                         return <DailyReportListView reportData={reportData} allowedStoreNames={allowedStoreNames} />;
                     case 'members':
-                        return <MemberManagementView memberData={memberData} refreshSquareData={refreshSquareData} operateSubscription={operateSubscription} activeStoreId={activeStoreId} manualMembersHook={manualMembersHook} />;
+                        return <MemberManagementView memberData={memberData} refreshSquareData={refreshSquareData} operateSubscription={operateSubscription} activeStoreId={activeStoreId} manualMembersHook={manualMembersHook} counselingHook={counselingHook} lineChatHook={lineChatHook} reportData={reportData} />;
                     case 'cashbook':
                         return <CashbookView cashbookHook={cashbookHook} memberData={memberData} manualMembersHook={manualMembersHook} activeStoreId={activeStoreId} squareData={memberData} menuItemsHook={menuItemsHook} />;
                     case 'attendance':
@@ -18756,6 +18990,7 @@
                 return (
                     <div className="min-h-screen bg-slate-50 relative">
                         <ToastContainer />
+                        <ConfirmDialogContainer />
                         {/* Flow Header */}
                         <header className="fixed top-0 left-0 right-0 z-50 glass-panel safe-top">
                             <div className="flex items-center justify-between px-4 h-14">
@@ -18793,6 +19028,7 @@
                 <div className="min-h-screen bg-slate-50 bg-mesh relative">
                     {/* トースト通知 */}
                     <ToastContainer />
+                    <ConfirmDialogContainer />
                     {/* トップローディングバー */}
                     <div className={`top-loading-bar ${memberData.loading || reportData.loading ? 'active' : ''}`}></div>
                     {/* 背景装飾オーブ */}
@@ -18840,6 +19076,8 @@
                                 </div>
                             </div>
                             <div className="flex items-center gap-1">
+                                {/* 背景更新インジケーター */}
+                                <BackgroundSyncIndicator />
                                 {isFullscreenView ? (
                                     <span className="text-xs font-semibold text-sise-500 px-3 py-1.5 bg-sise-50/80 border border-sise-200 rounded-xl">
                                         {currentView === 'counseling' ? 'カウンセリング中' : '施術レポート作成中'}
@@ -19039,6 +19277,350 @@
                             </ViewTransition>
                         </div>
                     </main>
+                    {/* クイック検索 (Cmd+K / Ctrl+K) */}
+                    {quickSearchOpen && (
+                        <QuickSearchModal
+                            onClose={() => setQuickSearchOpen(false)}
+                            memberData={memberData}
+                            manualMembersHook={manualMembersHook}
+                            counselingHook={counselingHook}
+                            navItems={navItems}
+                            onNavigate={(id) => { setCurrentView(id); setQuickSearchOpen(false); }}
+                            onSelectMember={(m) => { setCurrentView('members'); setQuickSearchOpen(false); showToast(`${m.name}を検索結果に表示中`, 'info', 2000); }}
+                        />
+                    )}
+                </div>
+            );
+        };
+
+        // 顧客360度ビュー（統合タイムライン）
+        const Customer360Modal = ({ customer, onClose, memberData, counselingHook, lineChatHook, reportData, manualMembersHook }) => {
+            const [tab, setTab] = useState('timeline');
+
+            // マッチング: 同名の顧客を全ソースから収集
+            const matched = useMemo(() => {
+                const name = customer?.name || '';
+                if (!name) return { squareMember: null, manualMember: null, counselings: [], lineThread: null, lineProfile: null, lineMessages: [] };
+                const normName = name.toLowerCase().replace(/\s+/g, '');
+                const nameMatch = (s) => {
+                    if (!s) return false;
+                    return s.toLowerCase().replace(/\s+/g, '').includes(normName) ||
+                           normName.includes(s.toLowerCase().replace(/\s+/g, ''));
+                };
+                const squareMember = (memberData?.members || []).find(m => nameMatch(m.name));
+                const manualMember = (manualMembersHook?.manualMembers || []).find(m => nameMatch(m.name));
+                const counselings = (counselingHook?.customers || []).filter(c => nameMatch(c.name));
+                let lineThread = null, lineProfile = null, lineMessages = [];
+                if (lineChatHook?.threads) {
+                    for (const t of lineChatHook.threads) {
+                        const p = lineChatHook.profiles?.[t.userId];
+                        if (p && nameMatch(p.displayName)) { lineThread = t; lineProfile = p; break; }
+                    }
+                    if (lineThread) {
+                        lineMessages = (lineChatHook.messages || []).filter(m => m.user_id === lineThread.userId || m.userId === lineThread.userId);
+                    }
+                }
+                return { squareMember, manualMember, counselings, lineThread, lineProfile, lineMessages };
+            }, [customer, memberData, counselingHook, lineChatHook, manualMembersHook]);
+
+            // タイムライン: 各ソースのイベントを時系列順にまとめる
+            const timeline = useMemo(() => {
+                const events = [];
+                matched.counselings.forEach(c => {
+                    events.push({ type: 'counseling', icon: 'file-text', color: '#f59e0b', date: c.timestamp, title: 'カウンセリングシート送信', detail: (c.concerns || []).slice(0, 3).join('、') || 'ご来店前のアンケートを受け取りました', raw: c });
+                });
+                (matched.lineMessages || []).slice(-30).forEach(m => {
+                    const ts = m.timestamp || m.created_at;
+                    if (!ts) return;
+                    events.push({ type: 'line', icon: 'message-circle', color: '#06c755', date: ts, title: m.direction === 'sent' ? 'LINE送信' : 'LINE受信', detail: (m.message_text || m.messageText || '(添付)').slice(0, 60) });
+                });
+                if (matched.squareMember) {
+                    const m = matched.squareMember;
+                    if (m.startDate) events.push({ type: 'subscription', icon: 'credit-card', color: '#3b82f6', date: m.startDate, title: 'Squareサブスク開始', detail: m.planName || '' });
+                    (m.payments || []).forEach(p => {
+                        events.push({ type: 'payment', icon: 'wallet', color: '#10b981', date: p.paidAt || p.date, title: '決済', detail: `¥${(p.amount||0).toLocaleString()} ${p.method || ''}` });
+                    });
+                }
+                if (matched.manualMember) {
+                    const m = matched.manualMember;
+                    if (m.startDate) events.push({ type: 'manual-subscription', icon: 'wallet', color: '#8b5cf6', date: m.startDate, title: '手動会員登録', detail: m.planName || '' });
+                    (m.payments || []).forEach(p => {
+                        events.push({ type: 'payment', icon: 'wallet', color: '#10b981', date: p.date || p.paidAt, title: '決済', detail: `¥${(p.amount||0).toLocaleString()} ${p.method || ''}` });
+                    });
+                }
+                return events
+                    .filter(e => e.date)
+                    .map(e => ({ ...e, dateObj: new Date(e.date) }))
+                    .sort((a, b) => b.dateObj - a.dateObj);
+            }, [matched]);
+
+            if (!customer) return null;
+
+            return (
+                <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.5)', backdropFilter:'blur(8px)', zIndex:9999, display:'flex', alignItems:'center', justifyContent:'center', padding:16, animation:'fadeIn .15s ease' }}
+                     onClick={onClose}>
+                    <div onClick={e => e.stopPropagation()} style={{ width:'100%', maxWidth:720, maxHeight:'85vh', background:'#fff', borderRadius:24, boxShadow:'0 24px 48px rgba(0,0,0,.2)', overflow:'hidden', display:'flex', flexDirection:'column', animation:'scaleIn .2s ease' }}>
+                        {/* ヘッダー */}
+                        <div style={{ padding:'20px 24px', background:'linear-gradient(135deg,#33a065,#2d8f5a)', color:'#fff' }}>
+                            <div style={{ display:'flex', alignItems:'center', gap:14 }}>
+                                <div style={{ width:56, height:56, borderRadius:16, background:'rgba(255,255,255,0.2)', color:'#fff', display:'flex', alignItems:'center', justifyContent:'center', fontSize:22, fontWeight:800 }}>
+                                    {getInitial(customer.name)}
+                                </div>
+                                <div style={{ flex:1, minWidth:0 }}>
+                                    <div style={{ fontSize:11, fontWeight:700, opacity:0.8, letterSpacing:'.1em' }}>CUSTOMER 360</div>
+                                    <div style={{ fontSize:20, fontWeight:800, marginTop:2 }}>{customer.name}</div>
+                                    <div style={{ display:'flex', gap:8, marginTop:6, flexWrap:'wrap' }}>
+                                        {matched.squareMember && <span style={{ fontSize:10, fontWeight:700, padding:'2px 8px', borderRadius:6, background:'rgba(255,255,255,.2)' }}>Square会員</span>}
+                                        {matched.manualMember && <span style={{ fontSize:10, fontWeight:700, padding:'2px 8px', borderRadius:6, background:'rgba(255,255,255,.2)' }}>手動会員</span>}
+                                        {matched.counselings.length > 0 && <span style={{ fontSize:10, fontWeight:700, padding:'2px 8px', borderRadius:6, background:'rgba(255,255,255,.2)' }}>カウンセリング {matched.counselings.length}件</span>}
+                                        {matched.lineThread && <span style={{ fontSize:10, fontWeight:700, padding:'2px 8px', borderRadius:6, background:'rgba(6,199,85,.9)' }}>LINE連携済</span>}
+                                    </div>
+                                </div>
+                                <button onClick={onClose} style={{ padding:8, borderRadius:12, background:'rgba(255,255,255,0.15)', border:'none', color:'#fff', cursor:'pointer' }}>
+                                    <Icon name="x" size={18} />
+                                </button>
+                            </div>
+                        </div>
+                        {/* タブ */}
+                        <div style={{ display:'flex', gap:4, padding:'10px 16px 0', borderBottom:'1px solid #f1f5f9' }}>
+                            {[
+                                { k: 'timeline', l: 'タイムライン', icon: 'activity' },
+                                { k: 'profile', l: '基本情報', icon: 'user' },
+                                { k: 'payments', l: '決済', icon: 'credit-card' },
+                                { k: 'line', l: 'LINE', icon: 'message-circle' },
+                            ].map(t => (
+                                <button key={t.k} onClick={() => setTab(t.k)}
+                                    style={{ padding:'10px 14px', borderRadius:'10px 10px 0 0', border:'none', background:'transparent', cursor:'pointer',
+                                        color: tab === t.k ? '#166534' : '#94a3b8',
+                                        fontSize:13, fontWeight:700,
+                                        borderBottom: tab === t.k ? '2px solid #33a065' : '2px solid transparent',
+                                        display:'flex', alignItems:'center', gap:6 }}>
+                                    <Icon name={t.icon} size={13} />
+                                    {t.l}
+                                </button>
+                            ))}
+                        </div>
+                        {/* 本体 */}
+                        <div style={{ flex:1, overflowY:'auto', padding:20 }}>
+                            {tab === 'timeline' && (
+                                timeline.length === 0 ? (
+                                    <EmptyState icon="activity" title="イベント履歴がありません" message="来店や決済、LINEやり取りなどがここに表示されます" compact />
+                                ) : (
+                                    <div style={{ position:'relative', paddingLeft:28 }}>
+                                        <div style={{ position:'absolute', left:13, top:8, bottom:8, width:2, background:'linear-gradient(to bottom, #e2e8f0, transparent)' }} />
+                                        {timeline.map((e, i) => (
+                                            <div key={i} style={{ position:'relative', marginBottom:14 }}>
+                                                <div style={{ position:'absolute', left:-28, top:2, width:28, height:28, borderRadius:'50%', background:e.color, color:'#fff', display:'flex', alignItems:'center', justifyContent:'center', border:'3px solid #fff', boxShadow:'0 2px 6px rgba(0,0,0,.08)' }}>
+                                                    <Icon name={e.icon} size={13} />
+                                                </div>
+                                                <div style={{ background:'#f8fafc', borderRadius:12, padding:'10px 14px', border:'1px solid #f1f5f9' }}>
+                                                    <div style={{ display:'flex', alignItems:'baseline', justifyContent:'space-between', gap:8 }}>
+                                                        <div style={{ fontSize:13, fontWeight:700, color:'#1e293b' }}>{e.title}</div>
+                                                        <div style={{ fontSize:11, color:'#94a3b8', flexShrink:0 }}>{e.dateObj.toLocaleDateString('ja-JP')}</div>
+                                                    </div>
+                                                    {e.detail && <div style={{ fontSize:12, color:'#64748b', marginTop:4, lineHeight:1.5 }}>{e.detail}</div>}
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )
+                            )}
+                            {tab === 'profile' && (
+                                matched.counselings.length === 0 && !matched.squareMember && !matched.manualMember ? (
+                                    <EmptyState icon="user" title="基本情報がありません" compact />
+                                ) : (
+                                    <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
+                                        {matched.counselings.length > 0 && (
+                                            <div style={{ padding:14, background:'#fffbeb', borderRadius:12, border:'1px solid #fde68a' }}>
+                                                <div style={{ fontSize:12, fontWeight:700, color:'#92400e', marginBottom:8 }}>カウンセリング（最新）</div>
+                                                {(() => {
+                                                    const c = matched.counselings[0];
+                                                    return (
+                                                        <div style={{ display:'flex', flexWrap:'wrap', gap:6 }}>
+                                                            {c.birthday && <span style={{ fontSize:11, padding:'3px 8px', borderRadius:6, background:'#fff', color:'#78350f', fontWeight:600 }}>誕生日: {c.birthday}</span>}
+                                                            {c.occupation && <span style={{ fontSize:11, padding:'3px 8px', borderRadius:6, background:'#fff', color:'#78350f', fontWeight:600 }}>職業: {c.occupation}</span>}
+                                                            {c.concerns && c.concerns.length > 0 && <span style={{ fontSize:11, padding:'3px 8px', borderRadius:6, background:'#fff', color:'#78350f', fontWeight:600, width:'100%' }}>お悩み: {c.concerns.join('、')}</span>}
+                                                        </div>
+                                                    );
+                                                })()}
+                                            </div>
+                                        )}
+                                        {matched.squareMember && (
+                                            <div style={{ padding:14, background:'#eff6ff', borderRadius:12, border:'1px solid #bfdbfe' }}>
+                                                <div style={{ fontSize:12, fontWeight:700, color:'#1e40af', marginBottom:8 }}>Square会員</div>
+                                                <div style={{ fontSize:12, color:'#1e3a5f' }}>プラン: <strong>{matched.squareMember.planName || '-'}</strong></div>
+                                                <div style={{ fontSize:12, color:'#1e3a5f' }}>ステータス: {matched.squareMember.status || '-'}</div>
+                                                <div style={{ fontSize:12, color:'#1e3a5f' }}>月額: ¥{(matched.squareMember.monthlyPrice || 0).toLocaleString()}</div>
+                                            </div>
+                                        )}
+                                        {matched.manualMember && (
+                                            <div style={{ padding:14, background:'#f5f3ff', borderRadius:12, border:'1px solid #ddd6fe' }}>
+                                                <div style={{ fontSize:12, fontWeight:700, color:'#5b21b6', marginBottom:8 }}>手動会員</div>
+                                                <div style={{ fontSize:12, color:'#4c1d95' }}>プラン: <strong>{matched.manualMember.planName || '-'}</strong></div>
+                                                <div style={{ fontSize:12, color:'#4c1d95' }}>月額: ¥{(matched.manualMember.monthlyPrice || 0).toLocaleString()}</div>
+                                            </div>
+                                        )}
+                                    </div>
+                                )
+                            )}
+                            {tab === 'payments' && (() => {
+                                const payments = [
+                                    ...((matched.squareMember?.payments) || []).map(p => ({ ...p, source: 'Square' })),
+                                    ...((matched.manualMember?.payments) || []).map(p => ({ ...p, source: '手動' })),
+                                ].sort((a, b) => new Date(b.date || b.paidAt) - new Date(a.date || a.paidAt));
+                                if (payments.length === 0) return <EmptyState icon="credit-card" title="決済履歴がありません" compact />;
+                                return (
+                                    <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+                                        {payments.map((p, i) => (
+                                            <div key={i} style={{ display:'flex', alignItems:'center', gap:10, padding:'10px 12px', borderRadius:10, background:'#f8fafc', border:'1px solid #f1f5f9' }}>
+                                                <div style={{ width:32, height:32, borderRadius:10, background:'#dcfce7', color:'#16a34a', display:'flex', alignItems:'center', justifyContent:'center' }}>
+                                                    <Icon name="wallet" size={14} />
+                                                </div>
+                                                <div style={{ flex:1 }}>
+                                                    <div style={{ fontSize:13, fontWeight:700, color:'#1e293b' }}>¥{(p.amount||0).toLocaleString()}</div>
+                                                    <div style={{ fontSize:11, color:'#94a3b8' }}>{p.source} / {p.method || '—'}</div>
+                                                </div>
+                                                <div style={{ fontSize:11, color:'#64748b' }}>{(p.date || p.paidAt || '').slice(0, 10)}</div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                );
+                            })()}
+                            {tab === 'line' && (
+                                !matched.lineThread ? (
+                                    <EmptyState icon="message-circle" title="LINE連携が見つかりません" message="同じ名前のLINEユーザーがいない可能性があります" compact />
+                                ) : (
+                                    <div>
+                                        <div style={{ padding:14, background:'#f0fdf4', borderRadius:12, border:'1px solid #bbf7d0', marginBottom:12 }}>
+                                            <div style={{ fontSize:12, fontWeight:700, color:'#166534' }}>LINE表示名: {matched.lineProfile?.displayName}</div>
+                                            {matched.lineProfile?.statusMessage && <div style={{ fontSize:11, color:'#15803d', marginTop:4 }}>"{matched.lineProfile.statusMessage}"</div>}
+                                        </div>
+                                        <div style={{ fontSize:11, fontWeight:700, color:'#94a3b8', marginBottom:8, letterSpacing:'.1em' }}>最近のメッセージ</div>
+                                        {matched.lineMessages.length === 0 ? (
+                                            <EmptyState icon="inbox" title="メッセージがありません" compact />
+                                        ) : (
+                                            <div style={{ display:'flex', flexDirection:'column', gap:4, maxHeight:320, overflowY:'auto' }}>
+                                                {matched.lineMessages.slice(-20).reverse().map((m, i) => {
+                                                    const isSent = m.direction === 'sent';
+                                                    return (
+                                                        <div key={i} style={{ display:'flex', justifyContent: isSent ? 'flex-end' : 'flex-start' }}>
+                                                            <div style={{ maxWidth:'80%', padding:'8px 12px', borderRadius:12, fontSize:12, lineHeight:1.5, background: isSent ? '#33a065' : '#f1f5f9', color: isSent ? '#fff' : '#1e293b' }}>
+                                                                {m.message_text || m.messageText || '(添付)'}
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        )}
+                                    </div>
+                                )
+                            )}
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // クイック検索モーダル
+        const QuickSearchModal = ({ onClose, memberData, manualMembersHook, counselingHook, navItems, onNavigate, onSelectMember }) => {
+            const [q, setQ] = useState('');
+            const debouncedQ = useDebounce(q, 150);
+            const inputRef = useRef(null);
+            useEffect(() => { setTimeout(() => inputRef.current?.focus(), 50); }, []);
+
+            const results = useMemo(() => {
+                const r = { navs: [], members: [], customers: [] };
+                if (!debouncedQ.trim()) {
+                    r.navs = navItems.slice(0, 6);
+                    return r;
+                }
+                const qq = debouncedQ.toLowerCase();
+                r.navs = navItems.filter(n => n.label.toLowerCase().includes(qq)).slice(0, 5);
+                const sqMembers = (memberData?.members || []).filter(m => m.name && m.name.toLowerCase().includes(qq)).slice(0, 6);
+                const manualM = (manualMembersHook?.manualMembers || []).filter(m => m.name && m.name.toLowerCase().includes(qq)).slice(0, 4);
+                r.members = [...sqMembers, ...manualM].slice(0, 8);
+                r.customers = (counselingHook?.customers || []).filter(c => c.name && c.name.toLowerCase().includes(qq)).slice(0, 5);
+                return r;
+            }, [debouncedQ, memberData, manualMembersHook, counselingHook, navItems]);
+
+            const hasAny = results.navs.length > 0 || results.members.length > 0 || results.customers.length > 0;
+
+            return (
+                <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.5)', backdropFilter:'blur(8px)', zIndex:9999, display:'flex', alignItems:'flex-start', justifyContent:'center', paddingTop:'10vh', animation:'fadeIn .15s ease' }}
+                     onClick={onClose}>
+                    <div onClick={e => e.stopPropagation()} style={{ width:'100%', maxWidth:560, margin:'0 16px', background:'#fff', borderRadius:20, boxShadow:'0 24px 48px rgba(0,0,0,.18)', overflow:'hidden', animation:'scaleIn .2s ease' }}>
+                        <div style={{ padding:'14px 16px', borderBottom:'1px solid #f1f5f9', display:'flex', alignItems:'center', gap:10 }}>
+                            <Icon name="search" size={18} className="text-slate-400" />
+                            <input ref={inputRef} value={q} onChange={e => setQ(e.target.value)}
+                                placeholder="お客様名・メニュー・画面名で検索..."
+                                style={{ flex:1, border:'none', outline:'none', fontSize:15, background:'transparent' }} />
+                            <kbd style={{ fontSize:10, padding:'3px 7px', borderRadius:6, background:'#f1f5f9', color:'#64748b', fontWeight:700 }}>ESC</kbd>
+                        </div>
+                        <div style={{ maxHeight:420, overflowY:'auto', padding:'8px 8px 12px' }}>
+                            {results.navs.length > 0 && (
+                                <div style={{ marginBottom:6 }}>
+                                    <div style={{ fontSize:10, fontWeight:700, color:'#94a3b8', padding:'8px 10px 4px', letterSpacing:'.1em' }}>画面</div>
+                                    {results.navs.map(n => (
+                                        <button key={n.id} onClick={() => onNavigate(n.id)}
+                                            style={{ width:'100%', display:'flex', alignItems:'center', gap:10, padding:'10px 12px', borderRadius:10, border:'none', background:'transparent', cursor:'pointer', textAlign:'left' }}
+                                            onMouseEnter={e => e.currentTarget.style.background = '#f1f5f9'}
+                                            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                                            <div style={{ width:28, height:28, borderRadius:8, background:'#f0f9f4', color:'#166534', display:'flex', alignItems:'center', justifyContent:'center' }}>
+                                                <Icon name={n.icon} size={14} />
+                                            </div>
+                                            <span style={{ fontSize:14, fontWeight:600, color:'#1e293b', flex:1 }}>{n.label}</span>
+                                            <Icon name="chevron-right" size={14} className="text-slate-300" />
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+                            {results.members.length > 0 && (
+                                <div style={{ marginBottom:6 }}>
+                                    <div style={{ fontSize:10, fontWeight:700, color:'#94a3b8', padding:'8px 10px 4px', letterSpacing:'.1em' }}>会員</div>
+                                    {results.members.map((m, i) => (
+                                        <button key={(m.id||m.customerId||i)+'_'+i} onClick={() => onSelectMember(m)}
+                                            style={{ width:'100%', display:'flex', alignItems:'center', gap:10, padding:'10px 12px', borderRadius:10, border:'none', background:'transparent', cursor:'pointer', textAlign:'left' }}
+                                            onMouseEnter={e => e.currentTarget.style.background = '#f1f5f9'}
+                                            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                                            <div style={{ width:28, height:28, borderRadius:8, background:'linear-gradient(135deg,#33a065,#2d8f5a)', color:'#fff', display:'flex', alignItems:'center', justifyContent:'center', fontSize:12, fontWeight:700 }}>
+                                                {getInitial(m.name)}
+                                            </div>
+                                            <div style={{ flex:1, minWidth:0 }}>
+                                                <div style={{ fontSize:14, fontWeight:600, color:'#1e293b' }}>{m.name}</div>
+                                                <div style={{ fontSize:11, color:'#94a3b8' }}>{m.planName || m.phone || '会員'}</div>
+                                            </div>
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+                            {results.customers.length > 0 && (
+                                <div style={{ marginBottom:6 }}>
+                                    <div style={{ fontSize:10, fontWeight:700, color:'#94a3b8', padding:'8px 10px 4px', letterSpacing:'.1em' }}>カウンセリング</div>
+                                    {results.customers.map((c, i) => (
+                                        <button key={c.index+'_'+i} onClick={() => onNavigate('counseling')}
+                                            style={{ width:'100%', display:'flex', alignItems:'center', gap:10, padding:'10px 12px', borderRadius:10, border:'none', background:'transparent', cursor:'pointer', textAlign:'left' }}
+                                            onMouseEnter={e => e.currentTarget.style.background = '#f1f5f9'}
+                                            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                                            <div style={{ width:28, height:28, borderRadius:8, background:'linear-gradient(135deg,#fbbf24,#f59e0b)', color:'#fff', display:'flex', alignItems:'center', justifyContent:'center', fontSize:12, fontWeight:700 }}>
+                                                {getInitial(c.name)}
+                                            </div>
+                                            <div style={{ flex:1 }}>
+                                                <div style={{ fontSize:14, fontWeight:600, color:'#1e293b' }}>{c.name}</div>
+                                                <div style={{ fontSize:11, color:'#94a3b8' }}>{c.timestamp ? new Date(c.timestamp).toLocaleDateString('ja-JP') : ''}</div>
+                                            </div>
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+                            {!hasAny && (
+                                <EmptyState icon="search" title="該当する結果がありません" compact />
+                            )}
+                        </div>
+                        <div style={{ padding:'10px 16px', borderTop:'1px solid #f1f5f9', display:'flex', alignItems:'center', justifyContent:'space-between', fontSize:11, color:'#94a3b8' }}>
+                            <span>画面・会員・カウンセリングを横断検索</span>
+                            <span><kbd style={{ padding:'2px 6px', borderRadius:4, background:'#f1f5f9', color:'#64748b', fontWeight:700 }}>Ctrl</kbd>+<kbd style={{ padding:'2px 6px', borderRadius:4, background:'#f1f5f9', color:'#64748b', fontWeight:700 }}>K</kbd></span>
+                        </div>
+                    </div>
                 </div>
             );
         };
