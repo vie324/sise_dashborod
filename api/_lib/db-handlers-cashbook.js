@@ -69,8 +69,27 @@ export async function cashbookPost(body) {
     case 'getDailyCloses': return cbGetDailyCloses(body.store || '');
     case 'getLogs':       return cbGetLogs(body.store || '', body.limit || 100);
     case 'saveCashbook':  return cbSaveAll(body.entries || [], body.operator || '');
+    case 'saveDailyCloses': return cbSaveDailyCloses(body.dailyCloses || []);
     default: return { error: '不明なaction: ' + action };
   }
+}
+
+async function cbSaveDailyCloses(closes) {
+  const rows = closes.map(c => ({
+    date: c.date, store_id: c.storeId,
+    safe_balance: c.safeBalance || 0,
+    petty_balance: c.pettyCashBalance || 0,
+    register_balance: c.registerBalance || 0,
+    closed_by: c.closedBy || '',
+    closed_at: c.closedAt || new Date().toISOString(),
+    notes: c.notes || '',
+    locked: c.locked !== undefined ? !!c.locked : true
+  }));
+  if (rows.length > 0) {
+    const { error } = await supabase.from('daily_close').upsert(rows, { onConflict: 'date,store_id' });
+    if (error) throw error;
+  }
+  return { success: true, count: rows.length };
 }
 
 async function cbAddEntry(entry, operator) {

@@ -40,6 +40,30 @@ export async function lineMessagesGet(params) {
 }
 
 export async function lineMessagesPost(body) {
+  // 移行用: direction を保持した一括保存
+  if (body.action === 'saveAll') {
+    const messages = body.messages || [];
+    const rows = messages.map(m => ({
+      store_id: m.storeId || '',
+      user_id: m.userId || '',
+      direction: m.direction || 'received',
+      message_type: m.messageType || 'text',
+      message_text: m.messageText || '',
+      message_id: m.messageId || '',
+      timestamp: m.timestamp || new Date().toISOString()
+    }));
+    if (body.replace) {
+      let del = supabase.from('line_messages').delete();
+      del = body.storeId ? del.eq('store_id', body.storeId) : del.neq('id', 0);
+      await del;
+    }
+    if (rows.length > 0) {
+      const { error } = await supabase.from('line_messages').insert(rows);
+      if (error) throw error;
+    }
+    return { success: true, count: rows.length };
+  }
+
   // Webhook形式 (events配列)
   if (body.events) {
     const rows = (body.events || []).map(ev => ({
@@ -126,6 +150,28 @@ export async function lineBroadcastsGet(params) {
 }
 
 export async function lineBroadcastsPost(body) {
+  if (body.action === 'saveAll') {
+    const broadcasts = body.broadcasts || [];
+    const rows = broadcasts.map(b => ({
+      store_id: b.storeId || '',
+      broadcast_type: b.broadcastType || '',
+      message_content: b.messageContent || '',
+      recipient_count: b.recipientCount || 0,
+      status: b.status || '',
+      timestamp: b.timestamp || new Date().toISOString()
+    }));
+    if (body.replace) {
+      let del = supabase.from('line_broadcasts').delete();
+      del = body.storeId ? del.eq('store_id', body.storeId) : del.neq('id', 0);
+      await del;
+    }
+    if (rows.length > 0) {
+      const { error } = await supabase.from('line_broadcasts').insert(rows);
+      if (error) throw error;
+    }
+    return { success: true, count: rows.length };
+  }
+
   const { error } = await supabase.from('line_broadcasts').insert({
     store_id: body.storeId || '',
     broadcast_type: body.broadcastType || 'broadcast',
@@ -160,6 +206,28 @@ export async function lineTemplatesGet(params) {
 export async function lineTemplatesPost(body) {
   const action = body.action || 'create';
   switch (action) {
+    case 'saveAll': {
+      const templates = body.templates || [];
+      const rows = templates.map(t => ({
+        template_id: t.templateId || ('tmpl_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6)),
+        store_id: t.storeId || '',
+        name: t.name || '',
+        category: t.category || '',
+        message_type: t.messageType || 'text',
+        message_content: t.messageContent || '',
+        created_at: t.createdAt || new Date().toISOString()
+      }));
+      if (body.replace) {
+        let del = supabase.from('line_templates').delete();
+        del = body.storeId ? del.eq('store_id', body.storeId) : del.neq('template_id', '');
+        await del;
+      }
+      if (rows.length > 0) {
+        const { error } = await supabase.from('line_templates').upsert(rows, { onConflict: 'template_id' });
+        if (error) throw error;
+      }
+      return { success: true, count: rows.length };
+    }
     case 'create': {
       const templateId = 'tmpl_' + Date.now();
       const { error } = await supabase.from('line_templates').insert({
@@ -214,6 +282,30 @@ export async function lineAutoRepliesGet(params) {
 export async function lineAutoRepliesPost(body) {
   const action = body.action || 'create';
   switch (action) {
+    case 'saveAll': {
+      const rules = body.rules || [];
+      const rows = rules.map(r => ({
+        rule_id: r.ruleId || ('rule_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6)),
+        store_id: r.storeId || '',
+        keyword: r.keyword || '',
+        match_method: r.matchMethod || 'contains',
+        reply_type: r.replyType || 'text',
+        reply_content: r.replyContent || '',
+        priority: r.priority || 0,
+        enabled: r.enabled !== false,
+        created_at: r.createdAt || new Date().toISOString()
+      }));
+      if (body.replace) {
+        let del = supabase.from('line_auto_replies').delete();
+        del = body.storeId ? del.eq('store_id', body.storeId) : del.neq('rule_id', '');
+        await del;
+      }
+      if (rows.length > 0) {
+        const { error } = await supabase.from('line_auto_replies').upsert(rows, { onConflict: 'rule_id' });
+        if (error) throw error;
+      }
+      return { success: true, count: rows.length };
+    }
     case 'create': {
       const ruleId = 'rule_' + Date.now();
       const { error } = await supabase.from('line_auto_replies').insert({
@@ -268,6 +360,26 @@ export async function lineTagsGet(params) {
 export async function lineTagsPost(body) {
   const action = body.action || 'create';
   switch (action) {
+    case 'saveAll': {
+      const tags = body.tags || [];
+      const rows = tags.map(t => ({
+        tag_id: t.tagId || ('tag_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6)),
+        store_id: t.storeId || '',
+        name: t.name || '',
+        color: t.color || '#06C755',
+        created_at: t.createdAt || new Date().toISOString()
+      }));
+      if (body.replace) {
+        let del = supabase.from('line_tags').delete();
+        del = body.storeId ? del.eq('store_id', body.storeId) : del.neq('tag_id', '');
+        await del;
+      }
+      if (rows.length > 0) {
+        const { error } = await supabase.from('line_tags').upsert(rows, { onConflict: 'tag_id' });
+        if (error) throw error;
+      }
+      return { success: true, count: rows.length };
+    }
     case 'create': {
       const tagId = 'tag_' + Date.now();
       const { error } = await supabase.from('line_tags').insert({
@@ -394,6 +506,25 @@ export async function lineAnalyticsGet(params) {
 export async function lineUserTagsPost(body) {
   const action = body.action || 'add';
   switch (action) {
+    case 'saveAll': {
+      const userTags = body.userTags || [];
+      const rows = userTags.map(ut => ({
+        store_id: ut.storeId || '',
+        user_id: ut.userId || '',
+        tag_id: ut.tagId || '',
+        assigned_at: ut.assignedAt || new Date().toISOString()
+      }));
+      if (body.replace) {
+        let del = supabase.from('line_user_tags').delete();
+        del = body.storeId ? del.eq('store_id', body.storeId) : del.neq('tag_id', '');
+        await del;
+      }
+      if (rows.length > 0) {
+        const { error } = await supabase.from('line_user_tags').upsert(rows, { onConflict: 'store_id,user_id,tag_id' });
+        if (error) throw error;
+      }
+      return { success: true, count: rows.length };
+    }
     case 'add': {
       const { error } = await supabase.from('line_user_tags').upsert({
         store_id: body.storeId || '', user_id: body.userId || '',

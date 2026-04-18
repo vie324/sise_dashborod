@@ -270,6 +270,32 @@ async function reportsPost(body) {
       if (error) throw error;
       return { success: true, id: body.id };
     }
+    case 'saveAll': {
+      const reports = body.reports || [];
+      const rows = reports.map(r => ({
+        timestamp: r.timestamp || new Date().toISOString(),
+        store: r.store || '',
+        hpb_new: parseInt(r.hpbNew) || 0,
+        meta_new: parseInt(r.metaNew) || 0,
+        referral_new: parseInt(r.referralNew) || 0,
+        discount_new: parseInt(r.discountNew) || 0,
+        hpb_contract: parseInt(r.hpbContract) || 0,
+        meta_contract: parseInt(r.metaContract) || 0,
+        referral_contract: parseInt(r.referralContract) || 0,
+        discount_contract: parseInt(r.discountContract) || 0,
+        existing_treatments: parseInt(r.existingTreatments) || 0,
+        task_complete: !!r.taskComplete,
+        prep_complete: !!r.prepComplete
+      }));
+      if (body.replace) {
+        await supabase.from('daily_reports').delete().neq('id', 0);
+      }
+      if (rows.length > 0) {
+        const { error } = await supabase.from('daily_reports').insert(rows);
+        if (error) throw error;
+      }
+      return { success: true, count: rows.length };
+    }
     default: return { error: '不明なaction: ' + action };
   }
 }
