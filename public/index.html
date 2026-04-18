@@ -8904,13 +8904,22 @@
                 return filtered;
             }, [rawEntries, filterStore]);
 
-            // 新規エントリーに店舗IDを自動付与
+            // 新規エントリーに店舗IDを自動付与（有効な店舗IDのみ許可）
             const addEntry = useCallback((entry) => {
-                return rawAddEntry({
-                    ...entry,
-                    store: entry.store || activeStoreId || (currentAccess && currentAccess.storeIds.length === 1 ? currentAccess.storeIds[0] : 'all')
-                });
-            }, [rawAddEntry, activeStoreId]);
+                const validStoreIds = new Set(activeStores.map(s => s.id));
+                let storeId = entry.store;
+                if (!storeId || !validStoreIds.has(storeId)) {
+                    if (activeStoreId && activeStoreId !== 'all' && validStoreIds.has(activeStoreId)) {
+                        storeId = activeStoreId;
+                    } else if (currentAccess && currentAccess.storeIds.length === 1) {
+                        storeId = currentAccess.storeIds[0];
+                    } else {
+                        showToast('店舗を選択してください', 'error');
+                        return null;
+                    }
+                }
+                return rawAddEntry({ ...entry, store: storeId });
+            }, [rawAddEntry, activeStoreId, activeStores]);
 
             const [showForm, setShowForm] = useState(false);
             const [selectedDate, setSelectedDate] = useState(new Date().toISOString().slice(0, 10));
@@ -9061,6 +9070,13 @@
             };
 
             const resetForm = () => {
+                // 店舗の初期値: filterStore > activeStoreId(具体的) > 単一店舗権限 > 空
+                let defaultStore = '';
+                const validIds = new Set(activeStores.map(s => s.id));
+                if (filterStore !== 'all' && validIds.has(filterStore)) defaultStore = filterStore;
+                else if (activeStoreId && activeStoreId !== 'all' && validIds.has(activeStoreId)) defaultStore = activeStoreId;
+                else if (currentAccess && currentAccess.storeIds.length === 1) defaultStore = currentAccess.storeIds[0];
+
                 setFormData({
                     date: selectedDate,
                     type: 'income',
@@ -9071,7 +9087,7 @@
                     treatmentCount: '1',
                     paymentMethod: 'CASH',
                     cashType: 'register',
-                    store: filterStore !== 'all' ? filterStore : (activeStoreId || ''),
+                    store: defaultStore,
                     recorder: currentAccess ? currentAccess.name : '',
                     notes: '',
                     selectedMenuId: '',
@@ -9082,7 +9098,10 @@
 
             const handleSubmit = () => {
                 if (!formData.amount || parseInt(formData.amount) <= 0) return;
-                if (currentAccess && formData.store && !currentAccess.storeIds.includes(formData.store)) {
+                if (!formData.store) {
+                    showToast('店舗を選択してください', 'error'); return;
+                }
+                if (currentAccess && !currentAccess.storeIds.includes(formData.store)) {
                     showToast('この店舗への入力権限がありません', 'error'); return;
                 }
                 const finalAmount = formData.type === 'income' ? effectiveAmount : parseInt(formData.amount);
