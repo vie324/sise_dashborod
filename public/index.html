@@ -1324,24 +1324,10 @@
         // 店舗マスタ（サーバーから動的に取得）
         let serverStores = [];
 
-        // 統合 Google Apps Script URL（全機能で共有・1つのスプレッドシートで管理）
+        // Google Apps Script URL（カウンセリング機能専用・Googleフォーム回答シート連携）
+        // その他の機能は全て Supabase (/api/db) に移行済み
         const DEFAULT_GAS_URL = 'https://script.google.com/macros/s/AKfycbzEVvDqMrYC8QkWgHisvP_LXbjWigCfpqB2eHOzCBoFaf1B_5ANnEU48LGaZ83VMnY1TA/exec';
         let UNIFIED_GAS_URL = localStorage.getItem('sise_unified_gas_url') || DEFAULT_GAS_URL;
-
-        // GASリクエストのラッパー: 「不明なtype」エラー時にデフォルトURLへフォールバック
-        const fetchGAS = async (queryString) => {
-            const res = await fetch(UNIFIED_GAS_URL + queryString);
-            const data = await res.json();
-            // 古いGASデプロイの場合、デフォルトURLでリトライ
-            if (data.error && typeof data.error === 'string' && data.error.includes('不明なtype') && UNIFIED_GAS_URL !== DEFAULT_GAS_URL) {
-                console.warn('[GAS] 古いデプロイを検出。デフォルトURLにフォールバック:', DEFAULT_GAS_URL.substring(0, 60) + '...');
-                UNIFIED_GAS_URL = DEFAULT_GAS_URL;
-                localStorage.setItem('sise_unified_gas_url', DEFAULT_GAS_URL);
-                const retryRes = await fetch(DEFAULT_GAS_URL + queryString);
-                return retryRes.json();
-            }
-            return data;
-        };
 
         // API設定（サーバーサイドプロキシ経由）
         // APIキーはVercel環境変数で管理、フロントエンドには露出しない
@@ -2480,28 +2466,11 @@
             });
 
             const fetchReportData = useCallback(async () => {
-                // APIが設定されていない場合は空データ
-                if (!UNIFIED_GAS_URL || UNIFIED_GAS_URL === 'YOUR_UNIFIED_GAS_URL') {
-                    setReportData({
-                        reports: [],
-                        loading: false,
-                        error: '統合GAS URLが設定されていません。設定画面からURLを入力してください。',
-                        lastUpdated: null
-                    });
-                    return;
-                }
-
                 try {
                     // 当月+先月のデータを取得（月間トレンド比較用）
-                    const response = await fetch(UNIFIED_GAS_URL + '?type=report&months=2');
-                    if (!response.ok) {
-                        throw new Error('日報データの取得に失敗しました (HTTP ' + response.status + ')');
-                    }
-                    const data = await response.json();
-
-                    if (data.error) {
-                        throw new Error(data.error);
-                    }
+                    const data = await dbGet('reports', { months: '2' });
+                    if (!data) throw new Error('日報データの取得に失敗しました');
+                    if (data.error) throw new Error(data.error);
 
                     setReportData({
                         reports: data.reports || [],
@@ -2691,8 +2660,6 @@
             return `${d.getMonth() + 1}/${d.getDate()}`;
         };
 
-        const MEMBER_USAGE_GAS_URL = UNIFIED_GAS_URL;
-
         // プラン別の月間利用上限設定
         const PLAN_LIMITS_STORAGE_KEY = 'sise_usage_plan_limits';
         const CARRYOVER_STORAGE_KEY = 'sise_usage_carryover';
@@ -2762,32 +2729,24 @@
                 return planLimits[planName] || 0;
             }, [planLimits]);
 
-            // GASからデータを取得する関数
-            const fetchFromGAS = useCallback(() => {
-                if (MEMBER_USAGE_GAS_URL !== 'YOUR_UNIFIED_GAS_URL') {
-                    return fetch(MEMBER_USAGE_GAS_URL + '?type=usage&month=' + currentMonth)
-                        .then(r => r.json())
-                        .then(data => {
-                            if (data && data.usage) {
-                                setUsageData(prev => {
-                                    const merged = { ...prev, ...data.usage };
-                                    // ローカルにも反映
-                                    try {
-                                        const all = JSON.parse(localStorage.getItem('sise_member_usage') || '{}');
-                                        all[currentMonth] = merged;
-                                        localStorage.setItem('sise_member_usage', JSON.stringify(all));
-                                    } catch (e) {}
-                                    return merged;
-                                });
-                                setLastSynced(new Date());
-                            }
-                        })
-                        .catch(() => {});
+            // Supabaseからデータを取得する関数
+            const fetchFromGAS = useCallback(async () => {
+                const data = await dbGet('usage', { month: currentMonth });
+                if (data && data.usage) {
+                    setUsageData(prev => {
+                        const merged = { ...prev, ...data.usage };
+                        try {
+                            const all = JSON.parse(localStorage.getItem('sise_member_usage') || '{}');
+                            all[currentMonth] = merged;
+                            localStorage.setItem('sise_member_usage', JSON.stringify(all));
+                        } catch (e) {}
+                        return merged;
+                    });
+                    setLastSynced(new Date());
                 }
-                return Promise.resolve();
             }, [currentMonth]);
 
-            // ローカルストレージからロード + GAS初回読み込み
+            // ローカルストレージからロード + 初回読み込み
             useEffect(() => {
                 try {
                     const stored = JSON.parse(localStorage.getItem('sise_member_usage') || '{}');
@@ -2797,16 +2756,15 @@
                 fetchFromGAS();
             }, [currentMonth, fetchFromGAS]);
 
-            // 定期同期（60秒ごとにGASからデータ取得）
+            // 定期同期（60秒ごとにデータ取得）
             useEffect(() => {
-                if (MEMBER_USAGE_GAS_URL === 'YOUR_UNIFIED_GAS_URL') return;
                 const interval = setInterval(() => {
                     fetchFromGAS();
                 }, 60000);
                 return () => clearInterval(interval);
             }, [fetchFromGAS]);
 
-            // 利用回数を更新（期間キーに対応）+ GASへ即時同期
+            // 利用回数を更新（期間キーに対応）+ 即時同期
             const updateUsage = useCallback((memberId, count, periodKey) => {
                 const key = periodKey ? `${memberId}__${periodKey}` : memberId;
                 setUsageData(prev => {
@@ -2816,22 +2774,14 @@
                         all[currentMonth] = updated;
                         localStorage.setItem('sise_member_usage', JSON.stringify(all));
                     } catch (e) {}
-                    // GASへ即時同期（バックグラウンド）
-                    if (MEMBER_USAGE_GAS_URL !== 'YOUR_UNIFIED_GAS_URL') {
-                        fetch(MEMBER_USAGE_GAS_URL, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'text/plain' },
-                            body: JSON.stringify({
-                                type: 'usage', action: 'saveUsage',
-                                data: [{ memberId, month: currentMonth, periodKey: periodKey || '', count: Math.max(0, count), updatedAt: new Date().toISOString() }]
-                            })
-                        }).catch(() => {});
-                    }
+                    dbPost('usage', {
+                        data: [{ memberId, month: currentMonth, periodKey: periodKey || '', count: Math.max(0, count), updatedAt: new Date().toISOString() }]
+                    });
                     return updated;
                 });
             }, [currentMonth]);
 
-            // Google Sheetsに保存
+            // Supabaseに保存
             const saveToSheet = useCallback(async (members) => {
                 setSaving(true);
                 try {
@@ -2839,28 +2789,22 @@
                     all[currentMonth] = usageData;
                     localStorage.setItem('sise_member_usage', JSON.stringify(all));
 
-                    if (MEMBER_USAGE_GAS_URL !== 'YOUR_UNIFIED_GAS_URL') {
-                        const payload = Object.entries(usageData).map(([rawKey, count]) => {
-                            const memberId = rawKey.includes('__') ? rawKey.split('__')[0] : rawKey;
-                            const periodKey = rawKey.includes('__') ? rawKey.split('__')[1] : '';
-                            const member = members.find(m => m.id === memberId);
-                            return {
-                                memberId,
-                                memberName: member?.name || '不明',
-                                storeName: member?.storeName || '',
-                                planName: member?.planName || '',
-                                month: currentMonth,
-                                periodKey,
-                                count,
-                                updatedAt: new Date().toISOString()
-                            };
-                        });
-                        await fetch(MEMBER_USAGE_GAS_URL, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'text/plain' },
-                            body: JSON.stringify({ type: 'usage', action: 'saveUsage', data: payload })
-                        });
-                    }
+                    const payload = Object.entries(usageData).map(([rawKey, count]) => {
+                        const memberId = rawKey.includes('__') ? rawKey.split('__')[0] : rawKey;
+                        const periodKey = rawKey.includes('__') ? rawKey.split('__')[1] : '';
+                        const member = members.find(m => m.id === memberId);
+                        return {
+                            memberId,
+                            memberName: member?.name || '不明',
+                            storeName: member?.storeName || '',
+                            planName: member?.planName || '',
+                            month: currentMonth,
+                            periodKey,
+                            count,
+                            updatedAt: new Date().toISOString()
+                        };
+                    });
+                    await dbPost('usage', { data: payload });
                     setLastSaved(new Date());
                     showToast('利用回数を保存しました', 'success', 2000);
                 } catch (e) {
@@ -2892,7 +2836,6 @@
         // 回数券管理（Google Sheets連携）
         // ========================================
 
-        const TICKET_GAS_URL = UNIFIED_GAS_URL;
         const TICKET_STORAGE_KEY = 'sise_ticket_data';
 
         const useTicketManagement = () => {
@@ -2904,32 +2847,21 @@
             const [lastSaved, setLastSaved] = useState(null);
             const [lastSynced, setLastSynced] = useState(null);
 
-            // GASからデータを取得する関数
-            const fetchTicketsFromGAS = useCallback(() => {
-                if (TICKET_GAS_URL !== 'YOUR_UNIFIED_GAS_URL') {
-                    return fetch(TICKET_GAS_URL + '?type=ticket')
-                        .then(r => r.json())
-                        .then(data => {
-                            if (data && data.plans) {
-                                setTicketPlans(data.plans);
-                            }
-                            if (data && data.tickets) {
-                                setCustomerTickets(data.tickets);
-                            }
-                            if (data && (data.plans || data.tickets)) {
-                                // ローカルにも反映
-                                try {
-                                    localStorage.setItem(TICKET_STORAGE_KEY, JSON.stringify({
-                                        plans: data.plans || [],
-                                        tickets: data.tickets || []
-                                    }));
-                                } catch (e) {}
-                                setLastSynced(new Date());
-                            }
-                        })
-                        .catch(() => {});
+            // Supabaseからデータを取得する関数
+            const fetchTicketsFromGAS = useCallback(async () => {
+                const data = await dbGet('ticket');
+                if (!data) return;
+                if (data.plans) setTicketPlans(data.plans);
+                if (data.tickets) setCustomerTickets(data.tickets);
+                if (data.plans || data.tickets) {
+                    try {
+                        localStorage.setItem(TICKET_STORAGE_KEY, JSON.stringify({
+                            plans: data.plans || [],
+                            tickets: data.tickets || []
+                        }));
+                    } catch (e) {}
+                    setLastSynced(new Date());
                 }
-                return Promise.resolve();
             }, []);
 
             // ローカルストレージから読み込み + GAS初回読み込み
@@ -2947,9 +2879,8 @@
                 fetchTicketsFromGAS();
             }, [fetchTicketsFromGAS]);
 
-            // 定期同期（60秒ごとにGASからデータ取得）
+            // 定期同期（60秒ごとにデータ取得）
             useEffect(() => {
-                if (TICKET_GAS_URL === 'YOUR_UNIFIED_GAS_URL') return;
                 const interval = setInterval(() => {
                     fetchTicketsFromGAS();
                 }, 60000);
@@ -3071,18 +3002,12 @@
                 });
             }, [ticketPlans, saveLocal]);
 
-            // Google Sheets に保存
+            // Supabaseに保存
             const saveToSheet = useCallback(async () => {
                 setSaving(true);
                 try {
                     saveLocal(ticketPlans, customerTickets);
-                    if (TICKET_GAS_URL !== 'YOUR_UNIFIED_GAS_URL') {
-                        await fetch(TICKET_GAS_URL, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'text/plain' },
-                            body: JSON.stringify({ type: 'ticket', action: 'saveTickets', plans: ticketPlans, tickets: customerTickets })
-                        });
-                    }
+                    await dbPost('ticket', { plans: ticketPlans, tickets: customerTickets });
                     setLastSaved(new Date());
                     showToast('回数券データを保存しました', 'success', 2000);
                 } catch (e) {
@@ -3131,28 +3056,20 @@
         // ========================================
 
         const MANUAL_MEMBERS_STORAGE_KEY = 'sise_manual_members';
-        const MANUAL_MEMBERS_GAS_URL = UNIFIED_GAS_URL;
 
         const useManualMembers = () => {
             const [manualMembers, setManualMembers] = useState([]);
             const [saving, setSaving] = useState(false);
             const [lastSynced, setLastSynced] = useState(null);
 
-            // GASから取得
-            const fetchFromGAS = useCallback(() => {
-                if (MANUAL_MEMBERS_GAS_URL !== 'YOUR_UNIFIED_GAS_URL') {
-                    return fetch(MANUAL_MEMBERS_GAS_URL + '?type=members')
-                        .then(r => r.json())
-                        .then(data => {
-                            if (data && data.members) {
-                                setManualMembers(data.members);
-                                try { localStorage.setItem(MANUAL_MEMBERS_STORAGE_KEY, JSON.stringify(data.members)); } catch(e) {}
-                                setLastSynced(new Date());
-                            }
-                        })
-                        .catch(() => {});
+            // Supabaseから取得
+            const fetchFromGAS = useCallback(async () => {
+                const data = await dbGet('members');
+                if (data && data.members) {
+                    setManualMembers(data.members);
+                    try { localStorage.setItem(MANUAL_MEMBERS_STORAGE_KEY, JSON.stringify(data.members)); } catch(e) {}
+                    setLastSynced(new Date());
                 }
-                return Promise.resolve();
             }, []);
 
             // 初回ロード
@@ -3166,7 +3083,6 @@
 
             // 定期同期（60秒ごと）
             useEffect(() => {
-                if (MANUAL_MEMBERS_GAS_URL === 'YOUR_UNIFIED_GAS_URL') return;
                 const interval = setInterval(fetchFromGAS, 60000);
                 return () => clearInterval(interval);
             }, [fetchFromGAS]);
@@ -3175,26 +3091,22 @@
                 try { localStorage.setItem(MANUAL_MEMBERS_STORAGE_KEY, JSON.stringify(members)); } catch (e) {}
             }, []);
 
-            // GASに保存
+            // Supabaseに保存
             const saveToGAS = useCallback(async (members) => {
-                if (MANUAL_MEMBERS_GAS_URL !== 'YOUR_UNIFIED_GAS_URL') {
-                    setSaving(true);
-                    try {
-                        await fetch(MANUAL_MEMBERS_GAS_URL, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'text/plain' },
-                            body: JSON.stringify({ type: 'members', action: 'saveManualMembers', members })
-                        });
+                setSaving(true);
+                try {
+                    const result = await dbPost('members', { members });
+                    if (result && !result.error) {
                         setLastSynced(new Date());
                         return true;
-                    } catch (e) {
-                        console.error('[会員管理] GAS保存エラー:', e);
-                        return false;
-                    } finally {
-                        setSaving(false);
                     }
+                    return false;
+                } catch (e) {
+                    console.error('[会員管理] 保存エラー:', e);
+                    return false;
+                } finally {
+                    setSaving(false);
                 }
-                return false;
             }, []);
 
             // 会員追加（入会）
@@ -3358,7 +3270,7 @@
         };
 
         // ========================================
-        // メニュー管理（出納帳プルダウン用）- GASのみ
+        // メニュー管理（出納帳プルダウン用）
         // ========================================
 
         const useMenuItems = () => {
@@ -3367,11 +3279,9 @@
             const [saving, setSaving] = useState(false);
 
             const fetchMenuItems = useCallback(async () => {
-                if (UNIFIED_GAS_URL === 'YOUR_UNIFIED_GAS_URL') return;
                 setLoading(true);
                 try {
-                    const res = await fetch(UNIFIED_GAS_URL + '?type=menuItems&includeInactive=true');
-                    const data = await res.json();
+                    const data = await dbGet('menuItems', { includeInactive: 'true' });
                     if (data && data.menuItems) {
                         setMenuItems(data.menuItems);
                     }
@@ -3387,17 +3297,14 @@
             const addItem = useCallback(async (item) => {
                 setSaving(true);
                 try {
-                    const res = await fetch(UNIFIED_GAS_URL, {
-                        method: 'POST', headers: { 'Content-Type': 'text/plain' },
-                        body: JSON.stringify({ type: 'menuItems', action: 'addItem', item })
-                    });
-                    const data = await res.json();
-                    if (data.success && data.item) {
-                        setMenuItems(prev => [...prev, data.item]);
+                    const data = await dbPost('menuItems', { action: 'addItem', item });
+                    if (data && data.success && data.itemId) {
+                        const newItem = { ...item, id: data.itemId, active: item.active !== false };
+                        setMenuItems(prev => [...prev, newItem]);
                         showToast('メニューを追加しました', 'success');
-                        return data.item;
+                        return newItem;
                     }
-                    if (data.error) showToast(data.error, 'error');
+                    if (data && data.error) showToast(data.error, 'error');
                 } catch (e) {
                     showToast('メニュー追加に失敗しました', 'error');
                 } finally { setSaving(false); }
@@ -3407,17 +3314,13 @@
             const updateItem = useCallback(async (itemId, updates) => {
                 setSaving(true);
                 try {
-                    const res = await fetch(UNIFIED_GAS_URL, {
-                        method: 'POST', headers: { 'Content-Type': 'text/plain' },
-                        body: JSON.stringify({ type: 'menuItems', action: 'updateItem', itemId, updates })
-                    });
-                    const data = await res.json();
-                    if (data.success) {
+                    const data = await dbPost('menuItems', { action: 'updateItem', itemId, updates });
+                    if (data && data.success) {
                         setMenuItems(prev => prev.map(m => m.id === itemId ? { ...m, ...updates } : m));
                         showToast('メニューを更新しました', 'success');
                         return true;
                     }
-                    if (data.error) showToast(data.error, 'error');
+                    if (data && data.error) showToast(data.error, 'error');
                 } catch (e) {
                     showToast('メニュー更新に失敗しました', 'error');
                 } finally { setSaving(false); }
@@ -3427,12 +3330,8 @@
             const deleteItem = useCallback(async (itemId) => {
                 setSaving(true);
                 try {
-                    const res = await fetch(UNIFIED_GAS_URL, {
-                        method: 'POST', headers: { 'Content-Type': 'text/plain' },
-                        body: JSON.stringify({ type: 'menuItems', action: 'deleteItem', itemId })
-                    });
-                    const data = await res.json();
-                    if (data.success) {
+                    const data = await dbPost('menuItems', { action: 'deleteItem', itemId });
+                    if (data && data.success) {
                         setMenuItems(prev => prev.map(m => m.id === itemId ? { ...m, active: false } : m));
                         showToast('メニューを削除しました', 'success');
                         return true;
@@ -3464,24 +3363,23 @@
             const [lastSynced, setLastSynced] = useState(null);
             const [syncError, setSyncError] = useState(null);
 
-            // スプレッドシートからフェッチ（メイン）、キャッシュはフォールバック
+            // Supabaseからフェッチ（メイン）、キャッシュはフォールバック
             const fetchFromGAS = useCallback(async (showLoading) => {
-                if (UNIFIED_GAS_URL === 'YOUR_UNIFIED_GAS_URL') { setLoading(false); return; }
                 if (showLoading) setLoading(true);
                 setSyncError(null);
                 try {
-                    const res = await fetch(UNIFIED_GAS_URL + '?type=cashbook&includeLogs=true');
-                    const data = await res.json();
+                    const data = await dbGet('cashbook', { includeLogs: 'true' });
                     if (data && data.entries) {
                         setEntries(data.entries);
                         setDailyCloses(data.dailyCloses || []);
                         setAuditLogs(data.logs || []);
                         setLastSynced(new Date());
                         try { localStorage.setItem(CASHBOOK_CACHE_KEY, JSON.stringify({ entries: data.entries, dailyCloses: data.dailyCloses || [], ts: Date.now() })); } catch(e) {}
+                    } else if (!data || data.error) {
+                        setSyncError('Supabaseとの同期に失敗しました');
                     }
                 } catch (e) {
-                    setSyncError('スプレッドシートとの同期に失敗しました');
-                    // オフライン時はキャッシュから
+                    setSyncError('Supabaseとの同期に失敗しました');
                     try {
                         const cached = JSON.parse(localStorage.getItem(CASHBOOK_CACHE_KEY) || '{}');
                         if (cached.entries) { setEntries(cached.entries); setDailyCloses(cached.dailyCloses || []); }
@@ -3493,18 +3391,15 @@
 
             // 初回ロード
             useEffect(() => {
-                // まずキャッシュから即時表示
                 try {
                     const cached = JSON.parse(localStorage.getItem(CASHBOOK_CACHE_KEY) || '{}');
                     if (cached.entries) { setEntries(cached.entries); setDailyCloses(cached.dailyCloses || []); }
                 } catch(e) {}
-                // スプレッドシートから最新取得
                 fetchFromGAS(true);
             }, []);
 
             // 定期同期（60秒ごと）
             useEffect(() => {
-                if (UNIFIED_GAS_URL === 'YOUR_UNIFIED_GAS_URL') return;
                 const interval = setInterval(() => fetchFromGAS(false), 60000);
                 return () => clearInterval(interval);
             }, [fetchFromGAS]);
@@ -3548,18 +3443,11 @@
                 setSaving(true);
 
                 try {
-                    if (UNIFIED_GAS_URL !== 'YOUR_UNIFIED_GAS_URL') {
-                        const res = await fetch(UNIFIED_GAS_URL, {
-                            method: 'POST', headers: { 'Content-Type': 'text/plain' },
-                            body: JSON.stringify({ type: 'cashbook', action: 'addEntry', entry: newEntry, operator: getOperator() })
-                        });
-                        const result = await res.json();
-                        if (result.error) {
-                            // ロールバック
-                            setEntries(prev => prev.filter(e => e.id !== newEntry.id));
-                            showToast(result.error, 'error');
-                            return null;
-                        }
+                    const result = await dbPost('cashbook', { action: 'addEntry', entry: newEntry, operator: getOperator() });
+                    if (result && result.error) {
+                        setEntries(prev => prev.filter(e => e.id !== newEntry.id));
+                        showToast(result.error, 'error');
+                        return null;
                     }
                     // キャッシュ更新
                     try {
@@ -3571,7 +3459,7 @@
                     return newEntry;
                 } catch (e) {
                     showToast('保存に失敗しました（オフライン？）', 'error');
-                    return newEntry; // ローカルには残す
+                    return newEntry;
                 } finally {
                     setSaving(false);
                 }
@@ -3590,22 +3478,16 @@
                 setSaving(true);
 
                 try {
-                    if (UNIFIED_GAS_URL !== 'YOUR_UNIFIED_GAS_URL') {
-                        const res = await fetch(UNIFIED_GAS_URL, {
-                            method: 'POST', headers: { 'Content-Type': 'text/plain' },
-                            body: JSON.stringify({ type: 'cashbook', action: 'updateEntry', entryId, updates, operator: getOperator() })
-                        });
-                        const result = await res.json();
-                        if (result.error) {
-                            setEntries(oldEntries); // ロールバック
-                            showToast(result.error, 'error');
-                            return false;
-                        }
+                    const result = await dbPost('cashbook', { action: 'updateEntry', entryId, updates, operator: getOperator() });
+                    if (result && result.error) {
+                        setEntries(oldEntries);
+                        showToast(result.error, 'error');
+                        return false;
                     }
                     return true;
                 } catch (e) {
                     showToast('更新に失敗しました', 'error');
-                    return true; // ローカルには残す
+                    return true;
                 } finally {
                     setSaving(false);
                 }
@@ -3623,17 +3505,11 @@
                 setSaving(true);
 
                 try {
-                    if (UNIFIED_GAS_URL !== 'YOUR_UNIFIED_GAS_URL') {
-                        const res = await fetch(UNIFIED_GAS_URL, {
-                            method: 'POST', headers: { 'Content-Type': 'text/plain' },
-                            body: JSON.stringify({ type: 'cashbook', action: 'deleteEntry', entryId, operator: getOperator() })
-                        });
-                        const result = await res.json();
-                        if (result.error) {
-                            setEntries(oldEntries);
-                            showToast(result.error, 'error');
-                            return false;
-                        }
+                    const result = await dbPost('cashbook', { action: 'deleteEntry', entryId, operator: getOperator() });
+                    if (result && result.error) {
+                        setEntries(oldEntries);
+                        showToast(result.error, 'error');
+                        return false;
                     }
                     return true;
                 } catch (e) {
@@ -3648,28 +3524,22 @@
             const closeDailyBooks = useCallback(async (date, storeId, balances, notes) => {
                 setSaving(true);
                 try {
-                    if (UNIFIED_GAS_URL !== 'YOUR_UNIFIED_GAS_URL') {
-                        const res = await fetch(UNIFIED_GAS_URL, {
-                            method: 'POST', headers: { 'Content-Type': 'text/plain' },
-                            body: JSON.stringify({
-                                type: 'cashbook', action: 'dailyClose',
-                                date, storeId,
-                                safeBalance: balances.safe || 0,
-                                pettyCashBalance: balances.pettyCash || 0,
-                                registerBalance: balances.register || 0,
-                                closedBy: getOperator(),
-                                notes: notes || ''
-                            })
-                        });
-                        const result = await res.json();
-                        if (result.error) {
-                            showToast(result.error, 'error');
-                            return false;
-                        }
-                        setDailyCloses(prev => [...prev, { date, storeId, safeBalance: balances.safe || 0, pettyCashBalance: balances.pettyCash || 0, registerBalance: balances.register || 0, closedBy: getOperator(), closedAt: new Date().toISOString(), locked: true }]);
-                        showToast(date + ' の日次締めが完了しました', 'success');
-                        return true;
+                    const result = await dbPost('cashbook', {
+                        action: 'dailyClose',
+                        date, storeId,
+                        safeBalance: balances.safe || 0,
+                        pettyCashBalance: balances.pettyCash || 0,
+                        registerBalance: balances.register || 0,
+                        closedBy: getOperator(),
+                        notes: notes || ''
+                    });
+                    if (!result || result.error) {
+                        showToast((result && result.error) || '日次締めに失敗しました', 'error');
+                        return false;
                     }
+                    setDailyCloses(prev => [...prev, { date, storeId, safeBalance: balances.safe || 0, pettyCashBalance: balances.pettyCash || 0, registerBalance: balances.register || 0, closedBy: getOperator(), closedAt: new Date().toISOString(), locked: true }]);
+                    showToast(date + ' の日次締めが完了しました', 'success');
+                    return true;
                 } catch (e) {
                     showToast('日次締めに失敗しました', 'error');
                     return false;
@@ -3698,16 +3568,14 @@
             const [todayRecord, setTodayRecord] = useState(null);
 
             const fetchRecords = useCallback(async (params = {}) => {
-                if (UNIFIED_GAS_URL === 'YOUR_UNIFIED_GAS_URL') return;
                 setLoading(true);
                 try {
-                    let url = UNIFIED_GAS_URL + '?type=attendance';
-                    if (params.store) url += '&store=' + params.store;
-                    if (params.month) url += '&month=' + params.month;
-                    if (params.staffId) url += '&staffId=' + params.staffId;
-                    if (params.date) url += '&date=' + params.date;
-                    const res = await fetch(url);
-                    const data = await res.json();
+                    const q = {};
+                    if (params.store) q.store = params.store;
+                    if (params.month) q.month = params.month;
+                    if (params.staffId) q.staffId = params.staffId;
+                    if (params.date) q.date = params.date;
+                    const data = await dbGet('attendance', q);
                     if (data && data.records) setRecords(data.records);
                 } catch (e) {
                     console.error('[勤怠] 取得エラー:', e);
@@ -3716,11 +3584,10 @@
 
             // 今日の自分の出勤状態を取得
             const checkTodayStatus = useCallback(async (staffId) => {
-                if (!staffId || UNIFIED_GAS_URL === 'YOUR_UNIFIED_GAS_URL') return;
+                if (!staffId) return;
                 try {
                     const today = new Date().toISOString().slice(0, 10);
-                    const res = await fetch(UNIFIED_GAS_URL + '?type=attendance&staffId=' + staffId + '&date=' + today);
-                    const data = await res.json();
+                    const data = await dbGet('attendance', { staffId, date: today });
                     if (data && data.records && data.records.length > 0) {
                         const latest = data.records.find(r => !r.clockOut) || data.records[0];
                         setTodayRecord(latest);
@@ -3733,14 +3600,10 @@
             const clockIn = useCallback(async (staffId, staffName, storeId, lat, lng, method, qrToken) => {
                 setSaving(true);
                 try {
-                    const body = { type: 'attendance', action: 'clockIn', staffId, staffName, storeId, lat, lng, method: method || 'gps' };
+                    const body = { action: 'clockIn', staffId, staffName, storeId, lat, lng, method: method || 'gps' };
                     if (qrToken) body.qrToken = qrToken;
-                    const res = await fetch(UNIFIED_GAS_URL, {
-                        method: 'POST', headers: { 'Content-Type': 'text/plain' },
-                        body: JSON.stringify(body)
-                    });
-                    const data = await res.json();
-                    if (data.error) { showToast(data.error, 'error'); return null; }
+                    const data = await dbPost('attendance', body);
+                    if (!data || data.error) { showToast((data && data.error) || '出勤記録に失敗しました', 'error'); return null; }
                     if (data.success) {
                         showToast('出勤を記録しました', 'success');
                         setTodayRecord(data.record);
@@ -3754,12 +3617,11 @@
             const clockOut = useCallback(async (staffId, lat, lng) => {
                 setSaving(true);
                 try {
-                    const res = await fetch(UNIFIED_GAS_URL, {
-                        method: 'POST', headers: { 'Content-Type': 'text/plain' },
-                        body: JSON.stringify({ type: 'attendance', action: 'clockOut', staffId, lat, lng })
-                    });
-                    const data = await res.json();
-                    if (data.error) { showToast(data.error, 'error'); return null; }
+                    // todayRecord.id を recordId として使う
+                    const recordId = (todayRecord && todayRecord.id) || null;
+                    if (!recordId) { showToast('出勤記録が見つかりません', 'error'); return null; }
+                    const data = await dbPost('attendance', { action: 'clockOut', recordId, lat, lng });
+                    if (!data || data.error) { showToast((data && data.error) || '退勤記録に失敗しました', 'error'); return null; }
                     if (data.success) {
                         showToast('退勤を記録しました', 'success');
                         setTodayRecord(prev => prev ? { ...prev, clockOut: data.record.clockOut, workMinutes: data.record.workMinutes } : null);
@@ -3768,35 +3630,26 @@
                 } catch (e) { showToast('退勤記録に失敗しました', 'error'); }
                 finally { setSaving(false); }
                 return null;
-            }, []);
+            }, [todayRecord]);
 
             // QRトークン生成（店舗端末用）
             const generateQrToken = useCallback(async (storeId) => {
                 try {
-                    const res = await fetch(UNIFIED_GAS_URL, {
-                        method: 'POST', headers: { 'Content-Type': 'text/plain' },
-                        body: JSON.stringify({ type: 'qrToken', action: 'generate', storeId })
-                    });
-                    return await res.json();
+                    return await dbPost('qrToken', { action: 'generate', storeId });
                 } catch (e) { return { error: 'QR生成失敗' }; }
             }, []);
 
             // QRトークン取得（有効なものがあればそれを返す）
             const getQrToken = useCallback(async (storeId) => {
                 try {
-                    const res = await fetch(UNIFIED_GAS_URL + '?type=qrToken&store=' + storeId);
-                    return await res.json();
+                    return await dbGet('qrToken', { store: storeId });
                 } catch (e) { return { error: 'QR取得失敗' }; }
             }, []);
 
             // QRトークン検証
             const validateQrToken = useCallback(async (token, storeId) => {
                 try {
-                    const res = await fetch(UNIFIED_GAS_URL, {
-                        method: 'POST', headers: { 'Content-Type': 'text/plain' },
-                        body: JSON.stringify({ type: 'qrToken', action: 'validate', token, storeId })
-                    });
-                    return await res.json();
+                    return await dbPost('qrToken', { action: 'validate', token, storeId });
                 } catch (e) { return { valid: false, error: '検証失敗' }; }
             }, []);
 
@@ -4062,32 +3915,25 @@
             // スレッド一覧を取得
             const fetchThreads = useCallback(async (storeId) => {
                 const sid = storeId || lineStoreId;
-                console.log('[LINE] fetchThreads called, sid:', sid, 'GAS_URL:', UNIFIED_GAS_URL.substring(0, 50) + '...');
-                if (!sid || UNIFIED_GAS_URL === 'YOUR_UNIFIED_GAS_URL') {
-                    console.warn('[LINE] fetchThreads skipped');
-                    return;
-                }
+                if (!sid) return;
                 setLoading(true);
                 setGasStatus('checking');
                 setGasError(null);
                 try {
-                    console.log('[LINE] fetching threads, store:', sid);
                     const [threadsRes, profilesRes] = await Promise.all([
-                        fetchGAS('?type=lineMessages&store=' + sid),
-                        fetchGAS('?type=lineProfiles&store=' + sid),
+                        dbGet('lineMessages', { store: sid }),
+                        dbGet('lineProfiles', { store: sid }),
                     ]);
-                    console.log('[LINE] threadsRes:', JSON.stringify(threadsRes).substring(0, 200));
-                    console.log('[LINE] profilesRes:', JSON.stringify(profilesRes).substring(0, 200));
-                    if (threadsRes.error || profilesRes.error) {
-                        const errMsg = threadsRes.error || profilesRes.error;
+                    if (!threadsRes || !profilesRes || threadsRes.error || profilesRes.error) {
+                        const errMsg = (threadsRes && threadsRes.error) || (profilesRes && profilesRes.error) || 'API接続エラー';
                         setGasStatus('error');
                         setGasError(errMsg);
-                        console.error('[LINE] GASエラー:', errMsg);
+                        console.error('[LINE] APIエラー:', errMsg);
                     } else {
                         setGasStatus('connected');
                     }
-                    if (threadsRes.threads) setThreads(threadsRes.threads);
-                    if (profilesRes.profiles) {
+                    if (threadsRes && threadsRes.threads) setThreads(threadsRes.threads);
+                    if (profilesRes && profilesRes.profiles) {
                         const map = {};
                         profilesRes.profiles.forEach(p => { map[p.userId] = p; });
                         setProfiles(map);
@@ -4109,11 +3955,11 @@
 
             // メッセージ取得
             const fetchMessages = useCallback(async (userId) => {
-                if (!lineStoreId || !userId || UNIFIED_GAS_URL === 'YOUR_UNIFIED_GAS_URL') return;
+                if (!lineStoreId || !userId) return;
                 setLoading(true);
                 try {
-                    const data = await fetchGAS('?type=lineMessages&store=' + lineStoreId + '&userId=' + encodeURIComponent(userId) + '&limit=200');
-                    if (data.messages) setMessages(data.messages);
+                    const data = await dbGet('lineMessages', { store: lineStoreId, userId, limit: '200' });
+                    if (data && data.messages) setMessages(data.messages);
                 } catch (e) {
                     console.error('LINE メッセージ取得エラー:', e);
                 } finally {
@@ -4142,19 +3988,12 @@
                         return false;
                     }
 
-                    // GASに送信記録を保存
-                    if (UNIFIED_GAS_URL !== 'YOUR_UNIFIED_GAS_URL') {
-                        await fetch(UNIFIED_GAS_URL, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'text/plain' },
-                            body: JSON.stringify({
-                                type: 'lineSend',
-                                storeId: lineStoreId,
-                                userId,
-                                messageText: text,
-                            }),
-                        }).catch(() => {});
-                    }
+                    // Supabaseに送信記録を保存
+                    dbPost('lineMessages', {
+                        storeId: lineStoreId,
+                        userId,
+                        messageText: text,
+                    });
 
                     // メッセージ一覧を更新
                     setMessages(prev => [...prev, {
@@ -4197,19 +4036,12 @@
                         return false;
                     }
 
-                    // GASに送信記録を保存
-                    if (UNIFIED_GAS_URL !== 'YOUR_UNIFIED_GAS_URL') {
-                        await fetch(UNIFIED_GAS_URL, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'text/plain' },
-                            body: JSON.stringify({
-                                type: 'lineSend',
-                                storeId: lineStoreId,
-                                userId,
-                                messageText: '[施術レポート] ' + (flexMessage.altText || ''),
-                            }),
-                        }).catch(() => {});
-                    }
+                    // Supabaseに送信記録を保存
+                    dbPost('lineMessages', {
+                        storeId: lineStoreId,
+                        userId,
+                        messageText: '[施術レポート] ' + (flexMessage.altText || ''),
+                    });
 
                     return true;
                 } catch (e) {
@@ -4231,10 +4063,10 @@
             const [broadcastSending, setBroadcastSending] = useState(false);
 
             const fetchBroadcasts = useCallback(async () => {
-                if (!lineStoreId || UNIFIED_GAS_URL === 'YOUR_UNIFIED_GAS_URL') return;
+                if (!lineStoreId) return;
                 try {
-                    const data = await fetchGAS('?type=lineBroadcasts&store=' + lineStoreId);
-                    if (data.broadcasts) setBroadcasts(data.broadcasts);
+                    const data = await dbGet('lineBroadcasts', { store: lineStoreId });
+                    if (data && data.broadcasts) setBroadcasts(data.broadcasts);
                 } catch (e) { console.error('[LINE] 配信履歴取得エラー:', e); }
             }, [lineStoreId]);
 
@@ -4262,20 +4094,16 @@
             const [templates, setTemplates] = useState([]);
 
             const fetchTemplates = useCallback(async () => {
-                if (!lineStoreId || UNIFIED_GAS_URL === 'YOUR_UNIFIED_GAS_URL') return;
+                if (!lineStoreId) return;
                 try {
-                    const data = await fetchGAS('?type=lineTemplates&store=' + lineStoreId);
-                    if (data.templates) setTemplates(data.templates);
+                    const data = await dbGet('lineTemplates', { store: lineStoreId });
+                    if (data && data.templates) setTemplates(data.templates);
                 } catch (e) { console.error('[LINE] テンプレート取得エラー:', e); }
             }, [lineStoreId]);
 
             const saveTemplate = useCallback(async (tmplData) => {
-                if (UNIFIED_GAS_URL === 'YOUR_UNIFIED_GAS_URL') return false;
                 try {
-                    await fetch(UNIFIED_GAS_URL, {
-                        method: 'POST', headers: { 'Content-Type': 'text/plain' },
-                        body: JSON.stringify({ type: 'lineTemplate', storeId: lineStoreId, ...tmplData }),
-                    });
+                    await dbPost('lineTemplates', { storeId: lineStoreId, ...tmplData });
                     await fetchTemplates();
                     return true;
                 } catch (e) { console.error('テンプレート保存エラー:', e); return false; }
@@ -4285,20 +4113,16 @@
             const [autoReplies, setAutoReplies] = useState([]);
 
             const fetchAutoReplies = useCallback(async () => {
-                if (!lineStoreId || UNIFIED_GAS_URL === 'YOUR_UNIFIED_GAS_URL') return;
+                if (!lineStoreId) return;
                 try {
-                    const data = await fetchGAS('?type=lineAutoReplies&store=' + lineStoreId);
-                    if (data.rules) setAutoReplies(data.rules);
+                    const data = await dbGet('lineAutoReplies', { store: lineStoreId });
+                    if (data && data.rules) setAutoReplies(data.rules);
                 } catch (e) { console.error('[LINE] 自動応答取得エラー:', e); }
             }, [lineStoreId]);
 
             const saveAutoReply = useCallback(async (ruleData) => {
-                if (UNIFIED_GAS_URL === 'YOUR_UNIFIED_GAS_URL') return false;
                 try {
-                    await fetch(UNIFIED_GAS_URL, {
-                        method: 'POST', headers: { 'Content-Type': 'text/plain' },
-                        body: JSON.stringify({ type: 'lineAutoReply', storeId: lineStoreId, ...ruleData }),
-                    });
+                    await dbPost('lineAutoReplies', { storeId: lineStoreId, ...ruleData });
                     await fetchAutoReplies();
                     return true;
                 } catch (e) { console.error('自動応答保存エラー:', e); return false; }
@@ -4309,36 +4133,28 @@
             const [userTags, setUserTags] = useState([]);
 
             const fetchTags = useCallback(async () => {
-                if (!lineStoreId || UNIFIED_GAS_URL === 'YOUR_UNIFIED_GAS_URL') return;
+                if (!lineStoreId) return;
                 try {
                     const [tagsRes, utRes] = await Promise.all([
-                        fetchGAS('?type=lineTags&store=' + lineStoreId),
-                        fetchGAS('?type=lineUserTags&store=' + lineStoreId),
+                        dbGet('lineTags', { store: lineStoreId }),
+                        dbGet('lineUserTags', { store: lineStoreId }),
                     ]);
-                    if (tagsRes.tags) setTags(tagsRes.tags);
-                    if (utRes.userTags) setUserTags(utRes.userTags);
+                    if (tagsRes && tagsRes.tags) setTags(tagsRes.tags);
+                    if (utRes && utRes.userTags) setUserTags(utRes.userTags);
                 } catch (e) { console.error('[LINE] タグ取得エラー:', e); }
             }, [lineStoreId]);
 
             const saveTag = useCallback(async (tagData) => {
-                if (UNIFIED_GAS_URL === 'YOUR_UNIFIED_GAS_URL') return false;
                 try {
-                    await fetch(UNIFIED_GAS_URL, {
-                        method: 'POST', headers: { 'Content-Type': 'text/plain' },
-                        body: JSON.stringify({ type: 'lineTag', storeId: lineStoreId, ...tagData }),
-                    });
+                    await dbPost('lineTags', { storeId: lineStoreId, ...tagData });
                     await fetchTags();
                     return true;
                 } catch (e) { console.error('タグ保存エラー:', e); return false; }
             }, [lineStoreId, fetchTags]);
 
             const saveUserTag = useCallback(async (utData) => {
-                if (UNIFIED_GAS_URL === 'YOUR_UNIFIED_GAS_URL') return false;
                 try {
-                    await fetch(UNIFIED_GAS_URL, {
-                        method: 'POST', headers: { 'Content-Type': 'text/plain' },
-                        body: JSON.stringify({ type: 'lineUserTag', storeId: lineStoreId, ...utData }),
-                    });
+                    await dbPost('lineUserTags', { storeId: lineStoreId, ...utData });
                     await fetchTags();
                     return true;
                 } catch (e) { console.error('ユーザータグ保存エラー:', e); return false; }
@@ -4348,10 +4164,10 @@
             const [analytics, setAnalytics] = useState(null);
 
             const fetchAnalytics = useCallback(async () => {
-                if (!lineStoreId || UNIFIED_GAS_URL === 'YOUR_UNIFIED_GAS_URL') return;
+                if (!lineStoreId) return;
                 try {
-                    const data = await fetchGAS('?type=lineAnalytics&store=' + lineStoreId);
-                    if (data.analytics) setAnalytics(data.analytics);
+                    const data = await dbGet('lineAnalytics', { store: lineStoreId });
+                    if (data && data.analytics) setAnalytics(data.analytics);
                 } catch (e) { console.error('[LINE] 分析取得エラー:', e); }
             }, [lineStoreId]);
 
@@ -5176,18 +4992,17 @@
                                     if (ok) {
                                         // 保存後にGETで検証
                                         try {
-                                            const verifyRes = await fetch(UNIFIED_GAS_URL + '?type=members');
-                                            const verifyData = await verifyRes.json();
+                                            const verifyData = await dbGet('members');
                                             if (verifyData && verifyData.members && verifyData.members.length > 0) {
-                                                showToast('スプレッドシートに' + verifyData.members.length + '件保存しました', 'success');
+                                                showToast('Supabaseに' + verifyData.members.length + '件保存しました', 'success');
                                             } else {
-                                                showToast('スプレッドシートに保存しました（検証: 0件）', 'success');
+                                                showToast('Supabaseに保存しました（検証: 0件）', 'success');
                                             }
                                         } catch (_) {
-                                            showToast('スプレッドシートに保存しました', 'success');
+                                            showToast('Supabaseに保存しました', 'success');
                                         }
                                     } else {
-                                        showToast('スプレッドシートへの保存に失敗しました', 'error');
+                                        showToast('Supabaseへの保存に失敗しました', 'error');
                                     }
                                 }}
                                 disabled={saving}

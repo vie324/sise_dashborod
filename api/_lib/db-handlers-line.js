@@ -310,6 +310,87 @@ export async function lineUserTagsGet(params) {
   };
 }
 
+// ============================================================
+// LINE分析 (lineAnalytics) - 計算専用・読み取り
+// ============================================================
+
+export async function lineAnalyticsGet(params) {
+  let query = supabase.from('line_messages').select('timestamp, store_id, user_id, direction, message_type');
+  if (params.store) query = query.eq('store_id', params.store);
+  const { data, error } = await query;
+  if (error) throw error;
+
+  const now = new Date();
+  const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+  const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+
+  let totalReceived = 0, totalSent = 0;
+  let last30Received = 0, last30Sent = 0;
+  let last7Received = 0, last7Sent = 0;
+  let follows = 0, unfollows = 0;
+  const uniqueUsers = {};
+  const dailyStats = {};
+  const hourlyStats = {};
+
+  for (const row of data || []) {
+    const ts = new Date(row.timestamp);
+    const direction = row.direction;
+    const msgType = row.message_type;
+    const userId = row.user_id;
+
+    if (msgType === 'follow') { follows++; continue; }
+    if (msgType === 'unfollow') { unfollows++; continue; }
+
+    if (direction === 'received') {
+      totalReceived++;
+      uniqueUsers[userId] = true;
+      if (ts >= thirtyDaysAgo) last30Received++;
+      if (ts >= sevenDaysAgo) last7Received++;
+    } else {
+      totalSent++;
+      if (ts >= thirtyDaysAgo) last30Sent++;
+      if (ts >= sevenDaysAgo) last7Sent++;
+    }
+
+    if (ts >= thirtyDaysAgo) {
+      const dateKey = ts.toISOString().slice(0, 10);
+      if (!dailyStats[dateKey]) dailyStats[dateKey] = { received: 0, sent: 0 };
+      if (direction === 'received') dailyStats[dateKey].received++;
+      else dailyStats[dateKey].sent++;
+    }
+
+    const hour = ts.getHours();
+    if (!hourlyStats[hour]) hourlyStats[hour] = { received: 0, sent: 0 };
+    if (direction === 'received') hourlyStats[hour].received++;
+    else hourlyStats[hour].sent++;
+  }
+
+  const dailyArray = Object.keys(dailyStats).sort().map(date => ({
+    date, received: dailyStats[date].received, sent: dailyStats[date].sent
+  }));
+
+  const hourlyArray = [];
+  for (let h = 0; h < 24; h++) {
+    hourlyArray.push({
+      hour: h,
+      received: (hourlyStats[h] || { received: 0 }).received,
+      sent: (hourlyStats[h] || { sent: 0 }).sent
+    });
+  }
+
+  return {
+    analytics: {
+      total: { received: totalReceived, sent: totalSent },
+      last30Days: { received: last30Received, sent: last30Sent },
+      last7Days: { received: last7Received, sent: last7Sent },
+      follows, unfollows,
+      uniqueUsers: Object.keys(uniqueUsers).length,
+      dailyStats: dailyArray,
+      hourlyStats: hourlyArray
+    }
+  };
+}
+
 export async function lineUserTagsPost(body) {
   const action = body.action || 'add';
   switch (action) {

@@ -6,7 +6,7 @@ import {
   lineMessagesGet, lineMessagesPost, lineProfilesGet, lineProfilesPost,
   lineBroadcastsGet, lineBroadcastsPost, lineTemplatesGet, lineTemplatesPost,
   lineAutoRepliesGet, lineAutoRepliesPost, lineTagsGet, lineTagsPost,
-  lineUserTagsGet, lineUserTagsPost
+  lineUserTagsGet, lineUserTagsPost, lineAnalyticsGet
 } from '../_lib/db-handlers-line.js';
 import {
   usageGet, usagePost, ticketGet, ticketPost,
@@ -40,6 +40,7 @@ const HANDLERS = {
   lineAutoReplies: { get: lineAutoRepliesGet, post: lineAutoRepliesPost },
   lineTags:        { get: lineTagsGet,       post: lineTagsPost },
   lineUserTags:    { get: lineUserTagsGet,   post: lineUserTagsPost },
+  lineAnalytics:   { get: lineAnalyticsGet,  post: async () => ({ error: 'lineAnalyticsはGET専用です' }) },
 };
 
 export default async function handler(req, res) {
