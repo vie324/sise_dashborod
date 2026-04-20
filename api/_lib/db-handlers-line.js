@@ -148,7 +148,95 @@ export async function lineProfilesGet(params) {
   };
 }
 
+// LINE Messaging API のチャネルアクセストークンを取得
+function getLineAccessToken(storeId) {
+  if (!storeId) return null;
+  const prefix = `LINE_STORE_${storeId}`;
+  return process.env[`${prefix}_CHANNEL_ACCESS_TOKEN`] || process.env[`${prefix}_ACCESS_TOKEN`] || null;
+}
+
+// LINE Messaging API からプロフィールを取得し Supabase に upsert する
+async function refreshLineProfile(storeId, userId, token) {
+  try {
+    const res = await fetch(`https://api.line.me/v2/bot/profile/${encodeURIComponent(userId)}`, {
+      headers: { 'Authorization': `Bearer ${token}` },
+    });
+    if (!res.ok) {
+      // 404 はブロック or 削除済み。名前は空のまま保持し、以降のAPI呼び出しを避ける。
+      await supabase.from('line_profiles').upsert({
+        user_id: userId, store_id: String(storeId),
+        display_name: '', picture_url: '',
+      }, { onConflict: 'user_id,store_id' });
+      return { userId, ok: false, status: res.status };
+    }
+    const profile = await res.json();
+    const displayName = profile.displayName || '';
+    const pictureUrl = profile.pictureUrl || '';
+    await supabase.from('line_profiles').upsert({
+      user_id: userId, store_id: String(storeId),
+      display_name: displayName, picture_url: pictureUrl,
+    }, { onConflict: 'user_id,store_id' });
+    return { userId, ok: true, displayName, pictureUrl };
+  } catch (err) {
+    return { userId, ok: false, error: err.message };
+  }
+}
+
+// 並列で最大 concurrency 件ずつ処理する
+async function processInBatches(items, concurrency, worker) {
+  const out = [];
+  let idx = 0;
+  const workers = new Array(Math.min(concurrency, items.length)).fill(0).map(async () => {
+    while (idx < items.length) {
+      const i = idx++;
+      out[i] = await worker(items[i]);
+    }
+  });
+  await Promise.all(workers);
+  return out;
+}
+
 export async function lineProfilesPost(body) {
+  const action = body.action || '';
+
+  // 管理機能: スレッド一覧の表示名が空のユーザーを LINE Messaging API で一括補完する
+  if (action === 'refresh' || action === 'backfill') {
+    const storeId = body.storeId ? String(body.storeId) : '';
+    if (!storeId) return { error: 'storeIdが必要です' };
+    const token = getLineAccessToken(storeId);
+    if (!token) return { error: `Store "${storeId}" に LINE アクセストークンが設定されていません` };
+
+    // userIds が明示されている場合はそれだけ、なければ display_name が空の行を Supabase から抽出する
+    let targetUserIds = Array.isArray(body.userIds) ? body.userIds.filter(Boolean) : [];
+    if (targetUserIds.length === 0) {
+      const { data, error } = await supabase.from('line_profiles')
+        .select('user_id')
+        .eq('store_id', storeId)
+        .or('display_name.is.null,display_name.eq.');
+      if (error) throw error;
+      targetUserIds = (data || []).map(r => r.user_id).filter(Boolean);
+      // line_messages 側には存在するが line_profiles に未登録のユーザーも対象に加える
+      const { data: msgRows, error: msgErr } = await supabase.from('line_messages')
+        .select('user_id')
+        .eq('store_id', storeId);
+      if (!msgErr && msgRows) {
+        const existing = new Set(targetUserIds);
+        for (const row of msgRows) {
+          if (row.user_id && !existing.has(row.user_id)) {
+            existing.add(row.user_id);
+            targetUserIds.push(row.user_id);
+          }
+        }
+      }
+    }
+
+    if (targetUserIds.length === 0) return { success: true, refreshed: 0, results: [] };
+
+    const results = await processInBatches(targetUserIds, 5, uid => refreshLineProfile(storeId, uid, token));
+    const refreshed = results.filter(r => r && r.ok).length;
+    return { success: true, refreshed, total: results.length, results };
+  }
+
   if (!body.userId) return { error: 'userIdが必要です' };
   const { error } = await supabase.from('line_profiles').upsert({
     user_id: body.userId, store_id: body.storeId || '',
