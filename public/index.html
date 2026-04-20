@@ -3963,10 +3963,57 @@
                         setGasStatus('connected');
                     }
                     if (threadsRes && threadsRes.threads) setThreads(threadsRes.threads);
+
+                    const profileMap = {};
                     if (profilesRes && profilesRes.profiles) {
-                        const map = {};
-                        profilesRes.profiles.forEach(p => { map[p.userId] = p; });
-                        setProfiles(map);
+                        profilesRes.profiles.forEach(p => { profileMap[p.userId] = p; });
+                        setProfiles(profileMap);
+                    }
+
+                    // === プロフィール名の自動補完 ===
+                    // displayName が空のスレッドはLINEプロフィールAPIから再取得し、
+                    // Supabaseに保存して以降は名前が表示されるようにする。
+                    // 同時に呼び出す件数は制限し、レート制限を超えないようにする。
+                    const threadList = (threadsRes && threadsRes.threads) || [];
+                    const missing = threadList
+                        .filter(t => !profileMap[t.userId] || !profileMap[t.userId].displayName)
+                        .slice(0, 30);
+                    if (missing.length > 0) {
+                        Promise.all(missing.map(async (t) => {
+                            try {
+                                const r = await fetch(`/api/line/profile/${encodeURIComponent(t.userId)}`, {
+                                    headers: { 'X-Store-Id': sid },
+                                });
+                                if (!r.ok) return null;
+                                const profile = await r.json();
+                                if (!profile || !profile.displayName) return null;
+                                // Supabase 永続化（fire-and-forget）
+                                dbPost('lineProfiles', {
+                                    userId: t.userId,
+                                    storeId: sid,
+                                    displayName: profile.displayName,
+                                    pictureUrl: profile.pictureUrl || '',
+                                });
+                                return { userId: t.userId, profile };
+                            } catch (_) {
+                                return null;
+                            }
+                        })).then(results => {
+                            const updates = results.filter(Boolean);
+                            if (updates.length === 0) return;
+                            setProfiles(prev => {
+                                const next = { ...prev };
+                                for (const { userId, profile } of updates) {
+                                    next[userId] = {
+                                        userId,
+                                        storeId: sid,
+                                        displayName: profile.displayName,
+                                        pictureUrl: profile.pictureUrl || '',
+                                    };
+                                }
+                                return next;
+                            });
+                        });
                     }
                 } catch (e) {
                     console.error('[LINE] スレッド取得エラー:', e);
