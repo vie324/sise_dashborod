@@ -3,40 +3,64 @@ import { supabase } from './supabase.js';
 // ============================================================
 // LINEメッセージ
 // ============================================================
+//
+// セキュリティ: LINE関連データは必ず store (store_id) を指定して取得する。
+// store が未指定の場合は空配列を返し、店舗横断でのデータ漏えいを防ぐ。
+// ============================================================
 
 export async function lineMessagesGet(params) {
-  if (params.userId && params.store) {
-    // 個別ユーザーのタイムライン
-    let query = supabase.from('line_messages').select('*')
-      .eq('store_id', params.store).eq('user_id', params.userId)
-      .order('timestamp', { ascending: false }).limit(parseInt(params.limit) || 100);
-    const { data, error } = await query;
-    if (error) throw error;
-    return {
-      messages: (data || []).map(mapMsg)
-    };
+  const storeId = params.store ? String(params.store) : '';
+  if (!storeId) {
+    // 店舗未指定は空レスポンス。店舗スコープを厳格に守るため。
+    return params.userId ? { messages: [] } : { threads: [] };
   }
 
-  // スレッド一覧 (store別の最新メッセージ)
-  let query = supabase.from('line_messages').select('*')
-    .order('timestamp', { ascending: false });
-  if (params.store) query = query.eq('store_id', params.store);
-  query = query.limit(500);
+  if (params.userId) {
+    // 個別ユーザーのタイムライン (直近N件を古い順で返す)
+    const limit = parseInt(params.limit) || 200;
+    const { data, error } = await supabase.from('line_messages').select('*')
+      .eq('store_id', storeId).eq('user_id', params.userId)
+      .order('timestamp', { ascending: false })
+      .limit(limit);
+    if (error) throw error;
+    const messages = (data || []).map(mapMsg).reverse();
+    return { messages };
+  }
 
-  const { data, error } = await query;
+  // スレッド一覧 (当該店舗の最新メッセージ)
+  const { data, error } = await supabase.from('line_messages').select('*')
+    .eq('store_id', storeId)
+    .order('timestamp', { ascending: false })
+    .limit(1000);
   if (error) throw error;
 
-  // ユーザーごとに最新メッセージを集約
+  // ユーザーごとに最新メッセージ・未読数を集約
   const threadMap = {};
   for (const msg of data || []) {
-    const key = `${msg.store_id}_${msg.user_id}`;
+    const key = msg.user_id;
     if (!threadMap[key]) {
-      threadMap[key] = { storeId: msg.store_id, userId: msg.user_id, lastMessage: mapMsg(msg), unread: 0 };
+      threadMap[key] = {
+        storeId: msg.store_id,
+        userId: msg.user_id,
+        lastMessage: mapMsg(msg),
+        unread: 0,
+        lastReceivedAt: null,
+      };
     }
-    if (msg.direction === 'received') threadMap[key].unread++;
+    if (msg.direction === 'received' && msg.message_type !== 'follow' && msg.message_type !== 'unfollow') {
+      threadMap[key].unread++;
+      if (!threadMap[key].lastReceivedAt) threadMap[key].lastReceivedAt = msg.timestamp;
+    }
   }
 
-  return { threads: Object.values(threadMap) };
+  // 最新メッセージ順にソート
+  const threads = Object.values(threadMap).sort((a, b) => {
+    const ta = a.lastMessage?.timestamp || 0;
+    const tb = b.lastMessage?.timestamp || 0;
+    return new Date(tb) - new Date(ta);
+  });
+
+  return { threads };
 }
 
 export async function lineMessagesPost(body) {
@@ -107,9 +131,13 @@ function mapMsg(r) {
 // ============================================================
 
 export async function lineProfilesGet(params) {
-  let query = supabase.from('line_profiles').select('*');
-  if (params.store) query = query.eq('store_id', params.store);
-  const { data, error } = await query;
+  const storeId = params.store ? String(params.store) : '';
+  if (!storeId) {
+    // 店舗未指定は空レスポンス。店舗横断での顧客情報漏えいを防ぐ。
+    return { profiles: [] };
+  }
+  const { data, error } = await supabase.from('line_profiles').select('*')
+    .eq('store_id', storeId);
   if (error) throw error;
   return {
     profiles: (data || []).map(r => ({
@@ -135,10 +163,12 @@ export async function lineProfilesPost(body) {
 // ============================================================
 
 export async function lineBroadcastsGet(params) {
-  let query = supabase.from('line_broadcasts').select('*')
-    .order('timestamp', { ascending: false }).limit(50);
-  if (params.store) query = query.eq('store_id', params.store);
-  const { data, error } = await query;
+  const storeId = params.store ? String(params.store) : '';
+  if (!storeId) return { broadcasts: [] };
+  const { data, error } = await supabase.from('line_broadcasts').select('*')
+    .eq('store_id', storeId)
+    .order('timestamp', { ascending: false })
+    .limit(50);
   if (error) throw error;
   return {
     broadcasts: (data || []).map(r => ({
@@ -189,9 +219,11 @@ export async function lineBroadcastsPost(body) {
 // ============================================================
 
 export async function lineTemplatesGet(params) {
-  let query = supabase.from('line_templates').select('*').order('created_at');
-  if (params.store) query = query.eq('store_id', params.store);
-  const { data, error } = await query;
+  const storeId = params.store ? String(params.store) : '';
+  if (!storeId) return { templates: [] };
+  const { data, error } = await supabase.from('line_templates').select('*')
+    .eq('store_id', storeId)
+    .order('created_at');
   if (error) throw error;
   return {
     templates: (data || []).map(r => ({
@@ -265,9 +297,11 @@ export async function lineTemplatesPost(body) {
 // ============================================================
 
 export async function lineAutoRepliesGet(params) {
-  let query = supabase.from('line_auto_replies').select('*').order('priority', { ascending: false });
-  if (params.store) query = query.eq('store_id', params.store);
-  const { data, error } = await query;
+  const storeId = params.store ? String(params.store) : '';
+  if (!storeId) return { rules: [] };
+  const { data, error } = await supabase.from('line_auto_replies').select('*')
+    .eq('store_id', storeId)
+    .order('priority', { ascending: false });
   if (error) throw error;
   return {
     rules: (data || []).map(r => ({
@@ -345,9 +379,11 @@ export async function lineAutoRepliesPost(body) {
 // ============================================================
 
 export async function lineTagsGet(params) {
-  let query = supabase.from('line_tags').select('*').order('created_at');
-  if (params.store) query = query.eq('store_id', params.store);
-  const { data, error } = await query;
+  const storeId = params.store ? String(params.store) : '';
+  if (!storeId) return { tags: [] };
+  const { data, error } = await supabase.from('line_tags').select('*')
+    .eq('store_id', storeId)
+    .order('created_at');
   if (error) throw error;
   return {
     tags: (data || []).map(r => ({
@@ -409,8 +445,9 @@ export async function lineTagsPost(body) {
 }
 
 export async function lineUserTagsGet(params) {
-  let query = supabase.from('line_user_tags').select('*');
-  if (params.store) query = query.eq('store_id', params.store);
+  const storeId = params.store ? String(params.store) : '';
+  if (!storeId) return { userTags: [] };
+  let query = supabase.from('line_user_tags').select('*').eq('store_id', storeId);
   if (params.userId) query = query.eq('user_id', params.userId);
   const { data, error } = await query;
   if (error) throw error;
@@ -427,9 +464,11 @@ export async function lineUserTagsGet(params) {
 // ============================================================
 
 export async function lineAnalyticsGet(params) {
-  let query = supabase.from('line_messages').select('timestamp, store_id, user_id, direction, message_type');
-  if (params.store) query = query.eq('store_id', params.store);
-  const { data, error } = await query;
+  const storeId = params.store ? String(params.store) : '';
+  if (!storeId) return { analytics: null };
+  const { data, error } = await supabase.from('line_messages')
+    .select('timestamp, store_id, user_id, direction, message_type')
+    .eq('store_id', storeId);
   if (error) throw error;
 
   const now = new Date();
