@@ -3971,48 +3971,33 @@
                     }
 
                     // === プロフィール名の自動補完 ===
-                    // displayName が空のスレッドはLINEプロフィールAPIから再取得し、
-                    // Supabaseに保存して以降は名前が表示されるようにする。
-                    // 同時に呼び出す件数は制限し、レート制限を超えないようにする。
+                    // 表示名が空のユーザーを LINE Messaging API から一括取得し Supabase に保存する。
+                    // サーバー側で完結するので CORS やレート制限の影響を受けにくい。
                     const threadList = (threadsRes && threadsRes.threads) || [];
                     const missing = threadList
                         .filter(t => !profileMap[t.userId] || !profileMap[t.userId].displayName)
-                        .slice(0, 30);
+                        .map(t => t.userId);
                     if (missing.length > 0) {
-                        Promise.all(missing.map(async (t) => {
-                            try {
-                                const r = await fetch(`/api/line/profile/${encodeURIComponent(t.userId)}`, {
-                                    headers: { 'X-Store-Id': sid },
-                                });
-                                if (!r.ok) return null;
-                                const profile = await r.json();
-                                if (!profile || !profile.displayName) return null;
-                                // Supabase 永続化（fire-and-forget）
-                                dbPost('lineProfiles', {
-                                    userId: t.userId,
-                                    storeId: sid,
-                                    displayName: profile.displayName,
-                                    pictureUrl: profile.pictureUrl || '',
-                                });
-                                return { userId: t.userId, profile };
-                            } catch (_) {
-                                return null;
+                        dbPost('lineProfiles', {
+                            action: 'refresh',
+                            storeId: sid,
+                            userIds: missing,
+                        }).then(async (res) => {
+                            if (!res || res.error) {
+                                console.error('[LINE] プロフィール補完エラー:', res && res.error);
+                                return;
                             }
-                        })).then(results => {
-                            const updates = results.filter(Boolean);
-                            if (updates.length === 0) return;
-                            setProfiles(prev => {
-                                const next = { ...prev };
-                                for (const { userId, profile } of updates) {
-                                    next[userId] = {
-                                        userId,
-                                        storeId: sid,
-                                        displayName: profile.displayName,
-                                        pictureUrl: profile.pictureUrl || '',
-                                    };
+                            // 補完できた件数があれば、最新のプロフィール一覧を再取得して反映
+                            if (res.refreshed > 0) {
+                                const refreshed = await dbGet('lineProfiles', { store: sid });
+                                if (refreshed && refreshed.profiles) {
+                                    const map = {};
+                                    refreshed.profiles.forEach(p => { map[p.userId] = p; });
+                                    setProfiles(map);
                                 }
-                                return next;
-                            });
+                            }
+                        }).catch(err => {
+                            console.error('[LINE] プロフィール補完エラー:', err);
                         });
                     }
                 } catch (e) {
