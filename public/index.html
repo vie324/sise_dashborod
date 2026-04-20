@@ -3884,6 +3884,32 @@
             const [gasStatus, setGasStatus] = useState('checking'); // 'checking' | 'connected' | 'error'
             const [gasError, setGasError] = useState(null);
 
+            // スタッフが閲覧してよいLINE店舗を解決する。
+            // currentAccess.storeIds には、
+            //   (a) LINE店舗IDと同じ数値文字列 ("1", "2", ...) か、
+            //   (b) Square店舗ID ("LID..." など) か、
+            //   (c) 店舗名 ("本厚木店" など)
+            // が入っている可能性があるため、serverStoresでID↔名前のマッピングも見て厳密に判定する。
+            const isLineStoreAllowed = useCallback((lineStore) => {
+                if (!currentAccess) return true; // 管理者
+                const sids = currentAccess.storeIds || [];
+                if (sids.length === 0) return false;
+                if (sids.includes(lineStore.id)) return true;
+                if (lineStore.name && sids.includes(lineStore.name)) return true;
+                if (Array.isArray(serverStores) && serverStores.length > 0) {
+                    for (const sid of sids) {
+                        const s = serverStores.find(x => x.id === sid);
+                        if (s && s.name && lineStore.name && s.name === lineStore.name) return true;
+                    }
+                }
+                return false;
+            }, []);
+
+            const allowedLineStores = useMemo(
+                () => (lineConfig.stores || []).filter(isLineStoreAllowed),
+                [lineConfig.stores, isLineStoreAllowed]
+            );
+
             // LINE設定を取得
             useEffect(() => {
                 fetch('/api/line/config')
@@ -3892,25 +3918,29 @@
                         return r.json();
                     })
                     .then(data => {
-                        console.log('[LINE] config:', data);
                         setLineConfig(data);
-                        console.log('[LINE] stores:', data.stores, 'current lineStoreId:', lineStoreId);
-                        if (data.stores && data.stores.length > 0 && !lineStoreId) {
-                            // スタッフ専用URLの場合は、紐づけられた店舗のみを候補とする
-                            const allowedStores = (currentAccess && currentAccess.storeIds && currentAccess.storeIds.length > 0)
-                                ? data.stores.filter(s => currentAccess.storeIds.includes(s.id))
-                                : data.stores;
-                            if (allowedStores.length > 0) {
-                                console.log('[LINE] setting lineStoreId to:', allowedStores[0].id);
-                                setLineStoreId(allowedStores[0].id);
-                            }
-                        }
                     })
                     .catch(e => {
                         console.error('[LINE] config取得エラー:', e);
                         setConfigError(e.message);
                     });
             }, []);
+
+            // 許可された店舗が確定したら、その最初の店舗を既定として選択する
+            useEffect(() => {
+                if (lineStoreId) return;
+                if (allowedLineStores.length === 0) return;
+                setLineStoreId(allowedLineStores[0].id);
+            }, [allowedLineStores, lineStoreId]);
+
+            // 許可外の店舗が選ばれていたら強制的に許可店舗に戻す（権限変更時など）
+            useEffect(() => {
+                if (!lineStoreId) return;
+                if (allowedLineStores.length === 0) return;
+                if (!allowedLineStores.some(s => s.id === lineStoreId)) {
+                    setLineStoreId(allowedLineStores[0].id);
+                }
+            }, [allowedLineStores, lineStoreId]);
 
             // スレッド一覧を取得
             const fetchThreads = useCallback(async (storeId) => {
@@ -4175,6 +4205,7 @@
                 lineConfig, threads, profiles, messages, selectedThread,
                 lineStoreId, setLineStoreId, loading, sending, configError,
                 gasStatus, gasError,
+                allowedLineStores, isLineStoreAllowed,
                 fetchThreads, openThread, setSelectedThread, sendMessage, sendFlexMessage, fetchMessages,
                 broadcasts, broadcastSending, fetchBroadcasts, sendBroadcast,
                 templates, fetchTemplates, saveTemplate,
@@ -10095,11 +10126,111 @@
         // LINE チャットビュー
         // ========================================
 
+        // ========================================
+        // LINE UI ヘルパー
+        // ========================================
+
+        // アバター用の初期文字と背景色（名前から決定論的に色を割り当て）
+        const LINE_AVATAR_PALETTE = [
+            '#06C755', '#10b981', '#14b8a6', '#0ea5e9',
+            '#6366f1', '#8b5cf6', '#d946ef', '#ec4899',
+            '#f43f5e', '#f97316', '#eab308', '#84cc16',
+        ];
+        const pickAvatarColor = (seed) => {
+            const s = seed || '';
+            let h = 0;
+            for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) & 0xffffffff;
+            return LINE_AVATAR_PALETTE[Math.abs(h) % LINE_AVATAR_PALETTE.length];
+        };
+        const initialOf = (name) => {
+            const t = (name || '').trim();
+            if (!t) return '?';
+            // 日本語は先頭1文字、英語は大文字の先頭1文字
+            return t[0].toUpperCase();
+        };
+
+        // 表示名の決定。LINE側で名前が取れない/ブロック済みなどで displayName が空の場合、
+        // 生のLINE user ID を見せずに「お客様 + 下4桁」にフォールバックする。
+        const resolveDisplayName = (profile, userId) => {
+            const name = profile && profile.displayName ? profile.displayName.trim() : '';
+            if (name) return name;
+            const tail = (userId || '').slice(-4);
+            return tail ? `お客様 #${tail}` : 'お客様';
+        };
+
+        // メッセージタイプ別のプレビュー文
+        const previewForMessage = (msg) => {
+            if (!msg) return '';
+            if (msg.messageType === 'follow') return '友だち追加';
+            if (msg.messageType === 'unfollow') return 'ブロックされました';
+            if (msg.messageType === 'image') return '📷 画像';
+            if (msg.messageType === 'video') return '🎞 動画';
+            if (msg.messageType === 'audio') return '🎵 音声';
+            if (msg.messageType === 'sticker') return 'スタンプ';
+            if (msg.messageType === 'location') return '📍 位置情報';
+            if (msg.messageType === 'file') return '📎 ファイル';
+            return msg.messageText || '';
+        };
+
+        // 相対時間 (直近は「分前」、それ以上は日付)
+        const relativeTime = (ts) => {
+            if (!ts) return '';
+            const d = new Date(ts);
+            const now = new Date();
+            const diffSec = Math.floor((now - d) / 1000);
+            if (diffSec < 60) return 'たった今';
+            if (diffSec < 3600) return Math.floor(diffSec / 60) + '分前';
+            const isToday = d.toDateString() === now.toDateString();
+            if (isToday) return d.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+            const yesterday = new Date(now);
+            yesterday.setDate(yesterday.getDate() - 1);
+            if (d.toDateString() === yesterday.toDateString()) return '昨日';
+            const sameYear = d.getFullYear() === now.getFullYear();
+            return sameYear
+                ? `${d.getMonth() + 1}/${d.getDate()}`
+                : d.toLocaleDateString('ja-JP');
+        };
+
+        // 日付セパレータ用ラベル
+        const dateSeparatorLabel = (ts) => {
+            const d = new Date(ts);
+            const now = new Date();
+            const isToday = d.toDateString() === now.toDateString();
+            if (isToday) return '今日';
+            const yesterday = new Date(now);
+            yesterday.setDate(yesterday.getDate() - 1);
+            if (d.toDateString() === yesterday.toDateString()) return '昨日';
+            const sameYear = d.getFullYear() === now.getFullYear();
+            return sameYear
+                ? `${d.getMonth() + 1}月${d.getDate()}日`
+                : `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`;
+        };
+
+        // Avatar コンポーネント
+        const LineAvatar = ({ profile, userId, name, size = 40 }) => {
+            const displayName = name || resolveDisplayName(profile, userId);
+            const bg = pickAvatarColor(userId || displayName);
+            const s = { width: size, height: size, fontSize: Math.max(12, size * 0.4) };
+            if (profile && profile.pictureUrl) {
+                return <ImageWithFallback src={profile.pictureUrl} alt={displayName}
+                    className="rounded-full object-cover flex-shrink-0"
+                    style={s} />;
+            }
+            return (
+                <div
+                    className="rounded-full flex items-center justify-center flex-shrink-0 text-white font-bold shadow-sm"
+                    style={{ ...s, background: bg }}>
+                    {initialOf(displayName)}
+                </div>
+            );
+        };
+
         const LineChatView = ({ lineChatHook }) => {
             const {
                 lineConfig, threads, profiles, messages, selectedThread,
                 lineStoreId, setLineStoreId, loading, sending, configError,
                 gasStatus, gasError,
+                allowedLineStores,
                 fetchThreads, openThread, setSelectedThread, sendMessage, fetchMessages,
                 broadcasts, broadcastSending, fetchBroadcasts, sendBroadcast,
                 templates, fetchTemplates, saveTemplate,
@@ -10110,6 +10241,7 @@
             const [lineTab, setLineTab] = useState('chat');
             const [showTemplatePanel, setShowTemplatePanel] = useState(false);
             const [inputText, setInputText] = useState('');
+            const [threadSearch, setThreadSearch] = useState('');
             const messagesEndRef = React.useRef(null);
 
             // 自動スクロール
@@ -10537,129 +10669,230 @@
             // スレッド選択中 → チャット画面
             if (selectedThread) {
                 const profile = profiles[selectedThread.userId] || {};
-                const displayName = profile.displayName || selectedThread.userId.slice(0, 8) + '...';
+                const displayName = resolveDisplayName(profile, selectedThread.userId);
+                const storeName = lineConfig.stores.find(s => s.id === lineStoreId)?.name || '';
+                const userTagIds = new Set(
+                    (userTags || [])
+                        .filter(ut => ut.storeId === lineStoreId && ut.userId === selectedThread.userId)
+                        .map(ut => ut.tagId)
+                );
+                const assignedTags = (tags || []).filter(t => userTagIds.has(t.tagId));
+
+                // 日付セパレータ付きでメッセージをグルーピング
+                const groupedMessages = [];
+                let lastDate = '';
+                for (const msg of (messages || [])) {
+                    const d = new Date(msg.timestamp);
+                    const key = d.toDateString();
+                    if (key !== lastDate) {
+                        groupedMessages.push({ kind: 'separator', label: dateSeparatorLabel(msg.timestamp), key: 'sep-' + key });
+                        lastDate = key;
+                    }
+                    groupedMessages.push({ kind: 'message', msg });
+                }
 
                 return (
-                    <div className="flex flex-col h-[calc(100vh-8rem)] md:h-[calc(100vh-7rem)]">
+                    <div className="flex flex-col h-[calc(100vh-8rem)] md:h-[calc(100vh-7rem)] bg-white rounded-2xl overflow-hidden border border-slate-100 shadow-sm">
                         {/* チャットヘッダー */}
-                        <div className="flex items-center gap-3 p-3 border-b border-slate-200 bg-white rounded-t-2xl">
+                        <div className="flex items-center gap-3 p-3 border-b border-slate-100 bg-white">
                             <button
                                 onClick={() => { setSelectedThread(null); fetchThreads(lineStoreId); }}
                                 className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl hover:bg-slate-100 transition-colors active:scale-95 text-slate-600"
+                                title="戻る"
                             >
                                 <Icon name="arrow-left" size={18} />
-                                <span className="text-xs font-semibold">戻る</span>
                             </button>
-                            {profile.pictureUrl ? (
-                                <ImageWithFallback src={profile.pictureUrl} alt={profile.displayName || ''} className="w-10 h-10 rounded-full object-cover" />
-                            ) : (
-                                <div className="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center">
-                                    <Icon name="user" size={20} className="text-green-600" />
-                                </div>
-                            )}
+                            <LineAvatar profile={profile} userId={selectedThread.userId} size={42} />
                             <div className="flex-1 min-w-0">
-                                <p className="font-semibold text-slate-800 truncate">{displayName}</p>
-                                <p className="text-xs text-slate-400">
-                                    {lineConfig.stores.find(s => s.id === lineStoreId)?.name || ''}
+                                <div className="flex items-center gap-2 min-w-0">
+                                    <p className="font-bold text-slate-800 truncate">{displayName}</p>
+                                    {assignedTags.slice(0, 2).map(t => (
+                                        <span key={t.tagId} className="text-[10px] px-2 py-0.5 rounded-full flex-shrink-0"
+                                            style={{ backgroundColor: (t.color || '#06C755') + '20', color: t.color || '#06C755' }}>
+                                            {t.name}
+                                        </span>
+                                    ))}
+                                </div>
+                                <p className="text-[11px] text-slate-400 flex items-center gap-1">
+                                    <Icon name="map-pin" size={10} />
+                                    {storeName}
                                 </p>
                             </div>
                             <button
                                 onClick={() => fetchMessages(selectedThread.userId)}
                                 className="p-2 rounded-xl hover:bg-slate-100 transition-colors"
-                                title="更新"
+                                title="最新のメッセージに更新"
                             >
                                 <Icon name="refresh-cw" size={18} className={`text-slate-400 ${loading ? 'animate-spin' : ''}`} />
                             </button>
                         </div>
 
                         {/* メッセージ一覧 */}
-                        <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50">
+                        <div className="flex-1 overflow-y-auto px-4 py-4 space-y-2"
+                            style={{ background: 'linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%)' }}>
                             {messages.length === 0 && !loading && (
-                                <p className="text-center text-slate-400 text-sm py-8">メッセージはありません</p>
-                            )}
-                            {messages.map((msg, idx) => (
-                                <div key={idx} className={`flex ${msg.direction === 'sent' ? 'justify-end' : 'justify-start'}`}>
-                                    <div className={`max-w-[75%] ${msg.direction === 'sent'
-                                        ? 'bg-green-500 text-white rounded-2xl rounded-br-md'
-                                        : 'bg-white text-slate-800 rounded-2xl rounded-bl-md shadow-sm border border-slate-100'
-                                    } px-4 py-2.5`}>
-                                        {msg.messageType === 'follow' || msg.messageType === 'unfollow' ? (
-                                            <p className="text-xs text-center italic opacity-70">{msg.messageText}</p>
-                                        ) : (
-                                            <p className="text-sm whitespace-pre-wrap break-words">{msg.messageText}</p>
-                                        )}
-                                        <p className={`text-[10px] mt-1 ${msg.direction === 'sent' ? 'text-green-100' : 'text-slate-400'} text-right`}>
-                                            {formatTime(msg.timestamp)}
-                                        </p>
+                                <div className="text-center py-12">
+                                    <div className="w-14 h-14 rounded-2xl bg-white shadow-sm flex items-center justify-center mx-auto mb-3">
+                                        <Icon name="message-square" size={26} className="text-slate-300" />
                                     </div>
+                                    <p className="text-sm text-slate-400">まだメッセージがありません</p>
+                                    <p className="text-xs text-slate-300 mt-1">下のフォームから最初のメッセージを送りましょう</p>
                                 </div>
-                            ))}
+                            )}
+                            {groupedMessages.map((item, idx) => {
+                                if (item.kind === 'separator') {
+                                    return (
+                                        <div key={item.key} className="flex items-center justify-center py-2">
+                                            <span className="text-[10px] text-slate-400 bg-white/70 backdrop-blur px-3 py-1 rounded-full border border-slate-100 font-medium">
+                                                {item.label}
+                                            </span>
+                                        </div>
+                                    );
+                                }
+                                const msg = item.msg;
+                                const isSystem = msg.messageType === 'follow' || msg.messageType === 'unfollow';
+                                if (isSystem) {
+                                    return (
+                                        <div key={idx} className="flex items-center justify-center py-1">
+                                            <span className={`text-[11px] italic px-3 py-1 rounded-full ${
+                                                msg.messageType === 'follow' ? 'bg-green-50 text-green-600' : 'bg-slate-100 text-slate-500'
+                                            }`}>
+                                                {msg.messageType === 'follow' ? '✨ 友だち追加' : '🚫 ブロック'}
+                                            </span>
+                                        </div>
+                                    );
+                                }
+                                const isSent = msg.direction === 'sent';
+                                return (
+                                    <div key={idx} className={`flex ${isSent ? 'justify-end' : 'justify-start'} items-end gap-2`}>
+                                        {!isSent && <LineAvatar profile={profile} userId={selectedThread.userId} size={28} />}
+                                        <div className={`max-w-[75%] ${isSent
+                                            ? 'bg-green-500 text-white rounded-2xl rounded-br-md'
+                                            : 'bg-white text-slate-800 rounded-2xl rounded-bl-md shadow-sm border border-slate-100'
+                                        } px-4 py-2.5`}>
+                                            <p className="text-sm whitespace-pre-wrap break-words leading-relaxed">
+                                                {previewForMessage(msg)}
+                                            </p>
+                                            <p className={`text-[10px] mt-1 ${isSent ? 'text-green-100' : 'text-slate-400'} ${isSent ? 'text-right' : 'text-left'}`}>
+                                                {formatTime(msg.timestamp)}
+                                            </p>
+                                        </div>
+                                    </div>
+                                );
+                            })}
                             <div ref={messagesEndRef} />
                         </div>
 
                         {/* テンプレート選択パネル */}
-                        {showTemplatePanel && templates.length > 0 && (
-                            <div className="border-t border-slate-100 bg-white p-2 max-h-40 overflow-y-auto">
-                                <div className="grid grid-cols-2 gap-1">
-                                    {templates.map(t => (
-                                        <button key={t.templateId} onClick={() => { setInputText(t.messageContent); setShowTemplatePanel(false); }}
-                                            className="text-left p-2 rounded-lg hover:bg-green-50 transition-colors">
-                                            <p className="text-xs font-semibold text-slate-700 truncate">{t.name}</p>
-                                            <p className="text-[10px] text-slate-400 truncate">{t.messageContent}</p>
-                                        </button>
-                                    ))}
+                        {showTemplatePanel && (
+                            <div className="border-t border-slate-100 bg-white p-3 max-h-48 overflow-y-auto">
+                                <div className="flex items-center justify-between mb-2">
+                                    <span className="text-xs font-bold text-slate-600">定型文</span>
+                                    <button onClick={() => setShowTemplatePanel(false)}
+                                        className="text-[11px] text-slate-400 hover:text-slate-600">閉じる</button>
                                 </div>
+                                {templates.length === 0 ? (
+                                    <p className="text-xs text-slate-400 text-center py-3">
+                                        まだテンプレートがありません。<br />
+                                        「テンプレート」タブから追加できます。
+                                    </p>
+                                ) : (
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-1.5">
+                                        {templates.map(t => (
+                                            <button key={t.templateId}
+                                                onClick={() => { setInputText(t.messageContent); setShowTemplatePanel(false); }}
+                                                className="text-left p-2.5 rounded-lg hover:bg-green-50 border border-slate-100 transition-colors">
+                                                <p className="text-xs font-semibold text-slate-700 truncate flex items-center gap-1.5">
+                                                    {t.category && <span className="text-[9px] px-1.5 py-0.5 rounded bg-green-50 text-green-600">{t.category}</span>}
+                                                    {t.name}
+                                                </p>
+                                                <p className="text-[10px] text-slate-400 truncate mt-0.5">{t.messageContent}</p>
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
                             </div>
                         )}
+
                         {/* 入力エリア */}
-                        <div className="p-3 border-t border-slate-200 bg-white rounded-b-2xl">
+                        <div className="p-3 border-t border-slate-100 bg-white">
                             <div className="flex gap-2 items-end">
                                 <button onClick={() => { if (!templates.length) fetchTemplates(); setShowTemplatePanel(!showTemplatePanel); }}
-                                    className="p-2.5 rounded-xl hover:bg-slate-100 transition-colors" title="テンプレート">
-                                    <Icon name="file-text" size={20} className="text-slate-400" />
+                                    className={`p-2.5 rounded-xl transition-colors ${showTemplatePanel ? 'bg-green-100 text-green-600' : 'hover:bg-slate-100 text-slate-400'}`}
+                                    title="テンプレート">
+                                    <Icon name="file-text" size={20} />
                                 </button>
                                 <textarea
                                     value={inputText}
                                     onChange={(e) => setInputText(e.target.value)}
                                     onKeyDown={handleKeyDown}
-                                    placeholder="メッセージを入力..."
+                                    placeholder="メッセージを入力… (Shift+Enterで改行)"
                                     rows={1}
                                     className="flex-1 resize-none rounded-xl border border-slate-200 px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/30 focus:border-green-400 transition-all"
-                                    style={{ maxHeight: '120px' }}
+                                    style={{ maxHeight: '140px' }}
                                     onInput={(e) => {
                                         e.target.style.height = 'auto';
-                                        e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px';
+                                        e.target.style.height = Math.min(e.target.scrollHeight, 140) + 'px';
                                     }}
                                 />
                                 <button
                                     onClick={handleSend}
                                     disabled={!inputText.trim() || sending}
-                                    className="p-2.5 rounded-xl bg-green-500 text-white hover:bg-green-600 disabled:opacity-40 disabled:cursor-not-allowed transition-all active:scale-90 shadow-sm"
+                                    className="p-2.5 rounded-xl bg-green-500 text-white hover:bg-green-600 disabled:opacity-40 disabled:cursor-not-allowed transition-all active:scale-90 shadow-md shadow-green-500/30"
+                                    title="送信 (Enter)"
                                 >
                                     <Icon name={sending ? 'loader' : 'send'} size={20} className={sending ? 'animate-spin' : ''} />
                                 </button>
                             </div>
+                            <p className="text-[10px] text-slate-400 mt-1.5 pl-1">
+                                プッシュメッセージとして送信されます。LINE公式アカウントの配信枠を消費します。
+                            </p>
                         </div>
                     </div>
                 );
             }
 
             // スレッド一覧（chatタブのデフォルト画面）
-            // Note: this is reached when lineTab === 'chat' && !selectedThread
-            // tabHeader is already rendered above by the if block
+            const currentStore = lineConfig.stores.find(s => s.id === lineStoreId);
+            const filteredThreads = threads.filter(t => {
+                if (!threadSearch.trim()) return true;
+                const profile = profiles[t.userId] || {};
+                const name = resolveDisplayName(profile, t.userId).toLowerCase();
+                const msg = (t.lastMessage?.messageText || '').toLowerCase();
+                const q = threadSearch.toLowerCase();
+                return name.includes(q) || msg.includes(q);
+            });
+            const totalUnread = threads.reduce((sum, t) => sum + (t.unread || 0), 0);
+
             return (
                 <div>
                     {/* ヘッダー */}
                     <div className="flex items-center justify-between mb-3">
-                        <div>
-                            <h2 className="text-xl font-bold text-slate-800">LINE</h2>
-                            <p className="text-xs text-slate-500 mt-0.5">{lineConfig.stores.find(s => s.id === lineStoreId)?.name || ''}</p>
+                        <div className="flex items-center gap-2.5 min-w-0">
+                            <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+                                style={{ background: 'linear-gradient(135deg, #06C755 0%, #00b74d 100%)' }}>
+                                <Icon name="message-circle" size={18} className="text-white" />
+                            </div>
+                            <div className="min-w-0">
+                                <h2 className="text-xl font-bold text-slate-800 leading-tight truncate">LINE</h2>
+                                <p className="text-[11px] text-slate-500 truncate flex items-center gap-1.5">
+                                    {currentStore?.name || '店舗未選択'}
+                                    {totalUnread > 0 && (
+                                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-red-50 text-red-600 text-[10px] font-semibold">
+                                            <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+                                            未読 {totalUnread}
+                                        </span>
+                                    )}
+                                </p>
+                            </div>
                         </div>
                         <button onClick={() => fetchThreads(lineStoreId)}
-                            className="p-2.5 rounded-xl hover:bg-slate-100 transition-colors">
+                            className="p-2.5 rounded-xl hover:bg-slate-100 transition-colors flex-shrink-0"
+                            title="更新">
                             <Icon name="refresh-cw" size={18} className={`text-slate-400 ${loading ? 'animate-spin' : ''}`} />
                         </button>
                     </div>
+
                     {/* タブナビゲーション */}
                     <div className="flex gap-1 overflow-x-auto pb-1 mb-4" style={{scrollbarWidth: 'none'}}>
                         {[
@@ -10679,10 +10912,10 @@
                         ))}
                     </div>
 
-                    {/* 店舗選択 */}
-                    {(() => { const ls = currentAccess ? lineConfig.stores.filter(s => currentAccess.storeIds.includes(s.id)) : lineConfig.stores; return ls.length > 1 ? (
+                    {/* 店舗選択 (許可された店舗のみ) */}
+                    {allowedLineStores.length > 1 && (
                         <div className="flex gap-2 mb-4 overflow-x-auto pb-1" style={{scrollbarWidth: 'none'}}>
-                            {ls.map(store => (
+                            {allowedLineStores.map(store => (
                                 <button
                                     key={store.id}
                                     onClick={() => setLineStoreId(store.id)}
@@ -10696,84 +10929,139 @@
                                 </button>
                             ))}
                         </div>
-                    ) : null; })()}
+                    )}
 
-                    {/* GAS接続ステータス */}
-                    {gasStatus !== 'checking' && (
-                        <div className={`flex items-center gap-2 px-3 py-2 rounded-xl mb-3 text-xs ${
-                            gasStatus === 'connected'
-                                ? 'bg-green-50 text-green-700'
-                                : 'bg-red-50 text-red-700'
-                        }`}>
-                            <span className={`w-2 h-2 rounded-full flex-shrink-0 ${
-                                gasStatus === 'connected' ? 'bg-green-500' : 'bg-red-500'
-                            }`}></span>
-                            {gasStatus === 'connected' ? (
-                                <span>GAS接続OK — メッセージ {threads.length} 件</span>
-                            ) : (
-                                <div>
-                                    <span className="font-semibold">GAS接続エラー</span>
-                                    {gasError && <span className="ml-1">— {gasError}</span>}
-                                    <p className="mt-0.5 text-[10px] opacity-75">GASを最新のunified.gsで再デプロイしてください</p>
-                                </div>
+                    {/* アクセス不可（許可店舗ゼロ） */}
+                    {allowedLineStores.length === 0 && lineConfig.configured && (
+                        <div className="bg-amber-50 border border-amber-200 text-amber-700 rounded-xl p-4 mb-3 text-xs">
+                            <p className="font-semibold mb-1">LINE利用権限がありません</p>
+                            <p className="opacity-80">あなたのアカウントには、LINE連携された店舗がまだ紐づけられていません。管理者にお問い合わせください。</p>
+                        </div>
+                    )}
+
+                    {/* 検索 */}
+                    {allowedLineStores.length > 0 && lineStoreId && (
+                        <div className="relative mb-3">
+                            <Icon name="search" size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                            <input
+                                type="text"
+                                value={threadSearch}
+                                onChange={e => setThreadSearch(e.target.value)}
+                                placeholder="お客様名・メッセージで検索..."
+                                className="w-full pl-9 pr-9 py-2.5 text-sm rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-green-500/30 focus:border-green-400 transition-all"
+                            />
+                            {threadSearch && (
+                                <button onClick={() => setThreadSearch('')}
+                                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded hover:bg-slate-100">
+                                    <Icon name="x" size={14} className="text-slate-400" />
+                                </button>
                             )}
                         </div>
                     )}
-                    {gasStatus === 'checking' && loading && (
-                        <div className="flex items-center gap-2 px-3 py-2 rounded-xl mb-3 text-xs bg-slate-50 text-slate-500">
-                            <Icon name="loader" size={12} className="animate-spin" />
-                            <span>GAS接続を確認中...</span>
+
+                    {/* 接続ステータス（エラー時のみ表示してノイズを減らす） */}
+                    {gasStatus === 'error' && gasError && (
+                        <div className="flex items-start gap-2 px-3 py-2 rounded-xl mb-3 text-xs bg-red-50 text-red-700">
+                            <Icon name="alert-circle" size={14} className="flex-shrink-0 mt-0.5" />
+                            <div>
+                                <span className="font-semibold">データ取得エラー</span>
+                                <span className="ml-1">— {gasError}</span>
+                                <p className="mt-0.5 text-[10px] opacity-75">時間を置いて再試行してください。問題が続く場合は管理者にご連絡を。</p>
+                            </div>
                         </div>
                     )}
 
                     {/* スレッド一覧 */}
                     <div className="space-y-2">
                         {loading && threads.length === 0 && gasStatus !== 'error' && (
-                            <div className="flex items-center justify-center py-12">
-                                <Icon name="loader" size={24} className="text-green-500 animate-spin" />
+                            <div className="space-y-2">
+                                {[1, 2, 3].map(i => (
+                                    <div key={i} className="flex items-center gap-3 p-3 rounded-2xl bg-white border border-slate-100 animate-pulse">
+                                        <div className="w-12 h-12 rounded-full bg-slate-100 flex-shrink-0" />
+                                        <div className="flex-1 min-w-0">
+                                            <div className="h-3 bg-slate-100 rounded w-1/3 mb-2" />
+                                            <div className="h-3 bg-slate-100 rounded w-2/3" />
+                                        </div>
+                                    </div>
+                                ))}
                             </div>
                         )}
 
-                        {!loading && threads.length === 0 && gasStatus !== 'error' && (
+                        {!loading && threads.length === 0 && gasStatus !== 'error' && lineStoreId && (
                             <div className="text-center py-12">
-                                <div className="w-14 h-14 rounded-2xl bg-green-50 flex items-center justify-center mx-auto mb-3">
-                                    <Icon name="message-circle" size={28} className="text-green-400" />
+                                <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-3"
+                                    style={{ background: 'linear-gradient(135deg, #d1fae5 0%, #ecfdf5 100%)' }}>
+                                    <Icon name="message-circle" size={30} className="text-green-500" />
                                 </div>
-                                <p className="text-sm text-slate-500">まだメッセージがありません</p>
-                                <p className="text-xs text-slate-400 mt-1">LINEからメッセージが届くとここに表示されます</p>
+                                <p className="text-sm font-semibold text-slate-600">まだメッセージがありません</p>
+                                <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                                    お客様からLINEでメッセージが届くと<br />ここにスレッドが表示されます
+                                </p>
                             </div>
                         )}
 
-                        {threads.map((thread, idx) => {
+                        {!loading && filteredThreads.length === 0 && threads.length > 0 && (
+                            <div className="text-center py-10">
+                                <Icon name="search" size={26} className="text-slate-300 mx-auto mb-2" />
+                                <p className="text-sm text-slate-500">「{threadSearch}」に一致するスレッドがありません</p>
+                            </div>
+                        )}
+
+                        {filteredThreads.map((thread, idx) => {
                             const profile = profiles[thread.userId] || {};
-                            const displayName = profile.displayName || thread.userId.slice(0, 8) + '...';
+                            const displayName = resolveDisplayName(profile, thread.userId);
                             const lastMsg = thread.lastMessage;
+                            const unread = thread.unread || 0;
+                            const preview = lastMsg
+                                ? (lastMsg.direction === 'sent' ? '自分: ' : '') + previewForMessage(lastMsg)
+                                : '';
+                            const userTagList = (tags || []).filter(tg =>
+                                (userTags || []).some(ut =>
+                                    ut.storeId === lineStoreId &&
+                                    ut.userId === thread.userId &&
+                                    ut.tagId === tg.tagId
+                                )
+                            );
 
                             return (
                                 <button
                                     key={thread.userId + '-' + idx}
                                     onClick={() => openThread(thread)}
-                                    className="w-full flex items-center gap-3 p-3 rounded-2xl bg-white hover:bg-green-50/50 border border-slate-100 hover:border-green-200 transition-all active:scale-[0.98] text-left"
+                                    className={`w-full flex items-center gap-3 p-3 rounded-2xl transition-all active:scale-[0.98] text-left border ${
+                                        unread > 0
+                                            ? 'bg-green-50/60 border-green-200 hover:bg-green-50'
+                                            : 'bg-white border-slate-100 hover:bg-green-50/40 hover:border-green-200'
+                                    }`}
                                 >
-                                    {profile.pictureUrl ? (
-                                        <ImageWithFallback src={profile.pictureUrl} alt={profile.displayName || ''} className="w-12 h-12 rounded-full object-cover flex-shrink-0" />
-                                    ) : (
-                                        <div className="w-12 h-12 rounded-full bg-green-100 flex items-center justify-center flex-shrink-0">
-                                            <Icon name="user" size={22} className="text-green-600" />
-                                        </div>
-                                    )}
+                                    <LineAvatar profile={profile} userId={thread.userId} size={48} />
                                     <div className="flex-1 min-w-0">
-                                        <div className="flex items-center justify-between">
-                                            <p className="font-semibold text-slate-800 truncate">{displayName}</p>
-                                            <span className="text-[10px] text-slate-400 flex-shrink-0 ml-2">
-                                                {lastMsg ? formatTime(lastMsg.timestamp) : ''}
+                                        <div className="flex items-center justify-between gap-2">
+                                            <div className="flex items-center gap-1.5 min-w-0">
+                                                <p className={`truncate ${unread > 0 ? 'font-bold text-slate-900' : 'font-semibold text-slate-800'}`}>
+                                                    {displayName}
+                                                </p>
+                                                {userTagList.slice(0, 1).map(t => (
+                                                    <span key={t.tagId} className="text-[9px] px-1.5 py-0.5 rounded-full flex-shrink-0 font-semibold"
+                                                        style={{ backgroundColor: (t.color || '#06C755') + '20', color: t.color || '#06C755' }}>
+                                                        {t.name}
+                                                    </span>
+                                                ))}
+                                            </div>
+                                            <span className="text-[10px] text-slate-400 flex-shrink-0">
+                                                {lastMsg ? relativeTime(lastMsg.timestamp) : ''}
                                             </span>
                                         </div>
-                                        <p className="text-xs text-slate-500 truncate mt-0.5">
-                                            {lastMsg ? (lastMsg.direction === 'sent' ? '自分: ' : '') + (lastMsg.messageText || `[${lastMsg.messageType}]`) : ''}
-                                        </p>
+                                        <div className="flex items-center justify-between gap-2 mt-0.5">
+                                            <p className={`text-xs truncate ${unread > 0 ? 'text-slate-700 font-medium' : 'text-slate-500'}`}>
+                                                {preview || <span className="italic text-slate-300">（メッセージなし）</span>}
+                                            </p>
+                                            {unread > 0 && (
+                                                <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1.5 rounded-full bg-green-500 text-white text-[10px] font-bold flex-shrink-0">
+                                                    {unread > 99 ? '99+' : unread}
+                                                </span>
+                                            )}
+                                        </div>
                                     </div>
-                                    <Icon name="chevron-right" size={16} className="text-slate-300 flex-shrink-0" />
                                 </button>
                             );
                         })}
@@ -13711,10 +13999,12 @@
                 if (!lineChatHook || !lineChatHook.lineConfig?.configured) {
                     alert('LINE連携が設定されていません。設定画面からLINE APIを設定してください。'); return;
                 }
-                const allowedLineStores = currentAccess ? lineChatHook.lineConfig.stores.filter(s => currentAccess.storeIds.includes(s.id)) : lineChatHook.lineConfig.stores;
-                if (lineChatHook.lineStoreId && (!currentAccess || currentAccess.storeIds.includes(lineChatHook.lineStoreId))) { lineChatHook.fetchThreads(lineChatHook.lineStoreId); }
-                else if (allowedLineStores.length > 0) {
-                    const fs = allowedLineStores[0].id;
+                const allowedStores = lineChatHook.allowedLineStores || [];
+                const isAllowed = (sid) => allowedStores.some(s => s.id === sid);
+                if (lineChatHook.lineStoreId && isAllowed(lineChatHook.lineStoreId)) {
+                    lineChatHook.fetchThreads(lineChatHook.lineStoreId);
+                } else if (allowedStores.length > 0) {
+                    const fs = allowedStores[0].id;
                     lineChatHook.setLineStoreId(fs); lineChatHook.fetchThreads(fs);
                 }
                 setLineSelectedUser(null); setLineSearchQuery(''); setLineSendStatus('');
@@ -15017,7 +15307,7 @@
                                     </div>
                                     <button onClick={()=>setLineModalOpen(false)} className="text-white/80 hover:text-white text-xl">&times;</button>
                                 </div>
-                                {lineChatHook && (() => { const ls = currentAccess ? lineChatHook.lineConfig.stores.filter(s => currentAccess.storeIds.includes(s.id)) : lineChatHook.lineConfig.stores; return ls.length > 1 ? (
+                                {lineChatHook && (() => { const ls = lineChatHook.allowedLineStores || []; return ls.length > 1 ? (
                                     <div className="px-4 pt-3 flex gap-2 flex-wrap">
                                         {ls.map(s=>(
                                             <button key={s.id} onClick={()=>{lineChatHook.setLineStoreId(s.id);lineChatHook.fetchThreads(s.id);setLineSelectedUser(null);}}
@@ -15036,19 +15326,22 @@
                                             : <EmptyState icon="message-circle" title="LINEスレッドがありません" message="お客様からのメッセージがあると表示されます" compact />
                                     )}
                                     {lineChatHook && lineChatHook.threads
-                                        .filter(t=>!lineSearchQuery||(lineChatHook.profiles[t.userId]?.displayName||'').toLowerCase().includes(lineSearchQuery.toLowerCase()))
+                                        .filter(t => {
+                                            const pr = lineChatHook.profiles[t.userId] || {};
+                                            const name = resolveDisplayName(pr, t.userId).toLowerCase();
+                                            return !lineSearchQuery || name.includes(lineSearchQuery.toLowerCase());
+                                        })
                                         .map(t=>{
                                             const pr=lineChatHook.profiles[t.userId]||{};
+                                            const name = resolveDisplayName(pr, t.userId);
                                             const sel=lineSelectedUser&&lineSelectedUser.userId===t.userId;
                                             return (
-                                                <button key={t.userId} onClick={()=>setLineSelectedUser({userId:t.userId,displayName:pr.displayName||t.userId})}
+                                                <button key={t.userId} onClick={()=>setLineSelectedUser({userId:t.userId,displayName:name})}
                                                     className={`w-full flex items-center gap-3 p-3 rounded-xl text-left transition ${sel?'bg-green-50 border-2 border-green-500':'hover:bg-gray-50 border-2 border-transparent'}`}>
-                                                    {pr.pictureUrl
-                                                        ?<ImageWithFallback src={pr.pictureUrl} className="w-10 h-10 rounded-full object-cover border-2 border-gray-200" alt={pr.displayName || ''}/>
-                                                        :<div className="w-10 h-10 rounded-full bg-gray-300 flex items-center justify-center text-white text-sm font-bold">{(pr.displayName||'?')[0]}</div>}
+                                                    <LineAvatar profile={pr} userId={t.userId} name={name} size={40} />
                                                     <div className="flex-1 min-w-0">
-                                                        <p className="font-bold text-sm truncate">{pr.displayName||t.userId}</p>
-                                                        {t.lastMessage&&<p className="text-xs text-gray-400 truncate">{t.lastMessage.messageText}</p>}
+                                                        <p className="font-bold text-sm truncate">{name}</p>
+                                                        {t.lastMessage&&<p className="text-xs text-gray-400 truncate">{previewForMessage(t.lastMessage)}</p>}
                                                     </div>
                                                     {sel&&<svg className="w-5 h-5 text-green-500" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd"/></svg>}
                                                 </button>
@@ -15376,12 +15669,13 @@
                     alert('LINE連携が設定されていません。設定画面からLINE APIを設定してください。');
                     return;
                 }
-                const allowedLineStores = currentAccess ? lineChatHook.lineConfig.stores.filter(s => currentAccess.storeIds.includes(s.id)) : lineChatHook.lineConfig.stores;
+                const allowedStores = lineChatHook.allowedLineStores || [];
+                const isAllowed = (sid) => allowedStores.some(s => s.id === sid);
                 // 初回はスレッド取得
-                if (lineChatHook.lineStoreId && (!currentAccess || currentAccess.storeIds.includes(lineChatHook.lineStoreId))) {
+                if (lineChatHook.lineStoreId && isAllowed(lineChatHook.lineStoreId)) {
                     lineChatHook.fetchThreads(lineChatHook.lineStoreId);
-                } else if (allowedLineStores.length > 0) {
-                    const firstStore = allowedLineStores[0].id;
+                } else if (allowedStores.length > 0) {
+                    const firstStore = allowedStores[0].id;
                     lineChatHook.setLineStoreId(firstStore);
                     lineChatHook.fetchThreads(firstStore);
                 }
@@ -15819,7 +16113,7 @@
                                 </div>
 
                                 {/* Store Selector */}
-                                {lineChatHook && (() => { const ls = currentAccess ? lineChatHook.lineConfig.stores.filter(s => currentAccess.storeIds.includes(s.id)) : lineChatHook.lineConfig.stores; return ls.length > 1 ? (
+                                {lineChatHook && (() => { const ls = lineChatHook.allowedLineStores || []; return ls.length > 1 ? (
                                     <div className="px-4 pt-3 flex gap-2 flex-wrap">
                                         {ls.map(s => (
                                             <button key={s.id} onClick={() => { lineChatHook.setLineStoreId(s.id); lineChatHook.fetchThreads(s.id); setLineSelectedUser(null); }}
@@ -15848,21 +16142,20 @@
                                         .filter(t => {
                                             if (!lineSearchQuery) return true;
                                             const profile = lineChatHook.profiles[t.userId] || {};
-                                            return (profile.displayName || '').toLowerCase().includes(lineSearchQuery.toLowerCase());
+                                            const name = resolveDisplayName(profile, t.userId).toLowerCase();
+                                            return name.includes(lineSearchQuery.toLowerCase());
                                         })
                                         .map(t => {
                                             const profile = lineChatHook.profiles[t.userId] || {};
+                                            const name = resolveDisplayName(profile, t.userId);
                                             const isSelected = lineSelectedUser && lineSelectedUser.userId === t.userId;
                                             return (
-                                                <button key={t.userId} onClick={() => setLineSelectedUser({ userId: t.userId, displayName: profile.displayName || t.userId })}
+                                                <button key={t.userId} onClick={() => setLineSelectedUser({ userId: t.userId, displayName: name })}
                                                     className={`w-full flex items-center gap-3 p-3 rounded-xl text-left transition ${isSelected ? 'bg-green-50 border-2 border-green-500 shadow-sm' : 'hover:bg-gray-50 border-2 border-transparent'}`}>
-                                                    {profile.pictureUrl
-                                                        ? <ImageWithFallback src={profile.pictureUrl} className="w-10 h-10 rounded-full object-cover border-2 border-gray-200" alt={profile.displayName || ''} />
-                                                        : <div className="w-10 h-10 rounded-full bg-gray-300 flex items-center justify-center text-white text-sm font-bold">{(profile.displayName || '?')[0]}</div>
-                                                    }
+                                                    <LineAvatar profile={profile} userId={t.userId} name={name} size={40} />
                                                     <div className="flex-1 min-w-0">
-                                                        <p className="font-bold text-sm text-gray-800 truncate">{profile.displayName || t.userId}</p>
-                                                        {t.lastMessage && <p className="text-xs text-gray-400 truncate">{t.lastMessage.messageText}</p>}
+                                                        <p className="font-bold text-sm text-gray-800 truncate">{name}</p>
+                                                        {t.lastMessage && <p className="text-xs text-gray-400 truncate">{previewForMessage(t.lastMessage)}</p>}
                                                     </div>
                                                     {isSelected && (
                                                         <svg className="w-5 h-5 text-green-500 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>

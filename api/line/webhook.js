@@ -1,14 +1,22 @@
 // LINE Webhook Receiver - Vercel Serverless Function
-// Receives messages from LINE and forwards to GAS for storage
+// Receives messages from LINE and persists directly to Supabase.
 // Each store has its own webhook URL: /api/line/webhook?store={id}
+//
+// Design:
+//   1. Verify signature with per-store CHANNEL_SECRET
+//   2. Persist every (follow/unfollow/message) event to Supabase scoped by storeId
+//   3. Resolve and upsert LINE profile (display_name, picture_url) scoped by storeId
+//   4. Run auto-reply rules (scoped by storeId)
+//   5. Best-effort mirror to legacy GAS so existing sheets stay warm
+//
+// Store scoping is strict: events received on /api/line/webhook?store=1
+// are ONLY ever written with store_id='1'. No cross-store bleed possible.
 
 import crypto from 'crypto';
+import { supabase } from '../_lib/supabase.js';
 
-// Disable Vercel's automatic body parsing to get raw body for signature verification
 export const config = {
-  api: {
-    bodyParser: false,
-  },
+  api: { bodyParser: false },
 };
 
 function getLineConfig(storeId) {
@@ -22,10 +30,12 @@ function getLineConfig(storeId) {
 
 function verifySignature(rawBody, signature, secret) {
   const hash = crypto.createHmac('SHA256', secret).update(rawBody).digest('base64');
-  return crypto.timingSafeEqual(Buffer.from(hash), Buffer.from(signature));
+  const a = Buffer.from(hash);
+  const b = Buffer.from(signature);
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
 }
 
-// Read raw body from request stream
 function getRawBody(req) {
   return new Promise((resolve, reject) => {
     const chunks = [];
@@ -35,20 +45,144 @@ function getRawBody(req) {
   });
 }
 
-// POST to GAS with redirect handling (GAS returns 302 which converts POST→GET, losing body)
 async function postToGas(gasUrl, data) {
-  const jsonBody = JSON.stringify(data);
-  const response = await fetch(gasUrl, {
+  return fetch(gasUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'text/plain' },
-    body: jsonBody,
+    body: JSON.stringify(data),
     redirect: 'follow',
   });
-  return response;
+}
+
+// Fetch LINE profile and upsert into line_profiles. Returns displayName or ''.
+async function fetchAndUpsertProfile(storeId, userId, accessToken) {
+  if (!userId) return '';
+  try {
+    const res = await fetch(`https://api.line.me/v2/bot/profile/${userId}`, {
+      headers: { 'Authorization': `Bearer ${accessToken}` },
+    });
+    if (!res.ok) {
+      // Blocked / deleted accounts return 404. Still upsert with empty name
+      // so UI shows a stable "guest" avatar instead of a broken name.
+      await supabase.from('line_profiles').upsert({
+        user_id: userId, store_id: String(storeId),
+        display_name: '', picture_url: '',
+      }, { onConflict: 'user_id,store_id' });
+      return '';
+    }
+    const profile = await res.json();
+    const displayName = profile.displayName || '';
+    const pictureUrl = profile.pictureUrl || '';
+    await supabase.from('line_profiles').upsert({
+      user_id: userId,
+      store_id: String(storeId),
+      display_name: displayName,
+      picture_url: pictureUrl,
+    }, { onConflict: 'user_id,store_id' });
+    return displayName;
+  } catch (err) {
+    console.error('[LINE webhook] profile fetch error:', err);
+    return '';
+  }
+}
+
+// Persist one LINE event to Supabase. Store scoping is enforced here.
+async function persistEvent(storeId, event) {
+  const sid = String(storeId);
+  const userId = event.source?.userId || '';
+  if (!userId) return;
+
+  if (event.type === 'message') {
+    const msgType = event.message?.type || 'text';
+    const text = event.message?.text
+      || (msgType === 'image' ? '[画像]' : msgType === 'sticker' ? '[スタンプ]'
+        : msgType === 'video' ? '[動画]' : msgType === 'audio' ? '[音声]'
+        : msgType === 'location' ? '[位置情報]' : msgType === 'file' ? '[ファイル]' : '');
+    await supabase.from('line_messages').insert({
+      store_id: sid,
+      user_id: userId,
+      direction: 'received',
+      message_type: msgType,
+      message_text: text,
+      message_id: event.message?.id || '',
+      timestamp: event.timestamp ? new Date(event.timestamp).toISOString() : new Date().toISOString(),
+    });
+  } else if (event.type === 'follow' || event.type === 'unfollow') {
+    await supabase.from('line_messages').insert({
+      store_id: sid,
+      user_id: userId,
+      direction: 'received',
+      message_type: event.type,
+      message_text: event.type === 'follow' ? '友だち追加' : 'ブロック',
+      message_id: '',
+      timestamp: event.timestamp ? new Date(event.timestamp).toISOString() : new Date().toISOString(),
+    });
+  }
+}
+
+// Run auto-reply matching for a single message event
+async function runAutoReply(storeId, event, accessToken) {
+  if (event.type !== 'message' || !event.replyToken) return;
+  const text = event.message?.text || '';
+  if (!text) return;
+
+  const { data: rules, error } = await supabase
+    .from('line_auto_replies')
+    .select('*')
+    .eq('store_id', String(storeId))
+    .eq('enabled', true)
+    .order('priority', { ascending: false });
+  if (error || !rules || rules.length === 0) return;
+
+  let matched = null;
+  for (const rule of rules) {
+    const method = rule.match_method || 'contains';
+    if (method === 'exact' && text === rule.keyword) { matched = rule; break; }
+    if (method === 'contains' && rule.keyword && text.includes(rule.keyword)) { matched = rule; break; }
+    if (method === 'regex') {
+      try { if (new RegExp(rule.keyword).test(text)) { matched = rule; break; } } catch (_) {}
+    }
+  }
+  if (!matched) return;
+
+  let replyMessage;
+  if (matched.reply_type === 'flex') {
+    try {
+      replyMessage = { type: 'flex', altText: matched.keyword || 'メッセージ', contents: JSON.parse(matched.reply_content) };
+    } catch (_) {
+      replyMessage = { type: 'text', text: matched.reply_content || '' };
+    }
+  } else {
+    replyMessage = { type: 'text', text: matched.reply_content || '' };
+  }
+
+  try {
+    const res = await fetch('https://api.line.me/v2/bot/message/reply', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ replyToken: event.replyToken, messages: [replyMessage] }),
+    });
+    if (res.ok) {
+      // Persist the outbound auto-reply so it shows up in the chat history
+      await supabase.from('line_messages').insert({
+        store_id: String(storeId),
+        user_id: event.source?.userId || '',
+        direction: 'sent',
+        message_type: 'text',
+        message_text: '[自動応答] ' + (matched.reply_type === 'flex' ? (matched.keyword || '') : (matched.reply_content || '')),
+        message_id: '',
+      });
+    }
+  } catch (err) {
+    console.error('[LINE webhook] auto-reply send error:', err);
+  }
 }
 
 export default async function handler(req, res) {
-  // LINE sends POST for webhooks, but also verify endpoint with GET
+  // LINE health-check uses GET
   if (req.method === 'GET') return res.status(200).json({ status: 'ok' });
   if (req.method !== 'POST') return res.status(200).end();
 
@@ -57,37 +191,31 @@ export default async function handler(req, res) {
 
   const lineConfig = getLineConfig(storeId);
   if (!lineConfig) {
-    console.error('Store not configured:', storeId);
+    console.error('[LINE webhook] Store not configured:', storeId);
     return res.status(404).json({ error: 'Store not configured', storeId });
   }
 
-  // Read raw body for accurate signature verification
   let rawBody;
   try {
     rawBody = await getRawBody(req);
   } catch (err) {
-    console.error('Failed to read request body:', err);
+    console.error('[LINE webhook] read body error:', err);
     return res.status(400).json({ error: 'Failed to read body' });
   }
 
-  // Verify LINE signature against raw body bytes
   const signature = req.headers['x-line-signature'];
-  if (!signature) {
-    console.error('Missing x-line-signature header');
-    return res.status(401).json({ error: 'Missing x-line-signature header' });
-  }
+  if (!signature) return res.status(401).json({ error: 'Missing x-line-signature header' });
 
   try {
     if (!verifySignature(rawBody, signature, lineConfig.secret)) {
-      console.error('Signature mismatch for store:', storeId);
+      console.error('[LINE webhook] Signature mismatch for store:', storeId);
       return res.status(401).json({ error: 'Invalid signature' });
     }
   } catch (err) {
-    console.error('Signature verification error:', err);
+    console.error('[LINE webhook] Signature verification error:', err);
     return res.status(401).json({ error: 'Signature verification failed' });
   }
 
-  // Parse the body after signature verification
   let body;
   try {
     body = JSON.parse(rawBody.toString('utf-8'));
@@ -96,122 +224,53 @@ export default async function handler(req, res) {
   }
 
   const events = body.events || [];
-
-  // LINE sends a verification request with empty events on webhook URL registration
   if (events.length === 0) {
     return res.status(200).json({ success: true, message: 'Webhook verified' });
   }
 
-  // Forward message events to GAS for storage
+  // Track unique userIds to fetch profiles once per event batch
+  const userIdsNeedingProfile = new Set();
+  for (const ev of events) {
+    if (ev.source?.userId && (ev.type === 'message' || ev.type === 'follow')) {
+      userIdsNeedingProfile.add(ev.source.userId);
+    }
+  }
+
+  // 1. Refresh profiles (store-scoped)
+  await Promise.all(
+    [...userIdsNeedingProfile].map(uid =>
+      fetchAndUpsertProfile(storeId, uid, lineConfig.token)
+    )
+  );
+
+  // 2. Persist events (store-scoped)
+  await Promise.all(events.map(ev => persistEvent(storeId, ev).catch(err => {
+    console.error('[LINE webhook] persistEvent error:', err);
+  })));
+
+  // 3. Run auto-reply (store-scoped)
+  await Promise.all(events.map(ev => runAutoReply(storeId, ev, lineConfig.token).catch(err => {
+    console.error('[LINE webhook] autoReply error:', err);
+  })));
+
+  // 4. Best-effort mirror to GAS for legacy sheets
   const gasUrl = process.env.GAS_WEBHOOK_URL;
-  const messageEvents = events.filter(e => e.type === 'message' || e.type === 'follow' || e.type === 'unfollow');
-
-  if (gasUrl && messageEvents.length > 0) {
-    try {
-      const gasRes = await postToGas(gasUrl, {
-        type: 'lineWebhook',
-        storeId,
-        events: messageEvents.map(e => ({
-          type: e.type,
-          timestamp: e.timestamp,
-          replyToken: e.type === 'message' ? e.replyToken : undefined,
-          userId: e.source?.userId || '',
-          messageType: e.message?.type || '',
-          messageText: e.message?.text || '',
-          messageId: e.message?.id || '',
-        })),
-      });
-      console.log('GAS webhook response:', gasRes.status);
-    } catch (err) {
-      console.error('Failed to forward to GAS:', err);
-    }
+  const relay = events.filter(e => e.type === 'message' || e.type === 'follow' || e.type === 'unfollow');
+  if (gasUrl && relay.length > 0) {
+    postToGas(gasUrl, {
+      type: 'lineWebhook',
+      storeId,
+      events: relay.map(e => ({
+        type: e.type,
+        timestamp: e.timestamp,
+        replyToken: e.type === 'message' ? e.replyToken : undefined,
+        userId: e.source?.userId || '',
+        messageType: e.message?.type || '',
+        messageText: e.message?.text || '',
+        messageId: e.message?.id || '',
+      })),
+    }).catch(err => console.error('[LINE webhook] GAS relay error:', err));
   }
 
-  // Auto-reply: check rules and reply if matched
-  for (const event of messageEvents) {
-    if (event.type !== 'message' || !event.replyToken) continue;
-    const messageText = event.message?.text || '';
-    if (!messageText) continue;
-
-    try {
-      // Fetch auto-reply rules from GAS
-      const gasUrl = process.env.GAS_WEBHOOK_URL;
-      if (!gasUrl) continue;
-
-      const rulesRes = await fetch(gasUrl + '?type=lineAutoReplies&store=' + storeId);
-      if (!rulesRes.ok) continue;
-      const rulesData = await rulesRes.json();
-      const rules = (rulesData.rules || []).filter(r => r.enabled);
-
-      // Find matching rule
-      let matchedRule = null;
-      for (const rule of rules) {
-        if (rule.matchMethod === 'exact' && messageText === rule.keyword) {
-          matchedRule = rule;
-          break;
-        } else if (rule.matchMethod === 'contains' && messageText.includes(rule.keyword)) {
-          matchedRule = rule;
-          break;
-        } else if (rule.matchMethod === 'regex') {
-          try {
-            if (new RegExp(rule.keyword).test(messageText)) {
-              matchedRule = rule;
-              break;
-            }
-          } catch (e) { /* invalid regex, skip */ }
-        }
-      }
-
-      if (matchedRule) {
-        // Use replyToken to reply (free, no messaging cost)
-        const replyMessages = [{ type: matchedRule.replyType || 'text', text: matchedRule.replyContent }];
-        // If replyType is 'flex', parse the content as JSON
-        if (matchedRule.replyType === 'flex') {
-          try {
-            replyMessages[0] = { type: 'flex', altText: matchedRule.keyword, contents: JSON.parse(matchedRule.replyContent) };
-          } catch (e) {
-            replyMessages[0] = { type: 'text', text: matchedRule.replyContent };
-          }
-        }
-
-        await fetch('https://api.line.me/v2/bot/message/reply', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${lineConfig.token}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ replyToken: event.replyToken, messages: replyMessages }),
-        });
-        console.log('Auto-reply sent for keyword:', matchedRule.keyword);
-      }
-    } catch (err) {
-      console.error('Auto-reply error:', err);
-    }
-  }
-
-  // Also fetch user profiles for new messages and store them
-  for (const event of messageEvents) {
-    if (event.source?.userId && gasUrl) {
-      try {
-        const profileRes = await fetch(`https://api.line.me/v2/bot/profile/${event.source.userId}`, {
-          headers: { 'Authorization': `Bearer ${lineConfig.token}` },
-        });
-        if (profileRes.ok) {
-          const profile = await profileRes.json();
-          await postToGas(gasUrl, {
-            type: 'lineProfile',
-            storeId,
-            userId: event.source.userId,
-            displayName: profile.displayName || '',
-            pictureUrl: profile.pictureUrl || '',
-          });
-        }
-      } catch (err) {
-        console.error('Failed to fetch LINE profile:', err);
-      }
-    }
-  }
-
-  // Always respond 200 to LINE
-  return res.status(200).json({ success: true, processed: messageEvents.length });
+  return res.status(200).json({ success: true, processed: events.length });
 }
