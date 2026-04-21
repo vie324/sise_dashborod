@@ -73,7 +73,23 @@
                             400: '#facc15',
                             500: '#eab308',
                             600: '#ca8a04',
-                        }
+                        },
+                        // Semantic palette (Phase 1: A2)
+                        // Use these for success/warning/danger/info states across the app.
+                        semantic: {
+                            'success-50':  '#ecfdf5',
+                            'success-500': '#10b981',
+                            'success-600': '#059669',
+                            'warning-50':  '#fffbeb',
+                            'warning-500': '#f59e0b',
+                            'warning-600': '#d97706',
+                            'danger-50':   '#fef2f2',
+                            'danger-500':  '#ef4444',
+                            'danger-600':  '#dc2626',
+                            'info-50':     '#eff6ff',
+                            'info-500':    '#3b82f6',
+                            'info-600':    '#2563eb',
+                        },
                     },
                     fontFamily: {
                         sans: ['"Noto Sans JP"', '"Hiragino Sans"', 'sans-serif'],
@@ -304,6 +320,35 @@
         }
         .dark .glass-card-glow { background: rgba(18,35,27,0.8); border-color: rgba(51,160,101,0.18); }
 
+        /* =========================================================
+           Phase 1 — A3: Typography scale
+           Single source of truth for text sizes. Prefer these on new
+           components; existing text-xs/sm/base/lg/xl are kept for BC.
+           ========================================================= */
+        .typo-display { font-size: clamp(28px, 4vw, 36px); font-weight: 800; letter-spacing: -0.02em; line-height: 1.15; }
+        .typo-h1      { font-size: clamp(22px, 3vw, 28px); font-weight: 700; letter-spacing: -0.01em; line-height: 1.25; }
+        .typo-h2      { font-size: 18px; font-weight: 600; line-height: 1.35; }
+        .typo-body    { font-size: 14px; font-weight: 400; line-height: 1.6; }
+        .typo-caption { font-size: 12px; font-weight: 500; color: #64748b; line-height: 1.5; }
+        .dark .typo-caption { color: #94a3b8; }
+        .typo-mono    { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace; font-variant-numeric: tabular-nums; }
+
+        /* =========================================================
+           Phase 1 — A4: Glass shadow hierarchy
+           Five-tier depth scale using the si'se brand tint.
+           Pair with .glass-card / .glass-panel for consistent layering.
+           ========================================================= */
+        .shadow-glass-xs { box-shadow: 0 2px 8px -2px rgba(51,160,101,.08); }
+        .shadow-glass-sm { box-shadow: 0 4px 16px -4px rgba(51,160,101,.12); }
+        .shadow-glass-md { box-shadow: 0 8px 24px -6px rgba(51,160,101,.16); }
+        .shadow-glass-lg { box-shadow: 0 16px 48px -12px rgba(51,160,101,.20); }
+        .shadow-glass-xl { box-shadow: 0 24px 64px -16px rgba(51,160,101,.24); }
+        .dark .shadow-glass-xs { box-shadow: 0 2px 8px -2px rgba(0,0,0,.35); }
+        .dark .shadow-glass-sm { box-shadow: 0 4px 16px -4px rgba(0,0,0,.45); }
+        .dark .shadow-glass-md { box-shadow: 0 8px 24px -6px rgba(0,0,0,.55); }
+        .dark .shadow-glass-lg { box-shadow: 0 16px 48px -12px rgba(0,0,0,.65); }
+        .dark .shadow-glass-xl { box-shadow: 0 24px 64px -16px rgba(0,0,0,.75); }
+
         /* Animated mesh background */
         .bg-mesh {
             background-image:
@@ -452,13 +497,22 @@
             animation: count-up 0.7s cubic-bezier(0.16,1,0.3,1) forwards;
         }
 
-        /* Staggered animations */
-        .stagger-1 { animation-delay: 0.06s; opacity: 0; }
-        .stagger-2 { animation-delay: 0.12s; opacity: 0; }
-        .stagger-3 { animation-delay: 0.18s; opacity: 0; }
-        .stagger-4 { animation-delay: 0.24s; opacity: 0; }
-        .stagger-5 { animation-delay: 0.30s; opacity: 0; }
-        .stagger-6 { animation-delay: 0.36s; opacity: 0; }
+        /* Staggered animations (canonical).
+           Pair with an animation class (e.g. animate-fade-in-up) and
+           animation-fill-mode: backwards so the initial opacity:0 holds
+           until the delay elapses. */
+        .stagger-1  { animation-delay: 0.06s; opacity: 0; animation-fill-mode: backwards; }
+        .stagger-2  { animation-delay: 0.12s; opacity: 0; animation-fill-mode: backwards; }
+        .stagger-3  { animation-delay: 0.18s; opacity: 0; animation-fill-mode: backwards; }
+        .stagger-4  { animation-delay: 0.24s; opacity: 0; animation-fill-mode: backwards; }
+        .stagger-5  { animation-delay: 0.30s; opacity: 0; animation-fill-mode: backwards; }
+        .stagger-6  { animation-delay: 0.36s; opacity: 0; animation-fill-mode: backwards; }
+        .stagger-7  { animation-delay: 0.42s; opacity: 0; animation-fill-mode: backwards; }
+        .stagger-8  { animation-delay: 0.48s; opacity: 0; animation-fill-mode: backwards; }
+        .stagger-9  { animation-delay: 0.54s; opacity: 0; animation-fill-mode: backwards; }
+        .stagger-10 { animation-delay: 0.60s; opacity: 0; animation-fill-mode: backwards; }
+        .stagger-11 { animation-delay: 0.66s; opacity: 0; animation-fill-mode: backwards; }
+        .stagger-12 { animation-delay: 0.72s; opacity: 0; animation-fill-mode: backwards; }
 
         /* Status pulse */
         .status-active::before {
@@ -538,6 +592,7 @@
             align-items: stretch;
             height: 46px;
             padding: 0 4px;
+            position: relative; /* anchor for .top-tab-underline */
         }
         .top-tab-item {
             display: flex;
@@ -563,17 +618,26 @@
         .top-tab-item.active {
             color: #33a065;
         }
-        .top-tab-item.active::after {
-            content: '';
-            position: absolute;
-            bottom: 0; left: 50%;
-            transform: translateX(-50%);
-            width: 28px; height: 2.5px;
-            background: linear-gradient(90deg, #33a065, #55b87f);
-            border-radius: 4px 4px 0 0;
-        }
+        /* Note: the active-tab underline is now rendered as a sliding React
+           element (see TopTabIndicator) so it animates between tabs rather
+           than teleporting. The old ::after pseudo-element has been removed. */
         .top-tab-item svg {
             flex-shrink: 0;
+        }
+
+        /* Phase 1 — B15: sliding tab underline */
+        .top-tab-underline {
+            position: absolute;
+            bottom: 0;
+            height: 2.5px;
+            background: linear-gradient(90deg, #33a065, #55b87f);
+            border-radius: 4px 4px 0 0;
+            transition: left 0.35s cubic-bezier(0.16,1,0.3,1), width 0.35s cubic-bezier(0.16,1,0.3,1), opacity 0.2s ease;
+            pointer-events: none;
+            will-change: left, width;
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .top-tab-underline { transition: none; }
         }
         /* More menu bottom sheet */
         .more-sheet-overlay {
@@ -686,6 +750,36 @@
         button:disabled {
             opacity: 0.5;
             cursor: not-allowed;
+        }
+
+        /* =========================================================
+           Phase 1 — B12: Ripple effect for the <Button/> component
+           Uses a single absolutely-positioned span inserted on click.
+           ========================================================= */
+        .btn-ripple {
+            position: relative;
+            overflow: hidden;
+            isolation: isolate;
+        }
+        .btn-ripple > .ripple-wave {
+            position: absolute;
+            border-radius: 50%;
+            background: currentColor;
+            opacity: 0.25;
+            pointer-events: none;
+            transform: scale(0);
+            animation: ripple 0.6s cubic-bezier(0.16,1,0.3,1);
+            z-index: 0;
+        }
+        .btn-ripple > .btn-ripple-inner {
+            position: relative;
+            z-index: 1;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            width: 100%;
+            height: 100%;
         }
 
         /* Mobile-first */
@@ -865,11 +959,8 @@
         }
         .top-loading-bar.active { opacity: 1; }
 
-        /* Staggered animation delays */
-        .stagger-1 { animation-delay: 0.05s; }
-        .stagger-2 { animation-delay: 0.1s; }
-        .stagger-3 { animation-delay: 0.15s; }
-        .stagger-4 { animation-delay: 0.2s; }
+        /* Staggered animation delays — canonical definition is at line ~500
+           (with opacity:0 so items are hidden until their turn).          */
 
         /* Better dark mode transitions */
         body, .glass-panel, .glass-card, .glass-card-glow {
@@ -885,6 +976,43 @@
             width: 64px; height: 64px; border-radius: 20px; margin-bottom: 16px;
             background: linear-gradient(135deg, rgba(51,160,101,0.08), rgba(51,160,101,0.04));
             display: flex; align-items: center; justify-content: center;
+        }
+
+        /* =========================================================
+           Phase 1 — F: global focus ring + reduced-motion fallback
+           ========================================================= */
+        *:focus-visible {
+            outline: 2px solid #33a065;
+            outline-offset: 2px;
+            border-radius: 4px;
+        }
+        .dark *:focus-visible {
+            outline-color: #55b87f;
+        }
+
+        /* Respect user motion preference across every animated element. */
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after {
+                animation-duration: 0.001ms !important;
+                animation-iteration-count: 1 !important;
+                transition-duration: 0.001ms !important;
+                scroll-behavior: auto !important;
+            }
+            /* Orbs and floating decorations are purely decorative; hide them. */
+            .bg-orb { animation: none !important; }
+        }
+
+        /* Screen-reader-only helper */
+        .sr-only {
+            position: absolute !important;
+            width: 1px !important;
+            height: 1px !important;
+            padding: 0 !important;
+            margin: -1px !important;
+            overflow: hidden !important;
+            clip: rect(0,0,0,0) !important;
+            white-space: nowrap !important;
+            border: 0 !important;
         }
     </style>
 </head>
@@ -1313,9 +1441,36 @@
     </style>
 
     <script type="text/babel">
-        const { useState, useEffect, useMemo, useCallback } = React;
+        const { useState, useEffect, useMemo, useCallback, useRef, useLayoutEffect } = React;
         const RechartsLib = window.Recharts || {};
         const { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LineChart, Line, AreaChart, Area, PieChart, Pie, Cell, ComposedChart } = RechartsLib;
+
+        // ========================================
+        // Motion preferences (Phase 1: F - a11y)
+        // Respected by charts, count-up, and any non-essential animation.
+        // Read once at load; matchMedia listener is added in useReducedMotion
+        // hook for live toggling within React components.
+        // ========================================
+        const prefersReducedMotion = typeof window !== 'undefined' && window.matchMedia
+            ? window.matchMedia('(prefers-reduced-motion: reduce)').matches
+            : false;
+
+        const useReducedMotion = () => {
+            const [rm, setRm] = useState(prefersReducedMotion);
+            useEffect(() => {
+                if (typeof window === 'undefined' || !window.matchMedia) return;
+                const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+                const handler = (e) => setRm(e.matches);
+                // Safari <14 only supports addListener
+                if (mq.addEventListener) mq.addEventListener('change', handler);
+                else mq.addListener(handler);
+                return () => {
+                    if (mq.removeEventListener) mq.removeEventListener('change', handler);
+                    else mq.removeListener(handler);
+                };
+            }, []);
+            return rm;
+        };
 
         // ========================================
         // 設定・定数
@@ -1659,12 +1814,19 @@
                 toastState.listeners.push(fn);
                 return () => { toastState.listeners = toastState.listeners.filter(l => l !== fn); };
             }, []);
-            if (!toasts.length) return null;
             const iconName = { success: 'check-circle', error: 'alert-circle', info: 'info' };
+            const roleFor = (type) => type === 'error' ? 'alert' : 'status';
+            // Container is always mounted so screen readers announce new toasts
+            // via aria-live without needing to detect DOM insertion.
             return (
-                <div className="toast-container">
+                <div className="toast-container" aria-live="polite" aria-atomic="false" role="region" aria-label="通知">
                     {toasts.map(t => (
-                        <div key={t.id} className={`toast toast-${t.type} ${t.leaving ? 'leaving' : ''}`}>
+                        <div
+                            key={t.id}
+                            className={`toast toast-${t.type} ${t.leaving ? 'leaving' : ''}`}
+                            role={roleFor(t.type)}
+                            aria-live={t.type === 'error' ? 'assertive' : 'polite'}
+                        >
                             <Icon name={iconName[t.type] || 'info'} size={18} />
                             <span>{t.message}</span>
                         </div>
@@ -1870,33 +2032,239 @@
         };
 
         // カードコンポーネント
-        const Card = ({ children, className = "", hover = false }) => (
-            <div className={`glass-card p-5 md:p-6 shadow-sm ${hover ? 'card-hover' : ''} ${className}`}>
-                {children}
-            </div>
+        // `staggerIndex` (optional): 0-indexed position; when provided, the card
+        // fades/slides in with a 60ms-per-index delay for staggered entrance.
+        const Card = ({ children, className = "", hover = false, staggerIndex, style }) => {
+            const hasStagger = typeof staggerIndex === 'number';
+            const combinedStyle = hasStagger
+                ? { animationDelay: `${staggerIndex * 60}ms`, animationFillMode: 'backwards', ...(style || {}) }
+                : style;
+            const staggerCls = hasStagger ? 'animate-fade-in-up' : '';
+            return (
+                <div className={`glass-card p-5 md:p-6 shadow-glass-sm ${hover ? 'card-hover' : ''} ${staggerCls} ${className}`} style={combinedStyle}>
+                    {children}
+                </div>
+            );
+        };
+
+        // Inline spinner used by <Button loading />
+        const Spinner = ({ size = 14 }) => (
+            <span
+                aria-hidden="true"
+                className="inline-block animate-spin rounded-full border-2 border-current border-t-transparent"
+                style={{ width: size, height: size }}
+            />
         );
 
+        // ========================================
+        // Phase 1 — B12: reusable <Button/>
+        // Variants: primary (gradient) | secondary | ghost | danger
+        // Sizes:    sm | md | lg
+        // Features: ripple, loading spinner, leftIcon/rightIcon,
+        //           active-scale, focus-visible ring, aria-busy.
+        // ========================================
+        const Button = ({
+            variant = 'primary',
+            size = 'md',
+            loading = false,
+            leftIcon = null,
+            rightIcon = null,
+            className = '',
+            children,
+            onClick,
+            type = 'button',
+            ...props
+        }) => {
+            const rm = useReducedMotion();
+            const base = 'btn-ripple inline-flex items-center justify-center gap-2 rounded-xl font-semibold select-none transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sise-500/40 focus-visible:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed';
+            const active = rm ? '' : 'active:scale-[0.97]';
+            const sizes = {
+                sm: 'px-3 py-1.5 text-xs min-h-[32px]',
+                md: 'px-4 py-2.5 text-sm min-h-[40px]',
+                lg: 'px-5 py-3 text-base min-h-[48px]',
+            };
+            const variants = {
+                primary:   'btn-gradient text-white shadow-glass-sm hover:shadow-glass-md',
+                secondary: 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 shadow-glass-xs dark:bg-slate-800 dark:border-slate-700 dark:text-slate-100 dark:hover:bg-slate-700',
+                ghost:     'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800',
+                danger:    'bg-[#ef4444] text-white hover:bg-[#dc2626] shadow-glass-sm',
+            };
+
+            const handleClick = (e) => {
+                if (props.disabled || loading) return;
+                if (!rm && e.currentTarget) {
+                    const btn = e.currentTarget;
+                    const rect = btn.getBoundingClientRect();
+                    const diameter = Math.max(rect.width, rect.height);
+                    const wave = document.createElement('span');
+                    wave.className = 'ripple-wave';
+                    wave.style.width = diameter + 'px';
+                    wave.style.height = diameter + 'px';
+                    wave.style.left = (e.clientX - rect.left - diameter / 2) + 'px';
+                    wave.style.top = (e.clientY - rect.top - diameter / 2) + 'px';
+                    btn.appendChild(wave);
+                    setTimeout(() => { try { wave.remove(); } catch (_) {} }, 650);
+                }
+                if (onClick) onClick(e);
+            };
+
+            return (
+                <button
+                    type={type}
+                    onClick={handleClick}
+                    aria-busy={loading || undefined}
+                    className={`${base} ${active} ${sizes[size] || sizes.md} ${variants[variant] || variants.primary} ${className}`}
+                    {...props}
+                >
+                    <span className="btn-ripple-inner">
+                        {loading ? <Spinner size={size === 'lg' ? 16 : 14} /> : leftIcon}
+                        {children && <span>{children}</span>}
+                        {!loading && rightIcon}
+                    </span>
+                </button>
+            );
+        };
+
+        // ========================================
+        // Phase 1 — B15: mobile top tab navigation with
+        // FLIP-style sliding underline indicator.
+        // The active underline measures each tab's <button> geometry
+        // via useLayoutEffect and slides into place, rather than
+        // teleporting via a CSS ::after pseudo-element.
+        // ========================================
+        const TopTabNav = ({ primaryTabs, currentView, setCurrentView, setMoreMenuOpen, moreMenuOpen }) => {
+            const containerRef = useRef(null);
+            const tabRefs = useRef({});
+            const [indicator, setIndicator] = useState({ left: 0, width: 0, visible: false });
+
+            const activeKey = React.useMemo(() => {
+                const primary = primaryTabs.find(t =>
+                    currentView === t.id ||
+                    (t.id === 'treatment' && (currentView === 'treatment-report' || currentView === 'posture'))
+                );
+                if (primary) return primary.id;
+                return '__more__';
+            }, [primaryTabs, currentView]);
+
+            useLayoutEffect(() => {
+                const btn = tabRefs.current[activeKey];
+                const container = containerRef.current;
+                if (!btn || !container) return;
+                const btnRect = btn.getBoundingClientRect();
+                const contRect = container.getBoundingClientRect();
+                const underlineWidth = 28;
+                const left = btnRect.left - contRect.left + (btnRect.width - underlineWidth) / 2;
+                setIndicator({ left, width: underlineWidth, visible: true });
+            }, [activeKey]);
+
+            // Recompute on resize (rotation / responsive changes)
+            useEffect(() => {
+                const onResize = () => {
+                    const btn = tabRefs.current[activeKey];
+                    const container = containerRef.current;
+                    if (!btn || !container) return;
+                    const btnRect = btn.getBoundingClientRect();
+                    const contRect = container.getBoundingClientRect();
+                    const underlineWidth = 28;
+                    const left = btnRect.left - contRect.left + (btnRect.width - underlineWidth) / 2;
+                    setIndicator(prev => ({ ...prev, left, width: underlineWidth }));
+                };
+                window.addEventListener('resize', onResize);
+                return () => window.removeEventListener('resize', onResize);
+            }, [activeKey]);
+
+            return (
+                <nav className="top-tab-nav hide-desktop" role="tablist" aria-label="主要メニュー">
+                    <div className="top-tab-nav-inner" ref={containerRef}>
+                        {primaryTabs.map((tab) => {
+                            const isActive = activeKey === tab.id;
+                            return (
+                                <button
+                                    key={tab.id}
+                                    ref={(el) => { tabRefs.current[tab.id] = el; }}
+                                    onClick={() => { setCurrentView(tab.id); setMoreMenuOpen(false); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+                                    className={`top-tab-item ${isActive ? 'active' : ''}`}
+                                    role="tab"
+                                    aria-selected={isActive}
+                                    aria-controls={`view-${tab.id}`}
+                                >
+                                    <Icon name={tab.icon} size={17} />
+                                    <span>{tab.label}</span>
+                                </button>
+                            );
+                        })}
+                        <button
+                            ref={(el) => { tabRefs.current['__more__'] = el; }}
+                            onClick={() => setMoreMenuOpen(!moreMenuOpen)}
+                            className={`top-tab-item ${activeKey === '__more__' ? 'active' : ''}`}
+                            role="tab"
+                            aria-selected={activeKey === '__more__'}
+                            aria-haspopup="menu"
+                            aria-expanded={moreMenuOpen}
+                            aria-label="その他のメニューを開く"
+                        >
+                            <Icon name="grid" size={17} />
+                            <span>その他</span>
+                        </button>
+                        <span
+                            className="top-tab-underline"
+                            style={{
+                                left: `${indicator.left}px`,
+                                width: `${indicator.width}px`,
+                                opacity: indicator.visible ? 1 : 0,
+                            }}
+                            aria-hidden="true"
+                        />
+                    </div>
+                </nav>
+            );
+        };
+
         // アニメーション付き数値カウンター
-        const AnimatedNumber = ({ value, prefix = "", suffix = "", duration = 800 }) => {
-            const [displayValue, setDisplayValue] = useState(0);
-            const numericValue = parseFloat(String(value).replace(/[^0-9.-]/g, '')) || 0;
-            const isFloat = String(value).includes('.');
+        // Phase 1: interpolates from the *previous* numeric value (not always 0),
+        // so repeated data refreshes feel like a smooth transition rather than
+        // a reset. Auto-detects prefix/suffix in formatted strings like
+        // "¥1,234" or "12.3%". Honors prefers-reduced-motion.
+        const AnimatedNumber = ({ value, prefix, suffix, duration = 800 }) => {
+            const rm = useReducedMotion();
+            const str = String(value ?? '');
+            // Auto-split into [prefix][number][suffix] when caller didn't supply them.
+            const match = str.match(/^([^0-9\-]*)(-?[0-9.,]+)(.*)$/);
+            const autoPrefix = match ? match[1] : '';
+            const autoSuffix = match ? match[3] : '';
+            const rawNum = match ? match[2].replace(/,/g, '') : str;
+            const numericValue = parseFloat(rawNum) || 0;
+            const isFloat = rawNum.includes('.');
+            const finalPrefix = prefix !== undefined ? prefix : autoPrefix;
+            const finalSuffix = suffix !== undefined ? suffix : autoSuffix;
+            const [displayValue, setDisplayValue] = useState(numericValue);
+            const prevRef = useRef(numericValue);
 
             useEffect(() => {
-                if (numericValue === 0) { setDisplayValue(0); return; }
+                if (rm) {
+                    setDisplayValue(numericValue);
+                    prevRef.current = numericValue;
+                    return;
+                }
+                const from = prevRef.current ?? 0;
+                const to = numericValue;
+                if (from === to) return;
                 const startTime = performance.now();
+                let rafId;
                 const animate = (currentTime) => {
                     const elapsed = currentTime - startTime;
                     const progress = Math.min(elapsed / duration, 1);
-                    const eased = 1 - Math.pow(1 - progress, 4);
-                    setDisplayValue(numericValue * eased);
-                    if (progress < 1) requestAnimationFrame(animate);
+                    const eased = 1 - Math.pow(1 - progress, 4); // easeOutQuart
+                    setDisplayValue(from + (to - from) * eased);
+                    if (progress < 1) rafId = requestAnimationFrame(animate);
+                    else prevRef.current = to;
                 };
-                requestAnimationFrame(animate);
-            }, [numericValue, duration]);
+                rafId = requestAnimationFrame(animate);
+                return () => cancelAnimationFrame(rafId);
+            }, [numericValue, duration, rm]);
 
             const formatted = isFloat ? displayValue.toFixed(1) : Math.round(displayValue).toLocaleString();
-            return <span>{prefix}{formatted}{suffix}</span>;
+            return <span>{finalPrefix}{formatted}{finalSuffix}</span>;
         };
 
         // ミニスパークライン（SVG）
@@ -1927,10 +2295,11 @@
         };
 
         // KPIカードコンポーネント
-        const KpiCard = ({ title, value, subValue, trend, icon, color = "bg-sise-500", gradientFrom = "from-sise-400", gradientTo = "to-sise-600", sparkData, accentColor, loading }) => {
+        // `index` (optional): position within a KPI grid for staggered entrance animation.
+        const KpiCard = ({ title, value, subValue, trend, icon, color = "bg-sise-500", gradientFrom = "from-sise-400", gradientTo = "to-sise-600", sparkData, accentColor, loading, index }) => {
             if (loading) {
                 return (
-                    <Card hover className="group kpi-card relative overflow-hidden">
+                    <Card hover staggerIndex={index} className="group kpi-card relative overflow-hidden">
                         <div className="flex justify-between items-start mb-2">
                             <div className={`rounded-xl bg-gradient-to-br ${gradientFrom} ${gradientTo} text-white shadow-lg p-2.5 md:p-3 opacity-60`}>
                                 <Icon name={icon} size={18} />
@@ -1943,7 +2312,7 @@
                 );
             }
             return (
-            <Card hover className="group kpi-card relative overflow-hidden" style={{'--kpi-color': accentColor || 'rgba(51,160,101,0.04)'}}>
+            <Card hover staggerIndex={index} className="group kpi-card relative overflow-hidden" style={{'--kpi-color': accentColor || 'rgba(51,160,101,0.04)'}}>
                 <div className="flex justify-between items-start mb-2">
                     <div className={`rounded-xl bg-gradient-to-br ${gradientFrom} ${gradientTo} text-white shadow-lg p-2.5 md:p-3 group-hover:scale-110 group-hover:rotate-3 transition-all duration-500`}>
                         <Icon name={icon} size={18} />
@@ -1962,7 +2331,9 @@
                 </div>
                 <h3 className="text-slate-500 font-medium text-[11px] md:text-xs tracking-wider uppercase">{title}</h3>
                 <div className="flex items-baseline mt-1 overflow-hidden">
-                    <span className="text-2xl md:text-3xl font-extrabold text-slate-900 tracking-tight animate-number-roll">{value}</span>
+                    <span className="text-2xl md:text-3xl font-extrabold text-slate-900 tracking-tight animate-number-roll typo-mono">
+                        <AnimatedNumber value={value} />
+                    </span>
                 </div>
                 {subValue && <p className="text-[11px] md:text-xs text-slate-400 mt-1">{subValue}</p>}
             </Card>
@@ -4508,16 +4879,16 @@
 
                     {/* Square会員データ KPIカード */}
                     <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 md:gap-4">
-                        <KpiCard title="アクティブ会員" value={formatNumber(totalActiveMembers)}
+                        <KpiCard index={0} title="アクティブ会員" value={formatNumber(totalActiveMembers)}
                             subValue={cashActiveMembers > 0 ? `Square: ${formatNumber(memberData.activeMembers)} / 現金: ${cashActiveMembers}` : `総会員: ${formatNumber(memberData.totalMembers)}人`} trend={null} icon="users"
                             gradientFrom="from-sise-400" gradientTo="to-sise-600" accentColor="#33a065" loading={memberData.loading} />
-                        <KpiCard title="想定月間売上" value={formatCurrency(totalExpectedRevenue)}
+                        <KpiCard index={1} title="想定月間売上" value={formatCurrency(totalExpectedRevenue)}
                             subValue={cashActiveRevenue > 0 ? `Square: ${formatCurrency(memberData.expectedRevenue)} / 現金: ${formatCurrency(cashActiveRevenue)}` : 'サブスク収益'} trend={null} icon="wallet"
                             gradientFrom="from-emerald-400" gradientTo="to-emerald-600" accentColor="#059669" loading={memberData.loading} />
-                        <KpiCard title="新規入会" value={formatNumber(memberData.newMembersThisMonth)}
+                        <KpiCard index={2} title="新規入会" value={formatNumber(memberData.newMembersThisMonth)}
                             subValue="今月の入会者" trend={null} icon="user-plus"
                             gradientFrom="from-blue-400" gradientTo="to-blue-600" accentColor="#3b82f6" loading={memberData.loading} />
-                        <KpiCard title="退会率" value={formatPercent(memberData.churnRate)}
+                        <KpiCard index={3} title="退会率" value={formatPercent(memberData.churnRate)}
                             subValue={`退会者: ${memberData.churnedMembers}人`} trend={null} icon="user-minus"
                             gradientFrom={memberData.churnRate > 5 ? "from-red-400" : "from-slate-400"}
                             gradientTo={memberData.churnRate > 5 ? "to-red-600" : "to-slate-500"}
@@ -4526,18 +4897,18 @@
 
                     {/* 日報集計 KPIカード（スパークライン付き） */}
                     <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 md:gap-4">
-                        <KpiCard title="新規来店数" value={formatNumber(aggregatedData.totalNewVisits)}
+                        <KpiCard index={4} title="新規来店数" value={formatNumber(aggregatedData.totalNewVisits)}
                             subValue="全チャネル合計" trend={null} icon="user-check"
                             gradientFrom="from-orange-400" gradientTo="to-orange-600"
                             sparkData={aggregatedData.dailyNewTrend} accentColor="#f97316" loading={reportData.loading} />
-                        <KpiCard title="契約数" value={formatNumber(aggregatedData.totalContracts)}
+                        <KpiCard index={5} title="契約数" value={formatNumber(aggregatedData.totalContracts)}
                             subValue="新規契約" trend={null} icon="file-signature"
                             gradientFrom="from-violet-400" gradientTo="to-violet-600"
                             sparkData={aggregatedData.dailyContractTrend} accentColor="#8b5cf6" loading={reportData.loading} />
-                        <KpiCard title="成約率" value={formatPercent(aggregatedData.conversionRate)}
+                        <KpiCard index={6} title="成約率" value={formatPercent(aggregatedData.conversionRate)}
                             subValue="新規 → 契約" trend={null} icon="target"
                             gradientFrom="from-teal-400" gradientTo="to-teal-600" accentColor="#14b8a6" loading={reportData.loading} />
-                        <KpiCard title="既存施術数" value={formatNumber(aggregatedData.totalTreatments)}
+                        <KpiCard index={7} title="既存施術数" value={formatNumber(aggregatedData.totalTreatments)}
                             subValue="リピーター対応" trend={null} icon="heart-handshake"
                             gradientFrom="from-rose-400" gradientTo="to-rose-600"
                             sparkData={aggregatedData.dailyTreatmentTrend} accentColor="#f43f5e" loading={reportData.loading} />
@@ -4574,9 +4945,12 @@
                                             <stop offset="100%" stopColor="#22c55e" stopOpacity={0} />
                                         </linearGradient>
                                     </defs>
-                                    <Area type="monotone" dataKey="new" name="新規" stroke="#0ea5e9" strokeWidth={2.5} fill="url(#areaBlue)" dot={{ r: 3, fill: '#0ea5e9', strokeWidth: 0 }} activeDot={{ r: 5, fill: '#0ea5e9', stroke: '#fff', strokeWidth: 2 }} />
-                                    <Area type="monotone" dataKey="contract" name="契約" stroke="#22c55e" strokeWidth={2.5} fill="url(#areaGreen)" dot={{ r: 3, fill: '#22c55e', strokeWidth: 0 }} activeDot={{ r: 5, fill: '#22c55e', stroke: '#fff', strokeWidth: 2 }} />
-                                    <Line type="monotone" dataKey="treatments" name="施術" stroke="#f97316" strokeWidth={2} dot={false} strokeDasharray="6 4" />
+                                    <Area type="monotone" dataKey="new" name="新規" stroke="#0ea5e9" strokeWidth={2.5} fill="url(#areaBlue)" dot={{ r: 3, fill: '#0ea5e9', strokeWidth: 0 }} activeDot={{ r: 5, fill: '#0ea5e9', stroke: '#fff', strokeWidth: 2 }}
+                                        isAnimationActive={!prefersReducedMotion} animationBegin={0} animationDuration={900} animationEasing="ease-out" />
+                                    <Area type="monotone" dataKey="contract" name="契約" stroke="#22c55e" strokeWidth={2.5} fill="url(#areaGreen)" dot={{ r: 3, fill: '#22c55e', strokeWidth: 0 }} activeDot={{ r: 5, fill: '#22c55e', stroke: '#fff', strokeWidth: 2 }}
+                                        isAnimationActive={!prefersReducedMotion} animationBegin={150} animationDuration={900} animationEasing="ease-out" />
+                                    <Line type="monotone" dataKey="treatments" name="施術" stroke="#f97316" strokeWidth={2} dot={false} strokeDasharray="6 4"
+                                        isAnimationActive={!prefersReducedMotion} animationBegin={300} animationDuration={900} animationEasing="ease-out" />
                                 </ComposedChart>
                             </ResponsiveContainer>
                         </Card>
@@ -4641,8 +5015,10 @@
                                             <stop offset="0%" stopColor="#4ade80" /><stop offset="100%" stopColor="#22c55e" />
                                         </linearGradient>
                                     </defs>
-                                    <Bar dataKey="new" name="new" fill="url(#barGradientBlue)" radius={[6, 6, 0, 0]} />
-                                    <Bar dataKey="contract" name="contract" fill="url(#barGradientGreen)" radius={[6, 6, 0, 0]} />
+                                    <Bar dataKey="new" name="new" fill="url(#barGradientBlue)" radius={[6, 6, 0, 0]}
+                                        isAnimationActive={!prefersReducedMotion} animationBegin={0} animationDuration={900} animationEasing="ease-out" />
+                                    <Bar dataKey="contract" name="contract" fill="url(#barGradientGreen)" radius={[6, 6, 0, 0]}
+                                        isAnimationActive={!prefersReducedMotion} animationBegin={150} animationDuration={900} animationEasing="ease-out" />
                                 </BarChart>
                             </ResponsiveContainer>
                         </Card>
@@ -5472,7 +5848,8 @@
                                                                     <div className="flex items-center gap-2">
                                                                         <span className="font-bold text-slate-800">{formatCurrency(payment.amount)}</span>
                                                                         <button onClick={async (e) => { e.stopPropagation(); if(await confirmDialog({ title:'支払記録の削除', message:'この支払記録を削除しますか？', confirmLabel:'削除', variant:'danger' })) removePayment(member.id, payment.id); }}
-                                                                            className="md:opacity-0 md:group-hover:opacity-100 p-1.5 rounded-lg hover:bg-red-50 text-slate-300 hover:text-red-400 transition-all">
+                                                                            className="md:opacity-0 md:group-hover:opacity-100 p-1.5 rounded-lg hover:bg-red-50 text-slate-300 hover:text-red-400 transition-all"
+                                                                            aria-label="この支払記録を削除">
                                                                             <Icon name="x" size={14} />
                                                                         </button>
                                                                     </div>
@@ -5776,7 +6153,7 @@
                                     <p className="text-xs text-slate-400">契約用URL・QRコードを発行</p>
                                 </div>
                             </div>
-                            <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-lg transition-colors">
+                            <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-lg transition-colors" aria-label="閉じる">
                                 <Icon name="x" size={20} />
                             </button>
                         </div>
@@ -6101,14 +6478,15 @@
                                     契約リンク発行
                                 </button>
                             )}
-                            <button
+                            <Button
                                 onClick={handleRefresh}
-                                disabled={isRefreshing}
-                                className="flex items-center px-4 py-2.5 btn-gradient rounded-xl font-medium text-sm transition-all disabled:opacity-50"
+                                loading={isRefreshing}
+                                variant="primary"
+                                size="md"
+                                leftIcon={!isRefreshing && <Icon name="refresh-cw" size={16} />}
                             >
-                                <Icon name={isRefreshing ? "loader" : "refresh-cw"} size={16} className={`mr-2 ${isRefreshing ? 'animate-spin' : ''}`} />
                                 {isRefreshing ? '更新中...' : 'データ更新'}
-                            </button>
+                            </Button>
                         </div>
                     </SectionHeader>
 
@@ -6256,11 +6634,16 @@
                                             return value;
                                         }}
                                     />
-                                    <Bar yAxisId="left" dataKey="newMembers" name="newMembers" fill="#63b185" radius={[6, 6, 0, 0]} />
-                                    <Bar yAxisId="left" dataKey="churnedMembers" name="churnedMembers" fill="#fda4af" radius={[6, 6, 0, 0]} />
-                                    <Bar yAxisId="left" dataKey="planChanges" name="planChanges" fill="#a78bfa" radius={[6, 6, 0, 0]} />
-                                    <Line yAxisId="left" type="monotone" dataKey="netGrowth" name="netGrowth" stroke="#eab308" strokeWidth={2} strokeDasharray="5 5" dot={{ r: 3 }} />
-                                    <Line yAxisId="right" type="monotone" dataKey="activeMembers" name="activeMembers" stroke="#3f9968" strokeWidth={3} dot={{ r: 4, fill: '#3f9968' }} />
+                                    <Bar yAxisId="left" dataKey="newMembers" name="newMembers" fill="#63b185" radius={[6, 6, 0, 0]}
+                                        isAnimationActive={!prefersReducedMotion} animationBegin={0} animationDuration={900} animationEasing="ease-out" />
+                                    <Bar yAxisId="left" dataKey="churnedMembers" name="churnedMembers" fill="#fda4af" radius={[6, 6, 0, 0]}
+                                        isAnimationActive={!prefersReducedMotion} animationBegin={120} animationDuration={900} animationEasing="ease-out" />
+                                    <Bar yAxisId="left" dataKey="planChanges" name="planChanges" fill="#a78bfa" radius={[6, 6, 0, 0]}
+                                        isAnimationActive={!prefersReducedMotion} animationBegin={240} animationDuration={900} animationEasing="ease-out" />
+                                    <Line yAxisId="left" type="monotone" dataKey="netGrowth" name="netGrowth" stroke="#eab308" strokeWidth={2} strokeDasharray="5 5" dot={{ r: 3 }}
+                                        isAnimationActive={!prefersReducedMotion} animationBegin={360} animationDuration={900} animationEasing="ease-out" />
+                                    <Line yAxisId="right" type="monotone" dataKey="activeMembers" name="activeMembers" stroke="#3f9968" strokeWidth={3} dot={{ r: 4, fill: '#3f9968' }}
+                                        isAnimationActive={!prefersReducedMotion} animationBegin={480} animationDuration={900} animationEasing="ease-out" />
                                 </ComposedChart>
                             </ResponsiveContainer>
                         )}
@@ -9330,18 +9713,24 @@
                                     <Icon name="alert-circle" size={12} className="inline mr-0.5" />オフライン
                                 </span>
                             )}
-                            <button onClick={refresh} disabled={loading}
-                                className="flex items-center px-3 py-2 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-xl text-xs font-medium transition-all active:scale-95 disabled:opacity-50">
-                                <Icon name="refresh-cw" size={14} className={`mr-1 ${loading ? 'animate-spin' : ''}`} />
-                                {loading ? '同期中...' : '最新取得'}
-                            </button>
-                            <button
-                                onClick={() => { resetForm(); setFormData(p => ({...p, date: selectedDate})); setShowForm(!showForm); }}
-                                className="flex items-center px-4 py-2.5 btn-gradient rounded-xl font-medium text-sm transition-all active:scale-95"
+                            <Button
+                                onClick={refresh}
+                                loading={loading}
+                                variant="secondary"
+                                size="sm"
+                                leftIcon={!loading && <Icon name="refresh-cw" size={14} />}
+                                aria-label="最新データを取得"
                             >
-                                <Icon name="plus" size={16} className="mr-1.5" />
+                                {loading ? '同期中...' : '最新取得'}
+                            </Button>
+                            <Button
+                                onClick={() => { resetForm(); setFormData(p => ({...p, date: selectedDate})); setShowForm(!showForm); }}
+                                variant="primary"
+                                size="md"
+                                leftIcon={<Icon name="plus" size={16} />}
+                            >
                                 記帳する
-                            </button>
+                            </Button>
                         </div>
                     </SectionHeader>
 
@@ -10695,8 +11084,10 @@
                                                         <Recharts.XAxis dataKey="date" tick={{fontSize:10}} tickFormatter={v => v.slice(5)} />
                                                         <Recharts.YAxis tick={{fontSize:10}} />
                                                         <Recharts.Tooltip />
-                                                        <Recharts.Bar dataKey="received" name="受信" fill="#06C755" radius={[2,2,0,0]} />
-                                                        <Recharts.Bar dataKey="sent" name="送信" fill="#3b82f6" radius={[2,2,0,0]} />
+                                                        <Recharts.Bar dataKey="received" name="受信" fill="#06C755" radius={[2,2,0,0]}
+                                                            isAnimationActive={!prefersReducedMotion} animationBegin={0} animationDuration={800} animationEasing="ease-out" />
+                                                        <Recharts.Bar dataKey="sent" name="送信" fill="#3b82f6" radius={[2,2,0,0]}
+                                                            isAnimationActive={!prefersReducedMotion} animationBegin={150} animationDuration={800} animationEasing="ease-out" />
                                                     </Recharts.BarChart>
                                                 </Recharts.ResponsiveContainer>
                                             </div>
@@ -10713,7 +11104,8 @@
                                                         <Recharts.XAxis dataKey="hour" tick={{fontSize:10}} tickFormatter={v => v + '時'} />
                                                         <Recharts.YAxis tick={{fontSize:10}} />
                                                         <Recharts.Tooltip />
-                                                        <Recharts.Bar dataKey="received" name="受信" fill="#06C755" radius={[2,2,0,0]} />
+                                                        <Recharts.Bar dataKey="received" name="受信" fill="#06C755" radius={[2,2,0,0]}
+                                                            isAnimationActive={!prefersReducedMotion} animationBegin={0} animationDuration={800} animationEasing="ease-out" />
                                                     </Recharts.BarChart>
                                                 </Recharts.ResponsiveContainer>
                                             </div>
@@ -19480,6 +19872,7 @@
                                             }}
                                             className="p-2.5 rounded-xl hover:bg-sise-50 text-slate-400 hover:text-sise-600 transition-all active:scale-90"
                                             title="データ更新"
+                                            aria-label="データを更新"
                                         >
                                             <Icon name="refresh-cw" size={18} />
                                         </button>
@@ -19490,6 +19883,8 @@
                                             }}
                                             className="p-2.5 rounded-xl hover:bg-sise-50 text-slate-400 hover:text-sise-600 transition-all active:scale-90 hide-mobile"
                                             title="ダークモード切り替え"
+                                            aria-label={isDarkMode ? 'ライトモードに切り替え' : 'ダークモードに切り替え'}
+                                            aria-pressed={isDarkMode}
                                         >
                                             <Icon name={isDarkMode ? 'sun' : 'moon'} size={18} />
                                         </button>
@@ -19564,30 +19959,13 @@
 
                     {/* Top Tab Navigation (Mobile) */}
                     {!isFullscreenView && (
-                        <nav className="top-tab-nav hide-desktop">
-                            <div className="top-tab-nav-inner">
-                                {primaryTabs.map((tab) => {
-                                    const isActive = currentView === tab.id || (tab.id === 'treatment' && (currentView === 'treatment-report' || currentView === 'posture'));
-                                    return (
-                                        <button
-                                            key={tab.id}
-                                            onClick={() => { setCurrentView(tab.id); setMoreMenuOpen(false); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
-                                            className={`top-tab-item ${isActive ? 'active' : ''}`}
-                                        >
-                                            <Icon name={tab.icon} size={17} />
-                                            <span>{tab.label}</span>
-                                        </button>
-                                    );
-                                })}
-                                <button
-                                    onClick={() => setMoreMenuOpen(!moreMenuOpen)}
-                                    className={`top-tab-item ${!primaryTabs.some(t => t.id === currentView || (t.id === 'treatment' && (currentView === 'treatment-report' || currentView === 'posture'))) ? 'active' : ''}`}
-                                >
-                                    <Icon name="grid" size={17} />
-                                    <span>その他</span>
-                                </button>
-                            </div>
-                        </nav>
+                        <TopTabNav
+                            primaryTabs={primaryTabs}
+                            currentView={currentView}
+                            setCurrentView={setCurrentView}
+                            setMoreMenuOpen={setMoreMenuOpen}
+                            moreMenuOpen={moreMenuOpen}
+                        />
                     )}
 
                     {/* More Menu Bottom Sheet (Mobile) */}
