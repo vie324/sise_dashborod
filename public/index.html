@@ -549,6 +549,35 @@
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
         @keyframes scaleIn { from { opacity: 0; transform: scale(.92); } to { opacity: 1; transform: scale(1); } }
 
+        /* Phase 2 — B14: modal backdrop + spring entrance */
+        @keyframes modalBackdropIn {
+            from { opacity: 0; backdrop-filter: blur(0px); -webkit-backdrop-filter: blur(0px); }
+            to   { opacity: 1; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
+        }
+        @keyframes modalSpringIn {
+            0%   { opacity: 0; transform: scale(0.88) translateY(12px); }
+            55%  { opacity: 1; transform: scale(1.02) translateY(-2px); }
+            78%  { transform: scale(0.995) translateY(0.5px); }
+            100% { opacity: 1; transform: scale(1) translateY(0); }
+        }
+        .modal-backdrop {
+            position: fixed; inset: 0; z-index: 9999;
+            background: rgba(15, 23, 42, 0.45);
+            backdrop-filter: blur(12px) saturate(1.2);
+            -webkit-backdrop-filter: blur(12px) saturate(1.2);
+            display: flex; align-items: center; justify-content: center; padding: 16px;
+            animation: modalBackdropIn 0.28s cubic-bezier(0.16,1,0.3,1) forwards;
+        }
+        .dark .modal-backdrop { background: rgba(0, 0, 0, 0.6); }
+        .modal-panel {
+            animation: modalSpringIn 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+            transform-origin: center;
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .modal-backdrop { animation: fadeIn 0.15s ease forwards; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
+            .modal-panel { animation: fadeIn 0.15s ease forwards; }
+        }
+
         /* Table hover & alternating rows */
         .table-row-hover {
             transition: background-color 0.2s ease;
@@ -920,6 +949,34 @@
         .toast-error { color: #b91c1c; border-color: rgba(239,68,68,0.25); }
         .toast-info { color: #1d6641; border-color: rgba(51,160,101,0.2); }
         .dark .toast { background: rgba(18,35,27,0.95); border-color: rgba(51,160,101,0.2); }
+        /* Phase 2 — B13: swipe-to-dismiss + stacking depth cue */
+        .toast {
+            touch-action: pan-y;
+            transition: transform 0.2s ease, opacity 0.2s ease;
+        }
+        .toast.swiping { transition: none; }
+        .toast-stack-behind {
+            transform: scale(0.95) translateY(-6px);
+            opacity: 0.55;
+            filter: saturate(0.6);
+        }
+        .toast-stack-behind-2 {
+            transform: scale(0.9) translateY(-10px);
+            opacity: 0.3;
+            filter: saturate(0.4);
+        }
+        .toast-close {
+            margin-left: auto;
+            opacity: 0.5;
+            padding: 2px 4px;
+            cursor: pointer;
+            background: transparent;
+            border: none;
+            color: inherit;
+            border-radius: 6px;
+            transition: opacity 0.15s ease, background 0.15s ease;
+        }
+        .toast-close:hover { opacity: 1; background: rgba(0,0,0,0.06); }
         @media (max-width: 768px) {
             .toast-container { top: 60px; right: 8px; left: 8px; }
             .toast { max-width: 100%; }
@@ -966,6 +1023,95 @@
         body, .glass-panel, .glass-card, .glass-card-glow {
             transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease;
         }
+
+        /* Phase 2 — C18: floating-label input */
+        .fi-wrap { display: flex; flex-direction: column; gap: 4px; }
+        .fi-field {
+            position: relative;
+            display: flex;
+            align-items: center;
+            background: #fff;
+            border: 1px solid #e2e8f0;
+            border-radius: 12px;
+            transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+        }
+        .dark .fi-field { background: #12231b; border-color: #1e3a2c; }
+        .fi-field:hover:not(.fi-disabled) { border-color: #cbd5e1; }
+        .dark .fi-field:hover:not(.fi-disabled) { border-color: #264a37; }
+        .fi-field:focus-within {
+            border-color: #33a065;
+            box-shadow: 0 0 0 3px rgba(51,160,101,0.15);
+        }
+        .fi-field.fi-disabled { opacity: 0.55; background: #f8fafc; }
+        .dark .fi-field.fi-disabled { background: #0d1c14; }
+        .fi-field > input {
+            flex: 1;
+            background: transparent;
+            border: none;
+            outline: none;
+            padding: 18px 14px 6px;
+            font-size: 14px;
+            color: #0f172a;
+            min-width: 0;
+            width: 100%;
+        }
+        .dark .fi-field > input { color: #e2e8f0; }
+        .fi-label {
+            position: absolute;
+            left: 14px;
+            top: 50%;
+            transform: translateY(-50%);
+            font-size: 14px;
+            color: #94a3b8;
+            pointer-events: none;
+            transition: transform 0.18s cubic-bezier(0.16,1,0.3,1), font-size 0.18s ease, color 0.15s ease;
+            background: transparent;
+            padding: 0 4px;
+        }
+        .fi-field.fi-filled .fi-label,
+        .fi-field:focus-within .fi-label,
+        .fi-field > input:not(:placeholder-shown) + .fi-label {
+            transform: translateY(-22px) scale(0.85);
+            color: #33a065;
+            font-weight: 600;
+        }
+        .fi-field > input:has(+ .fi-label) { /* noop; kept for readability */ }
+        .fi-field.fi-filled .fi-label,
+        .fi-field:focus-within .fi-label {
+            background: linear-gradient(to bottom, transparent 50%, #fff 50%);
+        }
+        .dark .fi-field.fi-filled .fi-label,
+        .dark .fi-field:focus-within .fi-label {
+            background: linear-gradient(to bottom, transparent 50%, #12231b 50%);
+        }
+        .fi-left, .fi-right {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0 10px;
+            color: #94a3b8;
+            flex-shrink: 0;
+        }
+        .fi-left + input { padding-left: 0; }
+        .fi-left ~ .fi-label { left: 38px; }
+        .fi-wrap.fi-error .fi-field {
+            border-color: #ef4444;
+            box-shadow: 0 0 0 3px rgba(239,68,68,0.12);
+        }
+        .fi-wrap.fi-error .fi-field:focus-within {
+            box-shadow: 0 0 0 3px rgba(239,68,68,0.2);
+        }
+        .fi-wrap.fi-error .fi-field.fi-filled .fi-label,
+        .fi-wrap.fi-error .fi-field:focus-within .fi-label {
+            color: #ef4444;
+        }
+        .fi-help {
+            font-size: 11px;
+            color: #64748b;
+            margin-left: 12px;
+            margin-top: 2px;
+        }
+        .fi-help-error { color: #ef4444; }
 
         /* Empty state */
         .empty-state {
@@ -1793,18 +1939,101 @@
         // トースト通知システム
         // ========================================
         const toastState = { listeners: [], toasts: [] };
+        // Max visible stack depth. Older toasts beyond this are auto-trimmed
+        // to prevent screen overflow when many notifications fire in quick succession.
+        const TOAST_STACK_MAX = 4;
+        const _notifyToasts = () => toastState.listeners.forEach(fn => fn([...toastState.toasts]));
+        const dismissToast = (id) => {
+            toastState.toasts = toastState.toasts.map(t => t.id === id ? { ...t, leaving: true } : t);
+            _notifyToasts();
+            setTimeout(() => {
+                toastState.toasts = toastState.toasts.filter(t => t.id !== id);
+                _notifyToasts();
+            }, 260);
+        };
         const showToast = (message, type = 'info', duration = 3500) => {
             const id = Date.now() + Math.random();
-            toastState.toasts = [...toastState.toasts, { id, message, type, leaving: false }];
-            toastState.listeners.forEach(fn => fn([...toastState.toasts]));
-            setTimeout(() => {
-                toastState.toasts = toastState.toasts.map(t => t.id === id ? { ...t, leaving: true } : t);
-                toastState.listeners.forEach(fn => fn([...toastState.toasts]));
-                setTimeout(() => {
-                    toastState.toasts = toastState.toasts.filter(t => t.id !== id);
-                    toastState.listeners.forEach(fn => fn([...toastState.toasts]));
-                }, 260);
-            }, duration);
+            const entry = { id, message, type, leaving: false, createdAt: Date.now() };
+            toastState.toasts = [...toastState.toasts, entry];
+            // Trim oldest if stack exceeds max (instant removal, no leaving animation).
+            if (toastState.toasts.length > TOAST_STACK_MAX) {
+                toastState.toasts = toastState.toasts.slice(-TOAST_STACK_MAX);
+            }
+            _notifyToasts();
+            const timer = setTimeout(() => dismissToast(id), duration);
+            entry._timer = timer;
+            return id;
+        };
+
+        // Phase 2 — B13: toast with swipe-to-dismiss and stacking.
+        const ToastItem = ({ toast, depth, onDismiss }) => {
+            const ref = useRef(null);
+            const startRef = useRef(null);
+            const [swipeX, setSwipeX] = useState(0);
+            const [swiping, setSwiping] = useState(false);
+            const iconName = { success: 'check-circle', error: 'alert-circle', info: 'info' };
+            const roleFor = (type) => type === 'error' ? 'alert' : 'status';
+
+            const onPointerDown = (e) => {
+                startRef.current = { x: e.clientX, y: e.clientY };
+                setSwiping(true);
+                if (ref.current) ref.current.setPointerCapture && ref.current.setPointerCapture(e.pointerId);
+            };
+            const onPointerMove = (e) => {
+                if (!startRef.current) return;
+                const dx = e.clientX - startRef.current.x;
+                const dy = e.clientY - startRef.current.y;
+                // Only treat as swipe when horizontal motion dominates
+                if (Math.abs(dx) < Math.abs(dy)) return;
+                setSwipeX(dx);
+            };
+            const onPointerEnd = () => {
+                if (!startRef.current) return;
+                startRef.current = null;
+                setSwiping(false);
+                if (Math.abs(swipeX) > 80) {
+                    // Animate out, then dismiss
+                    setSwipeX(swipeX > 0 ? 400 : -400);
+                    setTimeout(() => onDismiss(toast.id), 160);
+                } else {
+                    setSwipeX(0);
+                }
+            };
+
+            // Stack classes add visual depth cue for older toasts behind newest.
+            const stackClass = depth === 0 ? '' : depth === 1 ? 'toast-stack-behind' : 'toast-stack-behind-2';
+            const leavingClass = toast.leaving ? 'leaving' : '';
+            const swipingClass = swiping ? 'swiping' : '';
+            const style = swipeX !== 0
+                ? { transform: `translateX(${swipeX}px)`, opacity: Math.max(0, 1 - Math.abs(swipeX) / 200) }
+                : undefined;
+
+            return (
+                <div
+                    ref={ref}
+                    className={`toast toast-${toast.type} ${leavingClass} ${stackClass} ${swipingClass}`}
+                    style={style}
+                    role={roleFor(toast.type)}
+                    aria-live={toast.type === 'error' ? 'assertive' : 'polite'}
+                    onPointerDown={depth === 0 ? onPointerDown : undefined}
+                    onPointerMove={depth === 0 ? onPointerMove : undefined}
+                    onPointerUp={depth === 0 ? onPointerEnd : undefined}
+                    onPointerCancel={depth === 0 ? onPointerEnd : undefined}
+                >
+                    <Icon name={iconName[toast.type] || 'info'} size={18} />
+                    <span style={{ flex: 1, minWidth: 0 }}>{toast.message}</span>
+                    {depth === 0 && (
+                        <button
+                            type="button"
+                            className="toast-close"
+                            onClick={() => onDismiss(toast.id)}
+                            aria-label="通知を閉じる"
+                        >
+                            <Icon name="x" size={14} />
+                        </button>
+                    )}
+                </div>
+            );
         };
 
         const ToastContainer = () => {
@@ -1814,22 +2043,18 @@
                 toastState.listeners.push(fn);
                 return () => { toastState.listeners = toastState.listeners.filter(l => l !== fn); };
             }, []);
-            const iconName = { success: 'check-circle', error: 'alert-circle', info: 'info' };
-            const roleFor = (type) => type === 'error' ? 'alert' : 'status';
-            // Container is always mounted so screen readers announce new toasts
-            // via aria-live without needing to detect DOM insertion.
+            // Render newest at top of the stack; give older ones higher depth for the
+            // behind-the-front visual effect.
+            const ordered = [...toasts].reverse();
             return (
                 <div className="toast-container" aria-live="polite" aria-atomic="false" role="region" aria-label="通知">
-                    {toasts.map(t => (
-                        <div
+                    {ordered.map((t, idx) => (
+                        <ToastItem
                             key={t.id}
-                            className={`toast toast-${t.type} ${t.leaving ? 'leaving' : ''}`}
-                            role={roleFor(t.type)}
-                            aria-live={t.type === 'error' ? 'assertive' : 'polite'}
-                        >
-                            <Icon name={iconName[t.type] || 'info'} size={18} />
-                            <span>{t.message}</span>
-                        </div>
+                            toast={t}
+                            depth={idx}
+                            onDismiss={dismissToast}
+                        />
                     ))}
                 </div>
             );
@@ -1875,16 +2100,20 @@
             };
             const isDanger = opts.variant === 'danger';
             return (
-                <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.4)', backdropFilter:'blur(4px)', zIndex:9999, display:'flex', alignItems:'center', justifyContent:'center', padding:16, animation:'fadeIn .15s ease' }}
+                <div className="modal-backdrop"
+                     role="dialog"
+                     aria-modal="true"
+                     aria-labelledby="confirm-dialog-title"
+                     aria-describedby={opts.message ? "confirm-dialog-body" : undefined}
                      onClick={() => handleClose(false)}>
-                    <div onClick={e => e.stopPropagation()} style={{ background:'#fff', borderRadius:20, width:'100%', maxWidth:380, padding:24, boxShadow:'0 20px 48px rgba(0,0,0,.2)', animation:'scaleIn .2s ease' }}>
+                    <div className="modal-panel" onClick={e => e.stopPropagation()} style={{ background:'#fff', borderRadius:20, width:'100%', maxWidth:380, padding:24, boxShadow:'0 20px 60px rgba(15,23,42,.25)' }}>
                         <div style={{ display:'flex', alignItems:'center', gap:14, marginBottom:14 }}>
                             <div style={{ width:44, height:44, borderRadius:14, display:'flex', alignItems:'center', justifyContent:'center', background: isDanger ? '#fef2f2' : '#eff6ff', color: isDanger ? '#dc2626' : '#3b82f6', flexShrink:0 }}>
                                 <Icon name={isDanger ? 'alert-triangle' : 'help-circle'} size={22} />
                             </div>
                             <div style={{ flex:1, minWidth:0 }}>
-                                <div style={{ fontSize:16, fontWeight:700, color:'#1e293b', marginBottom:2 }}>{opts.title || '確認'}</div>
-                                {opts.message && <div style={{ fontSize:13, color:'#64748b', lineHeight:1.5 }}>{opts.message}</div>}
+                                <div id="confirm-dialog-title" style={{ fontSize:16, fontWeight:700, color:'#1e293b', marginBottom:2 }}>{opts.title || '確認'}</div>
+                                {opts.message && <div id="confirm-dialog-body" style={{ fontSize:13, color:'#64748b', lineHeight:1.5 }}>{opts.message}</div>}
                             </div>
                         </div>
                         <div style={{ display:'flex', gap:8, justifyContent:'flex-end', marginTop:18 }}>
@@ -1917,11 +2146,65 @@
         );
 
         // スケルトン行
+        // Phase 2 — B11: skeleton variants.
+        // `variant` can be:
+        //   'list'  (default)       — avatar + two-line row, N rows
+        //   'card'                  — grid of 96px blocks
+        //   'kpi'                   — KPI card placeholder (icon chip + title + value + sub)
+        //   'chart'                 — chart-shaped placeholder with x-axis ticks
+        //   'table'                 — compact rows for data tables
         const SkeletonRow = ({ count = 3, variant = 'list' }) => {
             const rows = Array.from({ length: count }, (_, i) => i);
             if (variant === 'card') return (
                 <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(240px, 1fr))', gap:12 }}>
                     {rows.map(i => <div key={i} className="skeleton" style={{ height:96, borderRadius:14 }} />)}
+                </div>
+            );
+            if (variant === 'kpi') return (
+                <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(180px, 1fr))', gap:12 }}>
+                    {rows.map(i => (
+                        <div key={i} className="glass-card" style={{ padding:20, display:'flex', flexDirection:'column', gap:10, minHeight:120 }}>
+                            <div className="skeleton" style={{ width:44, height:44, borderRadius:14 }} />
+                            <div className="skeleton" style={{ height:10, width:'60%', borderRadius:4 }} />
+                            <div className="skeleton" style={{ height:22, width:'80%', borderRadius:6 }} />
+                            <div className="skeleton" style={{ height:9, width:'45%', borderRadius:4 }} />
+                        </div>
+                    ))}
+                </div>
+            );
+            if (variant === 'chart') {
+                const height = 220;
+                const bars = Math.max(6, count);
+                return (
+                    <div className="glass-card" style={{ padding:20 }}>
+                        <div style={{ display:'flex', justifyContent:'space-between', marginBottom:16 }}>
+                            <div className="skeleton" style={{ height:14, width:120, borderRadius:6 }} />
+                            <div className="skeleton" style={{ height:12, width:80, borderRadius:6 }} />
+                        </div>
+                        <div style={{ display:'flex', alignItems:'flex-end', gap:8, height, paddingBottom:16, borderBottom:'1px dashed rgba(148,163,184,0.25)' }}>
+                            {Array.from({ length: bars }, (_, i) => {
+                                const h = 30 + ((Math.sin(i * 1.3) + 1) / 2) * (height - 50);
+                                return <div key={i} className="skeleton" style={{ flex:1, height: h + 'px', borderRadius:'6px 6px 0 0' }} />;
+                            })}
+                        </div>
+                        <div style={{ display:'flex', gap:8, marginTop:10 }}>
+                            {Array.from({ length: bars }, (_, i) => (
+                                <div key={i} className="skeleton" style={{ flex:1, height:8, borderRadius:4 }} />
+                            ))}
+                        </div>
+                    </div>
+                );
+            }
+            if (variant === 'table') return (
+                <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+                    {rows.map(i => (
+                        <div key={i} style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr 0.6fr', gap:12, padding:'10px 12px', borderRadius:10, background:'rgba(255,255,255,0.5)', border:'1px solid #f1f5f9' }}>
+                            <div className="skeleton" style={{ height:12, borderRadius:4 }} />
+                            <div className="skeleton" style={{ height:12, borderRadius:4, width:'85%' }} />
+                            <div className="skeleton" style={{ height:12, borderRadius:4, width:'60%' }} />
+                            <div className="skeleton" style={{ height:12, borderRadius:4, width:'40%', marginLeft:'auto' }} />
+                        </div>
+                    ))}
                 </div>
             );
             return (
@@ -2003,27 +2286,42 @@
         // ========================================
         // ビュー切り替えアニメーション
         // ========================================
+        // Phase 2 — B10: enhanced view transition
+        // - Honors prefers-reduced-motion (skips transform, shortens fade)
+        // - Scrolls to top on view change so the new view starts at its header
+        // - Stable keyed remount so inner state resets between views
         const ViewTransition = ({ viewKey, children }) => {
+            const rm = useReducedMotion();
             const [displayKey, setDisplayKey] = useState(viewKey);
             const [visible, setVisible] = useState(true);
 
             useEffect(() => {
-                if (viewKey !== displayKey) {
-                    setVisible(false);
-                    const timer = setTimeout(() => {
-                        setDisplayKey(viewKey);
-                        setVisible(true);
-                    }, 150);
-                    return () => clearTimeout(timer);
-                }
-            }, [viewKey, displayKey]);
+                if (viewKey === displayKey) return;
+                setVisible(false);
+                const exitMs = rm ? 60 : 160;
+                const timer = setTimeout(() => {
+                    setDisplayKey(viewKey);
+                    setVisible(true);
+                    // New content aligns to the top so the user's eye lands on
+                    // the view's heading rather than wherever they had scrolled.
+                    if (typeof window !== 'undefined') {
+                        window.scrollTo({ top: 0, behavior: rm ? 'auto' : 'smooth' });
+                    }
+                }, exitMs);
+                return () => clearTimeout(timer);
+            }, [viewKey, displayKey, rm]);
 
+            const enterMs = rm ? 80 : 280;
             return (
                 <div
+                    key={displayKey}
+                    className="view-transition-wrapper"
                     style={{
                         opacity: visible ? 1 : 0,
-                        transform: visible ? 'translateY(0)' : 'translateY(12px)',
-                        transition: 'opacity 0.2s ease, transform 0.3s cubic-bezier(0.16,1,0.3,1)',
+                        transform: rm ? 'none' : (visible ? 'translateY(0) scale(1)' : 'translateY(10px) scale(0.995)'),
+                        filter: rm ? 'none' : (visible ? 'blur(0px)' : 'blur(1px)'),
+                        transition: `opacity ${enterMs}ms ease, transform ${enterMs}ms cubic-bezier(0.16,1,0.3,1), filter ${enterMs}ms ease`,
+                        willChange: 'opacity, transform',
                     }}
                 >
                     {children}
@@ -2122,6 +2420,143 @@
                         {!loading && rightIcon}
                     </span>
                 </button>
+            );
+        };
+
+        // ========================================
+        // Phase 2 — C18: floating-label text input.
+        // Drop-in replacement for <label>+<input> pairs. The label sits on
+        // top of the input border when focused or filled, and drops into the
+        // input when empty & blurred. Keeps a11y: the label is a real <label>
+        // tied to the input via htmlFor/id.
+        // ========================================
+        const FloatingInput = ({
+            id,
+            label,
+            value,
+            onChange,
+            type = 'text',
+            placeholder = ' ', // space makes :placeholder-shown work reliably
+            error,
+            helpText,
+            leftIcon,
+            rightIcon,
+            className = '',
+            disabled,
+            required,
+            autoComplete,
+            inputMode,
+            ...props
+        }) => {
+            const autoId = useMemo(() => id || `fi-${Math.random().toString(36).slice(2, 9)}`, [id]);
+            const isFilled = value !== undefined && value !== null && String(value).length > 0;
+            return (
+                <div className={`fi-wrap ${error ? 'fi-error' : ''} ${className}`}>
+                    <div className={`fi-field ${isFilled ? 'fi-filled' : ''} ${disabled ? 'fi-disabled' : ''}`}>
+                        {leftIcon && <span className="fi-left">{leftIcon}</span>}
+                        <input
+                            id={autoId}
+                            type={type}
+                            value={value ?? ''}
+                            onChange={onChange}
+                            placeholder={placeholder}
+                            disabled={disabled}
+                            required={required}
+                            autoComplete={autoComplete}
+                            inputMode={inputMode}
+                            aria-invalid={error ? 'true' : undefined}
+                            aria-describedby={error || helpText ? `${autoId}-desc` : undefined}
+                            {...props}
+                        />
+                        <label htmlFor={autoId} className="fi-label">
+                            {label}{required && <span aria-hidden="true" style={{ color: '#ef4444', marginLeft: 2 }}>*</span>}
+                        </label>
+                        {rightIcon && <span className="fi-right">{rightIcon}</span>}
+                    </div>
+                    {(error || helpText) && (
+                        <p id={`${autoId}-desc`} className={`fi-help ${error ? 'fi-help-error' : ''}`}>
+                            {error || helpText}
+                        </p>
+                    )}
+                </div>
+            );
+        };
+
+        // ========================================
+        // Phase 2 — E29: shared chart tooltip
+        // Drop-in replacement for Recharts default tooltip. Pass as the
+        // `content` prop on <Tooltip>. Supports custom label/value
+        // formatters and entry filtering (e.g. to hide toggled-off series).
+        // ========================================
+        const ChartTooltip = ({ active, payload, label, labelFormatter, valueFormatter, nameFormatter, hidden }) => {
+            if (!active || !payload || !payload.length) return null;
+            const shown = hidden
+                ? payload.filter(p => !(hidden && hidden.has && hidden.has(p.dataKey)))
+                : payload;
+            if (shown.length === 0) return null;
+            const displayLabel = labelFormatter ? labelFormatter(label) : label;
+            return (
+                <div className="glass-panel shadow-glass-lg" style={{
+                    padding: '10px 14px',
+                    borderRadius: 14,
+                    minWidth: 140,
+                    fontSize: 12,
+                    border: '1px solid rgba(51,160,101,0.12)'
+                }}>
+                    {displayLabel !== undefined && displayLabel !== null && (
+                        <div style={{ fontSize: 11, fontWeight: 700, color: '#64748b', marginBottom: 6, letterSpacing: 0.3 }}>
+                            {displayLabel}
+                        </div>
+                    )}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                        {shown.map((entry, i) => {
+                            const v = valueFormatter ? valueFormatter(entry.value, entry) : entry.value;
+                            const n = nameFormatter ? nameFormatter(entry.name, entry) : entry.name;
+                            return (
+                                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'space-between' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                                        <span style={{ width: 8, height: 8, borderRadius: 2, background: entry.color || entry.stroke || entry.fill || '#33a065', flexShrink: 0 }} />
+                                        <span style={{ color: '#475569', fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{n}</span>
+                                    </div>
+                                    <span className="typo-mono" style={{ color: '#0f172a', fontWeight: 700 }}>{v}</span>
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+            );
+        };
+
+        // Phase 2 — E30: a simple click-to-toggle legend.
+        // Pass `items` [{ key, label, color }], controlled `hidden` Set, and
+        // `onToggle(key)` to let the parent update series visibility.
+        const ToggleLegend = ({ items, hidden, onToggle, align = 'end' }) => {
+            return (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: align === 'end' ? 'flex-end' : 'flex-start' }}>
+                    {items.map(it => {
+                        const off = hidden && hidden.has && hidden.has(it.key);
+                        return (
+                            <button
+                                key={it.key}
+                                type="button"
+                                onClick={() => onToggle && onToggle(it.key)}
+                                className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg text-[11px] font-semibold transition-all active:scale-95 focus-visible:ring-2 focus-visible:ring-sise-500/40 focus-visible:ring-offset-1"
+                                style={{
+                                    background: off ? 'rgba(148,163,184,0.12)' : 'rgba(51,160,101,0.08)',
+                                    color: off ? '#94a3b8' : '#334155',
+                                    border: '1px solid ' + (off ? 'rgba(148,163,184,0.25)' : 'rgba(51,160,101,0.2)'),
+                                    textDecoration: off ? 'line-through' : 'none',
+                                    opacity: off ? 0.7 : 1,
+                                }}
+                                aria-pressed={!off}
+                                aria-label={(off ? '表示: ' : '非表示: ') + it.label}
+                            >
+                                <span style={{ width: 8, height: 8, borderRadius: 2, background: off ? '#cbd5e1' : it.color, flexShrink: 0 }} />
+                                {it.label}
+                            </button>
+                        );
+                    })}
+                </div>
             );
         };
 
@@ -4258,6 +4693,11 @@
             const [configError, setConfigError] = useState(null);
             const [gasStatus, setGasStatus] = useState('checking'); // 'checking' | 'connected' | 'error'
             const [gasError, setGasError] = useState(null);
+            // Set of userIds whose profile is currently being fetched from
+            // LINE via the server. UI reads this to show a "読み込み中…" label
+            // instead of the "お客様 #xxxx" fallback, distinguishing a
+            // transient loading state from a permanently-empty name.
+            const [refreshingUserIds, setRefreshingUserIds] = useState(() => new Set());
 
             // スタッフが閲覧してよいLINE店舗を解決する。
             // currentAccess.storeIds には、
@@ -4348,15 +4788,24 @@
                     // === プロフィール名の自動補完 ===
                     // 表示名が空のユーザーを LINE Messaging API から一括取得し Supabase に保存する。
                     // サーバー側で完結するので CORS やレート制限の影響を受けにくい。
+                    // UI 側では refreshingUserIds に含まれる間「読み込み中…」を表示する。
                     const threadList = (threadsRes && threadsRes.threads) || [];
-                    const missing = threadList
-                        .filter(t => !profileMap[t.userId] || !profileMap[t.userId].displayName)
-                        .map(t => t.userId);
-                    if (missing.length > 0) {
+                    const uniqueMissing = Array.from(new Set(
+                        threadList
+                            .filter(t => t && t.userId)
+                            .filter(t => !profileMap[t.userId] || !profileMap[t.userId].displayName)
+                            .map(t => t.userId)
+                    ));
+                    if (uniqueMissing.length > 0) {
+                        setRefreshingUserIds(prev => {
+                            const next = new Set(prev);
+                            uniqueMissing.forEach(id => next.add(id));
+                            return next;
+                        });
                         dbPost('lineProfiles', {
                             action: 'refresh',
                             storeId: sid,
-                            userIds: missing,
+                            userIds: uniqueMissing,
                         }).then(async (res) => {
                             if (!res || res.error) {
                                 console.error('[LINE] プロフィール補完エラー:', res && res.error);
@@ -4373,6 +4822,12 @@
                             }
                         }).catch(err => {
                             console.error('[LINE] プロフィール補完エラー:', err);
+                        }).finally(() => {
+                            setRefreshingUserIds(prev => {
+                                const next = new Set(prev);
+                                uniqueMissing.forEach(id => next.delete(id));
+                                return next;
+                            });
                         });
                     }
                 } catch (e) {
@@ -4389,6 +4844,48 @@
                 console.log('[LINE] useEffect lineStoreId changed:', lineStoreId);
                 if (lineStoreId) fetchThreads(lineStoreId);
             }, [lineStoreId]);
+
+            // webhook経由でスレッドに新規ユーザーが追加されたとき、
+            // 初回 fetchThreads 以降に profile が無いユーザーを検出して補完する。
+            // これにより初期ロードとの競合時や、ページ滞在中に新しいメッセージが
+            // 届いた場合でも「お客様 #xxxx」のまま固まらず、自動で実名に更新される。
+            useEffect(() => {
+                if (!lineStoreId || !threads || threads.length === 0) return;
+                const needs = Array.from(new Set(
+                    threads
+                        .filter(t => t && t.userId)
+                        .filter(t => !profiles[t.userId] || !profiles[t.userId].displayName)
+                        .filter(t => !refreshingUserIds.has(t.userId))
+                        .map(t => t.userId)
+                ));
+                if (needs.length === 0) return;
+                setRefreshingUserIds(prev => {
+                    const next = new Set(prev);
+                    needs.forEach(id => next.add(id));
+                    return next;
+                });
+                dbPost('lineProfiles', {
+                    action: 'refresh',
+                    storeId: lineStoreId,
+                    userIds: needs,
+                }).then(async (res) => {
+                    if (!res || res.error) return;
+                    if (res.refreshed > 0) {
+                        const refreshed = await dbGet('lineProfiles', { store: lineStoreId });
+                        if (refreshed && refreshed.profiles) {
+                            const map = {};
+                            refreshed.profiles.forEach(p => { map[p.userId] = p; });
+                            setProfiles(map);
+                        }
+                    }
+                }).catch(() => {}).finally(() => {
+                    setRefreshingUserIds(prev => {
+                        const next = new Set(prev);
+                        needs.forEach(id => next.delete(id));
+                        return next;
+                    });
+                });
+            }, [threads, lineStoreId]);
 
             // メッセージ取得
             const fetchMessages = useCallback(async (userId) => {
@@ -4618,7 +5115,8 @@
                 templates, fetchTemplates, saveTemplate,
                 autoReplies, fetchAutoReplies, saveAutoReply,
                 tags, userTags, fetchTags, saveTag, saveUserTag,
-                analytics, fetchAnalytics
+                analytics, fetchAnalytics,
+                refreshingUserIds
             };
         };
 
@@ -4650,6 +5148,15 @@
         };
 
         const DashboardView = ({ memberData, reportData, selectedStore, setSelectedStore, allowedStoreNames, manualMembersHook, onStartFlow }) => {
+            // Phase 2 — E30: daily trend chart series visibility toggle
+            const [dailyTrendHidden, setDailyTrendHidden] = useState(() => new Set());
+            const toggleDailyTrend = useCallback((key) => {
+                setDailyTrendHidden(prev => {
+                    const next = new Set(prev);
+                    if (next.has(key)) next.delete(key); else next.add(key);
+                    return next;
+                });
+            }, []);
             // サブスクで現金入金の方をアクティブ会員として計上（店舗フィルタ適用）
             const cashActiveMembers = useMemo(() => {
                 if (!manualMembersHook?.manualMembers) return 0;
@@ -4918,23 +5425,27 @@
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-5">
                         {/* 日別推移チャート */}
                         <Card>
-                            <div className="flex items-center justify-between mb-4">
+                            <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
                                 <div>
                                     <h3 className="text-base font-bold text-slate-800">日別推移</h3>
                                     <p className="text-[10px] text-sise-500 tracking-widest font-semibold">DAILY TREND</p>
                                 </div>
-                                <div className="flex items-center gap-3 text-[10px]">
-                                    <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-sky-500"></span>新規</span>
-                                    <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-green-500"></span>契約</span>
-                                    <span className="flex items-center gap-1"><span className="w-2.5 h-0.5 bg-orange-500" style={{borderTop:'2px dashed #f97316',width:12}}></span>施術</span>
-                                </div>
+                                <ToggleLegend
+                                    items={[
+                                        { key: 'new',        label: '新規',  color: '#0ea5e9' },
+                                        { key: 'contract',   label: '契約',  color: '#22c55e' },
+                                        { key: 'treatments', label: '施術',  color: '#f97316' },
+                                    ]}
+                                    hidden={dailyTrendHidden}
+                                    onToggle={toggleDailyTrend}
+                                />
                             </div>
                             <ResponsiveContainer width="100%" height={chartHeight}>
                                 <ComposedChart data={aggregatedData.dailyTrend}>
                                     <CartesianGrid strokeDasharray="3 3" stroke="#e8f0ec" vertical={false} />
                                     <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
                                     <YAxis tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} width={30} />
-                                    <Tooltip contentStyle={tooltipStyle} />
+                                    <Tooltip content={<ChartTooltip hidden={dailyTrendHidden} />} />
                                     <defs>
                                         <linearGradient id="areaBlue" x1="0" y1="0" x2="0" y2="1">
                                             <stop offset="0%" stopColor="#0ea5e9" stopOpacity={0.25} />
@@ -4946,10 +5457,13 @@
                                         </linearGradient>
                                     </defs>
                                     <Area type="monotone" dataKey="new" name="新規" stroke="#0ea5e9" strokeWidth={2.5} fill="url(#areaBlue)" dot={{ r: 3, fill: '#0ea5e9', strokeWidth: 0 }} activeDot={{ r: 5, fill: '#0ea5e9', stroke: '#fff', strokeWidth: 2 }}
+                                        hide={dailyTrendHidden.has('new')}
                                         isAnimationActive={!prefersReducedMotion} animationBegin={0} animationDuration={900} animationEasing="ease-out" />
                                     <Area type="monotone" dataKey="contract" name="契約" stroke="#22c55e" strokeWidth={2.5} fill="url(#areaGreen)" dot={{ r: 3, fill: '#22c55e', strokeWidth: 0 }} activeDot={{ r: 5, fill: '#22c55e', stroke: '#fff', strokeWidth: 2 }}
+                                        hide={dailyTrendHidden.has('contract')}
                                         isAnimationActive={!prefersReducedMotion} animationBegin={150} animationDuration={900} animationEasing="ease-out" />
                                     <Line type="monotone" dataKey="treatments" name="施術" stroke="#f97316" strokeWidth={2} dot={false} strokeDasharray="6 4"
+                                        hide={dailyTrendHidden.has('treatments')}
                                         isAnimationActive={!prefersReducedMotion} animationBegin={300} animationDuration={900} animationEasing="ease-out" />
                                 </ComposedChart>
                             </ResponsiveContainer>
@@ -5006,7 +5520,10 @@
                                     <CartesianGrid strokeDasharray="3 3" stroke="#e8f0ec" vertical={false} />
                                     <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
                                     <YAxis tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} width={25} />
-                                    <Tooltip contentStyle={tooltipStyle} formatter={(v, n) => [v + '人', n === 'new' ? '新規' : '契約']} />
+                                    <Tooltip content={<ChartTooltip
+                                        valueFormatter={(v) => (v == null ? '' : v) + '人'}
+                                        nameFormatter={(n) => n === 'new' ? '新規' : n === 'contract' ? '契約' : n}
+                                    />} />
                                     <defs>
                                         <linearGradient id="barGradientBlue" x1="0" y1="0" x2="0" y2="1">
                                             <stop offset="0%" stopColor="#38bdf8" /><stop offset="100%" stopColor="#0ea5e9" />
@@ -10616,9 +11133,14 @@
 
         // 表示名の決定。LINE側で名前が取れない/ブロック済みなどで displayName が空の場合、
         // 生のLINE user ID を見せずに「お客様 + 下4桁」にフォールバックする。
-        const resolveDisplayName = (profile, userId) => {
+        // 第3引数 refreshingUserIds を渡すと、プロフィール取得中のユーザーに
+        // 「読み込み中…」を返して、永久欠損との視覚的区別を行う。
+        const resolveDisplayName = (profile, userId, refreshingUserIds) => {
             const name = profile && profile.displayName ? profile.displayName.trim() : '';
             if (name) return name;
+            if (refreshingUserIds && userId && refreshingUserIds.has && refreshingUserIds.has(userId)) {
+                return '読み込み中…';
+            }
             const tail = (userId || '').slice(-4);
             return tail ? `お客様 #${tail}` : 'お客様';
         };
@@ -10701,7 +11223,8 @@
                 templates, fetchTemplates, saveTemplate,
                 autoReplies, fetchAutoReplies, saveAutoReply,
                 tags, userTags, fetchTags, saveTag, saveUserTag,
-                analytics, fetchAnalytics
+                analytics, fetchAnalytics,
+                refreshingUserIds
             } = lineChatHook;
             const [lineTab, setLineTab] = useState('chat');
             const [showTemplatePanel, setShowTemplatePanel] = useState(false);
@@ -11137,7 +11660,7 @@
             // スレッド選択中 → チャット画面
             if (selectedThread) {
                 const profile = profiles[selectedThread.userId] || {};
-                const displayName = resolveDisplayName(profile, selectedThread.userId);
+                const displayName = resolveDisplayName(profile, selectedThread.userId, refreshingUserIds);
                 const storeName = lineConfig.stores.find(s => s.id === lineStoreId)?.name || '';
                 const userTagIds = new Set(
                     (userTags || [])
@@ -11325,6 +11848,8 @@
             const filteredThreads = threads.filter(t => {
                 if (!threadSearch.trim()) return true;
                 const profile = profiles[t.userId] || {};
+                // Don't pass refreshingUserIds here — we want to search against the
+                // resolved name or fallback, not the transient "読み込み中…" string.
                 const name = resolveDisplayName(profile, t.userId).toLowerCase();
                 const msg = (t.lastMessage?.messageText || '').toLowerCase();
                 const q = threadSearch.toLowerCase();
@@ -11477,7 +12002,7 @@
 
                         {filteredThreads.map((thread, idx) => {
                             const profile = profiles[thread.userId] || {};
-                            const displayName = resolveDisplayName(profile, thread.userId);
+                            const displayName = resolveDisplayName(profile, thread.userId, refreshingUserIds);
                             const lastMsg = thread.lastMessage;
                             const unread = thread.unread || 0;
                             const preview = lastMsg
@@ -15801,7 +16326,7 @@
                                         })
                                         .map(t=>{
                                             const pr=lineChatHook.profiles[t.userId]||{};
-                                            const name = resolveDisplayName(pr, t.userId);
+                                            const name = resolveDisplayName(pr, t.userId, lineChatHook.refreshingUserIds);
                                             const sel=lineSelectedUser&&lineSelectedUser.userId===t.userId;
                                             return (
                                                 <button key={t.userId} onClick={()=>setLineSelectedUser({userId:t.userId,displayName:name})}
@@ -15817,7 +16342,16 @@
                                         })}
                                 </div>
                                 <div className="p-4 border-t bg-gray-50">
-                                    {lineSelectedUser&&<p className="text-xs text-gray-500 mb-2 text-center">送信先: <span className="font-bold text-gray-700">{lineSelectedUser.displayName}</span></p>}
+                                    {lineSelectedUser&&(() => {
+                                        // プロフィール更新で名前が変わっても表示先が古い名前にならないよう、
+                                        // 現在の profiles/refreshingUserIds から毎回導出する。
+                                        const liveName = resolveDisplayName(
+                                            (lineChatHook && lineChatHook.profiles && lineChatHook.profiles[lineSelectedUser.userId]) || {},
+                                            lineSelectedUser.userId,
+                                            lineChatHook && lineChatHook.refreshingUserIds
+                                        );
+                                        return <p className="text-xs text-gray-500 mb-2 text-center">送信先: <span className="font-bold text-gray-700">{liveName}</span></p>;
+                                    })()}
                                     {lineSendStatus==='sent'&&<div className="flex items-center justify-center gap-2 text-green-600 font-bold text-sm py-2"><svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd"/></svg>送信完了！</div>}
                                     {lineSendStatus==='error'&&<p className="text-center text-red-500 text-sm mb-2 font-bold">送信に失敗しました。</p>}
                                     {lineSendStatus!=='sent'&&(
@@ -16615,7 +17149,7 @@
                                         })
                                         .map(t => {
                                             const profile = lineChatHook.profiles[t.userId] || {};
-                                            const name = resolveDisplayName(profile, t.userId);
+                                            const name = resolveDisplayName(profile, t.userId, lineChatHook.refreshingUserIds);
                                             const isSelected = lineSelectedUser && lineSelectedUser.userId === t.userId;
                                             return (
                                                 <button key={t.userId} onClick={() => setLineSelectedUser({ userId: t.userId, displayName: name })}
@@ -16638,7 +17172,11 @@
                                 <div className="p-4 border-t bg-gray-50">
                                     {lineSelectedUser && (
                                         <p className="text-xs text-gray-500 mb-2 text-center">
-                                            送信先: <span className="font-bold text-gray-700">{lineSelectedUser.displayName}</span>
+                                            送信先: <span className="font-bold text-gray-700">{resolveDisplayName(
+                                                (lineChatHook && lineChatHook.profiles && lineChatHook.profiles[lineSelectedUser.userId]) || {},
+                                                lineSelectedUser.userId,
+                                                lineChatHook && lineChatHook.refreshingUserIds
+                                            )}</span>
                                         </p>
                                     )}
                                     {lineSendStatus === 'sent' && (
@@ -20040,10 +20578,13 @@
                 const name = customer?.name || '';
                 if (!name) return { squareMember: null, manualMember: null, counselings: [], lineThread: null, lineProfile: null, lineMessages: [] };
                 const normName = name.toLowerCase().replace(/\s+/g, '');
+                // 空白のみの名前や空文字の displayName で "空 includes 空" が真になり
+                // 全行に一致してしまう問題を防ぐため、両辺とも非空を要求する。
                 const nameMatch = (s) => {
-                    if (!s) return false;
-                    return s.toLowerCase().replace(/\s+/g, '').includes(normName) ||
-                           normName.includes(s.toLowerCase().replace(/\s+/g, ''));
+                    if (!s || !normName) return false;
+                    const sn = String(s).toLowerCase().replace(/\s+/g, '');
+                    if (!sn) return false;
+                    return sn.includes(normName) || normName.includes(sn);
                 };
                 const squareMember = (memberData?.members || []).find(m => nameMatch(m.name));
                 const manualMember = (manualMembersHook?.manualMembers || []).find(m => nameMatch(m.name));
