@@ -1,7 +1,15 @@
 import { supabase } from '../_lib/supabase.js';
 import { cors } from '../_lib/cors.js';
-import { extractStaffContext } from '../_lib/auth.js';
+import {
+  extractStaffContext,
+  verifyAdminSession,
+  signAdminSession,
+  setAdminSessionCookie,
+  clearAdminSessionCookie,
+  REQUIRE_ADMIN_AUTH,
+} from '../_lib/auth.js';
 import { signToken } from '../_lib/sign.js';
+import bcrypt from 'bcryptjs';
 import { staffGet, staffPost, menuItemsGet, menuItemsPost, hpbGet, hpbPost } from '../_lib/db-handlers-master.js';
 import { cashbookGet, cashbookPost } from '../_lib/db-handlers-cashbook.js';
 import {
@@ -43,9 +51,9 @@ const HANDLERS = {
   lineTags:        { get: lineTagsGet,       post: lineTagsPost },
   lineUserTags:    { get: lineUserTagsGet,   post: lineUserTagsPost },
   lineAnalytics:   { get: lineAnalyticsGet,  post: async () => ({ error: 'lineAnalyticsはGET専用です' }) },
-  // スタッフトークン発行（Vercel Hobby の 12 ファンクション上限のため、
-  // 単独エンドポイントにせずここに相乗りさせている）
-  auth:            { get: async () => ({ error: 'authはPOST専用です' }), post: authPost },
+  // 認証（スタッフトークン発行 + 管理者ログイン）
+  // Vercel Hobby の 12 ファンクション上限対策で /api/db に相乗り
+  auth:            { get: authGet, post: authPost },
 };
 
 export default async function handler(req, res) {
@@ -73,10 +81,33 @@ export default async function handler(req, res) {
     return res.status(401).json({ error: '認証エラー: ' + (staffCtx.reason || 'invalid') });
   }
 
+  // ---- 管理者セッション判定 + REQUIRE_ADMIN_AUTH 強制 ----
+  // admin モード (staffCtx === null) かつ REQUIRE_ADMIN_AUTH=true の場合、
+  // HttpOnly cookie 経由の管理者セッションを必須化する。
+  // ただし auth テーブル (login/logout/session) は認証フロー自体のため例外。
+  const adminSession = (staffCtx === null) ? verifyAdminSession(req) : null;
+  if (staffCtx === null && REQUIRE_ADMIN_AUTH && table !== 'auth') {
+    if (!adminSession || !adminSession.authenticated) {
+      return res.status(401).json({
+        error: '管理者ログインが必要です',
+        requiresAdminLogin: true,
+      });
+    }
+  }
+
   try {
     const body = req.method === 'POST'
       ? (typeof req.body === 'string' ? JSON.parse(req.body) : req.body)
       : null;
+
+    // auth テーブルのみ特殊扱い: cookie 操作のため req/res を渡す
+    if (table === 'auth') {
+      const result = req.method === 'GET'
+        ? await authGet(params, { req, res, staffCtx, adminSession })
+        : await authPost(body, { req, res, staffCtx, adminSession });
+      if (res.writableEnded || res.headersSent) return;
+      return res.json(result);
+    }
 
     // 各ハンドラには第2引数として staffCtx を渡す。
     // 第2引数を受け取らない既存ハンドラは単に無視するため後方互換。
@@ -318,24 +349,73 @@ async function reportsPost(body) {
 }
 
 // ============================================================
-// スタッフトークン発行 (auth)
+// 認証 (auth) — スタッフURL発行 + 管理者ログイン/ログアウト/セッション取得
 // ============================================================
-// POST /api/db?table=auth  body: { action: 'issueToken', staffId, ttlSeconds? }
-//   → 署名付き URL トークンを返す。
+// POST /api/db?table=auth
+//   action: 'issueToken'  { staffId, ttlSeconds? }  → 署名付きURLトークン
+//           'login'       { password }              → HttpOnly cookie 発行
+//           'logout'                                → cookie 失効
+//           'session'                               → (GET 相当) 現在の認証状態
+//           'changePassword' { currentPassword, newPassword } → 将来用
 //
-// 独立エンドポイント (api/auth/*.js) を置かずにここに相乗りしているのは
-// Vercel Hobby の 12 ファンクション上限対策。
-// 管理者モード (staffCtx=null) からのみ呼び出し可能。
+// GET /api/db?table=auth
+//   → { requiresAuth: bool, authenticated: bool, username? }
+//
+// 独立エンドポイントにせずここに相乗りしているのは Vercel Hobby の
+// 12 ファンクション上限対策。
 // ============================================================
 
 const AUTH_TOKEN_DEFAULT_TTL = 365 * 24 * 60 * 60; // 1 year
 
-async function authPost(body, staffCtx) {
+// 失敗カウンタ（in-memory）: admin パスワード総当たり対策。
+// serverless インスタンス毎なので完全ではないが、UX 品質レベルのガード。
+// key = 'admin' 固定（将来ユーザー多様化時に拡張）
+const _loginFailures = new Map(); // key → { count, blockedUntil }
+function loginRateLimit() {
+  const key = 'admin';
+  const now = Date.now();
+  const entry = _loginFailures.get(key);
+  if (entry && entry.blockedUntil > now) {
+    return { blocked: true, retryAfter: Math.ceil((entry.blockedUntil - now) / 1000) };
+  }
+  return { blocked: false };
+}
+function loginRecordFailure() {
+  const key = 'admin';
+  const now = Date.now();
+  const entry = _loginFailures.get(key) || { count: 0, blockedUntil: 0 };
+  entry.count = (entry.blockedUntil > now ? entry.count : 0) + 1;
+  if (entry.count >= 5) { entry.blockedUntil = now + 60 * 1000; entry.count = 0; }
+  _loginFailures.set(key, entry);
+}
+function loginResetFailure() { _loginFailures.delete('admin'); }
+
+async function authGet(params, { adminSession }) {
+  // セッション状態を返す。クライアントが boot 時に叩いて
+  // ログイン画面を出すべきかを判定する。
+  return {
+    requiresAuth: !!REQUIRE_ADMIN_AUTH,
+    authenticated: !!(adminSession && adminSession.authenticated),
+    username: adminSession && adminSession.authenticated ? adminSession.username : undefined,
+  };
+}
+
+async function authPost(body, ctx) {
+  const { req, res, staffCtx, adminSession } = ctx;
   const action = body.action || '';
   switch (action) {
+    // ------------------------------------------------------------
+    // スタッフURL発行（既存機能）
+    // ------------------------------------------------------------
     case 'issueToken': {
+      // 管理者モード必須
       if (staffCtx !== null) {
         return { error: 'このアクションは管理者のみ呼び出せます' };
+      }
+      // REQUIRE_ADMIN_AUTH=true の場合はセッションも必須
+      // （router で一般ケースは弾いているが、防御的に再チェック）
+      if (REQUIRE_ADMIN_AUTH && (!adminSession || !adminSession.authenticated)) {
+        return { error: '管理者ログインが必要です', requiresAdminLogin: true };
       }
       const staffId = body.staffId ? String(body.staffId) : '';
       if (!staffId) return { error: 'staffIdが必要です' };
@@ -368,6 +448,56 @@ async function authPost(body, staffCtx) {
         relativeUrl: `?v=${encodeURIComponent(token)}`,
       };
     }
+
+    // ------------------------------------------------------------
+    // 管理者ログイン: bcrypt + env var 照合 → HttpOnly cookie 発行
+    // ------------------------------------------------------------
+    case 'login': {
+      const hash = process.env.SISE_ADMIN_PASSWORD_HASH || '';
+      if (!hash) {
+        return { error: '管理者パスワードが未設定です（環境変数 SISE_ADMIN_PASSWORD_HASH を設定してください）' };
+      }
+      const rl = loginRateLimit();
+      if (rl.blocked) {
+        return { error: `試行回数の上限を超えました。${rl.retryAfter}秒後に再試行してください` };
+      }
+      const password = body.password || '';
+      if (!password || typeof password !== 'string') {
+        loginRecordFailure();
+        return { error: 'パスワードを入力してください' };
+      }
+      let ok = false;
+      try { ok = await bcrypt.compare(password, hash); }
+      catch (e) { console.error('[auth/login] bcrypt error:', e); }
+      if (!ok) {
+        loginRecordFailure();
+        return { error: 'パスワードが正しくありません' };
+      }
+      loginResetFailure();
+      const token = signAdminSession('admin');
+      setAdminSessionCookie(res, token);
+      return { success: true, authenticated: true, username: 'admin' };
+    }
+
+    // ------------------------------------------------------------
+    // 管理者ログアウト: cookie 失効
+    // ------------------------------------------------------------
+    case 'logout': {
+      clearAdminSessionCookie(res);
+      return { success: true, authenticated: false };
+    }
+
+    // ------------------------------------------------------------
+    // セッション状態確認（GET と同じ）
+    // ------------------------------------------------------------
+    case 'session': {
+      return {
+        requiresAuth: !!REQUIRE_ADMIN_AUTH,
+        authenticated: !!(adminSession && adminSession.authenticated),
+        username: adminSession && adminSession.authenticated ? adminSession.username : undefined,
+      };
+    }
+
     default: return { error: '不明なaction: ' + action };
   }
 }
