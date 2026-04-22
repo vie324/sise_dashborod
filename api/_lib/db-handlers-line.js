@@ -214,20 +214,26 @@ export async function lineProfilesPost(body) {
         .eq('store_id', storeId)
         .or('display_name.is.null,display_name.eq.');
       if (error) throw error;
-      targetUserIds = (data || []).map(r => r.user_id).filter(Boolean);
+      // ここで Set を介して初期化することで line_profiles 自体に重複行があっても除去される
+      const seen = new Set();
+      for (const row of (data || [])) {
+        if (row.user_id && !seen.has(row.user_id)) {
+          seen.add(row.user_id);
+        }
+      }
       // line_messages 側には存在するが line_profiles に未登録のユーザーも対象に加える
       const { data: msgRows, error: msgErr } = await supabase.from('line_messages')
         .select('user_id')
         .eq('store_id', storeId);
       if (!msgErr && msgRows) {
-        const existing = new Set(targetUserIds);
         for (const row of msgRows) {
-          if (row.user_id && !existing.has(row.user_id)) {
-            existing.add(row.user_id);
-            targetUserIds.push(row.user_id);
-          }
+          if (row.user_id) seen.add(row.user_id);
         }
       }
+      targetUserIds = Array.from(seen);
+    } else {
+      // 呼び出し側からの userIds も念のため重複除去する
+      targetUserIds = Array.from(new Set(targetUserIds));
     }
 
     if (targetUserIds.length === 0) return { success: true, refreshed: 0, results: [] };
