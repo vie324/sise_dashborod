@@ -1730,25 +1730,17 @@
         // ============================================================
         const generateStaffUrl = async (staff) => {
             if (!staff || !staff.id) return null;
-            try {
-                const resp = await fetch('/api/auth/issue-token', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ staffId: staff.id }),
-                });
-                const data = await resp.json();
-                if (!resp.ok || !data || data.error) {
-                    console.error('[auth] URL発行失敗:', data && data.error);
-                    showToast('URLの発行に失敗しました: ' + ((data && data.error) || resp.status), 'error');
-                    return null;
-                }
-                const base = window.location.origin + window.location.pathname;
-                return `${base}?v=${encodeURIComponent(data.token)}`;
-            } catch (e) {
-                console.error('[auth] URL発行通信エラー:', e);
-                showToast('URLの発行に失敗しました（通信エラー）', 'error');
+            // 独立エンドポイントではなく /api/db に相乗り（Vercel Hobby の
+            // 12 ファンクション上限対策）。table=auth + action=issueToken で呼ぶ。
+            const data = await dbPost('auth', { action: 'issueToken', staffId: staff.id });
+            if (!data || data.error) {
+                const msg = (data && data.error) || '通信エラー';
+                console.error('[auth] URL発行失敗:', msg);
+                showToast('URLの発行に失敗しました: ' + msg, 'error');
                 return null;
             }
+            const base = window.location.origin + window.location.pathname;
+            return `${base}?v=${encodeURIComponent(data.token)}`;
         };
 
         // localStorage管理（GASフォールバック用）

@@ -1,6 +1,7 @@
 import { supabase } from '../_lib/supabase.js';
 import { cors } from '../_lib/cors.js';
 import { extractStaffContext } from '../_lib/auth.js';
+import { signToken } from '../_lib/sign.js';
 import { staffGet, staffPost, menuItemsGet, menuItemsPost, hpbGet, hpbPost } from '../_lib/db-handlers-master.js';
 import { cashbookGet, cashbookPost } from '../_lib/db-handlers-cashbook.js';
 import {
@@ -42,6 +43,9 @@ const HANDLERS = {
   lineTags:        { get: lineTagsGet,       post: lineTagsPost },
   lineUserTags:    { get: lineUserTagsGet,   post: lineUserTagsPost },
   lineAnalytics:   { get: lineAnalyticsGet,  post: async () => ({ error: 'lineAnalyticsはGET専用です' }) },
+  // スタッフトークン発行（Vercel Hobby の 12 ファンクション上限のため、
+  // 単独エンドポイントにせずここに相乗りさせている）
+  auth:            { get: async () => ({ error: 'authはPOST専用です' }), post: authPost },
 };
 
 export default async function handler(req, res) {
@@ -308,6 +312,61 @@ async function reportsPost(body) {
         if (error) throw error;
       }
       return { success: true, count: rows.length };
+    }
+    default: return { error: '不明なaction: ' + action };
+  }
+}
+
+// ============================================================
+// スタッフトークン発行 (auth)
+// ============================================================
+// POST /api/db?table=auth  body: { action: 'issueToken', staffId, ttlSeconds? }
+//   → 署名付き URL トークンを返す。
+//
+// 独立エンドポイント (api/auth/*.js) を置かずにここに相乗りしているのは
+// Vercel Hobby の 12 ファンクション上限対策。
+// 管理者モード (staffCtx=null) からのみ呼び出し可能。
+// ============================================================
+
+const AUTH_TOKEN_DEFAULT_TTL = 365 * 24 * 60 * 60; // 1 year
+
+async function authPost(body, staffCtx) {
+  const action = body.action || '';
+  switch (action) {
+    case 'issueToken': {
+      if (staffCtx !== null) {
+        return { error: 'このアクションは管理者のみ呼び出せます' };
+      }
+      const staffId = body.staffId ? String(body.staffId) : '';
+      if (!staffId) return { error: 'staffIdが必要です' };
+
+      const { data: staffRow, error: staffErr } = await supabase
+        .from('staff').select('id, name, role, status').eq('id', staffId).maybeSingle();
+      if (staffErr) throw staffErr;
+      if (!staffRow) return { error: 'スタッフが見つかりません' };
+      if (staffRow.status === 'inactive') return { error: 'このスタッフは無効化されています' };
+
+      const { data: ssRows, error: ssErr } = await supabase
+        .from('staff_stores').select('store_id').eq('staff_id', staffId);
+      if (ssErr) throw ssErr;
+      const storeIds = (ssRows || []).map(r => r.store_id).filter(Boolean);
+
+      const payload = {
+        id: staffRow.id,
+        n:  staffRow.name,
+        r:  staffRow.role || 'staff',
+        sid: storeIds,
+      };
+      const ttl = Math.min(Number(body.ttlSeconds) || AUTH_TOKEN_DEFAULT_TTL, AUTH_TOKEN_DEFAULT_TTL);
+      const token = signToken(payload, ttl);
+      const expiresAt = new Date((Math.floor(Date.now() / 1000) + ttl) * 1000).toISOString();
+
+      return {
+        success: true,
+        token,
+        expiresAt,
+        relativeUrl: `?v=${encodeURIComponent(token)}`,
+      };
     }
     default: return { error: '不明なaction: ' + action };
   }
