@@ -3916,17 +3916,21 @@
 
             // 集計
             const stats = useMemo(() => {
-                const now = new Date();
+                // 期限判定はローカル日付ベースで行う。
+                // new Date("YYYY-MM-DD") は UTC midnight として解釈されるため、
+                // JST の 9:00 までは「今日」でも UTC 基準だと前日扱いになり、
+                // 本日期限の回数券が「期限切れ」と表示される問題があった。
+                const todayYMD = todayLocalYMD();
+                const addDays = (ymd, d) => { try { const [y,m,dd]=ymd.split('-').map(Number); const dt=new Date(y,(m||1)-1,dd||1); dt.setDate(dt.getDate()+d); const yy=dt.getFullYear(); const mm=String(dt.getMonth()+1).padStart(2,'0'); const ddd=String(dt.getDate()).padStart(2,'0'); return `${yy}-${mm}-${ddd}`; } catch(_) { return ymd; } };
+                const in30 = addDays(todayYMD, 30);
                 const active = customerTickets.filter(t => {
-                    return t.remainingSessions > 0 && new Date(t.expirationDate) >= now;
+                    return t.remainingSessions > 0 && t.expirationDate && t.expirationDate >= todayYMD;
                 });
                 const expiringSoon = customerTickets.filter(t => {
-                    const exp = new Date(t.expirationDate);
-                    const diff = (exp - now) / (1000 * 60 * 60 * 24);
-                    return t.remainingSessions > 0 && diff >= 0 && diff <= 30;
+                    return t.remainingSessions > 0 && t.expirationDate && t.expirationDate >= todayYMD && t.expirationDate <= in30;
                 });
                 const expired = customerTickets.filter(t => {
-                    return t.remainingSessions > 0 && new Date(t.expirationDate) < now;
+                    return t.remainingSessions > 0 && t.expirationDate && t.expirationDate < todayYMD;
                 });
                 const completed = customerTickets.filter(t => t.remainingSessions <= 0);
                 const totalRevenue = customerTickets.reduce((sum, t) => sum + (t.price || 0), 0);
@@ -4979,8 +4983,14 @@
             }, [lineStoreId]);
 
             // 店舗変更時にスレッド再取得
+            // 前店舗のデータが一瞬残って表示されるのを防ぐため、新 fetch 前に
+            // threads / messages / profiles / selectedThread をクリアする。
             useEffect(() => {
                 console.log('[LINE] useEffect lineStoreId changed:', lineStoreId);
+                setThreads([]);
+                setMessages([]);
+                setProfiles({});
+                setSelectedThread(null);
                 if (lineStoreId) fetchThreads(lineStoreId);
             }, [lineStoreId]);
 
@@ -5046,9 +5056,11 @@
                 setSending(true);
                 try {
                     // LINE APIでプッシュ送信
+                    // スタッフ権限チェックを通すため X-Staff-Token/Id を付与
                     const pushRes = await fetch('/api/line/message/push', {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json', 'X-Store-Id': lineStoreId },
+                        headers: { 'Content-Type': 'application/json', 'X-Store-Id': lineStoreId, ...buildAuthHeaders() },
+                        credentials: 'same-origin',
                         body: JSON.stringify({
                             to: userId,
                             messages: [{ type: 'text', text }],
@@ -5061,12 +5073,19 @@
                         return false;
                     }
 
-                    // Supabaseに送信記録を保存
-                    dbPost('lineMessages', {
+                    // Supabase に送信記録を保存。await を忘れると UI では送信成功に見えるのに
+                    // 履歴が空のまま残る（= ページ再読込で消える）バグになる。
+                    const saveRes = await dbPost('lineMessages', {
                         storeId: lineStoreId,
                         userId,
                         messageText: text,
                     });
+                    if (!saveRes || saveRes.error) {
+                        console.warn('LINE送信メッセージの履歴保存に失敗:', saveRes && saveRes.error);
+                        // 送信自体は成功しているので UI には楽観的に反映するが、
+                        // 履歴差分がある可能性があるので軽く警告する。
+                        showToast('メッセージは送信されましたが履歴保存に失敗しました', 'error');
+                    }
 
                     // メッセージ一覧を更新
                     setMessages(prev => [...prev, {
@@ -5095,7 +5114,8 @@
                 try {
                     const pushRes = await fetch('/api/line/message/push', {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json', 'X-Store-Id': lineStoreId },
+                        headers: { 'Content-Type': 'application/json', 'X-Store-Id': lineStoreId, ...buildAuthHeaders() },
+                        credentials: 'same-origin',
                         body: JSON.stringify({
                             to: userId,
                             messages: [flexMessage],
@@ -5109,12 +5129,15 @@
                         return false;
                     }
 
-                    // Supabaseに送信記録を保存
-                    dbPost('lineMessages', {
+                    // Supabase に送信記録を保存（await 必須）
+                    const saveRes = await dbPost('lineMessages', {
                         storeId: lineStoreId,
                         userId,
                         messageText: '[施術レポート] ' + (flexMessage.altText || ''),
                     });
+                    if (!saveRes || saveRes.error) {
+                        console.warn('Flex送信メッセージの履歴保存に失敗:', saveRes && saveRes.error);
+                    }
 
                     return true;
                 } catch (e) {
@@ -5153,7 +5176,8 @@
                         : { messages: msgs, type: 'broadcast' };
                     const res = await fetch('/api/line/broadcast', {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json', 'X-Store-Id': lineStoreId },
+                        headers: { 'Content-Type': 'application/json', 'X-Store-Id': lineStoreId, ...buildAuthHeaders() },
+                        credentials: 'same-origin',
                         body: JSON.stringify(body),
                     });
                     if (!res.ok) { const err = await res.json().catch(() => ({})); console.error('配信エラー:', err); return false; }
@@ -7772,18 +7796,26 @@
             const [showSaved, setShowSaved] = useState(false);
 
             // 新規回数券フォーム
-            const [newTicket, setNewTicket] = useState({
+            const [newTicket, setNewTicket] = useState(() => ({
                 customerName: '', customerPhone: '', planId: '', storeName: '', notes: '',
-                purchaseDate: new Date().toISOString().slice(0, 10), expirationDate: ''
-            });
+                purchaseDate: todayLocalYMD(), expirationDate: ''
+            }));
             // プランフォーム
             const [planForm, setPlanForm] = useState({ name: '', sessions: '', price: '', validityDays: '' });
 
             // 日数計算
             const getDaysUntilExpiration = (expirationDate) => {
-                const now = new Date();
-                const exp = new Date(expirationDate);
-                return Math.ceil((exp - now) / (1000 * 60 * 60 * 24));
+                // ローカル日付同士の日数差を求める（UTC 変換はしない）。
+                // 以前は new Date(expirationDate) が UTC midnight 扱いになり
+                // JST との時差で本日期限の券が expired 判定されていた。
+                if (!expirationDate) return 0;
+                try {
+                    const [y, m, d] = String(expirationDate).split('-').map(Number);
+                    const exp = new Date(y, (m || 1) - 1, d || 1);
+                    const now = new Date();
+                    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+                    return Math.round((exp - today) / (1000 * 60 * 60 * 24));
+                } catch (_) { return 0; }
             };
 
             // ステータス判定
@@ -7827,20 +7859,34 @@
                 }
                 if (debouncedTicketSearch) {
                     const q = debouncedTicketSearch.toLowerCase();
-                    list = list.filter(t => t.customerName.toLowerCase().includes(q) || (t.customerPhone && t.customerPhone.includes(q)));
+                    // customerName / customerPhone が null の回数券でもクラッシュしないよう null 安全に
+                    list = list.filter(t => {
+                        const name = (t.customerName || '').toLowerCase();
+                        const phone = t.customerPhone || '';
+                        return name.includes(q) || phone.includes(q);
+                    });
                 }
                 return list.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
             }, [customerTickets, filterStatus, debouncedTicketSearch]);
 
             // プランが変わったら有効期限を自動計算
+            // new Date("YYYY-MM-DD") は UTC midnight としてパースされ、JST との境界で
+            // 1日ずれるため、文字列操作で local のまま日数を加算する。
+            const addDaysToYMD = (ymd, days) => {
+                const [y, m, d] = ymd.split('-').map(Number);
+                const dt = new Date(y, (m || 1) - 1, d || 1);
+                dt.setDate(dt.getDate() + (days || 0));
+                const yy = dt.getFullYear();
+                const mm = String(dt.getMonth() + 1).padStart(2, '0');
+                const dd = String(dt.getDate()).padStart(2, '0');
+                return `${yy}-${mm}-${dd}`;
+            };
             const handlePlanChange = (planId) => {
                 const plan = ticketPlans.find(p => p.id === planId);
-                const purchase = newTicket.purchaseDate || new Date().toISOString().slice(0, 10);
+                const purchase = newTicket.purchaseDate || todayLocalYMD();
                 let expDate = '';
                 if (plan) {
-                    const d = new Date(purchase);
-                    d.setDate(d.getDate() + plan.validityDays);
-                    expDate = d.toISOString().slice(0, 10);
+                    expDate = addDaysToYMD(purchase, plan.validityDays || 0);
                 }
                 setNewTicket(prev => ({ ...prev, planId, expirationDate: expDate }));
             };
@@ -7849,7 +7895,7 @@
             const handleAddTicket = () => {
                 if (!newTicket.customerName.trim() || !newTicket.planId) return;
                 addCustomerTicket(newTicket);
-                setNewTicket({ customerName: '', customerPhone: '', planId: '', storeName: '', notes: '', purchaseDate: new Date().toISOString().slice(0, 10), expirationDate: '' });
+                setNewTicket({ customerName: '', customerPhone: '', planId: '', storeName: '', notes: '', purchaseDate: todayLocalYMD(), expirationDate: '' });
                 setShowAddForm(false);
             };
 

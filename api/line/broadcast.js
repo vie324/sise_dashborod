@@ -1,5 +1,7 @@
 // LINE Broadcast/Narrowcast - Vercel Serverless Function
 
+import { extractStaffContext, canAccessStore } from '../_lib/auth.js';
+
 function getLineConfig(storeId) {
   if (!storeId) return null;
   const prefix = `LINE_STORE_${storeId}`;
@@ -23,13 +25,22 @@ export default async function handler(req, res) {
   const allowedOrigin = process.env.ALLOWED_ORIGIN || '*';
   res.setHeader('Access-Control-Allow-Origin', allowedOrigin);
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Store-Id');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Store-Id, X-Staff-Id, X-Staff-Token');
 
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   const storeId = req.headers['x-store-id'] || req.query.store;
   if (!storeId) return res.status(400).json({ error: 'X-Store-Id header required' });
+
+  // スタッフ権限チェック（別店舗への一斉配信を防止）
+  const staffCtx = await extractStaffContext(req);
+  if (staffCtx && staffCtx.valid === false) {
+    return res.status(401).json({ error: '認証エラー: ' + (staffCtx.reason || 'invalid') });
+  }
+  if (!canAccessStore(staffCtx, String(storeId))) {
+    return res.status(403).json({ error: 'この店舗への配信権限がありません' });
+  }
 
   const config = getLineConfig(storeId);
   if (!config) return res.status(500).json({ error: 'LINE not configured for this store' });

@@ -56,7 +56,17 @@ export async function ticketGet() {
   };
 }
 
-export async function ticketPost(body) {
+export async function ticketPost(body, staffCtx) {
+  // 注意: 本実装は delete().neq(...) による全置換方式。
+  // 店舗単位の部分更新ではなく、plans / tickets を全削除して入れ直すため、
+  // スタッフが勝手に呼ぶと全店舗の回数券データを破壊できる重大な権限問題になる。
+  // → 管理者モード (staffCtx === null) 限定に制限する。
+  // 将来、店舗スコープの部分更新が欲しくなったら、action: 'updatePlan' 等を
+  // 別途追加してスタッフに段階的に開放する。
+  if (staffCtx !== null) {
+    return { error: '回数券データの一括更新は管理者のみ許可されています' };
+  }
+
   if (body.plans) {
     const rows = body.plans.map(p => ({
       id: p.id, name: p.name || '', sessions: p.sessions || 0,
