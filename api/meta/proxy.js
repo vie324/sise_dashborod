@@ -1,6 +1,8 @@
 // Meta (Facebook/Instagram) Marketing API Proxy
 // Forwards requests to Meta Graph API with server-side authentication
 
+import { extractStaffContext } from '../_lib/auth.js';
+
 const ALLOWED_EDGES = [
   'campaigns',
   'adsets',
@@ -8,11 +10,19 @@ const ALLOWED_EDGES = [
   'insights',
 ];
 
+// headquarter / admin ロールのみ Meta API を叩ける
+function isMarketingAllowed(staffCtx) {
+  if (staffCtx === null) return true; // admin モード（URL-less）
+  if (!staffCtx || staffCtx.valid === false) return false;
+  const role = String(staffCtx.role || '').toLowerCase();
+  return role === 'headquarter' || role === 'admin';
+}
+
 export default async function handler(req, res) {
   const allowedOrigin = process.env.ALLOWED_ORIGIN || '*';
   res.setHeader('Access-Control-Allow-Origin', allowedOrigin);
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Staff-Id, X-Staff-Token');
 
   if (req.method === 'OPTIONS') return res.status(200).end();
 
@@ -28,7 +38,7 @@ export default async function handler(req, res) {
     metaPath = path;
   }
 
-  // /api/meta/config → 設定情報を返す (未設定でもエラーにしない)
+  // /api/meta/config → 設定情報のみで機密は含まないので認証なしで返す
   if (metaPath === 'config') {
     return res.status(200).json({
       configured: isConfigured,
@@ -41,6 +51,15 @@ export default async function handler(req, res) {
       error: 'Meta Ads API not configured',
       message: 'Set META_ACCESS_TOKEN and META_AD_ACCOUNT_ID in Vercel environment variables.'
     });
+  }
+
+  // 本部 (headquarter/admin) ロールのみマーケティング API を利用可能
+  const staffCtx = await extractStaffContext(req);
+  if (staffCtx && staffCtx.valid === false) {
+    return res.status(401).json({ error: '認証エラー: ' + (staffCtx.reason || 'invalid') });
+  }
+  if (!isMarketingAllowed(staffCtx)) {
+    return res.status(403).json({ error: 'Marketing API は本部ロールのみ利用できます' });
   }
 
   if (!metaPath) {

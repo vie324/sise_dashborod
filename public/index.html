@@ -10018,7 +10018,12 @@
                         updated.monthly = [...prev.monthly, entry].sort((a, b) => a.yearMonth.localeCompare(b.yearMonth));
                     }
                     localStorage.setItem(HPB_STORAGE_KEY, JSON.stringify(updated));
-                    upsertHpbMonthGas(entry);
+                    // サーバー保存失敗時はトーストで通知（localStorage はすでに更新済み）
+                    upsertHpbMonthGas(entry).then(res => {
+                        if (!res || res.error) {
+                            showToast('HPBデータの保存に失敗しました: ' + ((res && res.error) || '通信エラー'), 'error');
+                        }
+                    });
                     return updated;
                 });
             }, []);
@@ -10038,7 +10043,11 @@
                 setHpbData(prev => {
                     const updated = { ...prev, monthly: prev.monthly.filter(m => m.yearMonth !== yearMonth) };
                     localStorage.setItem(HPB_STORAGE_KEY, JSON.stringify(updated));
-                    deleteHpbMonthGas(yearMonth);
+                    deleteHpbMonthGas(yearMonth).then(res => {
+                        if (!res || res.error) {
+                            showToast('HPB月次データの削除に失敗しました: ' + ((res && res.error) || '通信エラー'), 'error');
+                        }
+                    });
                     return updated;
                 });
             }, []);
@@ -10066,8 +10075,11 @@
                 if (!metaConfig.configured) return;
                 setMetaData(prev => ({ ...prev, loading: true, error: null }));
                 try {
-                    // キャンペーン一覧
-                    const campRes = await fetch(`${META_PROXY_BASE}/campaigns?fields=name,status,objective,daily_budget,lifetime_budget&limit=50`);
+                    // キャンペーン一覧（本部ロールのみ 200 を返す）
+                    const campRes = await fetch(`${META_PROXY_BASE}/campaigns?fields=name,status,objective,daily_budget,lifetime_budget&limit=50`, {
+                        headers: buildAuthHeaders(),
+                        credentials: 'same-origin',
+                    });
                     const campData = await campRes.json();
                     if (campData.error) {
                         const errMsg = campData.error.message || JSON.stringify(campData.error);
@@ -10081,7 +10093,8 @@
 
                     // インサイト取得
                     const insightRes = await fetch(
-                        `${META_PROXY_BASE}/insights?fields=impressions,clicks,ctr,spend,actions,cost_per_action_type,cpc,cpm,reach,frequency&date_preset=${datePreset}&level=account`
+                        `${META_PROXY_BASE}/insights?fields=impressions,clicks,ctr,spend,actions,cost_per_action_type,cpc,cpm,reach,frequency&date_preset=${datePreset}&level=account`,
+                        { headers: buildAuthHeaders(), credentials: 'same-origin' }
                     );
                     const insightData = await insightRes.json();
                     if (insightData.error) {
@@ -10091,7 +10104,8 @@
 
                     // キャンペーン別インサイト
                     const campInsightRes = await fetch(
-                        `${META_PROXY_BASE}/insights?fields=campaign_name,impressions,clicks,ctr,spend,actions,cost_per_action_type&date_preset=${datePreset}&level=campaign&limit=50`
+                        `${META_PROXY_BASE}/insights?fields=campaign_name,impressions,clicks,ctr,spend,actions,cost_per_action_type&date_preset=${datePreset}&level=campaign&limit=50`,
+                        { headers: buildAuthHeaders(), credentials: 'same-origin' }
                     );
                     const campInsightData = await campInsightRes.json();
 
@@ -10114,14 +10128,17 @@
                 if (!tiktokConfig.configured) return;
                 setTiktokData(prev => ({ ...prev, loading: true, error: null }));
                 try {
-                    const now = new Date();
-                    const start = startDate || new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
-                    const end = endDate || now.toISOString().split('T')[0];
+                    // 日付はローカル計算する。toISOString は UTC 基準で、JST 深夜/早朝に
+                    // 1日ずれたレポート範囲になる問題を避ける。
+                    const monthStart = thisMonthLocalYM() + '-01';
+                    const start = startDate || monthStart;
+                    const end = endDate || todayLocalYMD();
 
                     // キャンペーン一覧
                     const campRes = await fetch(`${TIKTOK_PROXY_BASE}/campaign/get`, {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
+                        headers: { 'Content-Type': 'application/json', ...buildAuthHeaders() },
+                        credentials: 'same-origin',
                         body: JSON.stringify({ page_size: 100 })
                     });
                     const campData = campRes.ok ? await campRes.json() : { data: { list: [] } };
@@ -10129,7 +10146,8 @@
                     // レポート取得
                     const reportRes = await fetch(`${TIKTOK_PROXY_BASE}/report/integrated/get`, {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
+                        headers: { 'Content-Type': 'application/json', ...buildAuthHeaders() },
+                        credentials: 'same-origin',
                         body: JSON.stringify({
                             report_type: 'BASIC',
                             data_level: 'AUCTION_ADVERTISER',
@@ -12551,7 +12569,7 @@
 
             // HPBフォーム
             const [hpbForm, setHpbForm] = useState({
-                yearMonth: new Date().toISOString().slice(0, 7),
+                yearMonth: thisMonthLocalYM(),
                 pageViews: '', bookings: '', reviews: '', favorites: '', blogViews: '', coupons: ''
             });
             const [hpbEditingMonth, setHpbEditingMonth] = useState(null);
@@ -12739,7 +12757,7 @@
                                         {hpbEditingMonth ? '更新' : '登録'}
                                     </button>
                                     {hpbEditingMonth && (
-                                        <button onClick={() => { setHpbEditingMonth(null); setHpbForm({ yearMonth: new Date().toISOString().slice(0, 7), pageViews: '', bookings: '', reviews: '', favorites: '', blogViews: '', coupons: '' }); }}
+                                        <button onClick={() => { setHpbEditingMonth(null); setHpbForm({ yearMonth: thisMonthLocalYM(), pageViews: '', bookings: '', reviews: '', favorites: '', blogViews: '', coupons: '' }); }}
                                             className="px-4 py-1.5 border rounded text-sm hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
                                             キャンセル
                                         </button>
@@ -19601,8 +19619,11 @@
             // フローから別画面に一時遷移する（顧客名をsessionStorageに保存）
             const navigateOut = useCallback((stepId, targetView) => {
                 markDone(stepId);
+                // プライベートブラウジングや quota 超過で sessionStorage が使えない
+                // 場合でもフロー全体が止まらないように try/catch で握りつぶす。
                 if (flowCustomer?.name) {
-                    sessionStorage.setItem('sise_flow_customer_name', flowCustomer.name);
+                    try { sessionStorage.setItem('sise_flow_customer_name', flowCustomer.name); }
+                    catch (e) { console.warn('[flow] sessionStorage save failed:', e); }
                 }
                 onClose(targetView);
             }, [markDone, flowCustomer, onClose]);
@@ -19837,7 +19858,8 @@
                     ) : (
                         <>
                             <div className="flow-customer-card">
-                                <div className="flow-customer-avatar">{flowCustomer.name[0]}</div>
+                                {/* 空文字/null の場合でもクラッシュしないよう null 安全に */}
+                                <div className="flow-customer-avatar">{(flowCustomer?.name && flowCustomer.name[0]) || '?'}</div>
                                 <div className="flow-customer-info">
                                     <div className="flow-customer-name">{flowCustomer.name}</div>
                                     <div className="flow-customer-meta">
