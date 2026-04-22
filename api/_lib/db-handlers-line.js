@@ -659,7 +659,10 @@ export async function lineUserTagsGet(params, staffCtx) {
 
 export async function lineAnalyticsGet(params, staffCtx) {
   const storeId = params.store ? String(params.store) : '';
-  if (!storeId) return { analytics: null };
+  if (!storeId) {
+    // クライアントが永久ローディングに陥らないよう、明示的に空の analytics を返す
+    return { analytics: null, error: 'storeが指定されていません' };
+  }
   if (!canAccessStore(staffCtx, storeId)) {
     return { error: 'この店舗のLINE分析にアクセスする権限がありません' };
   }
@@ -700,17 +703,26 @@ export async function lineAnalyticsGet(params, staffCtx) {
       if (ts >= sevenDaysAgo) last7Sent++;
     }
 
-    if (ts >= thirtyDaysAgo) {
-      const dateKey = ts.toISOString().slice(0, 10);
-      if (!dailyStats[dateKey]) dailyStats[dateKey] = { received: 0, sent: 0 };
-      if (direction === 'received') dailyStats[dateKey].received++;
-      else dailyStats[dateKey].sent++;
-    }
+    // 日次/時間帯の集計は JST(UTC+9) 基準で行う。
+    // サーバが UTC の場合、ts.getHours() は UTC 時刻を返すため、日本の
+    // ユーザーが見るダッシュボードの「時間帯別メッセージ分布」が 9 時間
+    // ずれて表示されていた。サーバの timezone に依存しないよう、ts の
+    // 内部 UTC 時刻に +9h オフセットを加えて疑似 JST 時刻を算出する。
+    const TZ_OFFSET_MS = 9 * 60 * 60 * 1000; // JST = UTC+9
+    const jst = new Date(ts.getTime() + TZ_OFFSET_MS);
+    const jstDateKey = jst.toISOString().slice(0, 10); // 疑似 JST の YYYY-MM-DD
+    const jstHour = jst.getUTCHours();                 // 疑似 JST の時 (0-23)
 
-    const hour = ts.getHours();
-    if (!hourlyStats[hour]) hourlyStats[hour] = { received: 0, sent: 0 };
-    if (direction === 'received') hourlyStats[hour].received++;
-    else hourlyStats[hour].sent++;
+    if (ts >= thirtyDaysAgo) {
+      if (!dailyStats[jstDateKey]) dailyStats[jstDateKey] = { received: 0, sent: 0 };
+      if (direction === 'received') dailyStats[jstDateKey].received++;
+      else dailyStats[jstDateKey].sent++;
+
+      // 時間帯別も直近30日のみ集計（従来は全期間が混ざっていた）
+      if (!hourlyStats[jstHour]) hourlyStats[jstHour] = { received: 0, sent: 0 };
+      if (direction === 'received') hourlyStats[jstHour].received++;
+      else hourlyStats[jstHour].sent++;
+    }
   }
 
   const dailyArray = Object.keys(dailyStats).sort().map(date => ({

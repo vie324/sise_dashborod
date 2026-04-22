@@ -1,0 +1,17 @@
+{
+  "name": "si'se Dashboard",
+  "short_name": "si'se",
+  "description": "si'se 整体院経営ダッシュボード",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f4f8f5",
+  "theme_color": "#33a065",
+  "lang": "ja",
+  "icons": [
+    { "src": "/images/logo.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/images/logo.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ],
+  "categories": ["business", "productivity"]
+}
