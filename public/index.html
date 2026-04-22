@@ -1823,6 +1823,7 @@
                 const qs = new URLSearchParams({ table, ...params }).toString();
                 const resp = await fetch(DB_API_URL + '?' + qs, {
                     headers: buildAuthHeaders(),
+                    credentials: 'same-origin', // admin session cookie を送受信
                 });
                 return await resp.json();
             } catch (e) {
@@ -1836,6 +1837,7 @@
                 const resp = await fetch(DB_API_URL + '?table=' + table, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', ...buildAuthHeaders() },
+                    credentials: 'same-origin', // admin session cookie を送受信
                     body: JSON.stringify(body)
                 });
                 return await resp.json();
@@ -20450,20 +20452,151 @@
         };
 
         // パスワードロック付きラッパー（HooksルールのためAppと分離）
+        // ============================================================
+        // 管理者ログイン画面（HttpOnly cookie ベース）
+        // ============================================================
+        const AdminLoginScreen = ({ onSuccess }) => {
+            const [password, setPassword] = useState('');
+            const [submitting, setSubmitting] = useState(false);
+            const [error, setError] = useState('');
+            const inputRef = useRef(null);
+            useEffect(() => { if (inputRef.current) inputRef.current.focus(); }, []);
+            const submit = async () => {
+                if (!password || submitting) return;
+                setSubmitting(true);
+                setError('');
+                const res = await dbPost('auth', { action: 'login', password });
+                setSubmitting(false);
+                if (res && res.success && res.authenticated) {
+                    hapticSuccess();
+                    onSuccess();
+                } else {
+                    hapticError();
+                    setError((res && res.error) || 'ログインに失敗しました');
+                    setPassword('');
+                    if (inputRef.current) inputRef.current.focus();
+                }
+            };
+            return (
+                <div className="min-h-screen flex items-center justify-center p-6 bg-gradient-to-br from-sise-50 via-white to-emerald-50 dark:from-sise-900 dark:via-slate-900 dark:to-slate-900">
+                    <div className="glass-card p-8 max-w-sm w-full shadow-glass-lg animate-scale-in">
+                        <div className="flex flex-col items-center mb-6">
+                            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-sise-400 to-sise-600 text-white flex items-center justify-center shadow-glass-md mb-4">
+                                <Icon name="shield" size={28} />
+                            </div>
+                            <h1 className="text-xl font-extrabold text-slate-800 dark:text-slate-100 tracking-tight">管理者ログイン</h1>
+                            <p className="text-xs text-slate-500 mt-1">si&apos;se Dashboard</p>
+                        </div>
+                        <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1.5" htmlFor="admin-pw">パスワード</label>
+                        <input
+                            id="admin-pw"
+                            ref={inputRef}
+                            type="password"
+                            value={password}
+                            onChange={e => setPassword(e.target.value)}
+                            onKeyDown={e => { if (e.key === 'Enter') submit(); }}
+                            disabled={submitting}
+                            className="w-full px-4 py-3 border border-slate-200 rounded-xl text-sm outline-none focus:border-sise-500 focus:ring-2 focus:ring-sise-500/20 transition-all"
+                            autoComplete="current-password"
+                            aria-invalid={error ? 'true' : undefined}
+                            aria-describedby={error ? 'admin-pw-error' : undefined}
+                        />
+                        {error && (
+                            <p id="admin-pw-error" className="mt-2 text-xs text-red-600 font-medium flex items-center gap-1">
+                                <Icon name="alert-circle" size={12} /> {error}
+                            </p>
+                        )}
+                        <button
+                            onClick={submit}
+                            disabled={!password || submitting}
+                            aria-busy={submitting || undefined}
+                            className="mt-4 w-full inline-flex items-center justify-center gap-2 px-4 py-3 btn-gradient rounded-xl text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            {submitting ? <Spinner size={14} /> : <Icon name="log-in" size={14} />}
+                            {submitting ? 'ログイン中...' : 'ログイン'}
+                        </button>
+                        <p className="mt-4 text-[11px] text-slate-400 text-center">
+                            パスワードは環境変数 <code className="bg-slate-100 dark:bg-slate-800 px-1 rounded">SISE_ADMIN_PASSWORD_HASH</code> で設定されています
+                        </p>
+                    </div>
+                </div>
+            );
+        };
+
+        // ============================================================
+        // ロード中画面（admin session 問い合わせ中）
+        // ============================================================
+        const BootLoadingScreen = () => (
+            <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-sise-50 to-emerald-50 dark:from-slate-900 dark:to-slate-900">
+                <div className="flex flex-col items-center gap-3 text-slate-500">
+                    <Spinner size={28} />
+                    <p className="text-sm">読み込み中...</p>
+                </div>
+            </div>
+        );
+
         const AppWithAuth = () => {
             const [passwordVerified, setPasswordVerified] = useState(
                 !currentAccess || !currentAccess.hasPassword || sessionStorage.getItem('sise_pw_verified') === '1'
             );
 
-            // パスワードロック画面を表示（Appの前に判定し、Hooks順序を壊さない）
+            // 管理者モード (!currentAccess) で admin セッション状態を boot 時に取得する。
+            // staff モードでは REQUIRE_ADMIN_AUTH は関係ないので問い合わせ不要。
+            // state 初期値:
+            //   loading=true    : 問い合わせ中（blocking loading screen 表示）
+            //   requiresAuth    : server 側 REQUIRE_ADMIN_AUTH=true か
+            //   authenticated   : HttpOnly cookie の admin session が有効か
+            const [adminAuth, setAdminAuth] = useState(() => ({
+                loading: !currentAccess,              // staff モードでは loading 不要
+                requiresAuth: false,
+                authenticated: false,
+                username: '',
+            }));
+
+            useEffect(() => {
+                if (currentAccess) return; // staff モードは admin auth を問い合わせない
+                let cancelled = false;
+                dbGet('auth').then(r => {
+                    if (cancelled) return;
+                    setAdminAuth({
+                        loading: false,
+                        requiresAuth: !!(r && r.requiresAuth),
+                        authenticated: !!(r && r.authenticated),
+                        username: (r && r.username) || '',
+                    });
+                }).catch(() => {
+                    if (cancelled) return;
+                    setAdminAuth({ loading: false, requiresAuth: false, authenticated: false, username: '' });
+                });
+                return () => { cancelled = true; };
+            }, []);
+
+            // パスワードロック画面（staff URL + パスワード設定済みの場合）
             if (currentAccess && currentAccess.hasPassword && !passwordVerified) {
                 return <PasswordLockScreen access={currentAccess} onUnlock={() => setPasswordVerified(true)} />;
             }
 
-            return <App />;
+            // 管理者モードのみ admin 認証チェックを実行
+            if (!currentAccess) {
+                if (adminAuth.loading) return <BootLoadingScreen />;
+                if (adminAuth.requiresAuth && !adminAuth.authenticated) {
+                    return <AdminLoginScreen onSuccess={() => setAdminAuth(p => ({ ...p, authenticated: true, username: 'admin' }))} />;
+                }
+            }
+
+            return <App adminAuth={adminAuth} setAdminAuth={setAdminAuth} />;
         };
 
-        const App = () => {
+        const App = ({ adminAuth, setAdminAuth }) => {
+            // 管理者としてログアウト: cookie 失効させたあとページをリロードして状態を初期化
+            const handleAdminLogout = useCallback(async () => {
+                const ok = await confirmDialog({ title: 'ログアウト', message: '管理者としてログアウトしますか？', confirmLabel: 'ログアウト', variant: 'danger' });
+                if (!ok) return;
+                await dbPost('auth', { action: 'logout' });
+                if (setAdminAuth) setAdminAuth(p => ({ ...p, authenticated: false, username: '' }));
+                // フルリロードでローカル state と UI を完全に初期化
+                window.location.reload();
+            }, [setAdminAuth]);
             const [currentView, setCurrentView] = useState('dashboard');
             const [selectedStore, setSelectedStore] = useState('all');
             const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -20982,6 +21115,16 @@
                                         >
                                             <Icon name="refresh-cw" size={18} />
                                         </button>
+                                        {adminAuth && adminAuth.authenticated && (
+                                            <button
+                                                onClick={handleAdminLogout}
+                                                className="p-2.5 rounded-xl hover:bg-red-50 text-slate-400 hover:text-red-500 transition-all active:scale-90"
+                                                title={`管理者ログアウト (${adminAuth.username || 'admin'})`}
+                                                aria-label="管理者ログアウト"
+                                            >
+                                                <Icon name="log-out" size={18} />
+                                            </button>
+                                        )}
                                         <button
                                             onClick={() => {
                                                 setIsDarkMode(!isDarkMode);

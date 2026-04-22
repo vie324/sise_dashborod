@@ -19,7 +19,7 @@
 // ========================================
 
 import { supabase } from './supabase.js';
-import { verifyToken, looksSigned } from './sign.js';
+import { signToken, verifyToken, looksSigned } from './sign.js';
 
 // 未署名トークンを受理するかどうか。本番運用で全スタッフの URL を再発行した
 // あとは false に切り替えて、古い URL をハード無効化できる。
@@ -160,4 +160,69 @@ export function allowedStoreIds(staffCtx) {
   if (staffCtx === null) return null; // admin: no filter
   if (!staffCtx || staffCtx.valid === false) return [];
   return Array.isArray(staffCtx.storeIds) ? staffCtx.storeIds : [];
+}
+
+// ============================================================
+// 管理者セッション (HttpOnly cookie ベース)
+// ============================================================
+// sise_admin_session=<signed token by sign.js>  の cookie を発行・検証する。
+// 登録済みパスワード (bcrypt ハッシュ) と照合してから token 発行。
+//
+// 環境変数:
+//   SISE_ADMIN_PASSWORD_HASH : bcrypt ハッシュ（ログインの検証用）
+//   REQUIRE_ADMIN_AUTH       : 'true' なら admin エンドポイントで session を必須化
+// ============================================================
+
+const ADMIN_SESSION_COOKIE = 'sise_admin_session';
+const ADMIN_SESSION_TTL = 12 * 60 * 60; // 12 hours
+export const REQUIRE_ADMIN_AUTH = String(process.env.REQUIRE_ADMIN_AUTH || 'false').toLowerCase() === 'true';
+
+// ざっくり Cookie ヘッダを name→value マップに parse する
+export function parseCookies(req) {
+  const raw = readHeader(req, 'cookie');
+  const out = {};
+  if (!raw) return out;
+  for (const part of String(raw).split(';')) {
+    const idx = part.indexOf('=');
+    if (idx < 0) continue;
+    const k = part.slice(0, idx).trim();
+    const v = part.slice(idx + 1).trim();
+    if (!k) continue;
+    try { out[k] = decodeURIComponent(v); } catch (_) { out[k] = v; }
+  }
+  return out;
+}
+
+// res に admin セッション cookie をセット（HttpOnly + Secure in production）
+export function setAdminSessionCookie(res, token) {
+  const maxAge = ADMIN_SESSION_TTL;
+  const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
+  const cookie = `${ADMIN_SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; Max-Age=${maxAge}; HttpOnly; SameSite=Lax${secure}`;
+  res.setHeader('Set-Cookie', cookie);
+}
+
+// ログアウト: cookie を即時失効させる
+export function clearAdminSessionCookie(res) {
+  const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
+  const cookie = `${ADMIN_SESSION_COOKIE}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax${secure}`;
+  res.setHeader('Set-Cookie', cookie);
+}
+
+// 新規 admin セッション token を発行する（sign.js で HMAC 署名）。
+// payload: { sub: 'admin', iat, exp } だけを入れる。
+export function signAdminSession(username = 'admin') {
+  return signToken({ sub: 'admin', usr: username }, ADMIN_SESSION_TTL);
+}
+
+// cookie から admin セッションを検証する。
+// 戻り値: { authenticated: true, username } | { authenticated: false, reason? }
+export function verifyAdminSession(req) {
+  const cookies = parseCookies(req);
+  const token = cookies[ADMIN_SESSION_COOKIE];
+  if (!token) return { authenticated: false, reason: 'no_cookie' };
+  const v = verifyToken(token);
+  if (!v.ok) return { authenticated: false, reason: v.reason || 'invalid' };
+  const p = v.payload || {};
+  if (p.sub !== 'admin') return { authenticated: false, reason: 'wrong_subject' };
+  return { authenticated: true, username: p.usr || 'admin' };
 }
