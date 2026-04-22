@@ -193,7 +193,20 @@ export async function menuItemsPost(body) {
 // HPBデータ (hpb)
 // ============================================================
 
-export async function hpbGet() {
+// HPB は headquarter（本部）専用データ。
+// スタッフ（単店舗）モードからのアクセスは一切拒否し、管理者モード
+// (staffCtx === null) または role === 'headquarter'/'admin' のみ許可する。
+function _isHpbAllowed(staffCtx) {
+  if (staffCtx === null) return true; // admin モード
+  if (!staffCtx || staffCtx.valid === false) return false;
+  const role = String(staffCtx.role || '').toLowerCase();
+  return role === 'headquarter' || role === 'admin';
+}
+
+export async function hpbGet(params, staffCtx) {
+  if (!_isHpbAllowed(staffCtx)) {
+    return { error: 'HPBデータにアクセスする権限がありません' };
+  }
   const { data, error } = await supabase.from('hpb_data').select('*').order('year_month');
   if (error) throw error;
   return {
@@ -204,7 +217,10 @@ export async function hpbGet() {
   };
 }
 
-export async function hpbPost(body) {
+export async function hpbPost(body, staffCtx) {
+  if (!_isHpbAllowed(staffCtx)) {
+    return { error: 'HPBデータを更新する権限がありません' };
+  }
   const action = body.action || '';
   switch (action) {
     case 'saveAll': {

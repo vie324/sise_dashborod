@@ -2,6 +2,8 @@
 // Forwards requests to LINE API with server-side authentication
 // Supports multiple stores via X-Store-Id header
 
+import { extractStaffContext, canAccessStore } from '../_lib/auth.js';
+
 const LINE_API_BASE = 'https://api.line.me/v2/bot';
 
 // Allowed endpoints
@@ -35,13 +37,24 @@ export default async function handler(req, res) {
   const allowedOrigin = process.env.ALLOWED_ORIGIN || '*';
   res.setHeader('Access-Control-Allow-Origin', allowedOrigin);
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Store-Id');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Store-Id, X-Staff-Id, X-Staff-Token');
 
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (!['GET', 'POST', 'DELETE'].includes(req.method)) return res.status(405).json({ error: 'Method not allowed' });
 
   const storeId = req.headers['x-store-id'] || req.query.store;
   if (!storeId) return res.status(400).json({ error: 'X-Store-Id header required' });
+
+  // スタッフ権限チェック: 別店舗のトークンを使わせない
+  // staffCtx === null (admin モード) は従来通り全通し、
+  // token 付き (staff モード) は storeId が storeIds に含まれるときのみ許可。
+  const staffCtx = await extractStaffContext(req);
+  if (staffCtx && staffCtx.valid === false) {
+    return res.status(401).json({ error: '認証エラー: ' + (staffCtx.reason || 'invalid') });
+  }
+  if (!canAccessStore(staffCtx, String(storeId))) {
+    return res.status(403).json({ error: 'この店舗のLINE APIを利用する権限がありません' });
+  }
 
   const config = getLineConfig(storeId);
   if (!config) {

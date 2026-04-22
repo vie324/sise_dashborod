@@ -6,6 +6,11 @@
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#33a065">
+    <link rel="manifest" href="/manifest.json">
+    <link rel="icon" type="image/png" sizes="192x192" href="/images/icon-192.png">
+    <link rel="icon" type="image/png" sizes="512x512" href="/images/icon-512.png">
+    <link rel="apple-touch-icon" sizes="192x192" href="/images/icon-192.png">
     <title>si'se - 整体院経営ダッシュボード</title>
 
     <!-- Google Fonts (非ブロッキング) -->
@@ -945,10 +950,36 @@
             max-width: 360px;
         }
         .toast.leaving { animation: toast-out 0.25s ease-in forwards; }
-        .toast-success { color: #15803d; border-color: rgba(34,197,94,0.25); }
-        .toast-error { color: #b91c1c; border-color: rgba(239,68,68,0.25); }
-        .toast-info { color: #1d6641; border-color: rgba(51,160,101,0.2); }
+        /* 優先度別のカラー + 左アクセントバーで一目で分かる優先度表示 */
+        .toast-success {
+            color: #14532d;
+            border-color: rgba(34,197,94,0.3);
+            border-left: 4px solid #22c55e;
+            background: linear-gradient(135deg, rgba(240,253,244,0.98), rgba(220,252,231,0.95));
+        }
+        .toast-error {
+            color: #7f1d1d;
+            border-color: rgba(239,68,68,0.35);
+            border-left: 4px solid #ef4444;
+            background: linear-gradient(135deg, rgba(254,242,242,0.98), rgba(254,226,226,0.95));
+        }
+        .toast-info {
+            color: #0c4a6e;
+            border-color: rgba(14,165,233,0.25);
+            border-left: 4px solid #0ea5e9;
+            background: linear-gradient(135deg, rgba(240,249,255,0.98), rgba(224,242,254,0.95));
+        }
+        .toast-warning {
+            color: #78350f;
+            border-color: rgba(245,158,11,0.3);
+            border-left: 4px solid #f59e0b;
+            background: linear-gradient(135deg, rgba(255,251,235,0.98), rgba(254,243,199,0.95));
+        }
         .dark .toast { background: rgba(18,35,27,0.95); border-color: rgba(51,160,101,0.2); }
+        .dark .toast-success { color: #86efac; background: linear-gradient(135deg, rgba(20,50,30,0.95), rgba(18,35,27,0.95)); }
+        .dark .toast-error { color: #fca5a5; background: linear-gradient(135deg, rgba(50,18,18,0.95), rgba(30,10,10,0.95)); }
+        .dark .toast-info { color: #7dd3fc; background: linear-gradient(135deg, rgba(12,30,45,0.95), rgba(10,20,35,0.95)); }
+        .dark .toast-warning { color: #fcd34d; background: linear-gradient(135deg, rgba(50,35,10,0.95), rgba(35,25,5,0.95)); }
         /* Phase 2 — B13: swipe-to-dismiss + stacking depth cue */
         .toast {
             touch-action: pan-y;
@@ -2057,7 +2088,8 @@
             const startRef = useRef(null);
             const [swipeX, setSwipeX] = useState(0);
             const [swiping, setSwiping] = useState(false);
-            const iconName = { success: 'check-circle', error: 'alert-circle', info: 'info' };
+            // warning を追加。アイコンは alert-triangle（警告）で区別
+            const iconName = { success: 'check-circle', error: 'alert-circle', warning: 'alert-triangle', info: 'info' };
             const roleFor = (type) => type === 'error' ? 'alert' : 'status';
 
             const onPointerDown = (e) => {
@@ -3790,41 +3822,60 @@
                 } catch (e) {}
             }, []);
 
-            // 回数券プラン管理
-            const addPlan = useCallback((plan) => {
+            // 回数券プラン管理 — プランは全店舗共通マスタなので admin のみ
+            // 編集可能。dbPost の失敗は admin 以外には期待される挙動（サーバが 403）
+            const addPlan = useCallback(async (plan) => {
                 const newPlan = { ...plan, id: 'plan_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6) };
                 setTicketPlans(prev => {
                     const updated = [...prev, newPlan];
                     saveLocal(updated, customerTickets);
                     return updated;
                 });
+                const res = await dbPost('ticket', { action: 'addPlan', plan: newPlan });
+                if (!res || res.error) {
+                    showToast('プラン追加に失敗: ' + ((res && res.error) || '通信エラー'), 'error');
+                }
                 return newPlan;
             }, [customerTickets, saveLocal]);
 
-            const updatePlan = useCallback((planId, updates) => {
+            const updatePlan = useCallback(async (planId, updates) => {
                 setTicketPlans(prev => {
                     const updated = prev.map(p => p.id === planId ? { ...p, ...updates } : p);
                     saveLocal(updated, customerTickets);
                     return updated;
                 });
+                const res = await dbPost('ticket', { action: 'updatePlan', planId, plan: updates });
+                if (!res || res.error) {
+                    showToast('プラン更新に失敗: ' + ((res && res.error) || '通信エラー'), 'error');
+                }
             }, [customerTickets, saveLocal]);
 
-            const deletePlan = useCallback((planId) => {
+            const deletePlan = useCallback(async (planId) => {
                 setTicketPlans(prev => {
                     const updated = prev.filter(p => p.id !== planId);
                     saveLocal(updated, customerTickets);
                     return updated;
                 });
+                const res = await dbPost('ticket', { action: 'deletePlan', planId });
+                if (!res || res.error) {
+                    showToast('プラン削除に失敗: ' + ((res && res.error) || '通信エラー'), 'error');
+                }
             }, [customerTickets, saveLocal]);
 
-            // 顧客回数券管理
-            const addCustomerTicket = useCallback((ticket) => {
+            // 顧客回数券管理 — チケットは storeId 付きで発行され、サーバ側で
+            // 権限検証される（staff は自店舗のチケットのみ操作可）
+            const addCustomerTicket = useCallback(async (ticket) => {
                 const plan = ticketPlans.find(p => p.id === ticket.planId);
-                const purchaseDate = ticket.purchaseDate || new Date().toISOString().slice(0, 10);
+                const purchaseDate = ticket.purchaseDate || todayLocalYMD();
                 const expirationDate = ticket.expirationDate || (() => {
-                    const d = new Date(purchaseDate);
-                    d.setDate(d.getDate() + (plan?.validityDays || 180));
-                    return d.toISOString().slice(0, 10);
+                    // ローカル日付で validityDays 加算（UTC 解釈で 1 日ずれる問題回避）
+                    const [y, m, d] = purchaseDate.split('-').map(Number);
+                    const dt = new Date(y, (m || 1) - 1, d || 1);
+                    dt.setDate(dt.getDate() + (plan?.validityDays || 180));
+                    const yy = dt.getFullYear();
+                    const mm = String(dt.getMonth() + 1).padStart(2, '0');
+                    const dd = String(dt.getDate()).padStart(2, '0');
+                    return `${yy}-${mm}-${dd}`;
                 })();
 
                 const newTicket = {
@@ -3838,6 +3889,7 @@
                     price: plan?.price || ticket.price || 0,
                     purchaseDate,
                     expirationDate,
+                    storeId: ticket.storeId || '',
                     storeName: ticket.storeName || '',
                     notes: ticket.notes || '',
                     usageHistory: [],
@@ -3849,18 +3901,34 @@
                     saveLocal(ticketPlans, updated);
                     return updated;
                 });
+                const res = await dbPost('ticket', { action: 'addTicket', ticket: newTicket });
+                if (!res || res.error) {
+                    // ロールバック: 楽観的に追加したチケットを取り除く
+                    setCustomerTickets(prev => {
+                        const rolled = prev.filter(t => t.id !== newTicket.id);
+                        saveLocal(ticketPlans, rolled);
+                        return rolled;
+                    });
+                    showToast('回数券発行に失敗: ' + ((res && res.error) || '通信エラー'), 'error');
+                    return null;
+                }
                 return newTicket;
             }, [ticketPlans, saveLocal]);
 
-            const updateCustomerTicket = useCallback((ticketId, updates) => {
+            const updateCustomerTicket = useCallback(async (ticketId, updates) => {
                 setCustomerTickets(prev => {
                     const updated = prev.map(t => t.id === ticketId ? { ...t, ...updates } : t);
                     saveLocal(ticketPlans, updated);
                     return updated;
                 });
+                const res = await dbPost('ticket', { action: 'updateTicket', ticketId, updates });
+                if (!res || res.error) {
+                    showToast('回数券更新に失敗: ' + ((res && res.error) || '通信エラー'), 'error');
+                }
             }, [ticketPlans, saveLocal]);
 
-            const useSession = useCallback((ticketId) => {
+            const useSession = useCallback(async (ticketId) => {
+                // 楽観的更新
                 setCustomerTickets(prev => {
                     const updated = prev.map(t => {
                         if (t.id !== ticketId || t.remainingSessions <= 0) return t;
@@ -3873,9 +3941,23 @@
                     saveLocal(ticketPlans, updated);
                     return updated;
                 });
+                const res = await dbPost('ticket', { action: 'useSession', ticketId, delta: -1 });
+                if (!res || res.error) {
+                    // 失敗時はロールバック
+                    setCustomerTickets(prev => {
+                        const rolled = prev.map(t => t.id === ticketId && t.usageHistory?.length > 0
+                            ? { ...t, remainingSessions: t.remainingSessions + 1, usageHistory: t.usageHistory.slice(0, -1) }
+                            : t);
+                        saveLocal(ticketPlans, rolled);
+                        return rolled;
+                    });
+                    showToast('消化の記録に失敗: ' + ((res && res.error) || '通信エラー'), 'error');
+                } else {
+                    hapticSuccess();
+                }
             }, [ticketPlans, saveLocal]);
 
-            const undoSession = useCallback((ticketId) => {
+            const undoSession = useCallback(async (ticketId) => {
                 setCustomerTickets(prev => {
                     const updated = prev.map(t => {
                         if (t.id !== ticketId || t.remainingSessions >= t.totalSessions) return t;
@@ -3888,27 +3970,57 @@
                     saveLocal(ticketPlans, updated);
                     return updated;
                 });
+                const res = await dbPost('ticket', { action: 'useSession', ticketId, delta: 1 });
+                if (!res || res.error) {
+                    setCustomerTickets(prev => {
+                        const rolled = prev.map(t => t.id === ticketId && t.usageHistory?.length > 0
+                            ? { ...t, remainingSessions: t.remainingSessions - 1, usageHistory: t.usageHistory.slice(0, -1) }
+                            : t);
+                        saveLocal(ticketPlans, rolled);
+                        return rolled;
+                    });
+                    showToast('取り消しに失敗: ' + ((res && res.error) || '通信エラー'), 'error');
+                }
             }, [ticketPlans, saveLocal]);
 
-            const deleteCustomerTicket = useCallback((ticketId) => {
+            const deleteCustomerTicket = useCallback(async (ticketId) => {
+                // スナップショットを取ってロールバック可能にする
+                let removed = null;
                 setCustomerTickets(prev => {
+                    removed = prev.find(t => t.id === ticketId) || null;
                     const updated = prev.filter(t => t.id !== ticketId);
                     saveLocal(ticketPlans, updated);
                     return updated;
                 });
+                const res = await dbPost('ticket', { action: 'deleteTicket', ticketId });
+                if (!res || res.error) {
+                    if (removed) {
+                        setCustomerTickets(prev => {
+                            const rolled = [removed, ...prev];
+                            saveLocal(ticketPlans, rolled);
+                            return rolled;
+                        });
+                    }
+                    showToast('回数券削除に失敗: ' + ((res && res.error) || '通信エラー'), 'error');
+                }
             }, [ticketPlans, saveLocal]);
 
-            // Supabaseに保存
+            // Supabaseに一括保存（admin 専用: 旧 migration フロー向け）
+            // 個別操作は add/update/delete/useSession で自動同期されるため、通常は呼ばない。
             const saveToSheet = useCallback(async () => {
                 setSaving(true);
                 try {
                     saveLocal(ticketPlans, customerTickets);
-                    await dbPost('ticket', { plans: ticketPlans, tickets: customerTickets });
+                    const res = await dbPost('ticket', { action: 'saveAll', plans: ticketPlans, tickets: customerTickets });
+                    if (res && res.error) {
+                        showToast('一括保存に失敗: ' + res.error, 'error');
+                        return;
+                    }
                     setLastSaved(new Date());
-                    showToast('回数券データを保存しました', 'success', 2000);
+                    showToast('回数券データを一括保存しました', 'success', 2000);
                 } catch (e) {
                     console.error('Ticket save error:', e);
-                    showToast('回数券データの保存に失敗しました', 'error');
+                    showToast('一括保存に失敗しました', 'error');
                 } finally {
                     setSaving(false);
                 }
@@ -3916,17 +4028,21 @@
 
             // 集計
             const stats = useMemo(() => {
-                const now = new Date();
+                // 期限判定はローカル日付ベースで行う。
+                // new Date("YYYY-MM-DD") は UTC midnight として解釈されるため、
+                // JST の 9:00 までは「今日」でも UTC 基準だと前日扱いになり、
+                // 本日期限の回数券が「期限切れ」と表示される問題があった。
+                const todayYMD = todayLocalYMD();
+                const addDays = (ymd, d) => { try { const [y,m,dd]=ymd.split('-').map(Number); const dt=new Date(y,(m||1)-1,dd||1); dt.setDate(dt.getDate()+d); const yy=dt.getFullYear(); const mm=String(dt.getMonth()+1).padStart(2,'0'); const ddd=String(dt.getDate()).padStart(2,'0'); return `${yy}-${mm}-${ddd}`; } catch(_) { return ymd; } };
+                const in30 = addDays(todayYMD, 30);
                 const active = customerTickets.filter(t => {
-                    return t.remainingSessions > 0 && new Date(t.expirationDate) >= now;
+                    return t.remainingSessions > 0 && t.expirationDate && t.expirationDate >= todayYMD;
                 });
                 const expiringSoon = customerTickets.filter(t => {
-                    const exp = new Date(t.expirationDate);
-                    const diff = (exp - now) / (1000 * 60 * 60 * 24);
-                    return t.remainingSessions > 0 && diff >= 0 && diff <= 30;
+                    return t.remainingSessions > 0 && t.expirationDate && t.expirationDate >= todayYMD && t.expirationDate <= in30;
                 });
                 const expired = customerTickets.filter(t => {
-                    return t.remainingSessions > 0 && new Date(t.expirationDate) < now;
+                    return t.remainingSessions > 0 && t.expirationDate && t.expirationDate < todayYMD;
                 });
                 const completed = customerTickets.filter(t => t.remainingSessions <= 0);
                 const totalRevenue = customerTickets.reduce((sum, t) => sum + (t.price || 0), 0);
@@ -4979,8 +5095,14 @@
             }, [lineStoreId]);
 
             // 店舗変更時にスレッド再取得
+            // 前店舗のデータが一瞬残って表示されるのを防ぐため、新 fetch 前に
+            // threads / messages / profiles / selectedThread をクリアする。
             useEffect(() => {
                 console.log('[LINE] useEffect lineStoreId changed:', lineStoreId);
+                setThreads([]);
+                setMessages([]);
+                setProfiles({});
+                setSelectedThread(null);
                 if (lineStoreId) fetchThreads(lineStoreId);
             }, [lineStoreId]);
 
@@ -5046,9 +5168,11 @@
                 setSending(true);
                 try {
                     // LINE APIでプッシュ送信
+                    // スタッフ権限チェックを通すため X-Staff-Token/Id を付与
                     const pushRes = await fetch('/api/line/message/push', {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json', 'X-Store-Id': lineStoreId },
+                        headers: { 'Content-Type': 'application/json', 'X-Store-Id': lineStoreId, ...buildAuthHeaders() },
+                        credentials: 'same-origin',
                         body: JSON.stringify({
                             to: userId,
                             messages: [{ type: 'text', text }],
@@ -5061,12 +5185,19 @@
                         return false;
                     }
 
-                    // Supabaseに送信記録を保存
-                    dbPost('lineMessages', {
+                    // Supabase に送信記録を保存。await を忘れると UI では送信成功に見えるのに
+                    // 履歴が空のまま残る（= ページ再読込で消える）バグになる。
+                    const saveRes = await dbPost('lineMessages', {
                         storeId: lineStoreId,
                         userId,
                         messageText: text,
                     });
+                    if (!saveRes || saveRes.error) {
+                        console.warn('LINE送信メッセージの履歴保存に失敗:', saveRes && saveRes.error);
+                        // 送信自体は成功しているので UI には楽観的に反映するが、
+                        // 履歴差分がある可能性があるので軽く警告する。
+                        showToast('メッセージは送信されましたが履歴保存に失敗しました', 'error');
+                    }
 
                     // メッセージ一覧を更新
                     setMessages(prev => [...prev, {
@@ -5095,7 +5226,8 @@
                 try {
                     const pushRes = await fetch('/api/line/message/push', {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json', 'X-Store-Id': lineStoreId },
+                        headers: { 'Content-Type': 'application/json', 'X-Store-Id': lineStoreId, ...buildAuthHeaders() },
+                        credentials: 'same-origin',
                         body: JSON.stringify({
                             to: userId,
                             messages: [flexMessage],
@@ -5109,12 +5241,15 @@
                         return false;
                     }
 
-                    // Supabaseに送信記録を保存
-                    dbPost('lineMessages', {
+                    // Supabase に送信記録を保存（await 必須）
+                    const saveRes = await dbPost('lineMessages', {
                         storeId: lineStoreId,
                         userId,
                         messageText: '[施術レポート] ' + (flexMessage.altText || ''),
                     });
+                    if (!saveRes || saveRes.error) {
+                        console.warn('Flex送信メッセージの履歴保存に失敗:', saveRes && saveRes.error);
+                    }
 
                     return true;
                 } catch (e) {
@@ -5153,7 +5288,8 @@
                         : { messages: msgs, type: 'broadcast' };
                     const res = await fetch('/api/line/broadcast', {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json', 'X-Store-Id': lineStoreId },
+                        headers: { 'Content-Type': 'application/json', 'X-Store-Id': lineStoreId, ...buildAuthHeaders() },
+                        credentials: 'same-origin',
                         body: JSON.stringify(body),
                     });
                     if (!res.ok) { const err = await res.json().catch(() => ({})); console.error('配信エラー:', err); return false; }
@@ -5234,14 +5370,31 @@
             }, [lineStoreId, fetchTags]);
 
             // === 分析 ===
+            // analytics: null = 未取得 / {error} = 取得失敗 / その他 = 成功レスポンス
             const [analytics, setAnalytics] = useState(null);
+            const [analyticsError, setAnalyticsError] = useState(null);
 
             const fetchAnalytics = useCallback(async () => {
                 if (!lineStoreId) return;
+                setAnalyticsError(null);
                 try {
                     const data = await dbGet('lineAnalytics', { store: lineStoreId });
+                    if (data && data.error) {
+                        setAnalyticsError(data.error);
+                        return;
+                    }
                     if (data && data.analytics) setAnalytics(data.analytics);
-                } catch (e) { console.error('[LINE] 分析取得エラー:', e); }
+                    else setAnalyticsError('分析データを取得できませんでした');
+                } catch (e) {
+                    console.error('[LINE] 分析取得エラー:', e);
+                    setAnalyticsError('通信エラーが発生しました');
+                }
+            }, [lineStoreId]);
+
+            // 店舗切替時は analytics も初期化（前店舗のデータが残らないように）
+            useEffect(() => {
+                setAnalytics(null);
+                setAnalyticsError(null);
             }, [lineStoreId]);
 
             return {
@@ -5254,7 +5407,7 @@
                 templates, fetchTemplates, saveTemplate,
                 autoReplies, fetchAutoReplies, saveAutoReply,
                 tags, userTags, fetchTags, saveTag, saveUserTag,
-                analytics, fetchAnalytics,
+                analytics, analyticsError, fetchAnalytics,
                 refreshingUserIds
             };
         };
@@ -6999,6 +7152,35 @@
             const [selectedMember, setSelectedMember] = useState(null);
             const [actionLoading, setActionLoading] = useState(null); // 'cancel'|'pause'|'resume'
             const [actionMessage, setActionMessage] = useState(null); // { type, text }
+
+            // Phase 3 — モバイルの長押し（500ms）で会員カードにクイックアクションを出す
+            const [longPressMember, setLongPressMember] = useState(null);
+            const longPressTimerRef = useRef(null);
+            const longPressStartRef = useRef({ x: 0, y: 0, active: false });
+            const startLongPress = (member, e) => {
+                const t = e.touches && e.touches[0];
+                if (!t) return;
+                longPressStartRef.current = { x: t.clientX, y: t.clientY, active: true };
+                clearTimeout(longPressTimerRef.current);
+                longPressTimerRef.current = setTimeout(() => {
+                    if (!longPressStartRef.current.active) return;
+                    hapticTap();
+                    setLongPressMember(member);
+                }, 500);
+            };
+            const cancelLongPress = () => {
+                longPressStartRef.current.active = false;
+                clearTimeout(longPressTimerRef.current);
+            };
+            const onLongPressMove = (e) => {
+                if (!longPressStartRef.current.active) return;
+                const t = e.touches && e.touches[0];
+                if (!t) return;
+                const dx = t.clientX - longPressStartRef.current.x;
+                const dy = t.clientY - longPressStartRef.current.y;
+                // 10px 以上動いたら long-press キャンセル（スクロール扱い）
+                if (Math.abs(dx) > 10 || Math.abs(dy) > 10) cancelLongPress();
+            };
             const [showSubscriptionLink, setShowSubscriptionLink] = useState(false);
             const [currentPage, setCurrentPage] = useState(1);
             const ITEMS_PER_PAGE = 30;
@@ -7511,6 +7693,10 @@
                                 <div
                                     key={member.id}
                                     onClick={() => setSelectedMember(member)}
+                                    onTouchStart={(e) => startLongPress(member, e)}
+                                    onTouchMove={onLongPressMove}
+                                    onTouchEnd={cancelLongPress}
+                                    onTouchCancel={cancelLongPress}
                                     className="p-3.5 bg-white/60 rounded-xl border border-slate-100 active:bg-sise-50/50 transition-colors cursor-pointer"
                                 >
                                     <div className="flex items-center justify-between">
@@ -7564,6 +7750,69 @@
                             />
                         )}
                     </Card>
+
+                    {/* 会員カード長押しクイックアクション (モバイル) */}
+                    {longPressMember && (
+                        <>
+                            <div className="fixed inset-0 bg-black/40 z-[60] animate-fade-in" onClick={() => setLongPressMember(null)} />
+                            <div
+                                className="fixed left-0 right-0 bottom-0 z-[61] bg-white rounded-t-2xl p-4 animate-slide-up-fade safe-bottom"
+                                style={{ boxShadow: '0 -8px 32px rgba(0,0,0,0.15)' }}
+                                role="dialog"
+                                aria-label="クイックアクション"
+                            >
+                                <div className="w-10 h-1 rounded-full bg-slate-300 mx-auto mb-3" />
+                                <div className="flex items-center gap-3 mb-4 pb-3 border-b border-slate-100">
+                                    <Avatar name={longPressMember.name} size={36} />
+                                    <div className="flex-1 min-w-0">
+                                        <p className="text-sm font-bold text-slate-800 truncate">{longPressMember.name}</p>
+                                        <p className="text-[11px] text-slate-400 truncate">{longPressMember.planName}</p>
+                                    </div>
+                                </div>
+                                <div className="grid grid-cols-1 gap-2">
+                                    <button
+                                        onClick={() => { setLongPressMember(null); setSelectedMember(longPressMember); }}
+                                        className="flex items-center gap-3 p-3 rounded-xl hover:bg-sise-50 text-left active:scale-[0.98] transition-all"
+                                    >
+                                        <div className="w-10 h-10 rounded-lg bg-sise-100 text-sise-700 flex items-center justify-center">
+                                            <Icon name="user" size={18} />
+                                        </div>
+                                        <div><p className="text-sm font-semibold text-slate-800">顧客詳細を開く</p><p className="text-[10px] text-slate-400">支払記録・プラン情報など</p></div>
+                                    </button>
+                                    {longPressMember.phone && (
+                                        <a
+                                            href={`tel:${longPressMember.phone}`}
+                                            onClick={() => setLongPressMember(null)}
+                                            className="flex items-center gap-3 p-3 rounded-xl hover:bg-blue-50 text-left active:scale-[0.98] transition-all"
+                                        >
+                                            <div className="w-10 h-10 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center">
+                                                <Icon name="phone" size={18} />
+                                            </div>
+                                            <div><p className="text-sm font-semibold text-slate-800">電話する</p><p className="text-[10px] text-slate-400">{longPressMember.phone}</p></div>
+                                        </a>
+                                    )}
+                                    {longPressMember.email && (
+                                        <a
+                                            href={`mailto:${longPressMember.email}`}
+                                            onClick={() => setLongPressMember(null)}
+                                            className="flex items-center gap-3 p-3 rounded-xl hover:bg-purple-50 text-left active:scale-[0.98] transition-all"
+                                        >
+                                            <div className="w-10 h-10 rounded-lg bg-purple-100 text-purple-700 flex items-center justify-center">
+                                                <Icon name="mail" size={18} />
+                                            </div>
+                                            <div><p className="text-sm font-semibold text-slate-800">メール送信</p><p className="text-[10px] text-slate-400 truncate">{longPressMember.email}</p></div>
+                                        </a>
+                                    )}
+                                </div>
+                                <button
+                                    onClick={() => setLongPressMember(null)}
+                                    className="w-full mt-3 py-3 rounded-xl bg-slate-50 text-slate-600 text-sm font-medium hover:bg-slate-100 active:scale-[0.98] transition"
+                                >
+                                    閉じる
+                                </button>
+                            </div>
+                        </>
+                    )}
 
                     {/* 会員詳細モーダル */}
                     {selectedMember && (
@@ -7753,7 +8002,19 @@
         // 回数券管理ビュー
         // ========================================
 
-        const TicketManagementView = ({ ticketHook }) => {
+        const TicketManagementView = ({ ticketHook, memberData, activeStoreId }) => {
+            // 発行フォームの店舗ドロップダウン候補を算出:
+            //   - スタッフモード: currentAccess.storeIds に含まれる店舗のみ
+            //   - admin モード:  memberData.stores の全店舗
+            // 無効な店舗や所属外店舗を選ばせないようにする。
+            const accessibleStores = React.useMemo(() => {
+                const stores = (memberData && memberData.stores) || [];
+                const actives = stores.filter(s => s.status !== 'inactive');
+                if (currentAccess && Array.isArray(currentAccess.storeIds)) {
+                    return actives.filter(s => currentAccess.storeIds.includes(s.id));
+                }
+                return actives;
+            }, [memberData]);
             const {
                 ticketPlans, customerTickets, stats,
                 addPlan, updatePlan, deletePlan,
@@ -7771,19 +8032,107 @@
             const debouncedTicketSearch = useDebounce(searchQuery, 250);
             const [showSaved, setShowSaved] = useState(false);
 
+            // admin モード判定（URL-less アクセス = !currentAccess）
+            const isAdminMode = !currentAccess;
+
+            // storeId 未設定のチケット一覧（admin のみ表示）
+            // 旧フォーマットで発行済みのチケットをリストアップし、storeName ヒューリスティックで
+            // 推測 + 手動上書きできるバックフィル UI 用。
+            const orphanTickets = useMemo(() => {
+                return customerTickets.filter(t => !t.storeId);
+            }, [customerTickets]);
+            const [showBackfill, setShowBackfill] = useState(false);
+            const [backfillMapping, setBackfillMapping] = useState({}); // { ticketId: storeId }
+            const [backfillSaving, setBackfillSaving] = useState(false);
+
+            // 表示名で推測: t.storeName が memberData.stores の name と一致すればその id を初期値に
+            useEffect(() => {
+                if (orphanTickets.length === 0) return;
+                const nameToId = new Map((memberData?.stores || []).map(s => [s.name, s.id]));
+                setBackfillMapping(prev => {
+                    const next = { ...prev };
+                    let changed = false;
+                    for (const t of orphanTickets) {
+                        if (next[t.id]) continue;
+                        const guess = nameToId.get(t.storeName || '');
+                        if (guess) { next[t.id] = guess; changed = true; }
+                    }
+                    return changed ? next : prev;
+                });
+            }, [orphanTickets, memberData?.stores]);
+
+            const runBackfill = async () => {
+                const mappings = {};
+                for (const t of orphanTickets) {
+                    const sid = backfillMapping[t.id];
+                    if (sid) mappings[t.id] = sid;
+                }
+                if (Object.keys(mappings).length === 0) {
+                    showToast('バックフィル対象がありません', 'error');
+                    return;
+                }
+                setBackfillSaving(true);
+                try {
+                    const res = await dbPost('ticket', { action: 'backfillStoreIds', mappings });
+                    if (!res || res.error) {
+                        showToast('バックフィル失敗: ' + ((res && res.error) || '通信エラー'), 'error');
+                        return;
+                    }
+                    showToast(`${res.updated}件のチケットに storeId を付与しました`, 'success');
+                    hapticSuccess();
+                    setShowBackfill(false);
+                    // ローカル state も更新
+                    Object.entries(mappings).forEach(([tid, sid]) => {
+                        const s = (memberData?.stores || []).find(st => st.id === sid);
+                        updateCustomerTicket(tid, { storeId: sid, storeName: s ? s.name : '' });
+                    });
+                } finally {
+                    setBackfillSaving(false);
+                }
+            };
+
             // 新規回数券フォーム
-            const [newTicket, setNewTicket] = useState({
-                customerName: '', customerPhone: '', planId: '', storeName: '', notes: '',
-                purchaseDate: new Date().toISOString().slice(0, 10), expirationDate: ''
-            });
+            // storeId を主キー、storeName は表示用に併せて保持
+            const getInitialTicketStore = () => {
+                // activeStoreId が具体的な ID で accessible に含まれればそれを
+                if (activeStoreId && activeStoreId !== 'all' && accessibleStores.some(s => s.id === activeStoreId)) {
+                    return activeStoreId;
+                }
+                // 単一店舗アクセスならその店舗に自動セット
+                if (accessibleStores.length === 1) return accessibleStores[0].id;
+                return '';
+            };
+            const [newTicket, setNewTicket] = useState(() => ({
+                customerName: '', customerPhone: '', planId: '',
+                storeId: '', storeName: '', notes: '',
+                purchaseDate: todayLocalYMD(), expirationDate: ''
+            }));
+            // accessibleStores が確定したら storeId の初期値を再計算
+            React.useEffect(() => {
+                if (!newTicket.storeId) {
+                    const sid = getInitialTicketStore();
+                    if (sid) {
+                        const s = accessibleStores.find(st => st.id === sid);
+                        setNewTicket(prev => ({ ...prev, storeId: sid, storeName: s ? s.name : '' }));
+                    }
+                }
+            }, [accessibleStores, activeStoreId]);
             // プランフォーム
             const [planForm, setPlanForm] = useState({ name: '', sessions: '', price: '', validityDays: '' });
 
             // 日数計算
             const getDaysUntilExpiration = (expirationDate) => {
-                const now = new Date();
-                const exp = new Date(expirationDate);
-                return Math.ceil((exp - now) / (1000 * 60 * 60 * 24));
+                // ローカル日付同士の日数差を求める（UTC 変換はしない）。
+                // 以前は new Date(expirationDate) が UTC midnight 扱いになり
+                // JST との時差で本日期限の券が expired 判定されていた。
+                if (!expirationDate) return 0;
+                try {
+                    const [y, m, d] = String(expirationDate).split('-').map(Number);
+                    const exp = new Date(y, (m || 1) - 1, d || 1);
+                    const now = new Date();
+                    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+                    return Math.round((exp - today) / (1000 * 60 * 60 * 24));
+                } catch (_) { return 0; }
             };
 
             // ステータス判定
@@ -7827,20 +8176,34 @@
                 }
                 if (debouncedTicketSearch) {
                     const q = debouncedTicketSearch.toLowerCase();
-                    list = list.filter(t => t.customerName.toLowerCase().includes(q) || (t.customerPhone && t.customerPhone.includes(q)));
+                    // customerName / customerPhone が null の回数券でもクラッシュしないよう null 安全に
+                    list = list.filter(t => {
+                        const name = (t.customerName || '').toLowerCase();
+                        const phone = t.customerPhone || '';
+                        return name.includes(q) || phone.includes(q);
+                    });
                 }
                 return list.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
             }, [customerTickets, filterStatus, debouncedTicketSearch]);
 
             // プランが変わったら有効期限を自動計算
+            // new Date("YYYY-MM-DD") は UTC midnight としてパースされ、JST との境界で
+            // 1日ずれるため、文字列操作で local のまま日数を加算する。
+            const addDaysToYMD = (ymd, days) => {
+                const [y, m, d] = ymd.split('-').map(Number);
+                const dt = new Date(y, (m || 1) - 1, d || 1);
+                dt.setDate(dt.getDate() + (days || 0));
+                const yy = dt.getFullYear();
+                const mm = String(dt.getMonth() + 1).padStart(2, '0');
+                const dd = String(dt.getDate()).padStart(2, '0');
+                return `${yy}-${mm}-${dd}`;
+            };
             const handlePlanChange = (planId) => {
                 const plan = ticketPlans.find(p => p.id === planId);
-                const purchase = newTicket.purchaseDate || new Date().toISOString().slice(0, 10);
+                const purchase = newTicket.purchaseDate || todayLocalYMD();
                 let expDate = '';
                 if (plan) {
-                    const d = new Date(purchase);
-                    d.setDate(d.getDate() + plan.validityDays);
-                    expDate = d.toISOString().slice(0, 10);
+                    expDate = addDaysToYMD(purchase, plan.validityDays || 0);
                 }
                 setNewTicket(prev => ({ ...prev, planId, expirationDate: expDate }));
             };
@@ -7848,8 +8211,21 @@
             // 回数券追加
             const handleAddTicket = () => {
                 if (!newTicket.customerName.trim() || !newTicket.planId) return;
+                // スタッフモードで複数店舗の権限がある場合、店舗未選択のままだと
+                // サーバ側で 403 になるので事前に弾く
+                if (!newTicket.storeId && accessibleStores.length > 1) {
+                    showToast('店舗を選択してください', 'error');
+                    return;
+                }
                 addCustomerTicket(newTicket);
-                setNewTicket({ customerName: '', customerPhone: '', planId: '', storeName: '', notes: '', purchaseDate: new Date().toISOString().slice(0, 10), expirationDate: '' });
+                // リセット時は初期 storeId を再計算
+                const defaultSid = getInitialTicketStore();
+                const defaultStore = accessibleStores.find(s => s.id === defaultSid);
+                setNewTicket({
+                    customerName: '', customerPhone: '', planId: '',
+                    storeId: defaultSid, storeName: defaultStore ? defaultStore.name : '',
+                    notes: '', purchaseDate: todayLocalYMD(), expirationDate: ''
+                });
                 setShowAddForm(false);
             };
 
@@ -7903,6 +8279,73 @@
                             <Icon name="check-circle" size={18} className="text-green-500 mr-2 flex-shrink-0" />
                             <p className="text-green-700 text-sm font-medium">回数券データを保存しました</p>
                         </div>
+                    )}
+
+                    {/* storeId バックフィル (admin のみ、旧データに storeId が無い場合に表示) */}
+                    {isAdminMode && orphanTickets.length > 0 && (
+                        <Card className="border-amber-200 bg-amber-50/40">
+                            <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-3">
+                                    <div className="w-10 h-10 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center">
+                                        <Icon name="alert-triangle" size={18} />
+                                    </div>
+                                    <div>
+                                        <h3 className="text-sm font-bold text-slate-800">storeId 未設定の回数券 {orphanTickets.length} 件</h3>
+                                        <p className="text-[11px] text-slate-500">スタッフが操作できるよう店舗を紐付けてください</p>
+                                    </div>
+                                </div>
+                                <button
+                                    onClick={() => setShowBackfill(v => !v)}
+                                    className="px-3 py-2 rounded-lg text-xs font-semibold bg-amber-500 text-white hover:bg-amber-600 transition active:scale-95"
+                                >
+                                    {showBackfill ? '閉じる' : '店舗を付与'}
+                                </button>
+                            </div>
+                            {showBackfill && (
+                                <div className="mt-4 space-y-2 max-h-96 overflow-y-auto border-t border-amber-200 pt-4">
+                                    <p className="text-[11px] text-slate-500 mb-2">
+                                        推測された店舗（storeName と一致）は初期値で選択済み。必要に応じて手動で変更してください。
+                                    </p>
+                                    {orphanTickets.map(t => {
+                                        const selected = backfillMapping[t.id] || '';
+                                        return (
+                                            <div key={t.id} className="flex items-center gap-3 p-2.5 bg-white rounded-lg border border-amber-100">
+                                                <div className="flex-1 min-w-0">
+                                                    <p className="text-sm font-medium text-slate-800 truncate">{t.customerName || '(名前なし)'}</p>
+                                                    <p className="text-[11px] text-slate-400 truncate">{t.planName} / 発行: {t.purchaseDate} / 推測店舗名: {t.storeName || '—'}</p>
+                                                </div>
+                                                <select
+                                                    value={selected}
+                                                    onChange={e => setBackfillMapping(prev => ({ ...prev, [t.id]: e.target.value }))}
+                                                    className="px-2 py-1.5 border border-slate-200 rounded-lg text-xs outline-none bg-white"
+                                                >
+                                                    <option value="">-- 店舗を選択 --</option>
+                                                    {(memberData?.stores || []).filter(s => s.status !== 'inactive').map(s => (
+                                                        <option key={s.id} value={s.id}>{s.name}</option>
+                                                    ))}
+                                                </select>
+                                            </div>
+                                        );
+                                    })}
+                                    <div className="flex justify-end gap-2 pt-2">
+                                        <button
+                                            onClick={() => setShowBackfill(false)}
+                                            disabled={backfillSaving}
+                                            className="px-3 py-2 rounded-lg text-xs text-slate-600 hover:bg-slate-100"
+                                        >キャンセル</button>
+                                        <button
+                                            onClick={runBackfill}
+                                            disabled={backfillSaving}
+                                            aria-busy={backfillSaving || undefined}
+                                            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold bg-amber-500 text-white hover:bg-amber-600 disabled:opacity-50"
+                                        >
+                                            {backfillSaving && <Spinner size={12} />}
+                                            {backfillSaving ? '適用中...' : '選択した分を適用'}
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+                        </Card>
                     )}
 
                     {/* KPIサマリ（権限フィルタ適用済みデータから算出） */}
@@ -8010,13 +8453,32 @@
                                             </select>
                                         </div>
                                         <div>
-                                            <label className="block text-xs font-semibold text-slate-600 mb-1">店舗名</label>
-                                            <input
-                                                type="text" value={newTicket.storeName}
-                                                onChange={(e) => setNewTicket(prev => ({ ...prev, storeName: e.target.value }))}
-                                                placeholder="例: 新宿店"
-                                                className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:border-sise-400 outline-none"
-                                            />
+                                            <label className="block text-xs font-semibold text-slate-600 mb-1" htmlFor="tkt-store-select">
+                                                店舗 {accessibleStores.length > 1 && <span className="text-red-500" aria-hidden="true">*</span>}
+                                            </label>
+                                            <select
+                                                id="tkt-store-select"
+                                                value={newTicket.storeId}
+                                                onChange={(e) => {
+                                                    const sid = e.target.value;
+                                                    const s = accessibleStores.find(st => st.id === sid);
+                                                    setNewTicket(prev => ({ ...prev, storeId: sid, storeName: s ? s.name : '' }));
+                                                }}
+                                                disabled={accessibleStores.length === 0}
+                                                aria-required={accessibleStores.length > 1 ? 'true' : undefined}
+                                                className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:border-sise-400 outline-none bg-white disabled:bg-slate-50 disabled:text-slate-400"
+                                            >
+                                                <option value="">-- 店舗を選択 --</option>
+                                                {accessibleStores.map(s => (
+                                                    <option key={s.id} value={s.id}>{s.name}</option>
+                                                ))}
+                                            </select>
+                                            {accessibleStores.length === 0 && (
+                                                <p className="mt-1 text-[11px] text-amber-600 font-medium">
+                                                    <Icon name="alert-circle" size={11} className="inline -mt-0.5 mr-0.5" />
+                                                    アクセス可能な店舗がありません
+                                                </p>
+                                            )}
                                         </div>
                                         <div>
                                             <label className="block text-xs font-semibold text-slate-600 mb-1">購入日</label>
@@ -9211,6 +9673,9 @@
             const [editingStaff, setEditingStaff] = useState(null);
             const [isAdding, setIsAdding] = useState(false);
             const [copiedId, setCopiedId] = useState(null);
+            // 全スタッフ URL 一括再発行: 旧 legacy token から signed token への移行用
+            const [bulkReissuing, setBulkReissuing] = useState(false);
+            const [bulkReissueResult, setBulkReissueResult] = useState(null); // { success: [{id, name, url}], failed: [{id, name, error}] }
             const [gasSyncing, setGasSyncing] = useState(false);
             const [gasConnected, setGasConnected] = useState(false);
             const [dbError, setDbError] = useState(null);
@@ -9270,7 +9735,7 @@
                     }
                 } else {
                     // 新規追加
-                    const newStaff = { ...formData, id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), createdAt: new Date().toISOString().slice(0, 10), status: 'active' };
+                    const newStaff = { ...formData, id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), createdAt: todayLocalYMD(), status: 'active' };
                     updated = [...staffList, newStaff];
                     setStaffList(updated);
                     saveStaffListLocal(updated);
@@ -9326,6 +9791,42 @@
                 setFormData({ name: staff.name, role: staff.role, password: staff.password || '', storeIds: staff.storeIds || [] });
                 setEditingStaff(staff);
                 setIsAdding(true);
+            };
+
+            // 全スタッフの URL を HMAC 署名付き形式で再発行する admin ツール。
+            // 旧 legacy token (base64 のみ) からの移行や、SISE_AUTH_SECRET ローテ
+            // 後の再発行用。各スタッフの URL を個別に発行し、結果を画面に表示する。
+            const bulkReissueAllUrls = async () => {
+                if (!window.confirm('全てのアクティブなスタッフに新しい署名付き URL を発行します。\n(旧 URL は ALLOW_LEGACY_TOKENS=false にするまでは併用可能)\nよろしいですか?')) return;
+                setBulkReissuing(true);
+                setBulkReissueResult(null);
+                const targets = staffList.filter(s => s.status !== 'inactive');
+                const success = [];
+                const failed = [];
+                for (const staff of targets) {
+                    const url = await generateStaffUrl(staff);
+                    if (url) success.push({ id: staff.id, name: staff.name, url });
+                    else failed.push({ id: staff.id, name: staff.name, error: '発行失敗' });
+                }
+                setBulkReissueResult({ success, failed });
+                setBulkReissuing(false);
+                if (failed.length === 0) {
+                    showToast(`${success.length}件のURLを再発行しました`, 'success');
+                    hapticSuccess();
+                } else {
+                    showToast(`${success.length}件成功 / ${failed.length}件失敗`, 'error');
+                }
+            };
+
+            const copyAllReissuedUrls = async () => {
+                if (!bulkReissueResult || bulkReissueResult.success.length === 0) return;
+                const text = bulkReissueResult.success.map(s => `${s.name}: ${s.url}`).join('\n');
+                try {
+                    await navigator.clipboard.writeText(text);
+                    showToast('全URLをクリップボードにコピーしました', 'success');
+                } catch (e) {
+                    showToast('クリップボードへのコピーに失敗しました', 'error');
+                }
             };
 
             const handleCopyUrl = async (staff) => {
@@ -9428,15 +9929,71 @@
                             <p className="text-xs text-sise-500 tracking-wide mt-0.5">STAFF ACCESS MANAGEMENT</p>
                         </div>
                         {!isAdding && (
-                            <button
-                                onClick={() => { setIsAdding(true); setEditingStaff(null); setFormData({ name: '', role: 'staff', password: '', storeIds: [] }); }}
-                                className="flex items-center px-3 py-2 bg-sise-500 hover:bg-sise-600 text-white rounded-xl text-sm font-medium shadow-lg shadow-sise-500/25 transition-all"
-                            >
-                                <Icon name="user-plus" size={16} className="mr-1.5" />
-                                スタッフを追加
-                            </button>
+                            <div className="flex items-center gap-2 flex-wrap justify-end">
+                                <button
+                                    onClick={bulkReissueAllUrls}
+                                    disabled={bulkReissuing || staffList.length === 0}
+                                    title="全スタッフの URL を HMAC 署名付きで再発行（旧 URL からの移行用）"
+                                    className="flex items-center px-3 py-2 bg-amber-100 hover:bg-amber-200 text-amber-800 rounded-xl text-xs font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                    {bulkReissuing ? <Spinner size={12} /> : <Icon name="refresh-cw" size={12} className="mr-1" />}
+                                    <span className="ml-1">{bulkReissuing ? '発行中...' : '全URLを再発行'}</span>
+                                </button>
+                                <button
+                                    onClick={() => { setIsAdding(true); setEditingStaff(null); setFormData({ name: '', role: 'staff', password: '', storeIds: [] }); }}
+                                    className="flex items-center px-3 py-2 bg-sise-500 hover:bg-sise-600 text-white rounded-xl text-sm font-medium shadow-lg shadow-sise-500/25 transition-all"
+                                >
+                                    <Icon name="user-plus" size={16} className="mr-1.5" />
+                                    スタッフを追加
+                                </button>
+                            </div>
                         )}
                     </div>
+
+                    {/* 一括再発行の結果表示 */}
+                    {bulkReissueResult && (
+                        <div className="mb-4 p-3 bg-sise-50 rounded-xl border border-sise-200 animate-fade-in">
+                            <div className="flex items-center justify-between mb-2">
+                                <p className="text-sm font-bold text-slate-800">
+                                    一括再発行結果: 成功 {bulkReissueResult.success.length} / 失敗 {bulkReissueResult.failed.length}
+                                </p>
+                                <div className="flex items-center gap-2">
+                                    {bulkReissueResult.success.length > 0 && (
+                                        <button
+                                            onClick={copyAllReissuedUrls}
+                                            className="px-3 py-1.5 rounded-lg bg-sise-500 text-white text-xs font-semibold hover:bg-sise-600"
+                                        >
+                                            <Icon name="clipboard" size={12} className="inline mr-1" />全URLコピー
+                                        </button>
+                                    )}
+                                    <button
+                                        onClick={() => setBulkReissueResult(null)}
+                                        className="px-2 py-1.5 rounded-lg text-slate-500 hover:bg-slate-100 text-xs"
+                                    >閉じる</button>
+                                </div>
+                            </div>
+                            <div className="max-h-48 overflow-y-auto space-y-1">
+                                {bulkReissueResult.success.map(s => (
+                                    <div key={s.id} className="flex items-center justify-between p-2 bg-white rounded-lg border border-slate-100">
+                                        <span className="text-xs font-medium text-slate-700 truncate flex-1">{s.name}</span>
+                                        <button
+                                            onClick={async () => {
+                                                try { await navigator.clipboard.writeText(s.url); showToast(`${s.name} のURLをコピー`, 'success', 1500); }
+                                                catch (_) { showToast('コピー失敗', 'error'); }
+                                            }}
+                                            className="ml-2 px-2 py-1 rounded-md bg-sise-100 text-sise-700 text-[10px] font-semibold hover:bg-sise-200"
+                                        >コピー</button>
+                                    </div>
+                                ))}
+                                {bulkReissueResult.failed.map(s => (
+                                    <div key={s.id} className="flex items-center p-2 bg-red-50 rounded-lg border border-red-100">
+                                        <Icon name="alert-circle" size={12} className="text-red-500 mr-1.5 flex-shrink-0" />
+                                        <span className="text-xs font-medium text-red-700 truncate">{s.name} — {s.error}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
 
                     {/* 追加・編集フォーム */}
                     {isAdding && (
@@ -9556,7 +10113,8 @@
                                 </button>
                                 <button
                                     onClick={handleSave}
-                                    disabled={!formData.name.trim() || formData.storeIds.length === 0}
+                                    disabled={gasSyncing || !formData.name.trim() || formData.storeIds.length === 0}
+                                    aria-busy={gasSyncing || undefined}
                                     className="px-4 py-2 bg-sise-500 hover:bg-sise-600 text-white rounded-xl text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                                 >
                                     {editingStaff ? '更新' : '追加'}
@@ -9678,7 +10236,7 @@
                     // 新規追加
                     const storeId = formData.id.trim() || Date.now().toString(36);
                     if (storeList.find(s => s.id === storeId)) { alert('このIDは既に使われています'); return; }
-                    const newStore = { id: storeId, name: formData.name, status: 'active', memo: formData.memo, createdAt: new Date().toISOString().slice(0, 10) };
+                    const newStore = { id: storeId, name: formData.name, status: 'active', memo: formData.memo, createdAt: todayLocalYMD() };
                     setStoreList(prev => [...prev, newStore]);
                     setGasSyncing(true);
                     await addStoreToGas(newStore);
@@ -9972,7 +10530,12 @@
                         updated.monthly = [...prev.monthly, entry].sort((a, b) => a.yearMonth.localeCompare(b.yearMonth));
                     }
                     localStorage.setItem(HPB_STORAGE_KEY, JSON.stringify(updated));
-                    upsertHpbMonthGas(entry);
+                    // サーバー保存失敗時はトーストで通知（localStorage はすでに更新済み）
+                    upsertHpbMonthGas(entry).then(res => {
+                        if (!res || res.error) {
+                            showToast('HPBデータの保存に失敗しました: ' + ((res && res.error) || '通信エラー'), 'error');
+                        }
+                    });
                     return updated;
                 });
             }, []);
@@ -9992,7 +10555,11 @@
                 setHpbData(prev => {
                     const updated = { ...prev, monthly: prev.monthly.filter(m => m.yearMonth !== yearMonth) };
                     localStorage.setItem(HPB_STORAGE_KEY, JSON.stringify(updated));
-                    deleteHpbMonthGas(yearMonth);
+                    deleteHpbMonthGas(yearMonth).then(res => {
+                        if (!res || res.error) {
+                            showToast('HPB月次データの削除に失敗しました: ' + ((res && res.error) || '通信エラー'), 'error');
+                        }
+                    });
                     return updated;
                 });
             }, []);
@@ -10020,8 +10587,11 @@
                 if (!metaConfig.configured) return;
                 setMetaData(prev => ({ ...prev, loading: true, error: null }));
                 try {
-                    // キャンペーン一覧
-                    const campRes = await fetch(`${META_PROXY_BASE}/campaigns?fields=name,status,objective,daily_budget,lifetime_budget&limit=50`);
+                    // キャンペーン一覧（本部ロールのみ 200 を返す）
+                    const campRes = await fetch(`${META_PROXY_BASE}/campaigns?fields=name,status,objective,daily_budget,lifetime_budget&limit=50`, {
+                        headers: buildAuthHeaders(),
+                        credentials: 'same-origin',
+                    });
                     const campData = await campRes.json();
                     if (campData.error) {
                         const errMsg = campData.error.message || JSON.stringify(campData.error);
@@ -10035,7 +10605,8 @@
 
                     // インサイト取得
                     const insightRes = await fetch(
-                        `${META_PROXY_BASE}/insights?fields=impressions,clicks,ctr,spend,actions,cost_per_action_type,cpc,cpm,reach,frequency&date_preset=${datePreset}&level=account`
+                        `${META_PROXY_BASE}/insights?fields=impressions,clicks,ctr,spend,actions,cost_per_action_type,cpc,cpm,reach,frequency&date_preset=${datePreset}&level=account`,
+                        { headers: buildAuthHeaders(), credentials: 'same-origin' }
                     );
                     const insightData = await insightRes.json();
                     if (insightData.error) {
@@ -10045,7 +10616,8 @@
 
                     // キャンペーン別インサイト
                     const campInsightRes = await fetch(
-                        `${META_PROXY_BASE}/insights?fields=campaign_name,impressions,clicks,ctr,spend,actions,cost_per_action_type&date_preset=${datePreset}&level=campaign&limit=50`
+                        `${META_PROXY_BASE}/insights?fields=campaign_name,impressions,clicks,ctr,spend,actions,cost_per_action_type&date_preset=${datePreset}&level=campaign&limit=50`,
+                        { headers: buildAuthHeaders(), credentials: 'same-origin' }
                     );
                     const campInsightData = await campInsightRes.json();
 
@@ -10068,14 +10640,17 @@
                 if (!tiktokConfig.configured) return;
                 setTiktokData(prev => ({ ...prev, loading: true, error: null }));
                 try {
-                    const now = new Date();
-                    const start = startDate || new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
-                    const end = endDate || now.toISOString().split('T')[0];
+                    // 日付はローカル計算する。toISOString は UTC 基準で、JST 深夜/早朝に
+                    // 1日ずれたレポート範囲になる問題を避ける。
+                    const monthStart = thisMonthLocalYM() + '-01';
+                    const start = startDate || monthStart;
+                    const end = endDate || todayLocalYMD();
 
                     // キャンペーン一覧
                     const campRes = await fetch(`${TIKTOK_PROXY_BASE}/campaign/get`, {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
+                        headers: { 'Content-Type': 'application/json', ...buildAuthHeaders() },
+                        credentials: 'same-origin',
                         body: JSON.stringify({ page_size: 100 })
                     });
                     const campData = campRes.ok ? await campRes.json() : { data: { list: [] } };
@@ -10083,7 +10658,8 @@
                     // レポート取得
                     const reportRes = await fetch(`${TIKTOK_PROXY_BASE}/report/integrated/get`, {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
+                        headers: { 'Content-Type': 'application/json', ...buildAuthHeaders() },
+                        credentials: 'same-origin',
                         body: JSON.stringify({
                             report_type: 'BASIC',
                             data_level: 'AUCTION_ADVERTISER',
@@ -11652,7 +12228,7 @@
                 templates, fetchTemplates, saveTemplate,
                 autoReplies, fetchAutoReplies, saveAutoReply,
                 tags, userTags, fetchTags, saveTag, saveUserTag,
-                analytics, fetchAnalytics,
+                analytics, analyticsError, fetchAnalytics,
                 refreshingUserIds
             } = lineChatHook;
             const [lineTab, setLineTab] = useState('chat');
@@ -12002,7 +12578,17 @@
                     return (
                         <div>
                             {tabHeader}
-                            {!analytics ? (
+                            {analyticsError ? (
+                                <div className="flex flex-col items-center justify-center py-12 gap-3">
+                                    <Icon name="alert-circle" size={32} className="text-amber-500" />
+                                    <p className="text-sm font-semibold text-slate-700">分析データの取得に失敗しました</p>
+                                    <p className="text-xs text-slate-500 text-center max-w-xs">{analyticsError}</p>
+                                    <button
+                                        onClick={() => fetchAnalytics()}
+                                        className="mt-2 px-4 py-2 rounded-lg bg-green-500 text-white text-xs font-semibold hover:bg-green-600 active:scale-95 transition"
+                                    >再試行</button>
+                                </div>
+                            ) : !analytics ? (
                                 <div className="flex items-center justify-center py-12">
                                     <Icon name="loader" size={24} className="text-green-500 animate-spin" />
                                 </div>
@@ -12505,7 +13091,7 @@
 
             // HPBフォーム
             const [hpbForm, setHpbForm] = useState({
-                yearMonth: new Date().toISOString().slice(0, 7),
+                yearMonth: thisMonthLocalYM(),
                 pageViews: '', bookings: '', reviews: '', favorites: '', blogViews: '', coupons: ''
             });
             const [hpbEditingMonth, setHpbEditingMonth] = useState(null);
@@ -12693,7 +13279,7 @@
                                         {hpbEditingMonth ? '更新' : '登録'}
                                     </button>
                                     {hpbEditingMonth && (
-                                        <button onClick={() => { setHpbEditingMonth(null); setHpbForm({ yearMonth: new Date().toISOString().slice(0, 7), pageViews: '', bookings: '', reviews: '', favorites: '', blogViews: '', coupons: '' }); }}
+                                        <button onClick={() => { setHpbEditingMonth(null); setHpbForm({ yearMonth: thisMonthLocalYM(), pageViews: '', bookings: '', reviews: '', favorites: '', blogViews: '', coupons: '' }); }}
                                             className="px-4 py-1.5 border rounded text-sm hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
                                             キャンセル
                                         </button>
@@ -15413,7 +15999,13 @@
                     const result = await resp.json();
                     if (!resp.ok) throw new Error(result.message || 'アップロード失敗');
                     return result.url;
-                } catch (e) { console.error('Blob upload error:', e); return null; }
+                } catch (e) {
+                    // 以前は silent null を返して呼び出し側が気づけなかった。
+                    // LINE 送信時に画像が欠落するなど重大な影響があるため明示的にトースト通知する。
+                    console.error('Blob upload error:', e);
+                    showToast('画像のアップロードに失敗しました: ' + (e.message || '通信エラー'), 'error');
+                    return null;
+                }
             }, []);
 
             // LINE送信
@@ -15541,13 +16133,20 @@
                     const jsonBlob = new Blob([analysisJson], { type: 'application/json' });
 
                     // 3. iOS/Android: Web Share APIで写真アプリに保存（画像のみ）
+                    // iOS Safari は navigator.share あっても canShare({files}) が
+                    // false を返すケースがあるため、両方チェックしてフォールバック。
+                    const ua = navigator.userAgent || '';
+                    const isIOS = /iPad|iPhone|iPod/.test(ua) && !window.MSStream;
                     let shared = false;
+                    let shareAttempted = false;
                     if (navigator.share && navigator.canShare) {
                         try {
                             const imageFile = dataUrlToFile(composed, baseName + '.jpg');
                             if (navigator.canShare({ files: [imageFile] })) {
+                                shareAttempted = true;
                                 await navigator.share({ files: [imageFile], title: baseName });
                                 shared = true;
+                                hapticSuccess();
                             }
                         } catch (e) {
                             if (e.name === 'AbortError') return; // ユーザーがキャンセル
@@ -15563,6 +16162,12 @@
                         document.body.appendChild(imgLink);
                         imgLink.click();
                         document.body.removeChild(imgLink);
+                        // iOS ユーザーはダウンロード先が分かりにくいので誘導を表示
+                        if (isIOS) {
+                            showToast('「ファイル」アプリのダウンロードに保存されました', 'info', 4000);
+                        } else if (!shareAttempted) {
+                            showToast('画像をダウンロードしました', 'success', 2000);
+                        }
                     }
 
                     // 5. JSONは常にダウンロードリンクで保存（Web Shareで送れない環境が多いため）
@@ -15614,12 +16219,16 @@
                     const jsonFileName = `BeforeAfter_${name}_${date}.json`;
                     const jsonFile = new File([jsonBlob], jsonFileName, { type: 'application/json' });
 
+                    const ua2 = navigator.userAgent || '';
+                    const isIOS2 = /iPad|iPhone|iPod/.test(ua2) && !window.MSStream;
+
                     // iOS/モバイル: Web Share APIで写真アプリに直接保存可能
                     if (navigator.share && navigator.canShare) {
                         const shareFiles = [...files.map(f => dataUrlToFile(f.dataUrl, f.fileName)), jsonFile];
                         const shareData = { files: shareFiles };
                         if (navigator.canShare(shareData)) {
                             await navigator.share(shareData);
+                            hapticSuccess();
                             setCompDownloading(false);
                             return;
                         }
@@ -15627,11 +16236,12 @@
                         const imgOnlyData = { files: files.map(f => dataUrlToFile(f.dataUrl, f.fileName)) };
                         if (navigator.canShare(imgOnlyData)) {
                             await navigator.share(imgOnlyData);
+                            hapticSuccess();
                             setCompDownloading(false);
                             return;
                         }
                     }
-                    // フォールバック: 従来のダウンロード（PC等）
+                    // フォールバック: 従来のダウンロード（PC等、または iOS Share 非対応）
                     for (const f of files) {
                         const link = document.createElement('a');
                         link.download = f.fileName;
@@ -15644,6 +16254,12 @@
                     jsonLink.href = jsonUrl;
                     jsonLink.click();
                     setTimeout(() => URL.revokeObjectURL(jsonUrl), 1000);
+                    // iOS ユーザーはダウンロード先が分かりにくいので誘導
+                    if (isIOS2) {
+                        showToast('「ファイル」アプリのダウンロードに保存されました', 'info', 4000);
+                    } else {
+                        showToast(`${files.length + 1}件のファイルをダウンロードしました`, 'success', 2000);
+                    }
                 } catch (e) {
                     // ユーザーがShareシートをキャンセルした場合はAbortErrorになる（正常）
                     if (e.name !== 'AbortError') {
@@ -19464,23 +20080,73 @@
             { id: 'complete', label: '完了', icon: 'check-circle', description: '次回予約・フォローアップ' },
         ];
 
+        // 来店フロー: sessionStorage 永続化
+        // ページリロードや誤タップで戻った時にも途中状態を復元できるようにする。
+        // 保存対象は永続化が有用な主要 state のみ。UI 一時値（searchQuery 等）は除外。
+        const FLOW_STATE_KEY = 'sise_flow_state_v1';
+        const loadPersistedFlowState = () => {
+            try {
+                const raw = sessionStorage.getItem(FLOW_STATE_KEY);
+                if (!raw) return null;
+                const s = JSON.parse(raw);
+                return (s && typeof s === 'object') ? s : null;
+            } catch (_) { return null; }
+        };
+        const saveFlowStatePersisted = (state) => {
+            try { sessionStorage.setItem(FLOW_STATE_KEY, JSON.stringify(state)); } catch (_) {}
+        };
+        const clearFlowStatePersisted = () => {
+            try { sessionStorage.removeItem(FLOW_STATE_KEY); } catch (_) {}
+        };
+
         const FlowNavigationView = ({ onClose, memberData, counselingHook, lineChatHook, activeStoreId }) => {
             const { useState, useEffect, useCallback, useMemo, useRef } = React;
 
-            // Flow state
-            const [currentStep, setCurrentStep] = useState(0);
-            const [flowCustomer, setFlowCustomer] = useState(null); // { id, name, phone, email, lineConnected, source }
-            const [stepStatus, setStepStatus] = useState({}); // { stepId: 'done'|'skipped' }
+            // Flow state — sessionStorage から復元（ページリロード対策）
+            const _persisted = useMemo(() => loadPersistedFlowState(), []);
+            const [currentStep, setCurrentStep] = useState(() => _persisted?.currentStep || 0);
+            const [flowCustomer, setFlowCustomer] = useState(() => _persisted?.flowCustomer || null);
+            const [stepStatus, setStepStatus] = useState(() => _persisted?.stepStatus || {});
             const [searchQuery, setSearchQuery] = useState('');
             const [customerTab, setCustomerTab] = useState('gas'); // 'gas' | 'square'
             const [gasSearchInput, setGasSearchInput] = useState('');
-            const [gasCustomerDetail, setGasCustomerDetail] = useState(null); // GAS顧客詳細データ
+            const [gasCustomerDetail, setGasCustomerDetail] = useState(() => _persisted?.gasCustomerDetail || null);
             const [gasDetailLoading, setGasDetailLoading] = useState(false);
-            const [treatmentNotes, setTreatmentNotes] = useState('');
-            const [treatmentMenus, setTreatmentMenus] = useState({ '骨盤矯正': false, '姿勢矯正': false, '小顔矯正': false, 'ほぐし': false });
-            const [contractResult, setContractResult] = useState(null); // 'contract' | 'follow-up' | null
-            const [followUpSent, setFollowUpSent] = useState(false);
+            const [treatmentNotes, setTreatmentNotes] = useState(() => _persisted?.treatmentNotes || '');
+            const [treatmentMenus, setTreatmentMenus] = useState(() => _persisted?.treatmentMenus || { '骨盤矯正': false, '姿勢矯正': false, '小顔矯正': false, 'ほぐし': false });
+            const [contractResult, setContractResult] = useState(() => _persisted?.contractResult || null);
+            const [followUpSent, setFollowUpSent] = useState(() => _persisted?.followUpSent || false);
+            // 復元時のみ true。banner を 1 回表示 → ユーザーが閉じるか次操作まで表示
+            const [wasRestored, setWasRestored] = useState(() => !!_persisted && (_persisted.currentStep > 0 || !!_persisted.flowCustomer));
             const contentRef = useRef(null);
+
+            // state が変わるたびに sessionStorage に書き戻す
+            // searchQuery / customerTab / gasSearchInput は UI 一時値なので永続化しない
+            useEffect(() => {
+                saveFlowStatePersisted({
+                    currentStep, flowCustomer, stepStatus,
+                    gasCustomerDetail, treatmentNotes, treatmentMenus,
+                    contractResult, followUpSent,
+                    _savedAt: Date.now(),
+                });
+            }, [currentStep, flowCustomer, stepStatus, gasCustomerDetail, treatmentNotes, treatmentMenus, contractResult, followUpSent]);
+
+            // 「最初からやり直す」ボタン用
+            const resetFlow = useCallback(() => {
+                setCurrentStep(0);
+                setFlowCustomer(null);
+                setStepStatus({});
+                setGasCustomerDetail(null);
+                setTreatmentNotes('');
+                setTreatmentMenus({ '骨盤矯正': false, '姿勢矯正': false, '小顔矯正': false, 'ほぐし': false });
+                setContractResult(null);
+                setFollowUpSent(false);
+                setSearchQuery('');
+                setCustomerTab('gas');
+                setGasSearchInput('');
+                clearFlowStatePersisted();
+                setWasRestored(false);
+            }, []);
 
             // Merge Square customers + manual members for search
             const allCustomers = useMemo(() => {
@@ -19555,8 +20221,11 @@
             // フローから別画面に一時遷移する（顧客名をsessionStorageに保存）
             const navigateOut = useCallback((stepId, targetView) => {
                 markDone(stepId);
+                // プライベートブラウジングや quota 超過で sessionStorage が使えない
+                // 場合でもフロー全体が止まらないように try/catch で握りつぶす。
                 if (flowCustomer?.name) {
-                    sessionStorage.setItem('sise_flow_customer_name', flowCustomer.name);
+                    try { sessionStorage.setItem('sise_flow_customer_name', flowCustomer.name); }
+                    catch (e) { console.warn('[flow] sessionStorage save failed:', e); }
                 }
                 onClose(targetView);
             }, [markDone, flowCustomer, onClose]);
@@ -19791,7 +20460,8 @@
                     ) : (
                         <>
                             <div className="flow-customer-card">
-                                <div className="flow-customer-avatar">{flowCustomer.name[0]}</div>
+                                {/* 空文字/null の場合でもクラッシュしないよう null 安全に */}
+                                <div className="flow-customer-avatar">{(flowCustomer?.name && flowCustomer.name[0]) || '?'}</div>
                                 <div className="flow-customer-info">
                                     <div className="flow-customer-name">{flowCustomer.name}</div>
                                     <div className="flow-customer-meta">
@@ -20307,7 +20977,12 @@
                         )}
 
                         <button
-                            onClick={() => onClose('dashboard')}
+                            onClick={() => {
+                                // フロー完了: 永続化状態をクリア
+                                clearFlowStatePersisted();
+                                hapticSuccess();
+                                onClose('dashboard');
+                            }}
                             className="flow-btn flow-btn-primary w-full"
                             style={{ marginTop: 20, flex: 'none' }}
                         >
@@ -20351,6 +21026,37 @@
                         <h2 style={{ fontSize: 20, fontWeight: 800, color: '#1e293b', marginTop: 2 }}>{FLOW_STEPS[currentStep].label}</h2>
                         <p style={{ fontSize: 12, color: '#94a3b8', marginTop: 2 }}>{FLOW_STEPS[currentStep].description}</p>
                     </div>
+
+                    {/* 復元中バナー: sessionStorage から state 復元したことを通知 */}
+                    {wasRestored && (
+                        <div style={{
+                            margin: '0 12px 12px', padding: '10px 14px', borderRadius: 12,
+                            background: 'linear-gradient(135deg, #fef3c7, #fde68a)',
+                            border: '1px solid #fbbf24', display: 'flex', alignItems: 'center', gap: 10,
+                            fontSize: 12, color: '#92400e', fontWeight: 600,
+                        }}>
+                            <Icon name="refresh-cw" size={14} />
+                            <span style={{ flex: 1 }}>前回の途中フローを復元しました</span>
+                            <button
+                                onClick={async () => {
+                                    if (await confirmDialog({
+                                        title: 'フローをリセット',
+                                        message: '途中の入力内容を破棄して最初からやり直しますか？',
+                                        confirmLabel: 'リセット', variant: 'danger'
+                                    })) resetFlow();
+                                }}
+                                style={{
+                                    padding: '4px 10px', borderRadius: 8, border: '1px solid #d97706',
+                                    background: '#fff', color: '#92400e', fontSize: 11, fontWeight: 700, cursor: 'pointer'
+                                }}
+                            >最初からやり直す</button>
+                            <button
+                                onClick={() => setWasRestored(false)}
+                                aria-label="バナーを閉じる"
+                                style={{ background: 'transparent', border: 'none', color: '#92400e', cursor: 'pointer', padding: 2, display: 'flex' }}
+                            ><Icon name="x" size={14} /></button>
+                        </div>
+                    )}
 
                     {/* Content */}
                     <div className="flow-content-card" ref={contentRef}>
@@ -20600,8 +21306,38 @@
             const [currentView, setCurrentView] = useState('dashboard');
             const [selectedStore, setSelectedStore] = useState('all');
             const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-            const [isDarkMode, setIsDarkMode] = useState(false);
+            const [isDarkMode, setIsDarkMode] = useState(() => {
+                // ダークモード設定を localStorage に保存（Settings 監査 #7）
+                try { return localStorage.getItem('sise_dark_mode') === '1'; }
+                catch (_) { return false; }
+            });
+            useEffect(() => {
+                try { localStorage.setItem('sise_dark_mode', isDarkMode ? '1' : '0'); } catch (_) {}
+            }, [isDarkMode]);
             const [flowMode, setFlowMode] = useState(false);
+
+            // Phase 3 — ヘッダ縮退: 下スクロール時に opacity/shadow を減らして
+            // 画面の情報密度を上げる。上スクロールで復帰。
+            const [headerShrunk, setHeaderShrunk] = useState(false);
+            useEffect(() => {
+                let lastY = 0;
+                let ticking = false;
+                const onScroll = () => {
+                    if (ticking) return;
+                    ticking = true;
+                    requestAnimationFrame(() => {
+                        const y = window.scrollY || 0;
+                        const delta = y - lastY;
+                        // 閾値: 下方向 8px 超で縮退、上方向 4px 超で復帰
+                        if (y > 100 && delta > 8) setHeaderShrunk(true);
+                        else if (delta < -4 || y < 50) setHeaderShrunk(false);
+                        lastY = y;
+                        ticking = false;
+                    });
+                };
+                window.addEventListener('scroll', onScroll, { passive: true });
+                return () => window.removeEventListener('scroll', onScroll);
+            }, []);
             const [quickSearchOpen, setQuickSearchOpen] = useState(false);
 
             const isStaffMode = !!currentAccess;
@@ -20905,7 +21641,7 @@
                     case 'usage':
                         return <MemberUsageView memberData={memberData} usageHook={usageHook} />;
                     case 'tickets':
-                        return <TicketManagementView ticketHook={ticketHook} />;
+                        return <TicketManagementView ticketHook={ticketHook} memberData={memberData} activeStoreId={activeStoreId} />;
                     case 'counseling':
                         return <ConceptFormView counselingHook={counselingHook} activeStoreId={activeStoreId} memberData={memberData} />;
                     case 'treatment':
@@ -21027,8 +21763,11 @@
                     <div className="bg-orb bg-orb-2"></div>
                     <div className="bg-orb bg-orb-3"></div>
 
-                    {/* Header */}
-                    <header className="fixed top-0 left-0 right-0 z-50 glass-panel safe-top">
+                    {/* Header (scroll 時に透明度/影を減らして情報密度 UP) */}
+                    <header
+                        className={`fixed top-0 left-0 right-0 z-50 glass-panel safe-top transition-[opacity,box-shadow,backdrop-filter] duration-200 ${headerShrunk && !isFullscreenView ? 'opacity-90 shadow-none' : 'shadow-glass-xs'}`}
+                        style={headerShrunk && !isFullscreenView ? { backdropFilter: 'blur(12px) saturate(1.4)', WebkitBackdropFilter: 'blur(12px) saturate(1.4)' } : undefined}
+                    >
                         <div className="flex items-center justify-between px-4 md:px-5 h-14 md:h-16">
                             <div className="flex items-center">
                                 {isFullscreenView ? (
@@ -21639,6 +22378,18 @@
         // アプリケーションのレンダリング
         const root = ReactDOM.createRoot(document.getElementById('root'));
         root.render(<AppWithAuth />);
+
+        // Service Worker 登録 (PWA サポート)
+        // 本番デプロイ後は home 画面に追加でアプリ風 UX、オフライン時の
+        // キャッシュフォールバックが効く。/api/* は network-only なので
+        // データ鮮度と認証は維持される。
+        if ('serviceWorker' in navigator && window.location.protocol === 'https:') {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/sw.js').catch(err => {
+                    console.warn('[sw] registration failed:', err);
+                });
+            });
+        }
     </script>
 </body>
 </html>
