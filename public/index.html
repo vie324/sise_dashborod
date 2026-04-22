@@ -1643,6 +1643,29 @@
         };
 
         // ========================================
+        // Phase 3 — モバイル触覚フィードバック (haptic)
+        // ========================================
+        // navigator.vibrate は iOS Safari では完全無視されるが、Android / 一部
+        // Android chrome ベースブラウザでは動作する。未対応環境ではサイレント no-op。
+        // prefers-reduced-motion が有効なら振動も控える（"motion" は視覚だけでなく
+        // 物理的な動きも含まれる解釈）。
+        // ========================================
+        const _hapticEnabled = () => {
+            if (typeof navigator === 'undefined' || typeof navigator.vibrate !== 'function') return false;
+            if (prefersReducedMotion) return false;
+            return true;
+        };
+        const hapticTap = () => {
+            if (_hapticEnabled()) { try { navigator.vibrate(10); } catch (_) {} }
+        };
+        const hapticSuccess = () => {
+            if (_hapticEnabled()) { try { navigator.vibrate([8, 30, 8]); } catch (_) {} }
+        };
+        const hapticError = () => {
+            if (_hapticEnabled()) { try { navigator.vibrate([30, 20, 30]); } catch (_) {} }
+        };
+
+        // ========================================
         // 設定・定数
         // ========================================
 
@@ -10182,6 +10205,82 @@
             const [showMenuManager, setShowMenuManager] = useState(false);
             const [menuForm, setMenuForm] = useState({ name: '', category: '', price: '', itemType: 'menu' });
             const [editingMenuId, setEditingMenuId] = useState(null);
+            // Phase 3 — メニュー並び替え (DND) 状態
+            // サーバ側にはまだ order カラムが無いため localStorage に ID 配列を保存し、
+            // クライアント側だけで並びを再現する。
+            const MENU_ORDER_KEY = 'sise_menu_order_v1';
+            const [menuOrder, setMenuOrder] = useState(() => {
+                try { return JSON.parse(localStorage.getItem(MENU_ORDER_KEY)) || []; }
+                catch (_) { return []; }
+            });
+            const persistMenuOrder = (ids) => {
+                try { localStorage.setItem(MENU_ORDER_KEY, JSON.stringify(ids)); } catch (_) {}
+            };
+            // 並び替え中のアイテム（ID / Y オフセット / hover 先）を保持するための ref
+            const dragState = useRef({ active: false, itemId: null, startY: 0, currentY: 0, itemIds: [], overIndex: -1 });
+            const [dragVersion, setDragVersion] = useState(0); // re-render トリガ
+            // 見かけ順を返す: menuOrder に含まれる ID の順 → それ以外は元の順で末尾に
+            const orderedMenuItems = useMemo(() => {
+                const all = (menuItemsHook?.menuItems || []).filter(m => m.active);
+                if (!menuOrder || menuOrder.length === 0) return all;
+                const byId = new Map(all.map(m => [m.id, m]));
+                const seen = new Set();
+                const out = [];
+                for (const id of menuOrder) {
+                    const it = byId.get(id);
+                    if (it) { out.push(it); seen.add(id); }
+                }
+                for (const it of all) if (!seen.has(it.id)) out.push(it);
+                return out;
+            }, [menuItemsHook?.menuItems, menuOrder]);
+
+            // メニュー DND ハンドラ（pointer events でタッチ・マウス統一）
+            const ROW_HEIGHT = 52; // 各行のおおよその高さ（px）
+            const onMenuDragStart = (itemId, startEvent) => {
+                const ids = orderedMenuItems.map(m => m.id);
+                const idx = ids.indexOf(itemId);
+                if (idx < 0) return;
+                dragState.current = {
+                    active: true,
+                    itemId,
+                    startY: startEvent.clientY,
+                    currentY: startEvent.clientY,
+                    itemIds: ids,
+                    overIndex: idx,
+                };
+                setDragVersion(v => v + 1);
+                // pointer capture で move/up を同じ要素で受け取る
+                try { startEvent.currentTarget.setPointerCapture(startEvent.pointerId); } catch (_) {}
+                hapticTap();
+            };
+            const onMenuDragMove = (e) => {
+                if (!dragState.current.active) return;
+                const s = dragState.current;
+                s.currentY = e.clientY;
+                const delta = s.currentY - s.startY;
+                const fromIdx = s.itemIds.indexOf(s.itemId);
+                const targetIdx = Math.max(0, Math.min(s.itemIds.length - 1, fromIdx + Math.round(delta / ROW_HEIGHT)));
+                if (targetIdx !== s.overIndex) {
+                    s.overIndex = targetIdx;
+                    setDragVersion(v => v + 1);
+                }
+            };
+            const onMenuDragEnd = () => {
+                const s = dragState.current;
+                if (!s.active) { dragState.current.active = false; return; }
+                const fromIdx = s.itemIds.indexOf(s.itemId);
+                const toIdx = s.overIndex;
+                dragState.current = { active: false, itemId: null, startY: 0, currentY: 0, itemIds: [], overIndex: -1 };
+                if (fromIdx !== -1 && toIdx !== -1 && fromIdx !== toIdx) {
+                    const next = s.itemIds.slice();
+                    const [moved] = next.splice(fromIdx, 1);
+                    next.splice(toIdx, 0, moved);
+                    setMenuOrder(next);
+                    persistMenuOrder(next);
+                    hapticSuccess();
+                }
+                setDragVersion(v => v + 1);
+            };
 
             const incomeCategories = ['施術売上', 'サブスク月額', '回数券販売', '物販', 'その他収入'];
             const expenseCategories = ['家賃', '水道光熱費', '消耗品', '広告費', '人件費', '設備', '交通費', 'その他経費'];
@@ -11037,26 +11136,60 @@
                                 })()}
                             </div>
 
-                            {/* メニュー一覧 */}
-                            <div className="space-y-1.5 max-h-64 overflow-y-auto">
-                                {(menuItemsHook?.menuItems || []).filter(m => m.active).map(item => (
-                                    <div key={item.id} className="flex items-center justify-between p-2.5 bg-white rounded-lg border border-slate-100 hover:border-sise-200 transition-colors">
-                                        <div className="flex items-center gap-2">
-                                            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${item.itemType === 'coupon' ? 'bg-amber-100 text-amber-700' : 'bg-sise-100 text-sise-700'}`}>
-                                                {item.itemType === 'coupon' ? 'クーポン' : 'メニュー'}
-                                            </span>
-                                            <span className="text-sm font-medium text-slate-700">{item.name}</span>
+                            {/* メニュー一覧（DND 対応: 左端のつまみをドラッグで並び替え、ローカル保存） */}
+                            <p className="text-[10px] text-slate-400 mb-1.5">
+                                <Icon name="grip-vertical" size={10} className="inline -mt-0.5 mr-1" />
+                                左端のつまみをドラッグで並び替えできます（この端末に保存）
+                            </p>
+                            <div className="space-y-1.5 max-h-64 overflow-y-auto" onPointerMove={onMenuDragMove} onPointerUp={onMenuDragEnd} onPointerCancel={onMenuDragEnd}>
+                                {orderedMenuItems.map((item, index) => {
+                                    const isDragging = dragState.current.active && dragState.current.itemId === item.id;
+                                    const fromIdx = dragState.current.active ? dragState.current.itemIds.indexOf(dragState.current.itemId) : -1;
+                                    const overIdx = dragState.current.overIndex;
+                                    // drag 中、他の行を上下にずらして移動先を示す
+                                    let shift = 0;
+                                    if (dragState.current.active && !isDragging && fromIdx !== -1) {
+                                        if (fromIdx < overIdx && index > fromIdx && index <= overIdx) shift = -ROW_HEIGHT;
+                                        else if (fromIdx > overIdx && index < fromIdx && index >= overIdx) shift = ROW_HEIGHT;
+                                    }
+                                    const liveY = isDragging ? (dragState.current.currentY - dragState.current.startY) : 0;
+                                    return (
+                                        <div
+                                            key={item.id}
+                                            className={`flex items-center justify-between p-2.5 rounded-lg border transition-colors ${isDragging ? 'bg-sise-50 border-sise-400 shadow-lg' : 'bg-white border-slate-100 hover:border-sise-200'}`}
+                                            style={{
+                                                transform: isDragging ? `translateY(${liveY}px)` : (shift ? `translateY(${shift}px)` : undefined),
+                                                transition: isDragging ? 'none' : 'transform 0.18s cubic-bezier(0.16,1,0.3,1), border-color 0.15s',
+                                                zIndex: isDragging ? 10 : undefined,
+                                                position: isDragging ? 'relative' : undefined,
+                                            }}
+                                        >
+                                            <div className="flex items-center gap-2 min-w-0">
+                                                <button
+                                                    type="button"
+                                                    className="text-slate-300 hover:text-slate-500 transition-colors cursor-grab active:cursor-grabbing flex-shrink-0 p-1 -ml-1"
+                                                    style={{ touchAction: 'none' }}
+                                                    aria-label="ドラッグで並び替え"
+                                                    onPointerDown={(e) => { e.preventDefault(); onMenuDragStart(item.id, e); }}
+                                                >
+                                                    <Icon name="grip-vertical" size={14} />
+                                                </button>
+                                                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded flex-shrink-0 ${item.itemType === 'coupon' ? 'bg-amber-100 text-amber-700' : 'bg-sise-100 text-sise-700'}`}>
+                                                    {item.itemType === 'coupon' ? 'クーポン' : 'メニュー'}
+                                                </span>
+                                                <span className="text-sm font-medium text-slate-700 truncate">{item.name}</span>
+                                            </div>
+                                            <div className="flex items-center gap-2 flex-shrink-0">
+                                                <span className="text-sm font-bold text-slate-800">{formatCurrency(item.price)}</span>
+                                                <button onClick={() => { setEditingMenuId(item.id); setMenuForm({ name: item.name, category: item.category, price: String(item.price), itemType: item.itemType }); }}
+                                                    className="text-slate-400 hover:text-sise-600 transition-colors"><Icon name="edit" size={14} /></button>
+                                                <button onClick={async () => { if (await confirmDialog({ title:'メニュー削除', message:item.name + 'を削除しますか？', confirmLabel:'削除', variant:'danger' })) menuItemsHook.deleteItem(item.id); }}
+                                                    className="text-slate-400 hover:text-red-500 transition-colors"><Icon name="trash-2" size={14} /></button>
+                                            </div>
                                         </div>
-                                        <div className="flex items-center gap-2">
-                                            <span className="text-sm font-bold text-slate-800">{formatCurrency(item.price)}</span>
-                                            <button onClick={() => { setEditingMenuId(item.id); setMenuForm({ name: item.name, category: item.category, price: String(item.price), itemType: item.itemType }); }}
-                                                className="text-slate-400 hover:text-sise-600 transition-colors"><Icon name="edit" size={14} /></button>
-                                            <button onClick={async () => { if (await confirmDialog({ title:'メニュー削除', message:item.name + 'を削除しますか？', confirmLabel:'削除', variant:'danger' })) menuItemsHook.deleteItem(item.id); }}
-                                                className="text-slate-400 hover:text-red-500 transition-colors"><Icon name="trash-2" size={14} /></button>
-                                        </div>
-                                    </div>
-                                ))}
-                                {(menuItemsHook?.menuItems || []).filter(m => m.active).length === 0 && (
+                                    );
+                                })}
+                                {orderedMenuItems.length === 0 && (
                                     <p className="text-xs text-slate-400 text-center py-4">メニューが登録されていません</p>
                                 )}
                             </div>
@@ -20444,6 +20577,45 @@
             // 施術タブ内のサブタブ (姿勢分析 + 施術レポート統合)
             const [treatmentSubTab, setTreatmentSubTab] = useState('posture'); // 'posture' | 'report'
             const [moreMenuOpen, setMoreMenuOpen] = useState(false);
+            // Phase 3 — ボトムシートのドラッグ状態（下方向ドラッグで閉じる）
+            const [sheetDragY, setSheetDragY] = useState(0);
+            const sheetDragRef = useRef({ startY: 0, startT: 0, active: false });
+            const onSheetTouchStart = useCallback((e) => {
+                const t = e.touches && e.touches[0];
+                if (!t) return;
+                // スクロール可能な子要素（メニュー一覧）内で始まったドラッグは
+                // 通常スクロール扱いにする: シートドラッグは handle + 上部空白のみ
+                if (e.target.closest && e.target.closest('[data-sheet-scrollable]')) {
+                    sheetDragRef.current.active = false;
+                    return;
+                }
+                sheetDragRef.current = { startY: t.clientY, startT: performance.now(), active: true };
+            }, []);
+            const onSheetTouchMove = useCallback((e) => {
+                if (!sheetDragRef.current.active) return;
+                const t = e.touches && e.touches[0];
+                if (!t) return;
+                const dy = t.clientY - sheetDragRef.current.startY;
+                // 上方向にドラッグしても 0 から動かさない（下方向のみ追従）
+                setSheetDragY(Math.max(0, dy));
+            }, []);
+            const onSheetTouchEnd = useCallback(() => {
+                if (!sheetDragRef.current.active) return;
+                sheetDragRef.current.active = false;
+                const dy = sheetDragY;
+                const dt = performance.now() - sheetDragRef.current.startT;
+                const velocity = dy / Math.max(1, dt); // px/ms (下方向)
+                // 閾値: 120px 超えるか velocity 0.4 以上で閉じる
+                if (dy > 120 || velocity > 0.4) {
+                    setMoreMenuOpen(false);
+                    hapticTap();
+                }
+                setSheetDragY(0);
+            }, [sheetDragY]);
+            // シートを開くたびに drag オフセットをリセット
+            useEffect(() => {
+                if (!moreMenuOpen) setSheetDragY(0);
+            }, [moreMenuOpen]);
 
             // キーボードショートカット
             useEffect(() => {
@@ -20477,6 +20649,71 @@
                 { id: 'treatment', label: '施術', icon: 'activity' },
                 { id: 'line', label: 'LINE', icon: 'message-circle' },
             ];
+
+            // ============================================================
+            // Phase 3 — モバイル水平スワイプで primary tab を切替える
+            // ============================================================
+            // 要件:
+            //   - タッチ専用（マウスは無視）
+            //   - 水平方向が主体の場合のみ（縦スクロールを妨げない）
+            //   - 入力欄・select・チャート・スクロール可能な要素の中で始まった
+            //     スワイプは無視する
+            //   - 閾値: 水平 >= 60px AND 縦 < 40px AND 速度 >= 0.25 px/ms
+            //   - 現在タブの左右隣タブに循環する
+            // ============================================================
+            const swipeRef = useRef({ x: 0, y: 0, t: 0, active: false });
+            const SWIPE_IGNORE_SELECTOR = 'input, textarea, select, button, [data-no-swipe], .recharts-wrapper, canvas';
+            const isSwipeIgnoredTarget = (el) => {
+                if (!el || !el.closest) return false;
+                // 入力系はスワイプを拾わない
+                if (el.closest(SWIPE_IGNORE_SELECTOR)) return true;
+                // 水平スクロール可能な祖先要素の中ではスワイプを渡す
+                let node = el;
+                while (node && node !== document.body) {
+                    const cs = window.getComputedStyle(node);
+                    const ox = cs.overflowX;
+                    if ((ox === 'auto' || ox === 'scroll') && node.scrollWidth > node.clientWidth) {
+                        return true;
+                    }
+                    node = node.parentElement;
+                }
+                return false;
+            };
+            const onMainTouchStart = useCallback((e) => {
+                if (isFullscreenView || flowMode) return;
+                const t = e.touches && e.touches[0];
+                if (!t) return;
+                if (isSwipeIgnoredTarget(e.target)) { swipeRef.current.active = false; return; }
+                swipeRef.current = { x: t.clientX, y: t.clientY, t: performance.now(), active: true };
+            }, [isFullscreenView, flowMode]);
+            const onMainTouchEnd = useCallback((e) => {
+                if (!swipeRef.current.active) return;
+                swipeRef.current.active = false;
+                const t = (e.changedTouches && e.changedTouches[0]) || null;
+                if (!t) return;
+                const dx = t.clientX - swipeRef.current.x;
+                const dy = t.clientY - swipeRef.current.y;
+                const dt = performance.now() - swipeRef.current.t;
+                const absX = Math.abs(dx);
+                const absY = Math.abs(dy);
+                // 縦スクロール寄りは無視
+                if (absY >= absX * 0.8) return;
+                if (absX < 60) return;
+                const velocity = absX / Math.max(1, dt); // px/ms
+                if (velocity < 0.25 && dt > 400) return; // ゆっくりすぎる/長すぎる
+                // 現在タブの index を決める（treatment系は 'treatment' として扱う）
+                const normalized = (currentView === 'treatment-report' || currentView === 'posture') ? 'treatment' : currentView;
+                const idx = primaryTabs.findIndex(t => t.id === normalized);
+                if (idx === -1) return; // "その他" メニュー配下のビューは対象外
+                const direction = dx < 0 ? 1 : -1; // 左スワイプ=次、右スワイプ=前
+                const nextIdx = idx + direction;
+                if (nextIdx < 0 || nextIdx >= primaryTabs.length) return; // 端でバウンス
+                setCurrentView(primaryTabs[nextIdx].id);
+                setMoreMenuOpen(false);
+                hapticTap();
+                try { window.scrollTo({ top: 0, behavior: 'auto' }); } catch (_) {}
+            }, [currentView, primaryTabs, isFullscreenView, flowMode]);
+            const onMainTouchCancel = useCallback(() => { swipeRef.current.active = false; }, []);
 
             // 「その他」メニュー内の項目
             const moreMenuItems = [
@@ -20840,28 +21077,44 @@
                     {/* More Menu Bottom Sheet (Mobile) */}
                     {moreMenuOpen && !isFullscreenView && (
                         <>
-                            <div className="more-sheet-overlay hide-desktop" onClick={() => setMoreMenuOpen(false)} />
-                            <div className="more-sheet hide-desktop">
-                                <div className="more-sheet-handle" />
-                                {moreMenuItems.map((group, gi) => (
-                                    <div key={gi}>
-                                        <div className="more-sheet-section-label">{group.section}</div>
-                                        <div className="more-sheet-grid">
-                                            {group.items.map((item) => (
-                                                <button
-                                                    key={item.id}
-                                                    onClick={() => { setCurrentView(item.id); setMoreMenuOpen(false); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
-                                                    className={`more-sheet-item ${currentView === item.id ? 'active' : ''}`}
-                                                >
-                                                    <div className="more-icon">
-                                                        <Icon name={item.icon} size={20} />
-                                                    </div>
-                                                    <span>{item.label}</span>
-                                                </button>
-                                            ))}
+                            <div
+                                className="more-sheet-overlay hide-desktop"
+                                onClick={() => setMoreMenuOpen(false)}
+                                style={{ opacity: Math.max(0, 1 - sheetDragY / 300) }}
+                            />
+                            <div
+                                className="more-sheet hide-desktop"
+                                style={{
+                                    transform: sheetDragY > 0 ? `translateY(${sheetDragY}px)` : undefined,
+                                    transition: sheetDragRef.current.active ? 'none' : 'transform 0.25s cubic-bezier(0.16,1,0.3,1)',
+                                }}
+                                onTouchStart={onSheetTouchStart}
+                                onTouchMove={onSheetTouchMove}
+                                onTouchEnd={onSheetTouchEnd}
+                                onTouchCancel={onSheetTouchEnd}
+                            >
+                                <div className="more-sheet-handle" aria-label="下にスワイプして閉じる" />
+                                <div data-sheet-scrollable style={{ overflowY: 'auto', maxHeight: 'calc(70vh - 40px)' }}>
+                                    {moreMenuItems.map((group, gi) => (
+                                        <div key={gi}>
+                                            <div className="more-sheet-section-label">{group.section}</div>
+                                            <div className="more-sheet-grid">
+                                                {group.items.map((item) => (
+                                                    <button
+                                                        key={item.id}
+                                                        onClick={() => { setCurrentView(item.id); setMoreMenuOpen(false); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+                                                        className={`more-sheet-item ${currentView === item.id ? 'active' : ''}`}
+                                                    >
+                                                        <div className="more-icon">
+                                                            <Icon name={item.icon} size={20} />
+                                                        </div>
+                                                        <span>{item.label}</span>
+                                                    </button>
+                                                ))}
+                                            </div>
                                         </div>
-                                    </div>
-                                ))}
+                                    ))}
+                                </div>
                             </div>
                         </>
                     )}
@@ -20877,7 +21130,12 @@
                     )}
 
                     {/* Main Content */}
-                    <main className={`min-h-screen relative z-10 transition-all duration-300 ${isFullscreenView ? 'pt-14 md:pt-16' : flowPaused ? 'pt-[140px] md:pt-[104px]' : 'pt-[102px] md:pt-16'} ${isFullscreenView ? '' : 'lg:pl-56'}`}>
+                    <main
+                        className={`min-h-screen relative z-10 transition-all duration-300 ${isFullscreenView ? 'pt-14 md:pt-16' : flowPaused ? 'pt-[140px] md:pt-[104px]' : 'pt-[102px] md:pt-16'} ${isFullscreenView ? '' : 'lg:pl-56'}`}
+                        onTouchStart={onMainTouchStart}
+                        onTouchEnd={onMainTouchEnd}
+                        onTouchCancel={onMainTouchCancel}
+                    >
                         <div className={`${isFullscreenView ? 'p-0' : 'px-3 py-2 md:p-5 lg:p-8'} max-w-7xl mx-auto ${isFullscreenView ? 'pb-4' : 'pb-8'}`}>
                             <ViewTransition viewKey={currentView}>
                                 {renderView()}
