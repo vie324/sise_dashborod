@@ -175,9 +175,40 @@ async function attSaveAll(records, replace) {
 async function attClockIn(body) {
   if (!body.staffId || !body.storeId) return { error: 'staffIdとstoreIdが必要です' };
 
-  const today = new Date().toISOString().split('T')[0];
+  // クライアントのローカル日時を優先（サーバの UTC によるタイムゾーンずれ回避）。
+  // 後方互換のため未指定なら UTC 派生値にフォールバック。
+  const isValidDate = typeof body.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(body.date);
+  const isValidTime = typeof body.time === 'string' && /^\d{2}:\d{2}$/.test(body.time);
   const now = new Date();
-  const clockIn = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+  const today = isValidDate ? body.date : now.toISOString().split('T')[0];
+  const clockIn = isValidTime ? body.time
+    : `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+
+  // 二重クロックイン防止: 同一スタッフ・同日・未退勤のレコードがあればそれを返す
+  // （ネットワーク再送やダブルタップによる重複挿入を防ぐ）
+  {
+    const { data: existing } = await supabase.from('attendance')
+      .select('*')
+      .eq('staff_id', body.staffId)
+      .eq('date', today)
+      .or('clock_out.is.null,clock_out.eq.')
+      .limit(1);
+    if (existing && existing.length > 0) {
+      const e = existing[0];
+      return {
+        success: true,
+        alreadyClockedIn: true,
+        record: {
+          id: e.id, staffId: e.staff_id, staffName: e.staff_name || '',
+          storeId: e.store_id, date: e.date,
+          clockIn: e.clock_in || '', clockOut: e.clock_out || '',
+          workMinutes: e.work_minutes || 0,
+          lat: e.lat, lng: e.lng, method: e.method || ''
+        }
+      };
+    }
+  }
+
   const id = 'att_' + now.getTime().toString(36) + Math.random().toString(36).slice(2, 5);
 
   const { error } = await supabase.from('attendance').insert({
@@ -188,7 +219,17 @@ async function attClockIn(body) {
   });
   if (error) throw error;
 
-  return { success: true, record: { id, staffId: body.staffId, date: today, clockIn } };
+  // クライアントが todayRecord として保持できるよう完全な record を返す
+  return {
+    success: true,
+    record: {
+      id, staffId: body.staffId, staffName: body.staffName || '',
+      storeId: body.storeId, date: today,
+      clockIn, clockOut: '', workMinutes: 0,
+      lat: body.lat || null, lng: body.lng || null,
+      method: body.method || ''
+    }
+  };
 }
 
 async function attClockOut(body) {
@@ -196,11 +237,14 @@ async function attClockOut(body) {
 
   const { data: rec } = await supabase.from('attendance').select('*').eq('id', body.recordId).single();
   if (!rec) return { error: 'レコードが見つかりません' };
+  if (rec.clock_out) return { error: '既に退勤済みです' };
 
+  const isValidTime = typeof body.time === 'string' && /^\d{2}:\d{2}$/.test(body.time);
   const now = new Date();
-  const clockOut = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+  const clockOut = isValidTime ? body.time
+    : `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
 
-  // 労働時間計算
+  // 労働時間計算（深夜跨ぎの場合は clock_out < clock_in なので 24h 足す）
   let workMinutes = 0;
   if (rec.clock_in) {
     const [ih, im] = rec.clock_in.split(':').map(Number);
@@ -284,7 +328,9 @@ export async function qrTokenPost(body) {
 
       // トークンを使用済みにする
       await supabase.from('qr_tokens').update({ used: true }).eq('token', body.token);
-      return { valid: true };
+      // クライアントが clockIn で使うため storeId を必ず返す（これが無いと出勤処理が
+      // undefined storeId で失敗していた）
+      return { valid: true, storeId: data.store_id };
     }
     default: return { error: '不明なaction: ' + action };
   }
