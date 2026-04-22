@@ -219,6 +219,38 @@ export async function ticketPost(body, staffCtx) {
     return { success: true, ticket: updatedTicket };
   }
 
+  // ------------------------------------------------------------
+  // storeId バックフィル (admin only)
+  // 旧フォーマット（storeId なし）で発行済みチケットに storeId を
+  // 付与する一括ツール。admin UI から呼び出される。
+  //   body: { action: 'backfillStoreIds', mappings: { ticketId: storeId } }
+  // ------------------------------------------------------------
+  if (action === 'backfillStoreIds') {
+    if (staffCtx !== null) {
+      return { error: 'storeId バックフィルは管理者のみ許可されています' };
+    }
+    const mappings = body.mappings || {};
+    const entries = Object.entries(mappings).filter(([id, sid]) => id && sid);
+    if (entries.length === 0) return { error: 'mappings が空です' };
+
+    let updated = 0;
+    const errors = [];
+    for (const [ticketId, storeId] of entries) {
+      try {
+        const { data } = await supabase.from('ticket_data')
+          .select('id, data').filter('data->>id', 'eq', ticketId).maybeSingle();
+        if (!data) { errors.push({ ticketId, error: 'not_found' }); continue; }
+        const merged = { ...(data.data || {}), storeId: String(storeId) };
+        const { error } = await supabase.from('ticket_data').update({ data: merged }).eq('id', data.id);
+        if (error) { errors.push({ ticketId, error: error.message }); continue; }
+        updated++;
+      } catch (e) {
+        errors.push({ ticketId, error: e.message });
+      }
+    }
+    return { success: true, updated, errors };
+  }
+
   return { error: '不明なaction: ' + action };
 }
 

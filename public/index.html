@@ -7887,6 +7887,65 @@
             const debouncedTicketSearch = useDebounce(searchQuery, 250);
             const [showSaved, setShowSaved] = useState(false);
 
+            // admin モード判定（URL-less アクセス = !currentAccess）
+            const isAdminMode = !currentAccess;
+
+            // storeId 未設定のチケット一覧（admin のみ表示）
+            // 旧フォーマットで発行済みのチケットをリストアップし、storeName ヒューリスティックで
+            // 推測 + 手動上書きできるバックフィル UI 用。
+            const orphanTickets = useMemo(() => {
+                return customerTickets.filter(t => !t.storeId);
+            }, [customerTickets]);
+            const [showBackfill, setShowBackfill] = useState(false);
+            const [backfillMapping, setBackfillMapping] = useState({}); // { ticketId: storeId }
+            const [backfillSaving, setBackfillSaving] = useState(false);
+
+            // 表示名で推測: t.storeName が memberData.stores の name と一致すればその id を初期値に
+            useEffect(() => {
+                if (orphanTickets.length === 0) return;
+                const nameToId = new Map((memberData?.stores || []).map(s => [s.name, s.id]));
+                setBackfillMapping(prev => {
+                    const next = { ...prev };
+                    let changed = false;
+                    for (const t of orphanTickets) {
+                        if (next[t.id]) continue;
+                        const guess = nameToId.get(t.storeName || '');
+                        if (guess) { next[t.id] = guess; changed = true; }
+                    }
+                    return changed ? next : prev;
+                });
+            }, [orphanTickets, memberData?.stores]);
+
+            const runBackfill = async () => {
+                const mappings = {};
+                for (const t of orphanTickets) {
+                    const sid = backfillMapping[t.id];
+                    if (sid) mappings[t.id] = sid;
+                }
+                if (Object.keys(mappings).length === 0) {
+                    showToast('バックフィル対象がありません', 'error');
+                    return;
+                }
+                setBackfillSaving(true);
+                try {
+                    const res = await dbPost('ticket', { action: 'backfillStoreIds', mappings });
+                    if (!res || res.error) {
+                        showToast('バックフィル失敗: ' + ((res && res.error) || '通信エラー'), 'error');
+                        return;
+                    }
+                    showToast(`${res.updated}件のチケットに storeId を付与しました`, 'success');
+                    hapticSuccess();
+                    setShowBackfill(false);
+                    // ローカル state も更新
+                    Object.entries(mappings).forEach(([tid, sid]) => {
+                        const s = (memberData?.stores || []).find(st => st.id === sid);
+                        updateCustomerTicket(tid, { storeId: sid, storeName: s ? s.name : '' });
+                    });
+                } finally {
+                    setBackfillSaving(false);
+                }
+            };
+
             // 新規回数券フォーム
             // storeId を主キー、storeName は表示用に併せて保持
             const getInitialTicketStore = () => {
@@ -8075,6 +8134,73 @@
                             <Icon name="check-circle" size={18} className="text-green-500 mr-2 flex-shrink-0" />
                             <p className="text-green-700 text-sm font-medium">回数券データを保存しました</p>
                         </div>
+                    )}
+
+                    {/* storeId バックフィル (admin のみ、旧データに storeId が無い場合に表示) */}
+                    {isAdminMode && orphanTickets.length > 0 && (
+                        <Card className="border-amber-200 bg-amber-50/40">
+                            <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-3">
+                                    <div className="w-10 h-10 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center">
+                                        <Icon name="alert-triangle" size={18} />
+                                    </div>
+                                    <div>
+                                        <h3 className="text-sm font-bold text-slate-800">storeId 未設定の回数券 {orphanTickets.length} 件</h3>
+                                        <p className="text-[11px] text-slate-500">スタッフが操作できるよう店舗を紐付けてください</p>
+                                    </div>
+                                </div>
+                                <button
+                                    onClick={() => setShowBackfill(v => !v)}
+                                    className="px-3 py-2 rounded-lg text-xs font-semibold bg-amber-500 text-white hover:bg-amber-600 transition active:scale-95"
+                                >
+                                    {showBackfill ? '閉じる' : '店舗を付与'}
+                                </button>
+                            </div>
+                            {showBackfill && (
+                                <div className="mt-4 space-y-2 max-h-96 overflow-y-auto border-t border-amber-200 pt-4">
+                                    <p className="text-[11px] text-slate-500 mb-2">
+                                        推測された店舗（storeName と一致）は初期値で選択済み。必要に応じて手動で変更してください。
+                                    </p>
+                                    {orphanTickets.map(t => {
+                                        const selected = backfillMapping[t.id] || '';
+                                        return (
+                                            <div key={t.id} className="flex items-center gap-3 p-2.5 bg-white rounded-lg border border-amber-100">
+                                                <div className="flex-1 min-w-0">
+                                                    <p className="text-sm font-medium text-slate-800 truncate">{t.customerName || '(名前なし)'}</p>
+                                                    <p className="text-[11px] text-slate-400 truncate">{t.planName} / 発行: {t.purchaseDate} / 推測店舗名: {t.storeName || '—'}</p>
+                                                </div>
+                                                <select
+                                                    value={selected}
+                                                    onChange={e => setBackfillMapping(prev => ({ ...prev, [t.id]: e.target.value }))}
+                                                    className="px-2 py-1.5 border border-slate-200 rounded-lg text-xs outline-none bg-white"
+                                                >
+                                                    <option value="">-- 店舗を選択 --</option>
+                                                    {(memberData?.stores || []).filter(s => s.status !== 'inactive').map(s => (
+                                                        <option key={s.id} value={s.id}>{s.name}</option>
+                                                    ))}
+                                                </select>
+                                            </div>
+                                        );
+                                    })}
+                                    <div className="flex justify-end gap-2 pt-2">
+                                        <button
+                                            onClick={() => setShowBackfill(false)}
+                                            disabled={backfillSaving}
+                                            className="px-3 py-2 rounded-lg text-xs text-slate-600 hover:bg-slate-100"
+                                        >キャンセル</button>
+                                        <button
+                                            onClick={runBackfill}
+                                            disabled={backfillSaving}
+                                            aria-busy={backfillSaving || undefined}
+                                            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold bg-amber-500 text-white hover:bg-amber-600 disabled:opacity-50"
+                                        >
+                                            {backfillSaving && <Spinner size={12} />}
+                                            {backfillSaving ? '適用中...' : '選択した分を適用'}
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+                        </Card>
                     )}
 
                     {/* KPIサマリ（権限フィルタ適用済みデータから算出） */}
