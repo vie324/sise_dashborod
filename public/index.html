@@ -3790,41 +3790,60 @@
                 } catch (e) {}
             }, []);
 
-            // 回数券プラン管理
-            const addPlan = useCallback((plan) => {
+            // 回数券プラン管理 — プランは全店舗共通マスタなので admin のみ
+            // 編集可能。dbPost の失敗は admin 以外には期待される挙動（サーバが 403）
+            const addPlan = useCallback(async (plan) => {
                 const newPlan = { ...plan, id: 'plan_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6) };
                 setTicketPlans(prev => {
                     const updated = [...prev, newPlan];
                     saveLocal(updated, customerTickets);
                     return updated;
                 });
+                const res = await dbPost('ticket', { action: 'addPlan', plan: newPlan });
+                if (!res || res.error) {
+                    showToast('プラン追加に失敗: ' + ((res && res.error) || '通信エラー'), 'error');
+                }
                 return newPlan;
             }, [customerTickets, saveLocal]);
 
-            const updatePlan = useCallback((planId, updates) => {
+            const updatePlan = useCallback(async (planId, updates) => {
                 setTicketPlans(prev => {
                     const updated = prev.map(p => p.id === planId ? { ...p, ...updates } : p);
                     saveLocal(updated, customerTickets);
                     return updated;
                 });
+                const res = await dbPost('ticket', { action: 'updatePlan', planId, plan: updates });
+                if (!res || res.error) {
+                    showToast('プラン更新に失敗: ' + ((res && res.error) || '通信エラー'), 'error');
+                }
             }, [customerTickets, saveLocal]);
 
-            const deletePlan = useCallback((planId) => {
+            const deletePlan = useCallback(async (planId) => {
                 setTicketPlans(prev => {
                     const updated = prev.filter(p => p.id !== planId);
                     saveLocal(updated, customerTickets);
                     return updated;
                 });
+                const res = await dbPost('ticket', { action: 'deletePlan', planId });
+                if (!res || res.error) {
+                    showToast('プラン削除に失敗: ' + ((res && res.error) || '通信エラー'), 'error');
+                }
             }, [customerTickets, saveLocal]);
 
-            // 顧客回数券管理
-            const addCustomerTicket = useCallback((ticket) => {
+            // 顧客回数券管理 — チケットは storeId 付きで発行され、サーバ側で
+            // 権限検証される（staff は自店舗のチケットのみ操作可）
+            const addCustomerTicket = useCallback(async (ticket) => {
                 const plan = ticketPlans.find(p => p.id === ticket.planId);
-                const purchaseDate = ticket.purchaseDate || new Date().toISOString().slice(0, 10);
+                const purchaseDate = ticket.purchaseDate || todayLocalYMD();
                 const expirationDate = ticket.expirationDate || (() => {
-                    const d = new Date(purchaseDate);
-                    d.setDate(d.getDate() + (plan?.validityDays || 180));
-                    return d.toISOString().slice(0, 10);
+                    // ローカル日付で validityDays 加算（UTC 解釈で 1 日ずれる問題回避）
+                    const [y, m, d] = purchaseDate.split('-').map(Number);
+                    const dt = new Date(y, (m || 1) - 1, d || 1);
+                    dt.setDate(dt.getDate() + (plan?.validityDays || 180));
+                    const yy = dt.getFullYear();
+                    const mm = String(dt.getMonth() + 1).padStart(2, '0');
+                    const dd = String(dt.getDate()).padStart(2, '0');
+                    return `${yy}-${mm}-${dd}`;
                 })();
 
                 const newTicket = {
@@ -3838,6 +3857,7 @@
                     price: plan?.price || ticket.price || 0,
                     purchaseDate,
                     expirationDate,
+                    storeId: ticket.storeId || '',
                     storeName: ticket.storeName || '',
                     notes: ticket.notes || '',
                     usageHistory: [],
@@ -3849,18 +3869,34 @@
                     saveLocal(ticketPlans, updated);
                     return updated;
                 });
+                const res = await dbPost('ticket', { action: 'addTicket', ticket: newTicket });
+                if (!res || res.error) {
+                    // ロールバック: 楽観的に追加したチケットを取り除く
+                    setCustomerTickets(prev => {
+                        const rolled = prev.filter(t => t.id !== newTicket.id);
+                        saveLocal(ticketPlans, rolled);
+                        return rolled;
+                    });
+                    showToast('回数券発行に失敗: ' + ((res && res.error) || '通信エラー'), 'error');
+                    return null;
+                }
                 return newTicket;
             }, [ticketPlans, saveLocal]);
 
-            const updateCustomerTicket = useCallback((ticketId, updates) => {
+            const updateCustomerTicket = useCallback(async (ticketId, updates) => {
                 setCustomerTickets(prev => {
                     const updated = prev.map(t => t.id === ticketId ? { ...t, ...updates } : t);
                     saveLocal(ticketPlans, updated);
                     return updated;
                 });
+                const res = await dbPost('ticket', { action: 'updateTicket', ticketId, updates });
+                if (!res || res.error) {
+                    showToast('回数券更新に失敗: ' + ((res && res.error) || '通信エラー'), 'error');
+                }
             }, [ticketPlans, saveLocal]);
 
-            const useSession = useCallback((ticketId) => {
+            const useSession = useCallback(async (ticketId) => {
+                // 楽観的更新
                 setCustomerTickets(prev => {
                     const updated = prev.map(t => {
                         if (t.id !== ticketId || t.remainingSessions <= 0) return t;
@@ -3873,9 +3909,23 @@
                     saveLocal(ticketPlans, updated);
                     return updated;
                 });
+                const res = await dbPost('ticket', { action: 'useSession', ticketId, delta: -1 });
+                if (!res || res.error) {
+                    // 失敗時はロールバック
+                    setCustomerTickets(prev => {
+                        const rolled = prev.map(t => t.id === ticketId && t.usageHistory?.length > 0
+                            ? { ...t, remainingSessions: t.remainingSessions + 1, usageHistory: t.usageHistory.slice(0, -1) }
+                            : t);
+                        saveLocal(ticketPlans, rolled);
+                        return rolled;
+                    });
+                    showToast('消化の記録に失敗: ' + ((res && res.error) || '通信エラー'), 'error');
+                } else {
+                    hapticSuccess();
+                }
             }, [ticketPlans, saveLocal]);
 
-            const undoSession = useCallback((ticketId) => {
+            const undoSession = useCallback(async (ticketId) => {
                 setCustomerTickets(prev => {
                     const updated = prev.map(t => {
                         if (t.id !== ticketId || t.remainingSessions >= t.totalSessions) return t;
@@ -3888,27 +3938,57 @@
                     saveLocal(ticketPlans, updated);
                     return updated;
                 });
+                const res = await dbPost('ticket', { action: 'useSession', ticketId, delta: 1 });
+                if (!res || res.error) {
+                    setCustomerTickets(prev => {
+                        const rolled = prev.map(t => t.id === ticketId && t.usageHistory?.length > 0
+                            ? { ...t, remainingSessions: t.remainingSessions - 1, usageHistory: t.usageHistory.slice(0, -1) }
+                            : t);
+                        saveLocal(ticketPlans, rolled);
+                        return rolled;
+                    });
+                    showToast('取り消しに失敗: ' + ((res && res.error) || '通信エラー'), 'error');
+                }
             }, [ticketPlans, saveLocal]);
 
-            const deleteCustomerTicket = useCallback((ticketId) => {
+            const deleteCustomerTicket = useCallback(async (ticketId) => {
+                // スナップショットを取ってロールバック可能にする
+                let removed = null;
                 setCustomerTickets(prev => {
+                    removed = prev.find(t => t.id === ticketId) || null;
                     const updated = prev.filter(t => t.id !== ticketId);
                     saveLocal(ticketPlans, updated);
                     return updated;
                 });
+                const res = await dbPost('ticket', { action: 'deleteTicket', ticketId });
+                if (!res || res.error) {
+                    if (removed) {
+                        setCustomerTickets(prev => {
+                            const rolled = [removed, ...prev];
+                            saveLocal(ticketPlans, rolled);
+                            return rolled;
+                        });
+                    }
+                    showToast('回数券削除に失敗: ' + ((res && res.error) || '通信エラー'), 'error');
+                }
             }, [ticketPlans, saveLocal]);
 
-            // Supabaseに保存
+            // Supabaseに一括保存（admin 専用: 旧 migration フロー向け）
+            // 個別操作は add/update/delete/useSession で自動同期されるため、通常は呼ばない。
             const saveToSheet = useCallback(async () => {
                 setSaving(true);
                 try {
                     saveLocal(ticketPlans, customerTickets);
-                    await dbPost('ticket', { plans: ticketPlans, tickets: customerTickets });
+                    const res = await dbPost('ticket', { action: 'saveAll', plans: ticketPlans, tickets: customerTickets });
+                    if (res && res.error) {
+                        showToast('一括保存に失敗: ' + res.error, 'error');
+                        return;
+                    }
                     setLastSaved(new Date());
-                    showToast('回数券データを保存しました', 'success', 2000);
+                    showToast('回数券データを一括保存しました', 'success', 2000);
                 } catch (e) {
                     console.error('Ticket save error:', e);
-                    showToast('回数券データの保存に失敗しました', 'error');
+                    showToast('一括保存に失敗しました', 'error');
                 } finally {
                     setSaving(false);
                 }
@@ -7777,7 +7857,19 @@
         // 回数券管理ビュー
         // ========================================
 
-        const TicketManagementView = ({ ticketHook }) => {
+        const TicketManagementView = ({ ticketHook, memberData, activeStoreId }) => {
+            // 発行フォームの店舗ドロップダウン候補を算出:
+            //   - スタッフモード: currentAccess.storeIds に含まれる店舗のみ
+            //   - admin モード:  memberData.stores の全店舗
+            // 無効な店舗や所属外店舗を選ばせないようにする。
+            const accessibleStores = React.useMemo(() => {
+                const stores = (memberData && memberData.stores) || [];
+                const actives = stores.filter(s => s.status !== 'inactive');
+                if (currentAccess && Array.isArray(currentAccess.storeIds)) {
+                    return actives.filter(s => currentAccess.storeIds.includes(s.id));
+                }
+                return actives;
+            }, [memberData]);
             const {
                 ticketPlans, customerTickets, stats,
                 addPlan, updatePlan, deletePlan,
@@ -7796,10 +7888,31 @@
             const [showSaved, setShowSaved] = useState(false);
 
             // 新規回数券フォーム
+            // storeId を主キー、storeName は表示用に併せて保持
+            const getInitialTicketStore = () => {
+                // activeStoreId が具体的な ID で accessible に含まれればそれを
+                if (activeStoreId && activeStoreId !== 'all' && accessibleStores.some(s => s.id === activeStoreId)) {
+                    return activeStoreId;
+                }
+                // 単一店舗アクセスならその店舗に自動セット
+                if (accessibleStores.length === 1) return accessibleStores[0].id;
+                return '';
+            };
             const [newTicket, setNewTicket] = useState(() => ({
-                customerName: '', customerPhone: '', planId: '', storeName: '', notes: '',
+                customerName: '', customerPhone: '', planId: '',
+                storeId: '', storeName: '', notes: '',
                 purchaseDate: todayLocalYMD(), expirationDate: ''
             }));
+            // accessibleStores が確定したら storeId の初期値を再計算
+            React.useEffect(() => {
+                if (!newTicket.storeId) {
+                    const sid = getInitialTicketStore();
+                    if (sid) {
+                        const s = accessibleStores.find(st => st.id === sid);
+                        setNewTicket(prev => ({ ...prev, storeId: sid, storeName: s ? s.name : '' }));
+                    }
+                }
+            }, [accessibleStores, activeStoreId]);
             // プランフォーム
             const [planForm, setPlanForm] = useState({ name: '', sessions: '', price: '', validityDays: '' });
 
@@ -7894,8 +8007,21 @@
             // 回数券追加
             const handleAddTicket = () => {
                 if (!newTicket.customerName.trim() || !newTicket.planId) return;
+                // スタッフモードで複数店舗の権限がある場合、店舗未選択のままだと
+                // サーバ側で 403 になるので事前に弾く
+                if (!newTicket.storeId && accessibleStores.length > 1) {
+                    showToast('店舗を選択してください', 'error');
+                    return;
+                }
                 addCustomerTicket(newTicket);
-                setNewTicket({ customerName: '', customerPhone: '', planId: '', storeName: '', notes: '', purchaseDate: todayLocalYMD(), expirationDate: '' });
+                // リセット時は初期 storeId を再計算
+                const defaultSid = getInitialTicketStore();
+                const defaultStore = accessibleStores.find(s => s.id === defaultSid);
+                setNewTicket({
+                    customerName: '', customerPhone: '', planId: '',
+                    storeId: defaultSid, storeName: defaultStore ? defaultStore.name : '',
+                    notes: '', purchaseDate: todayLocalYMD(), expirationDate: ''
+                });
                 setShowAddForm(false);
             };
 
@@ -8056,13 +8182,32 @@
                                             </select>
                                         </div>
                                         <div>
-                                            <label className="block text-xs font-semibold text-slate-600 mb-1">店舗名</label>
-                                            <input
-                                                type="text" value={newTicket.storeName}
-                                                onChange={(e) => setNewTicket(prev => ({ ...prev, storeName: e.target.value }))}
-                                                placeholder="例: 新宿店"
-                                                className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:border-sise-400 outline-none"
-                                            />
+                                            <label className="block text-xs font-semibold text-slate-600 mb-1" htmlFor="tkt-store-select">
+                                                店舗 {accessibleStores.length > 1 && <span className="text-red-500" aria-hidden="true">*</span>}
+                                            </label>
+                                            <select
+                                                id="tkt-store-select"
+                                                value={newTicket.storeId}
+                                                onChange={(e) => {
+                                                    const sid = e.target.value;
+                                                    const s = accessibleStores.find(st => st.id === sid);
+                                                    setNewTicket(prev => ({ ...prev, storeId: sid, storeName: s ? s.name : '' }));
+                                                }}
+                                                disabled={accessibleStores.length === 0}
+                                                aria-required={accessibleStores.length > 1 ? 'true' : undefined}
+                                                className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:border-sise-400 outline-none bg-white disabled:bg-slate-50 disabled:text-slate-400"
+                                            >
+                                                <option value="">-- 店舗を選択 --</option>
+                                                {accessibleStores.map(s => (
+                                                    <option key={s.id} value={s.id}>{s.name}</option>
+                                                ))}
+                                            </select>
+                                            {accessibleStores.length === 0 && (
+                                                <p className="mt-1 text-[11px] text-amber-600 font-medium">
+                                                    <Icon name="alert-circle" size={11} className="inline -mt-0.5 mr-0.5" />
+                                                    アクセス可能な店舗がありません
+                                                </p>
+                                            )}
                                         </div>
                                         <div>
                                             <label className="block text-xs font-semibold text-slate-600 mb-1">購入日</label>
@@ -19528,23 +19673,73 @@
             { id: 'complete', label: '完了', icon: 'check-circle', description: '次回予約・フォローアップ' },
         ];
 
+        // 来店フロー: sessionStorage 永続化
+        // ページリロードや誤タップで戻った時にも途中状態を復元できるようにする。
+        // 保存対象は永続化が有用な主要 state のみ。UI 一時値（searchQuery 等）は除外。
+        const FLOW_STATE_KEY = 'sise_flow_state_v1';
+        const loadPersistedFlowState = () => {
+            try {
+                const raw = sessionStorage.getItem(FLOW_STATE_KEY);
+                if (!raw) return null;
+                const s = JSON.parse(raw);
+                return (s && typeof s === 'object') ? s : null;
+            } catch (_) { return null; }
+        };
+        const saveFlowStatePersisted = (state) => {
+            try { sessionStorage.setItem(FLOW_STATE_KEY, JSON.stringify(state)); } catch (_) {}
+        };
+        const clearFlowStatePersisted = () => {
+            try { sessionStorage.removeItem(FLOW_STATE_KEY); } catch (_) {}
+        };
+
         const FlowNavigationView = ({ onClose, memberData, counselingHook, lineChatHook, activeStoreId }) => {
             const { useState, useEffect, useCallback, useMemo, useRef } = React;
 
-            // Flow state
-            const [currentStep, setCurrentStep] = useState(0);
-            const [flowCustomer, setFlowCustomer] = useState(null); // { id, name, phone, email, lineConnected, source }
-            const [stepStatus, setStepStatus] = useState({}); // { stepId: 'done'|'skipped' }
+            // Flow state — sessionStorage から復元（ページリロード対策）
+            const _persisted = useMemo(() => loadPersistedFlowState(), []);
+            const [currentStep, setCurrentStep] = useState(() => _persisted?.currentStep || 0);
+            const [flowCustomer, setFlowCustomer] = useState(() => _persisted?.flowCustomer || null);
+            const [stepStatus, setStepStatus] = useState(() => _persisted?.stepStatus || {});
             const [searchQuery, setSearchQuery] = useState('');
             const [customerTab, setCustomerTab] = useState('gas'); // 'gas' | 'square'
             const [gasSearchInput, setGasSearchInput] = useState('');
-            const [gasCustomerDetail, setGasCustomerDetail] = useState(null); // GAS顧客詳細データ
+            const [gasCustomerDetail, setGasCustomerDetail] = useState(() => _persisted?.gasCustomerDetail || null);
             const [gasDetailLoading, setGasDetailLoading] = useState(false);
-            const [treatmentNotes, setTreatmentNotes] = useState('');
-            const [treatmentMenus, setTreatmentMenus] = useState({ '骨盤矯正': false, '姿勢矯正': false, '小顔矯正': false, 'ほぐし': false });
-            const [contractResult, setContractResult] = useState(null); // 'contract' | 'follow-up' | null
-            const [followUpSent, setFollowUpSent] = useState(false);
+            const [treatmentNotes, setTreatmentNotes] = useState(() => _persisted?.treatmentNotes || '');
+            const [treatmentMenus, setTreatmentMenus] = useState(() => _persisted?.treatmentMenus || { '骨盤矯正': false, '姿勢矯正': false, '小顔矯正': false, 'ほぐし': false });
+            const [contractResult, setContractResult] = useState(() => _persisted?.contractResult || null);
+            const [followUpSent, setFollowUpSent] = useState(() => _persisted?.followUpSent || false);
+            // 復元時のみ true。banner を 1 回表示 → ユーザーが閉じるか次操作まで表示
+            const [wasRestored, setWasRestored] = useState(() => !!_persisted && (_persisted.currentStep > 0 || !!_persisted.flowCustomer));
             const contentRef = useRef(null);
+
+            // state が変わるたびに sessionStorage に書き戻す
+            // searchQuery / customerTab / gasSearchInput は UI 一時値なので永続化しない
+            useEffect(() => {
+                saveFlowStatePersisted({
+                    currentStep, flowCustomer, stepStatus,
+                    gasCustomerDetail, treatmentNotes, treatmentMenus,
+                    contractResult, followUpSent,
+                    _savedAt: Date.now(),
+                });
+            }, [currentStep, flowCustomer, stepStatus, gasCustomerDetail, treatmentNotes, treatmentMenus, contractResult, followUpSent]);
+
+            // 「最初からやり直す」ボタン用
+            const resetFlow = useCallback(() => {
+                setCurrentStep(0);
+                setFlowCustomer(null);
+                setStepStatus({});
+                setGasCustomerDetail(null);
+                setTreatmentNotes('');
+                setTreatmentMenus({ '骨盤矯正': false, '姿勢矯正': false, '小顔矯正': false, 'ほぐし': false });
+                setContractResult(null);
+                setFollowUpSent(false);
+                setSearchQuery('');
+                setCustomerTab('gas');
+                setGasSearchInput('');
+                clearFlowStatePersisted();
+                setWasRestored(false);
+            }, []);
 
             // Merge Square customers + manual members for search
             const allCustomers = useMemo(() => {
@@ -20375,7 +20570,12 @@
                         )}
 
                         <button
-                            onClick={() => onClose('dashboard')}
+                            onClick={() => {
+                                // フロー完了: 永続化状態をクリア
+                                clearFlowStatePersisted();
+                                hapticSuccess();
+                                onClose('dashboard');
+                            }}
                             className="flow-btn flow-btn-primary w-full"
                             style={{ marginTop: 20, flex: 'none' }}
                         >
@@ -20419,6 +20619,37 @@
                         <h2 style={{ fontSize: 20, fontWeight: 800, color: '#1e293b', marginTop: 2 }}>{FLOW_STEPS[currentStep].label}</h2>
                         <p style={{ fontSize: 12, color: '#94a3b8', marginTop: 2 }}>{FLOW_STEPS[currentStep].description}</p>
                     </div>
+
+                    {/* 復元中バナー: sessionStorage から state 復元したことを通知 */}
+                    {wasRestored && (
+                        <div style={{
+                            margin: '0 12px 12px', padding: '10px 14px', borderRadius: 12,
+                            background: 'linear-gradient(135deg, #fef3c7, #fde68a)',
+                            border: '1px solid #fbbf24', display: 'flex', alignItems: 'center', gap: 10,
+                            fontSize: 12, color: '#92400e', fontWeight: 600,
+                        }}>
+                            <Icon name="refresh-cw" size={14} />
+                            <span style={{ flex: 1 }}>前回の途中フローを復元しました</span>
+                            <button
+                                onClick={async () => {
+                                    if (await confirmDialog({
+                                        title: 'フローをリセット',
+                                        message: '途中の入力内容を破棄して最初からやり直しますか？',
+                                        confirmLabel: 'リセット', variant: 'danger'
+                                    })) resetFlow();
+                                }}
+                                style={{
+                                    padding: '4px 10px', borderRadius: 8, border: '1px solid #d97706',
+                                    background: '#fff', color: '#92400e', fontSize: 11, fontWeight: 700, cursor: 'pointer'
+                                }}
+                            >最初からやり直す</button>
+                            <button
+                                onClick={() => setWasRestored(false)}
+                                aria-label="バナーを閉じる"
+                                style={{ background: 'transparent', border: 'none', color: '#92400e', cursor: 'pointer', padding: 2, display: 'flex' }}
+                            ><Icon name="x" size={14} /></button>
+                        </div>
+                    )}
 
                     {/* Content */}
                     <div className="flow-content-card" ref={contentRef}>
@@ -20973,7 +21204,7 @@
                     case 'usage':
                         return <MemberUsageView memberData={memberData} usageHook={usageHook} />;
                     case 'tickets':
-                        return <TicketManagementView ticketHook={ticketHook} />;
+                        return <TicketManagementView ticketHook={ticketHook} memberData={memberData} activeStoreId={activeStoreId} />;
                     case 'counseling':
                         return <ConceptFormView counselingHook={counselingHook} activeStoreId={activeStoreId} memberData={memberData} />;
                     case 'treatment':

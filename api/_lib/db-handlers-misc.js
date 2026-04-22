@@ -57,39 +57,169 @@ export async function ticketGet() {
 }
 
 export async function ticketPost(body, staffCtx) {
-  // 注意: 本実装は delete().neq(...) による全置換方式。
-  // 店舗単位の部分更新ではなく、plans / tickets を全削除して入れ直すため、
-  // スタッフが勝手に呼ぶと全店舗の回数券データを破壊できる重大な権限問題になる。
-  // → 管理者モード (staffCtx === null) 限定に制限する。
-  // 将来、店舗スコープの部分更新が欲しくなったら、action: 'updatePlan' 等を
-  // 別途追加してスタッフに段階的に開放する。
-  if (staffCtx !== null) {
-    return { error: '回数券データの一括更新は管理者のみ許可されています' };
+  const action = body.action || '';
+
+  // ------------------------------------------------------------
+  // 全置換（admin only）— body.plans / body.tickets を丸ごと入れ替える
+  // 互換のため「action 無し + plans/tickets あり」も admin-only の
+  // 全置換として扱う（旧クライアント対応）。
+  // ------------------------------------------------------------
+  if (action === 'saveAll' || (!action && (body.plans || body.tickets))) {
+    if (staffCtx !== null) {
+      return { error: '回数券データの一括更新は管理者のみ許可されています' };
+    }
+    if (body.plans) {
+      const rows = body.plans.map(p => ({
+        id: p.id, name: p.name || '', sessions: p.sessions || 0,
+        price: p.price || 0, validity_days: p.validityDays || 0, active: !!p.active
+      }));
+      await supabase.from('ticket_plans').delete().neq('id', '');
+      if (rows.length > 0) {
+        const { error } = await supabase.from('ticket_plans').insert(rows);
+        if (error) throw error;
+      }
+    }
+    if (body.tickets) {
+      await supabase.from('ticket_data').delete().neq('id', 0);
+      if (body.tickets.length > 0) {
+        const rows = body.tickets.map(t => ({ data: t }));
+        const { error } = await supabase.from('ticket_data').insert(rows);
+        if (error) throw error;
+      }
+    }
+    return { success: true };
   }
 
-  if (body.plans) {
-    const rows = body.plans.map(p => ({
-      id: p.id, name: p.name || '', sessions: p.sessions || 0,
-      price: p.price || 0, validity_days: p.validityDays || 0, active: !!p.active
-    }));
-    // 全置換
-    await supabase.from('ticket_plans').delete().neq('id', '');
-    if (rows.length > 0) {
-      const { error } = await supabase.from('ticket_plans').insert(rows);
+  // ------------------------------------------------------------
+  // プラン CRUD (admin only) — プランは全店舗共通のマスタデータなので
+  // 部分更新もスタッフには開放しない。
+  // ------------------------------------------------------------
+  if (action === 'addPlan' || action === 'updatePlan' || action === 'deletePlan') {
+    if (staffCtx !== null) {
+      return { error: 'プラン編集は管理者のみ許可されています' };
+    }
+    if (action === 'addPlan') {
+      const p = body.plan || {};
+      if (!p.id || !p.name) return { error: 'idと名前が必要です' };
+      const { error } = await supabase.from('ticket_plans').insert({
+        id: p.id, name: p.name, sessions: p.sessions || 0,
+        price: p.price || 0, validity_days: p.validityDays || 0, active: p.active !== false
+      });
       if (error) throw error;
+      return { success: true, planId: p.id };
+    }
+    if (action === 'updatePlan') {
+      const p = body.plan || body.updates || {};
+      const planId = body.planId || p.id;
+      if (!planId) return { error: 'planIdが必要です' };
+      const updates = {};
+      if (p.name !== undefined) updates.name = p.name;
+      if (p.sessions !== undefined) updates.sessions = p.sessions;
+      if (p.price !== undefined) updates.price = p.price;
+      if (p.validityDays !== undefined) updates.validity_days = p.validityDays;
+      if (p.active !== undefined) updates.active = !!p.active;
+      const { error } = await supabase.from('ticket_plans').update(updates).eq('id', planId);
+      if (error) throw error;
+      return { success: true, planId };
+    }
+    if (action === 'deletePlan') {
+      if (!body.planId) return { error: 'planIdが必要です' };
+      const { error } = await supabase.from('ticket_plans').delete().eq('id', body.planId);
+      if (error) throw error;
+      return { success: true, planId: body.planId };
     }
   }
 
-  if (body.tickets) {
-    await supabase.from('ticket_data').delete().neq('id', 0);
-    if (body.tickets.length > 0) {
-      const rows = body.tickets.map(t => ({ data: t }));
-      const { error } = await supabase.from('ticket_data').insert(rows);
-      if (error) throw error;
+  // ------------------------------------------------------------
+  // チケット CRUD (staff allowed, store 権限チェック付き)
+  // チケットは JSONB data カラムに格納されているので、行特定は
+  // data->>'id' で行う。storeId は ticket.storeId または
+  // 既存行の data->>'storeId' を参照する。
+  // ------------------------------------------------------------
+  // 既存行の storeId を取り出すヘルパー
+  const loadTicketStoreId = async (ticketId) => {
+    const { data } = await supabase.from('ticket_data').select('id, data').filter('data->>id', 'eq', ticketId).maybeSingle();
+    if (!data) return { row: null, storeId: null };
+    return { row: data, storeId: (data.data && data.data.storeId) || null };
+  };
+
+  if (action === 'addTicket') {
+    const t = body.ticket || {};
+    if (!t.id) return { error: 'ticket.id が必要です' };
+    const storeId = t.storeId || '';
+    // staff モードでは storeId 必須 & 権限内の店舗に限る
+    if (staffCtx !== null) {
+      if (!storeId) return { error: 'ticket.storeId が必要です（スタッフモード）' };
+      if (!canAccessStore(staffCtx, storeId)) {
+        return { error: 'この店舗で回数券を発行する権限がありません' };
+      }
     }
+    const { error } = await supabase.from('ticket_data').insert({ data: t });
+    if (error) throw error;
+    return { success: true, ticketId: t.id };
   }
 
-  return { success: true };
+  if (action === 'updateTicket') {
+    const ticketId = body.ticketId || (body.ticket && body.ticket.id);
+    if (!ticketId) return { error: 'ticketIdが必要です' };
+    const { row, storeId: existingStore } = await loadTicketStoreId(ticketId);
+    if (!row) return { error: 'チケットが見つかりません' };
+    if (staffCtx !== null && !canAccessStore(staffCtx, existingStore)) {
+      return { error: 'この店舗のチケットを編集する権限がありません' };
+    }
+    // 変更後の storeId も権限チェック（店舗移動を防止）
+    const merged = { ...(row.data || {}), ...(body.updates || body.ticket || {}) };
+    if (staffCtx !== null && merged.storeId !== existingStore && !canAccessStore(staffCtx, merged.storeId)) {
+      return { error: '変更先店舗にアクセス権限がありません' };
+    }
+    const { error } = await supabase.from('ticket_data').update({ data: merged }).eq('id', row.id);
+    if (error) throw error;
+    return { success: true, ticketId };
+  }
+
+  if (action === 'deleteTicket') {
+    const ticketId = body.ticketId;
+    if (!ticketId) return { error: 'ticketIdが必要です' };
+    const { row, storeId: existingStore } = await loadTicketStoreId(ticketId);
+    if (!row) return { error: 'チケットが見つかりません' };
+    if (staffCtx !== null && !canAccessStore(staffCtx, existingStore)) {
+      return { error: 'この店舗のチケットを削除する権限がありません' };
+    }
+    const { error } = await supabase.from('ticket_data').delete().eq('id', row.id);
+    if (error) throw error;
+    return { success: true, ticketId };
+  }
+
+  if (action === 'useSession') {
+    // delta: -1 = 消化, +1 = 取り消し
+    const ticketId = body.ticketId;
+    const delta = typeof body.delta === 'number' ? body.delta : -1;
+    if (!ticketId) return { error: 'ticketIdが必要です' };
+    if (delta !== -1 && delta !== 1) return { error: 'delta は -1 または +1' };
+    const { row, storeId: existingStore } = await loadTicketStoreId(ticketId);
+    if (!row) return { error: 'チケットが見つかりません' };
+    if (staffCtx !== null && !canAccessStore(staffCtx, existingStore)) {
+      return { error: 'この店舗のチケットを消化する権限がありません' };
+    }
+    const t = row.data || {};
+    const remaining = Number(t.remainingSessions || 0);
+    const total = Number(t.totalSessions || 0);
+    if (delta === -1 && remaining <= 0) return { error: '残り回数がありません' };
+    if (delta === 1 && remaining >= total) return { error: 'これ以上取り消せません' };
+    const updatedTicket = {
+      ...t,
+      remainingSessions: remaining + delta,
+      usageHistory: [
+        ...(Array.isArray(t.usageHistory) ? t.usageHistory : []),
+        { date: new Date().toISOString(), action: delta === -1 ? 'use' : 'undo' }
+      ]
+    };
+    const { error } = await supabase.from('ticket_data').update({ data: updatedTicket }).eq('id', row.id);
+    if (error) throw error;
+    return { success: true, ticket: updatedTicket };
+  }
+
+  return { error: '不明なaction: ' + action };
 }
 
 // ============================================================
