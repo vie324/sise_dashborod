@@ -1,12 +1,27 @@
 import { supabase } from './supabase.js';
+import { canAccessStore, allowedStoreIds } from './auth.js';
 
 // ============================================================
 // 出納帳 (cashbook) + 出納帳ログ + 日次締め
 // ============================================================
 
-export async function cashbookGet(params) {
+export async function cashbookGet(params, staffCtx) {
+  // スタッフモード: 明示 params.store が無い場合でも staffCtx.storeIds に
+  // 自動フィルタを掛け、権限外の店舗行を返さない。
+  // 明示 params.store がある場合は権限チェック後に通す。
+  const scoped = allowedStoreIds(staffCtx); // null=admin / [] or storeIds
+  if (params.store) {
+    if (scoped !== null && !scoped.includes(params.store)) {
+      return { error: 'この店舗の出納帳にアクセスする権限がありません' };
+    }
+  }
+
   let query = supabase.from('cashbook').select('*').order('date', { ascending: false });
   if (params.store) query = query.eq('store_id', params.store);
+  else if (scoped !== null) {
+    if (scoped.length === 0) return { entries: [], dailyCloses: [], logs: [], lastUpdated: new Date().toISOString() };
+    query = query.in('store_id', scoped);
+  }
   if (params.month) {
     const [y, m] = params.month.split('-').map(Number);
     const start = `${params.month}-01`;
@@ -20,6 +35,7 @@ export async function cashbookGet(params) {
   // 日次締めデータ
   let dcQuery = supabase.from('daily_close').select('*').order('date', { ascending: false });
   if (params.store) dcQuery = dcQuery.eq('store_id', params.store);
+  else if (scoped !== null && scoped.length > 0) dcQuery = dcQuery.in('store_id', scoped);
   const { data: dcData } = await dcQuery;
 
   // ログ
@@ -28,6 +44,7 @@ export async function cashbookGet(params) {
     let logQuery = supabase.from('cashbook_log').select('*')
       .order('timestamp', { ascending: false }).limit(100);
     if (params.store) logQuery = logQuery.eq('store_id', params.store);
+    else if (scoped !== null && scoped.length > 0) logQuery = logQuery.in('store_id', scoped);
     const { data: logData } = await logQuery;
     logs = (logData || []).map(l => ({
       timestamp: l.timestamp, action: l.action, entryId: l.entry_id,
@@ -61,17 +78,17 @@ export async function cashbookGet(params) {
   };
 }
 
-export async function cashbookPost(body) {
+export async function cashbookPost(body, staffCtx) {
   const action = body.action || '';
   switch (action) {
-    case 'addEntry':      return cbAddEntry(body.entry || {}, body.operator || '');
-    case 'updateEntry':   return cbUpdateEntry(body.entryId, body.updates || {}, body.operator || '');
-    case 'deleteEntry':   return cbDeleteEntry(body.entryId, body.operator || '');
-    case 'dailyClose':    return cbDailyClose(body);
-    case 'getDailyCloses': return cbGetDailyCloses(body.store || '');
-    case 'getLogs':       return cbGetLogs(body.store || '', body.limit || 100);
-    case 'saveCashbook':  return cbSaveAll(body.entries || [], body.operator || '');
-    case 'saveDailyCloses': return cbSaveDailyCloses(body.dailyCloses || []);
+    case 'addEntry':      return cbAddEntry(body.entry || {}, body.operator || '', staffCtx);
+    case 'updateEntry':   return cbUpdateEntry(body.entryId, body.updates || {}, body.operator || '', staffCtx);
+    case 'deleteEntry':   return cbDeleteEntry(body.entryId, body.operator || '', staffCtx);
+    case 'dailyClose':    return cbDailyClose(body, staffCtx);
+    case 'getDailyCloses': return cbGetDailyCloses(body.store || '', staffCtx);
+    case 'getLogs':       return cbGetLogs(body.store || '', body.limit || 100, staffCtx);
+    case 'saveCashbook':  return cbSaveAll(body.entries || [], body.operator || '', staffCtx);
+    case 'saveDailyCloses': return cbSaveDailyCloses(body.dailyCloses || [], staffCtx);
     default: return { error: '不明なaction: ' + action };
   }
 }
@@ -94,9 +111,14 @@ async function cbSaveDailyCloses(closes) {
   return { success: true, count: rows.length };
 }
 
-async function cbAddEntry(entry, operator) {
+async function cbAddEntry(entry, operator, staffCtx) {
   // 店舗ID必須チェック（FK制約対応）
   if (!entry.store) return { error: '店舗IDが必要です' };
+
+  // スタッフ権限: 対象店舗にアクセス権があるか
+  if (!canAccessStore(staffCtx, entry.store)) {
+    return { error: 'この店舗への記帳権限がありません' };
+  }
 
   // 日次締めロック確認
   if (entry.store) {
@@ -127,12 +149,20 @@ async function cbAddEntry(entry, operator) {
   return { success: true, entry: { ...row, id } };
 }
 
-async function cbUpdateEntry(entryId, updates, operator) {
+async function cbUpdateEntry(entryId, updates, operator, staffCtx) {
   if (!entryId) return { error: 'entryIdが必要です' };
 
   const { data: before } = await supabase.from('cashbook').select('*').eq('id', entryId).single();
   if (!before) return { error: 'エントリが見つかりません' };
   if (before.deleted) return { error: '削除済みエントリです' };
+
+  // スタッフ権限: 既存レコードの店舗にアクセス権があるか + 変更後の店舗にも権限があるか
+  if (!canAccessStore(staffCtx, before.store_id)) {
+    return { error: 'この店舗のエントリを編集する権限がありません' };
+  }
+  if (updates.store !== undefined && !canAccessStore(staffCtx, updates.store)) {
+    return { error: '変更先の店舗にアクセス権限がありません' };
+  }
 
   // ロック確認
   const { data: dc } = await supabase.from('daily_close')
@@ -161,11 +191,15 @@ async function cbUpdateEntry(entryId, updates, operator) {
   return { success: true };
 }
 
-async function cbDeleteEntry(entryId, operator) {
+async function cbDeleteEntry(entryId, operator, staffCtx) {
   if (!entryId) return { error: 'entryIdが必要です' };
 
   const { data: before } = await supabase.from('cashbook').select('*').eq('id', entryId).single();
   if (!before) return { error: 'エントリが見つかりません' };
+
+  if (!canAccessStore(staffCtx, before.store_id)) {
+    return { error: 'この店舗のエントリを削除する権限がありません' };
+  }
 
   const { data: dc } = await supabase.from('daily_close')
     .select('locked').eq('date', before.date).eq('store_id', before.store_id).maybeSingle();
@@ -179,9 +213,13 @@ async function cbDeleteEntry(entryId, operator) {
   return { success: true };
 }
 
-async function cbDailyClose(body) {
+async function cbDailyClose(body, staffCtx) {
   const { date, storeId, safeBalance, pettyCashBalance, registerBalance, closedBy, notes } = body;
   if (!date || !storeId) return { error: '日付と店舗IDが必要です' };
+
+  if (!canAccessStore(staffCtx, storeId)) {
+    return { error: 'この店舗の日次締めを行う権限がありません' };
+  }
 
   const { data: existing } = await supabase.from('daily_close')
     .select('locked').eq('date', date).eq('store_id', storeId).maybeSingle();

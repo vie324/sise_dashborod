@@ -1,5 +1,6 @@
 import { supabase } from '../_lib/supabase.js';
 import { cors } from '../_lib/cors.js';
+import { extractStaffContext } from '../_lib/auth.js';
 import { staffGet, staffPost, menuItemsGet, menuItemsPost, hpbGet, hpbPost } from '../_lib/db-handlers-master.js';
 import { cashbookGet, cashbookPost } from '../_lib/db-handlers-cashbook.js';
 import {
@@ -58,12 +59,24 @@ export default async function handler(req, res) {
     });
   }
 
+  // ---- スタッフ権限コンテキスト抽出 ----
+  // 返り値:
+  //   null        : token 無し（admin モード）→ 既存挙動と同等の全店舗許可
+  //   { valid:false, reason } : token 不正 / staff 無効 → 401 で拒否
+  //   { valid:true, staffId, role, storeIds } : 通常のスタッフアクセス
+  const staffCtx = await extractStaffContext(req);
+  if (staffCtx && staffCtx.valid === false) {
+    return res.status(401).json({ error: '認証エラー: ' + (staffCtx.reason || 'invalid') });
+  }
+
   try {
     const body = req.method === 'POST'
       ? (typeof req.body === 'string' ? JSON.parse(req.body) : req.body)
       : null;
 
-    const result = req.method === 'GET' ? await h.get(params) : await h.post(body);
+    // 各ハンドラには第2引数として staffCtx を渡す。
+    // 第2引数を受け取らない既存ハンドラは単に無視するため後方互換。
+    const result = req.method === 'GET' ? await h.get(params, staffCtx) : await h.post(body, staffCtx);
     return res.json(result);
   } catch (e) {
     console.error(`db/${table} error:`, e);

@@ -1760,10 +1760,35 @@
         // ============================================================
         const DB_API_URL = '/api/db';
 
+        // 認証ヘッダを構築: URL の ?v=<base64> トークンがある場合のみ送信する。
+        // currentAccess は dbGet/dbPost より後で定義されるため、ここでは URL を
+        // 直接読み、index.html がクロージャ順序に依存しないようにする。
+        const buildAuthHeaders = () => {
+            try {
+                const params = new URLSearchParams(window.location.search);
+                const token = params.get('v');
+                if (!token) return {};
+                // staffId は token を decode すれば取れるが、サーバ側で検証・突合
+                // するためヘッダに明示的に入れる。デコード失敗時は X-Staff-Token のみ
+                // 送る（サーバが 401 で弾く）。
+                let staffId = '';
+                try {
+                    const json = decodeURIComponent(escape(atob(token)));
+                    const decoded = JSON.parse(json);
+                    staffId = String(decoded.id || '');
+                } catch (_) { /* ignore decode errors */ }
+                const headers = { 'X-Staff-Token': token };
+                if (staffId) headers['X-Staff-Id'] = staffId;
+                return headers;
+            } catch (_) { return {}; }
+        };
+
         const dbGet = async (table, params = {}) => {
             try {
                 const qs = new URLSearchParams({ table, ...params }).toString();
-                const resp = await fetch(DB_API_URL + '?' + qs);
+                const resp = await fetch(DB_API_URL + '?' + qs, {
+                    headers: buildAuthHeaders(),
+                });
                 return await resp.json();
             } catch (e) {
                 console.warn('DB GET エラー [' + table + ']:', e);
@@ -1775,7 +1800,7 @@
             try {
                 const resp = await fetch(DB_API_URL + '?table=' + table, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', ...buildAuthHeaders() },
                     body: JSON.stringify(body)
                 });
                 return await resp.json();
