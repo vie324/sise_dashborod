@@ -8,7 +8,9 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="theme-color" content="#33a065">
     <link rel="manifest" href="/manifest.json">
-    <link rel="apple-touch-icon" href="/images/logo.png">
+    <link rel="icon" type="image/png" sizes="192x192" href="/images/icon-192.png">
+    <link rel="icon" type="image/png" sizes="512x512" href="/images/icon-512.png">
+    <link rel="apple-touch-icon" sizes="192x192" href="/images/icon-192.png">
     <title>si'se - 整体院経営ダッシュボード</title>
 
     <!-- Google Fonts (非ブロッキング) -->
@@ -948,10 +950,36 @@
             max-width: 360px;
         }
         .toast.leaving { animation: toast-out 0.25s ease-in forwards; }
-        .toast-success { color: #15803d; border-color: rgba(34,197,94,0.25); }
-        .toast-error { color: #b91c1c; border-color: rgba(239,68,68,0.25); }
-        .toast-info { color: #1d6641; border-color: rgba(51,160,101,0.2); }
+        /* 優先度別のカラー + 左アクセントバーで一目で分かる優先度表示 */
+        .toast-success {
+            color: #14532d;
+            border-color: rgba(34,197,94,0.3);
+            border-left: 4px solid #22c55e;
+            background: linear-gradient(135deg, rgba(240,253,244,0.98), rgba(220,252,231,0.95));
+        }
+        .toast-error {
+            color: #7f1d1d;
+            border-color: rgba(239,68,68,0.35);
+            border-left: 4px solid #ef4444;
+            background: linear-gradient(135deg, rgba(254,242,242,0.98), rgba(254,226,226,0.95));
+        }
+        .toast-info {
+            color: #0c4a6e;
+            border-color: rgba(14,165,233,0.25);
+            border-left: 4px solid #0ea5e9;
+            background: linear-gradient(135deg, rgba(240,249,255,0.98), rgba(224,242,254,0.95));
+        }
+        .toast-warning {
+            color: #78350f;
+            border-color: rgba(245,158,11,0.3);
+            border-left: 4px solid #f59e0b;
+            background: linear-gradient(135deg, rgba(255,251,235,0.98), rgba(254,243,199,0.95));
+        }
         .dark .toast { background: rgba(18,35,27,0.95); border-color: rgba(51,160,101,0.2); }
+        .dark .toast-success { color: #86efac; background: linear-gradient(135deg, rgba(20,50,30,0.95), rgba(18,35,27,0.95)); }
+        .dark .toast-error { color: #fca5a5; background: linear-gradient(135deg, rgba(50,18,18,0.95), rgba(30,10,10,0.95)); }
+        .dark .toast-info { color: #7dd3fc; background: linear-gradient(135deg, rgba(12,30,45,0.95), rgba(10,20,35,0.95)); }
+        .dark .toast-warning { color: #fcd34d; background: linear-gradient(135deg, rgba(50,35,10,0.95), rgba(35,25,5,0.95)); }
         /* Phase 2 — B13: swipe-to-dismiss + stacking depth cue */
         .toast {
             touch-action: pan-y;
@@ -2060,7 +2088,8 @@
             const startRef = useRef(null);
             const [swipeX, setSwipeX] = useState(0);
             const [swiping, setSwiping] = useState(false);
-            const iconName = { success: 'check-circle', error: 'alert-circle', info: 'info' };
+            // warning を追加。アイコンは alert-triangle（警告）で区別
+            const iconName = { success: 'check-circle', error: 'alert-circle', warning: 'alert-triangle', info: 'info' };
             const roleFor = (type) => type === 'error' ? 'alert' : 'status';
 
             const onPointerDown = (e) => {
@@ -9644,6 +9673,9 @@
             const [editingStaff, setEditingStaff] = useState(null);
             const [isAdding, setIsAdding] = useState(false);
             const [copiedId, setCopiedId] = useState(null);
+            // 全スタッフ URL 一括再発行: 旧 legacy token から signed token への移行用
+            const [bulkReissuing, setBulkReissuing] = useState(false);
+            const [bulkReissueResult, setBulkReissueResult] = useState(null); // { success: [{id, name, url}], failed: [{id, name, error}] }
             const [gasSyncing, setGasSyncing] = useState(false);
             const [gasConnected, setGasConnected] = useState(false);
             const [dbError, setDbError] = useState(null);
@@ -9761,6 +9793,42 @@
                 setIsAdding(true);
             };
 
+            // 全スタッフの URL を HMAC 署名付き形式で再発行する admin ツール。
+            // 旧 legacy token (base64 のみ) からの移行や、SISE_AUTH_SECRET ローテ
+            // 後の再発行用。各スタッフの URL を個別に発行し、結果を画面に表示する。
+            const bulkReissueAllUrls = async () => {
+                if (!window.confirm('全てのアクティブなスタッフに新しい署名付き URL を発行します。\n(旧 URL は ALLOW_LEGACY_TOKENS=false にするまでは併用可能)\nよろしいですか?')) return;
+                setBulkReissuing(true);
+                setBulkReissueResult(null);
+                const targets = staffList.filter(s => s.status !== 'inactive');
+                const success = [];
+                const failed = [];
+                for (const staff of targets) {
+                    const url = await generateStaffUrl(staff);
+                    if (url) success.push({ id: staff.id, name: staff.name, url });
+                    else failed.push({ id: staff.id, name: staff.name, error: '発行失敗' });
+                }
+                setBulkReissueResult({ success, failed });
+                setBulkReissuing(false);
+                if (failed.length === 0) {
+                    showToast(`${success.length}件のURLを再発行しました`, 'success');
+                    hapticSuccess();
+                } else {
+                    showToast(`${success.length}件成功 / ${failed.length}件失敗`, 'error');
+                }
+            };
+
+            const copyAllReissuedUrls = async () => {
+                if (!bulkReissueResult || bulkReissueResult.success.length === 0) return;
+                const text = bulkReissueResult.success.map(s => `${s.name}: ${s.url}`).join('\n');
+                try {
+                    await navigator.clipboard.writeText(text);
+                    showToast('全URLをクリップボードにコピーしました', 'success');
+                } catch (e) {
+                    showToast('クリップボードへのコピーに失敗しました', 'error');
+                }
+            };
+
             const handleCopyUrl = async (staff) => {
                 // サーバーで HMAC 署名付き token を発行してから URL を組み立てる。
                 // 通信エラーや権限エラーは generateStaffUrl 内でトースト通知済み。
@@ -9861,15 +9929,71 @@
                             <p className="text-xs text-sise-500 tracking-wide mt-0.5">STAFF ACCESS MANAGEMENT</p>
                         </div>
                         {!isAdding && (
-                            <button
-                                onClick={() => { setIsAdding(true); setEditingStaff(null); setFormData({ name: '', role: 'staff', password: '', storeIds: [] }); }}
-                                className="flex items-center px-3 py-2 bg-sise-500 hover:bg-sise-600 text-white rounded-xl text-sm font-medium shadow-lg shadow-sise-500/25 transition-all"
-                            >
-                                <Icon name="user-plus" size={16} className="mr-1.5" />
-                                スタッフを追加
-                            </button>
+                            <div className="flex items-center gap-2 flex-wrap justify-end">
+                                <button
+                                    onClick={bulkReissueAllUrls}
+                                    disabled={bulkReissuing || staffList.length === 0}
+                                    title="全スタッフの URL を HMAC 署名付きで再発行（旧 URL からの移行用）"
+                                    className="flex items-center px-3 py-2 bg-amber-100 hover:bg-amber-200 text-amber-800 rounded-xl text-xs font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                    {bulkReissuing ? <Spinner size={12} /> : <Icon name="refresh-cw" size={12} className="mr-1" />}
+                                    <span className="ml-1">{bulkReissuing ? '発行中...' : '全URLを再発行'}</span>
+                                </button>
+                                <button
+                                    onClick={() => { setIsAdding(true); setEditingStaff(null); setFormData({ name: '', role: 'staff', password: '', storeIds: [] }); }}
+                                    className="flex items-center px-3 py-2 bg-sise-500 hover:bg-sise-600 text-white rounded-xl text-sm font-medium shadow-lg shadow-sise-500/25 transition-all"
+                                >
+                                    <Icon name="user-plus" size={16} className="mr-1.5" />
+                                    スタッフを追加
+                                </button>
+                            </div>
                         )}
                     </div>
+
+                    {/* 一括再発行の結果表示 */}
+                    {bulkReissueResult && (
+                        <div className="mb-4 p-3 bg-sise-50 rounded-xl border border-sise-200 animate-fade-in">
+                            <div className="flex items-center justify-between mb-2">
+                                <p className="text-sm font-bold text-slate-800">
+                                    一括再発行結果: 成功 {bulkReissueResult.success.length} / 失敗 {bulkReissueResult.failed.length}
+                                </p>
+                                <div className="flex items-center gap-2">
+                                    {bulkReissueResult.success.length > 0 && (
+                                        <button
+                                            onClick={copyAllReissuedUrls}
+                                            className="px-3 py-1.5 rounded-lg bg-sise-500 text-white text-xs font-semibold hover:bg-sise-600"
+                                        >
+                                            <Icon name="clipboard" size={12} className="inline mr-1" />全URLコピー
+                                        </button>
+                                    )}
+                                    <button
+                                        onClick={() => setBulkReissueResult(null)}
+                                        className="px-2 py-1.5 rounded-lg text-slate-500 hover:bg-slate-100 text-xs"
+                                    >閉じる</button>
+                                </div>
+                            </div>
+                            <div className="max-h-48 overflow-y-auto space-y-1">
+                                {bulkReissueResult.success.map(s => (
+                                    <div key={s.id} className="flex items-center justify-between p-2 bg-white rounded-lg border border-slate-100">
+                                        <span className="text-xs font-medium text-slate-700 truncate flex-1">{s.name}</span>
+                                        <button
+                                            onClick={async () => {
+                                                try { await navigator.clipboard.writeText(s.url); showToast(`${s.name} のURLをコピー`, 'success', 1500); }
+                                                catch (_) { showToast('コピー失敗', 'error'); }
+                                            }}
+                                            className="ml-2 px-2 py-1 rounded-md bg-sise-100 text-sise-700 text-[10px] font-semibold hover:bg-sise-200"
+                                        >コピー</button>
+                                    </div>
+                                ))}
+                                {bulkReissueResult.failed.map(s => (
+                                    <div key={s.id} className="flex items-center p-2 bg-red-50 rounded-lg border border-red-100">
+                                        <Icon name="alert-circle" size={12} className="text-red-500 mr-1.5 flex-shrink-0" />
+                                        <span className="text-xs font-medium text-red-700 truncate">{s.name} — {s.error}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
 
                     {/* 追加・編集フォーム */}
                     {isAdding && (
@@ -15875,7 +15999,13 @@
                     const result = await resp.json();
                     if (!resp.ok) throw new Error(result.message || 'アップロード失敗');
                     return result.url;
-                } catch (e) { console.error('Blob upload error:', e); return null; }
+                } catch (e) {
+                    // 以前は silent null を返して呼び出し側が気づけなかった。
+                    // LINE 送信時に画像が欠落するなど重大な影響があるため明示的にトースト通知する。
+                    console.error('Blob upload error:', e);
+                    showToast('画像のアップロードに失敗しました: ' + (e.message || '通信エラー'), 'error');
+                    return null;
+                }
             }, []);
 
             // LINE送信
@@ -16003,13 +16133,20 @@
                     const jsonBlob = new Blob([analysisJson], { type: 'application/json' });
 
                     // 3. iOS/Android: Web Share APIで写真アプリに保存（画像のみ）
+                    // iOS Safari は navigator.share あっても canShare({files}) が
+                    // false を返すケースがあるため、両方チェックしてフォールバック。
+                    const ua = navigator.userAgent || '';
+                    const isIOS = /iPad|iPhone|iPod/.test(ua) && !window.MSStream;
                     let shared = false;
+                    let shareAttempted = false;
                     if (navigator.share && navigator.canShare) {
                         try {
                             const imageFile = dataUrlToFile(composed, baseName + '.jpg');
                             if (navigator.canShare({ files: [imageFile] })) {
+                                shareAttempted = true;
                                 await navigator.share({ files: [imageFile], title: baseName });
                                 shared = true;
+                                hapticSuccess();
                             }
                         } catch (e) {
                             if (e.name === 'AbortError') return; // ユーザーがキャンセル
@@ -16025,6 +16162,12 @@
                         document.body.appendChild(imgLink);
                         imgLink.click();
                         document.body.removeChild(imgLink);
+                        // iOS ユーザーはダウンロード先が分かりにくいので誘導を表示
+                        if (isIOS) {
+                            showToast('「ファイル」アプリのダウンロードに保存されました', 'info', 4000);
+                        } else if (!shareAttempted) {
+                            showToast('画像をダウンロードしました', 'success', 2000);
+                        }
                     }
 
                     // 5. JSONは常にダウンロードリンクで保存（Web Shareで送れない環境が多いため）
@@ -16076,12 +16219,16 @@
                     const jsonFileName = `BeforeAfter_${name}_${date}.json`;
                     const jsonFile = new File([jsonBlob], jsonFileName, { type: 'application/json' });
 
+                    const ua2 = navigator.userAgent || '';
+                    const isIOS2 = /iPad|iPhone|iPod/.test(ua2) && !window.MSStream;
+
                     // iOS/モバイル: Web Share APIで写真アプリに直接保存可能
                     if (navigator.share && navigator.canShare) {
                         const shareFiles = [...files.map(f => dataUrlToFile(f.dataUrl, f.fileName)), jsonFile];
                         const shareData = { files: shareFiles };
                         if (navigator.canShare(shareData)) {
                             await navigator.share(shareData);
+                            hapticSuccess();
                             setCompDownloading(false);
                             return;
                         }
@@ -16089,11 +16236,12 @@
                         const imgOnlyData = { files: files.map(f => dataUrlToFile(f.dataUrl, f.fileName)) };
                         if (navigator.canShare(imgOnlyData)) {
                             await navigator.share(imgOnlyData);
+                            hapticSuccess();
                             setCompDownloading(false);
                             return;
                         }
                     }
-                    // フォールバック: 従来のダウンロード（PC等）
+                    // フォールバック: 従来のダウンロード（PC等、または iOS Share 非対応）
                     for (const f of files) {
                         const link = document.createElement('a');
                         link.download = f.fileName;
@@ -16106,6 +16254,12 @@
                     jsonLink.href = jsonUrl;
                     jsonLink.click();
                     setTimeout(() => URL.revokeObjectURL(jsonUrl), 1000);
+                    // iOS ユーザーはダウンロード先が分かりにくいので誘導
+                    if (isIOS2) {
+                        showToast('「ファイル」アプリのダウンロードに保存されました', 'info', 4000);
+                    } else {
+                        showToast(`${files.length + 1}件のファイルをダウンロードしました`, 'success', 2000);
+                    }
                 } catch (e) {
                     // ユーザーがShareシートをキャンセルした場合はAbortErrorになる（正常）
                     if (e.name !== 'AbortError') {
