@@ -1,4 +1,5 @@
 import { supabase } from './supabase.js';
+import { canAccessStore, allowedStoreIds } from './auth.js';
 
 // ============================================================
 // 利用回数 (usage)
@@ -110,9 +111,22 @@ export async function membersPost(body) {
 // 勤怠 (attendance)
 // ============================================================
 
-export async function attendanceGet(params) {
+export async function attendanceGet(params, staffCtx) {
+  // スタッフモード: 明示 params.store が無い場合は staffCtx.storeIds で自動フィルタ。
+  // 明示されている場合は権限チェック後に通過させる。
+  const scoped = allowedStoreIds(staffCtx);
+  if (params.store) {
+    if (scoped !== null && !scoped.includes(params.store)) {
+      return { error: 'この店舗の勤怠データにアクセスする権限がありません' };
+    }
+  }
+
   let query = supabase.from('attendance').select('*').order('date', { ascending: false });
   if (params.store) query = query.eq('store_id', params.store);
+  else if (scoped !== null) {
+    if (scoped.length === 0) return { records: [], lastUpdated: new Date().toISOString() };
+    query = query.in('store_id', scoped);
+  }
   if (params.staffId) query = query.eq('staff_id', params.staffId);
   if (params.date) query = query.eq('date', params.date);
   else if (params.month) {
@@ -139,19 +153,24 @@ export async function attendanceGet(params) {
   };
 }
 
-export async function attendancePost(body) {
+export async function attendancePost(body, staffCtx) {
   const action = body.action || '';
   switch (action) {
-    case 'clockIn': return attClockIn(body);
-    case 'clockOut': return attClockOut(body);
-    case 'update': return attUpdate(body.recordId, body.updates || {});
-    case 'delete': return attDelete(body.recordId);
-    case 'saveAll': return attSaveAll(body.records || [], body.replace);
+    case 'clockIn': return attClockIn(body, staffCtx);
+    case 'clockOut': return attClockOut(body, staffCtx);
+    case 'update': return attUpdate(body.recordId, body.updates || {}, staffCtx);
+    case 'delete': return attDelete(body.recordId, staffCtx);
+    case 'saveAll': return attSaveAll(body.records || [], body.replace, staffCtx);
     default: return { error: '不明なaction: ' + action };
   }
 }
 
-async function attSaveAll(records, replace) {
+async function attSaveAll(records, replace, staffCtx) {
+  // 一括保存は全レコードの書き込みなので、スタッフモードでは拒否する。
+  // 管理者（staffCtx=null）のみ許可。
+  if (staffCtx !== null) {
+    return { error: '一括保存は管理者のみ許可されています' };
+  }
   const rows = records.map(r => ({
     id: r.id || ('att_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5)),
     staff_id: r.staffId || '', staff_name: r.staffName || '',
@@ -172,8 +191,18 @@ async function attSaveAll(records, replace) {
   return { success: true, count: rows.length };
 }
 
-async function attClockIn(body) {
+async function attClockIn(body, staffCtx) {
   if (!body.staffId || !body.storeId) return { error: 'staffIdとstoreIdが必要です' };
+
+  // スタッフモード: 自分自身の staffId で、かつ割当店舗にのみクロックイン可能。
+  if (staffCtx !== null) {
+    if (staffCtx.staffId && staffCtx.staffId !== body.staffId) {
+      return { error: '他のスタッフIDでの出勤はできません' };
+    }
+    if (!canAccessStore(staffCtx, body.storeId)) {
+      return { error: 'この店舗への出勤権限がありません' };
+    }
+  }
 
   // クライアントのローカル日時を優先（サーバの UTC によるタイムゾーンずれ回避）。
   // 後方互換のため未指定なら UTC 派生値にフォールバック。
@@ -232,12 +261,22 @@ async function attClockIn(body) {
   };
 }
 
-async function attClockOut(body) {
+async function attClockOut(body, staffCtx) {
   if (!body.recordId) return { error: 'recordIdが必要です' };
 
   const { data: rec } = await supabase.from('attendance').select('*').eq('id', body.recordId).single();
   if (!rec) return { error: 'レコードが見つかりません' };
   if (rec.clock_out) return { error: '既に退勤済みです' };
+
+  // スタッフモード: 自分自身のレコード + 割当店舗のみ退勤可能
+  if (staffCtx !== null) {
+    if (staffCtx.staffId && staffCtx.staffId !== rec.staff_id) {
+      return { error: '他のスタッフのレコードを退勤できません' };
+    }
+    if (!canAccessStore(staffCtx, rec.store_id)) {
+      return { error: 'この店舗のレコードを退勤する権限がありません' };
+    }
+  }
 
   const isValidTime = typeof body.time === 'string' && /^\d{2}:\d{2}$/.test(body.time);
   const now = new Date();
@@ -262,8 +301,17 @@ async function attClockOut(body) {
   return { success: true, record: { id: body.recordId, clockOut, workMinutes } };
 }
 
-async function attUpdate(recordId, updates) {
+async function attUpdate(recordId, updates, staffCtx) {
   if (!recordId) return { error: 'recordIdが必要です' };
+
+  if (staffCtx !== null) {
+    const { data: rec } = await supabase.from('attendance').select('staff_id, store_id').eq('id', recordId).single();
+    if (!rec) return { error: 'レコードが見つかりません' };
+    if (!canAccessStore(staffCtx, rec.store_id)) {
+      return { error: 'この店舗のレコードを編集する権限がありません' };
+    }
+  }
+
   const dbUpdates = {};
   if (updates.clockIn !== undefined) dbUpdates.clock_in = updates.clockIn;
   if (updates.clockOut !== undefined) dbUpdates.clock_out = updates.clockOut;
@@ -275,8 +323,17 @@ async function attUpdate(recordId, updates) {
   return { success: true };
 }
 
-async function attDelete(recordId) {
+async function attDelete(recordId, staffCtx) {
   if (!recordId) return { error: 'recordIdが必要です' };
+
+  if (staffCtx !== null) {
+    const { data: rec } = await supabase.from('attendance').select('store_id').eq('id', recordId).single();
+    if (!rec) return { error: 'レコードが見つかりません' };
+    if (!canAccessStore(staffCtx, rec.store_id)) {
+      return { error: 'この店舗のレコードを削除する権限がありません' };
+    }
+  }
+
   const { error } = await supabase.from('attendance').delete().eq('id', recordId);
   if (error) throw error;
   return { success: true };
@@ -303,11 +360,16 @@ export async function qrTokenGet(params) {
   };
 }
 
-export async function qrTokenPost(body) {
+export async function qrTokenPost(body, staffCtx) {
   const action = body.action || '';
   switch (action) {
     case 'generate': {
       if (!body.storeId) return { error: 'storeIdが必要です' };
+      // 権限外店舗の QR を発行してしまうと他店舗のスタッフに渡せてしまうため、
+      // スタッフモードでは自分の所属店舗の QR のみ発行可能。
+      if (!canAccessStore(staffCtx, body.storeId)) {
+        return { error: 'この店舗のQRを発行する権限がありません' };
+      }
       const token = Math.random().toString(36).slice(2) + Date.now().toString(36);
       const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString(); // 5分有効
       const { error } = await supabase.from('qr_tokens').insert({
@@ -325,11 +387,15 @@ export async function qrTokenPost(body) {
       if (data.used) return { valid: false, error: '使用済みトークンです' };
       if (new Date(data.expires_at) < new Date()) return { valid: false, error: 'トークンが期限切れです' };
       if (body.storeId && data.store_id !== body.storeId) return { valid: false, error: '店舗IDが一致しません' };
+      // スタッフモードでは、QR の発行店舗が自分の所属店舗であることを検証する
+      // （別店舗の QR をスキャンしても出勤できないようにする）
+      if (!canAccessStore(staffCtx, data.store_id)) {
+        return { valid: false, error: 'この店舗のQRを使用する権限がありません' };
+      }
 
       // トークンを使用済みにする
       await supabase.from('qr_tokens').update({ used: true }).eq('token', body.token);
-      // クライアントが clockIn で使うため storeId を必ず返す（これが無いと出勤処理が
-      // undefined storeId で失敗していた）
+      // クライアントが clockIn で使うため storeId を必ず返す
       return { valid: true, storeId: data.store_id };
     }
     default: return { error: '不明なaction: ' + action };
