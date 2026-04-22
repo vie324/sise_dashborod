@@ -4396,7 +4396,7 @@
             const checkTodayStatus = useCallback(async (staffId) => {
                 if (!staffId) return;
                 try {
-                    const today = new Date().toISOString().slice(0, 10);
+                    const today = todayLocalYMD();
                     const data = await dbGet('attendance', { staffId, date: today });
                     if (data && data.records && data.records.length > 0) {
                         const latest = data.records.find(r => !r.clockOut) || data.records[0];
@@ -9894,6 +9894,29 @@
             const allActiveStores = stores.filter(s => s.status !== 'inactive');
             const activeStores = currentAccess ? allActiveStores.filter(s => currentAccess.storeIds.includes(s.id)) : allActiveStores;
 
+            // 記帳フォームが参照する store 初期値。'all'（全店舗フィルタ）や
+            // アクセス権限外の ID を拒否して、サーバーに invalid-store を
+            // 送らないようにする。権限が単一店舗の場合はその ID に自動設定。
+            const getInitialFormStore = () => {
+                const ids = new Set(activeStores.map(s => s.id));
+                if (activeStoreId && activeStoreId !== 'all' && ids.has(activeStoreId)) return activeStoreId;
+                if (currentAccess && currentAccess.storeIds.length === 1 && ids.has(currentAccess.storeIds[0])) {
+                    return currentAccess.storeIds[0];
+                }
+                return '';
+            };
+
+            // タイムゾーンずれを防ぐため、システムの表示日付ではなくローカル時刻から
+            // YYYY-MM-DD を生成する。toISOString() は UTC なので夜遅い時間だと日付が
+            // 翌日扱いになる問題があった。
+            const todayLocalYMD = () => {
+                const d = new Date();
+                const y = d.getFullYear();
+                const m = String(d.getMonth() + 1).padStart(2, '0');
+                const day = String(d.getDate()).padStart(2, '0');
+                return `${y}-${m}-${day}`;
+            };
+
             // 店舗フィルタ
             const [filterStore, setFilterStore] = useState('all');
             // タブ: overview / entries / audit / reconcile
@@ -9929,8 +9952,9 @@
             }, [rawAddEntry, activeStoreId, activeStores]);
 
             const [showForm, setShowForm] = useState(false);
-            const [selectedDate, setSelectedDate] = useState(new Date().toISOString().slice(0, 10));
-            const [viewMonth, setViewMonth] = useState(new Date().toISOString().slice(0, 7));
+            // ローカル時刻ベースの日付を使う（UTC toISOString はタイムゾーンずれを起こす）
+            const [selectedDate, setSelectedDate] = useState(todayLocalYMD);
+            const [viewMonth, setViewMonth] = useState(() => todayLocalYMD().slice(0, 7));
             const [editingId, setEditingId] = useState(null);
             const [showCashCheck, setShowCashCheck] = useState(false);
             const [cashCheckAmount, setCashCheckAmount] = useState('');
@@ -9938,8 +9962,8 @@
             const [showDailyClose, setShowDailyClose] = useState(false);
             const [dailyCloseData, setDailyCloseData] = useState({ safe: '', pettyCash: '', register: '', notes: '' });
 
-            const [formData, setFormData] = useState({
-                date: new Date().toISOString().slice(0, 10),
+            const [formData, setFormData] = useState(() => ({
+                date: todayLocalYMD(),
                 type: 'income',
                 category: '施術売上',
                 description: '',
@@ -9948,12 +9972,16 @@
                 treatmentCount: '1',
                 paymentMethod: 'CASH',
                 cashType: 'register',
-                store: activeStoreId || '',
-                recorder: '',
+                // activeStoreId が 'all' のときに bogus な store='all' が入ると
+                // サーバーが 23503(FK) で拒否するため、明示的に除外する。
+                store: getInitialFormStore(),
+                recorder: currentAccess ? currentAccess.name : '',
                 notes: '',
                 selectedMenuId: '',
                 pointDiscount: ''
-            });
+            }));
+            // 送信時に店舗未選択フラグを立て、該当 select に赤枠を出す
+            const [storeError, setStoreError] = useState(false);
 
             // メニュー管理UI
             const [showMenuManager, setShowMenuManager] = useState(false);
@@ -10076,16 +10104,20 @@
                 return s ? s.name : storeId;
             };
 
-            const resetForm = () => {
+            // resetForm — オプション引数で表示日付を差し替え可能にして、
+            // 「記帳する」クリック時のフォーム初期化を1回の setFormData で完結させる。
+            const resetForm = (overrideDate) => {
                 // 店舗の初期値: filterStore > activeStoreId(具体的) > 単一店舗権限 > 空
                 let defaultStore = '';
                 const validIds = new Set(activeStores.map(s => s.id));
                 if (filterStore !== 'all' && validIds.has(filterStore)) defaultStore = filterStore;
                 else if (activeStoreId && activeStoreId !== 'all' && validIds.has(activeStoreId)) defaultStore = activeStoreId;
-                else if (currentAccess && currentAccess.storeIds.length === 1) defaultStore = currentAccess.storeIds[0];
+                else if (currentAccess && currentAccess.storeIds.length === 1 && validIds.has(currentAccess.storeIds[0])) {
+                    defaultStore = currentAccess.storeIds[0];
+                }
 
                 setFormData({
-                    date: selectedDate,
+                    date: overrideDate || selectedDate,
                     type: 'income',
                     category: '施術売上',
                     description: '',
@@ -10101,36 +10133,53 @@
                     pointDiscount: ''
                 });
                 setEditingId(null);
+                setStoreError(false);
             };
 
-            const handleSubmit = () => {
-                if (!formData.amount || parseInt(formData.amount) <= 0) return;
+            const handleSubmit = async () => {
+                if (saving) return; // 二重送信防止
+                if (!formData.amount || parseInt(formData.amount) <= 0) {
+                    showToast('金額を入力してください', 'error'); return;
+                }
                 if (!formData.store) {
-                    showToast('店舗を選択してください', 'error'); return;
+                    setStoreError(true);
+                    showToast('店舗を選択してください', 'error');
+                    return;
+                }
+                // 権限外店舗の送信を阻止（active store の id 集合で検証）
+                const validStoreIds = new Set(activeStores.map(s => s.id));
+                if (!validStoreIds.has(formData.store)) {
+                    setStoreError(true);
+                    showToast('選択された店舗にアクセス権限がありません', 'error');
+                    return;
                 }
                 if (currentAccess && !currentAccess.storeIds.includes(formData.store)) {
+                    setStoreError(true);
                     showToast('この店舗への入力権限がありません', 'error'); return;
                 }
+                setStoreError(false);
                 const finalAmount = formData.type === 'income' ? effectiveAmount : parseInt(formData.amount);
                 const discount = parseInt(formData.pointDiscount) || 0;
                 const descWithDiscount = discount > 0
                     ? (formData.description || '') + '（ポイント割引 -' + formatCurrency(discount) + '）'
                     : formData.description;
+                const payload = {
+                    ...formData,
+                    description: descWithDiscount,
+                    amount: finalAmount,
+                    treatmentCount: parseInt(formData.treatmentCount) || 0
+                };
+                // addEntry: 成功で entry オブジェクト / 失敗で null
+                // updateEntry: 成功で true / 失敗で false
+                // いずれも「偽値または .error 付き」なら失敗扱いとしてフォームを閉じない
+                let result;
                 if (editingId) {
-                    updateEntry(editingId, {
-                        ...formData,
-                        description: descWithDiscount,
-                        amount: finalAmount,
-                        treatmentCount: parseInt(formData.treatmentCount) || 0
-                    });
+                    result = await updateEntry(editingId, payload);
                 } else {
-                    addEntry({
-                        ...formData,
-                        description: descWithDiscount,
-                        amount: finalAmount,
-                        treatmentCount: parseInt(formData.treatmentCount) || 0
-                    });
+                    result = await addEntry(payload);
                 }
+                const isFailure = !result || (typeof result === 'object' && result && result.error);
+                if (isFailure) return;
                 resetForm();
                 setShowForm(false);
             };
@@ -10161,32 +10210,39 @@
             const changeMonth = (delta) => {
                 const d = new Date(viewMonth + '-01');
                 d.setMonth(d.getMonth() + delta);
-                setViewMonth(d.toISOString().slice(0, 7));
+                // タイムゾーンずれを防ぐため toISOString (UTC) は使わない
+                const y = d.getFullYear();
+                const m = String(d.getMonth() + 1).padStart(2, '0');
+                setViewMonth(`${y}-${m}`);
             };
 
             // レジ金チェック
             const handleCashCheck = () => {
                 const actual = parseInt(cashCheckAmount) || 0;
                 const storeId = cashCheckStore || filterStore;
-                let expected = cashBalance.total;
-                if (storeId && storeId !== 'all' && cashBalance.byStore[storeId]) {
-                    expected = cashBalance.byStore[storeId].balance;
+                // レジ金チェック差異は個別店舗に紐付ける必要があるため、
+                // 'all' フィルタ時は store を選ばせる（空のまま addEntry に渡すと失敗する）
+                if (!storeId || storeId === 'all') {
+                    showToast('差異記録には店舗を指定してください', 'error');
+                    return;
                 }
+                let expected = cashBalance.total;
+                if (cashBalance.byStore[storeId]) expected = cashBalance.byStore[storeId].balance;
                 const diff = actual - expected;
                 const storeName = getStoreName(storeId) || '全店舗';
                 if (diff !== 0) {
                     addEntry({
-                        date: new Date().toISOString().slice(0, 10),
+                        date: todayLocalYMD(),
                         type: diff > 0 ? 'income' : 'expense',
                         category: diff > 0 ? 'その他収入' : 'その他経費',
                         description: 'レジ金チェック差異（' + storeName + '）実残高:' + formatCurrency(actual) + ' / 理論:' + formatCurrency(expected),
                         amount: Math.abs(diff),
                         paymentMethod: 'CASH',
                         cashType: 'register',
-                        store: storeId !== 'all' ? storeId : '',
+                        store: storeId,
                         recorder: currentAccess ? currentAccess.name : 'レジ金チェック'
                     });
-                    showToast('差異 ' + (diff > 0 ? '+' : '') + formatCurrency(diff) + ' を記録しました（' + storeName + '）', diff === 0 ? 'success' : 'error');
+                    showToast('差異 ' + (diff > 0 ? '+' : '') + formatCurrency(diff) + ' を記録しました（' + storeName + '）', 'error');
                 } else {
                     showToast(storeName + '：レジ金一致（' + formatCurrency(actual) + '）', 'success');
                 }
@@ -10198,7 +10254,7 @@
             const handleDailyClose = async () => {
                 const storeId = filterStore !== 'all' ? filterStore : '';
                 if (!storeId) { showToast('日次締めは店舗を選択してください', 'error'); return; }
-                const today = new Date().toISOString().slice(0, 10);
+                const today = todayLocalYMD();
                 const result = await closeDailyBooks(today, storeId, {
                     safe: parseInt(dailyCloseData.safe) || 0,
                     pettyCash: parseInt(dailyCloseData.pettyCash) || 0,
@@ -10213,7 +10269,7 @@
             // Square売上との突合
             const squareReconciliation = useMemo(() => {
                 if (!squareData?.payments) return null;
-                const today = new Date().toISOString().slice(0, 10);
+                const today = todayLocalYMD();
                 const todaySquare = (squareData.payments || []).filter(p => p.created_at && p.created_at.startsWith(today));
                 const squareTotal = todaySquare.reduce((s, p) => s + (p.amount_money?.amount || 0) / 100, 0);
                 const todayCashbook = entries.filter(e => e.date === today && e.type === 'income');
@@ -10241,7 +10297,17 @@
                                 {loading ? '同期中...' : '最新取得'}
                             </Button>
                             <Button
-                                onClick={() => { resetForm(); setFormData(p => ({...p, date: selectedDate})); setShowForm(!showForm); }}
+                                onClick={() => {
+                                    // フォームを開くときは必ず resetForm で初期化し、
+                                    // 表示日付は現在の selectedDate にする。resetForm が
+                                    // 完結した1コールの setFormData を投げ、setShowForm は
+                                    // その後に切替える（resetForm の結果を尊重するため順序厳守）。
+                                    if (!showForm) {
+                                        setStoreError(false);
+                                        resetForm(selectedDate);
+                                    }
+                                    setShowForm(!showForm);
+                                }}
                                 variant="primary"
                                 size="md"
                                 leftIcon={<Icon name="plus" size={16} />}
@@ -10335,7 +10401,7 @@
                     {/* 店舗別残高カード */}
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                         {Object.entries(cashBalance.byStore).map(([storeId, data]) => {
-                            const storeClose = dailyCloses.find(c => c.storeId === storeId && c.date === new Date().toISOString().slice(0, 10));
+                            const storeClose = dailyCloses.find(c => c.storeId === storeId && c.date === todayLocalYMD());
                             return (
                             <div key={storeId} className={`glass-card !rounded-2xl p-4 cursor-pointer transition-all ${filterStore === storeId ? 'border-2 border-sise-400 bg-sise-50/30' : 'border border-slate-200 hover:border-sise-200'}`}
                                 onClick={() => setFilterStore(filterStore === storeId ? 'all' : storeId)}>
@@ -10370,13 +10436,13 @@
                     </div>
 
                     {/* 日次締めボタン */}
-                    {filterStore !== 'all' && !isDayClosed(new Date().toISOString().slice(0, 10), filterStore) && (
+                    {filterStore !== 'all' && !isDayClosed(todayLocalYMD(), filterStore) && (
                         <button onClick={() => setShowDailyClose(true)}
                             className="w-full flex items-center justify-center gap-2 py-3 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white rounded-xl font-semibold text-sm transition-all active:scale-[0.98]">
                             <Icon name="lock" size={16} /> 本日の日次締めを行う（{getStoreName(filterStore)}）
                         </button>
                     )}
-                    {filterStore !== 'all' && isDayClosed(new Date().toISOString().slice(0, 10), filterStore) && (
+                    {filterStore !== 'all' && isDayClosed(todayLocalYMD(), filterStore) && (
                         <div className="flex items-center justify-center gap-2 py-3 bg-green-50 border border-green-200 text-green-700 rounded-xl font-semibold text-sm">
                             <Icon name="check-circle" size={16} /> 本日の日次締め完了（{getStoreName(filterStore)}）
                         </div>
@@ -10555,14 +10621,35 @@
 
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                                 <div>
-                                    <label className="block text-xs font-medium text-slate-600 mb-1">店舗 *</label>
-                                    <select value={formData.store} onChange={e => setFormData(p => ({...p, store: e.target.value}))}
-                                        className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm outline-none bg-white">
+                                    <label className="block text-xs font-medium text-slate-600 mb-1" htmlFor="cb-store-select">
+                                        店舗 <span className="text-red-500" aria-hidden="true">*</span>
+                                    </label>
+                                    <select
+                                        id="cb-store-select"
+                                        value={formData.store}
+                                        onChange={e => { setFormData(p => ({...p, store: e.target.value})); if (e.target.value) setStoreError(false); }}
+                                        aria-required="true"
+                                        aria-invalid={storeError || undefined}
+                                        aria-describedby={storeError ? 'cb-store-error' : undefined}
+                                        className={`w-full px-3 py-2.5 border rounded-xl text-sm outline-none bg-white transition-colors ${storeError ? 'border-red-400 bg-red-50 focus:border-red-500' : 'border-slate-200 focus:border-sise-500'}`}
+                                    >
                                         <option value="">-- 店舗を選択 --</option>
                                         {activeStores.map(s => (
                                             <option key={s.id} value={s.id}>{s.name}</option>
                                         ))}
                                     </select>
+                                    {storeError && (
+                                        <p id="cb-store-error" className="mt-1 text-[11px] text-red-600 font-medium">
+                                            <Icon name="alert-circle" size={11} className="inline -mt-0.5 mr-0.5" />
+                                            店舗を選択してください
+                                        </p>
+                                    )}
+                                    {activeStores.length === 0 && (
+                                        <p className="mt-1 text-[11px] text-amber-600 font-medium">
+                                            <Icon name="alert-circle" size={11} className="inline -mt-0.5 mr-0.5" />
+                                            アクセス可能な店舗がありません。管理者に確認してください。
+                                        </p>
+                                    )}
                                 </div>
                                 <div>
                                     <label className="block text-xs font-medium text-slate-600 mb-1">日付 *</label>
@@ -10676,10 +10763,22 @@
 
                             <div className="flex justify-end gap-2 mt-4">
                                 <button onClick={() => { setShowForm(false); resetForm(); }}
-                                    className="px-4 py-2.5 text-sm text-slate-600 hover:bg-slate-100 rounded-xl transition-colors">キャンセル</button>
-                                <button onClick={handleSubmit} disabled={!formData.amount || parseInt(formData.amount) <= 0}
-                                    className="px-5 py-2.5 btn-gradient rounded-xl text-sm font-medium">
-                                    {editingId ? '更新' : '記録する'}
+                                    disabled={saving}
+                                    className="px-4 py-2.5 text-sm text-slate-600 hover:bg-slate-100 rounded-xl transition-colors disabled:opacity-50">キャンセル</button>
+                                <button
+                                    onClick={handleSubmit}
+                                    disabled={
+                                        saving ||
+                                        !formData.amount ||
+                                        parseInt(formData.amount) <= 0 ||
+                                        !formData.store ||
+                                        activeStores.length === 0
+                                    }
+                                    className="px-5 py-2.5 btn-gradient rounded-xl text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-2"
+                                    aria-busy={saving || undefined}
+                                >
+                                    {saving && <Spinner size={14} />}
+                                    {saving ? '保存中...' : (editingId ? '更新' : '記録する')}
                                 </button>
                             </div>
                         </Card>
