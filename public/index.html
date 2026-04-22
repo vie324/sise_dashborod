@@ -1718,17 +1718,37 @@
             }
         };
 
-        // アクセストークン生成（UTF-8対応）
-        const generateStaffToken = (staff) => {
-            const payload = { n: staff.name, r: staff.role, sid: staff.storeIds, pw: staff.password ? 1 : 0, id: staff.id };
-            return btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
-        };
-
-        // スタッフ用URL生成
-        const generateStaffUrl = (staff) => {
-            const token = generateStaffToken(staff);
-            const base = window.location.origin + window.location.pathname;
-            return `${base}?v=${token}`;
+        // ============================================================
+        // スタッフ URL 発行
+        // ============================================================
+        // HMAC-SHA256 で署名された token をサーバーから発行してもらう。
+        // 以前は client-side で base64(JSON) を生成していたが、tamper-proof
+        // ではなかったため、/api/auth/issue-token 経由に変更した。
+        //
+        // 呼び出し側は await で URL を受け取る。旧同期版 API の呼び出し箇所は
+        // すべて async へ更新済み。
+        // ============================================================
+        const generateStaffUrl = async (staff) => {
+            if (!staff || !staff.id) return null;
+            try {
+                const resp = await fetch('/api/auth/issue-token', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ staffId: staff.id }),
+                });
+                const data = await resp.json();
+                if (!resp.ok || !data || data.error) {
+                    console.error('[auth] URL発行失敗:', data && data.error);
+                    showToast('URLの発行に失敗しました: ' + ((data && data.error) || resp.status), 'error');
+                    return null;
+                }
+                const base = window.location.origin + window.location.pathname;
+                return `${base}?v=${encodeURIComponent(data.token)}`;
+            } catch (e) {
+                console.error('[auth] URL発行通信エラー:', e);
+                showToast('URLの発行に失敗しました（通信エラー）', 'error');
+                return null;
+            }
         };
 
         // localStorage管理（GASフォールバック用）
@@ -9291,12 +9311,19 @@
                 setIsAdding(true);
             };
 
-            const handleCopyUrl = (staff) => {
-                const url = generateStaffUrl(staff);
-                navigator.clipboard.writeText(url).then(() => {
+            const handleCopyUrl = async (staff) => {
+                // サーバーで HMAC 署名付き token を発行してから URL を組み立てる。
+                // 通信エラーや権限エラーは generateStaffUrl 内でトースト通知済み。
+                const url = await generateStaffUrl(staff);
+                if (!url) return;
+                try {
+                    await navigator.clipboard.writeText(url);
                     setCopiedId(staff.id);
                     setTimeout(() => setCopiedId(null), 2000);
-                });
+                } catch (e) {
+                    console.error('[staff] クリップボード書き込みエラー:', e);
+                    showToast('クリップボードへのコピーに失敗しました', 'error');
+                }
             };
 
             const toggleStoreId = (storeId) => {

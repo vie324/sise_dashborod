@@ -3,26 +3,34 @@
 // ========================================
 // クライアントは以下の2つのヘッダを送る:
 //   X-Staff-Id    : staff テーブル主キー
-//   X-Staff-Token : base64(JSON) 形式の staff token
-//                   ( index.html の parseAccessFromUrl / generateStaffToken と同形式 )
+//   X-Staff-Token : スタッフトークン
+//                   新形式(signed): <base64url(JSON)>.<base64url(HMAC)>
+//                   旧形式(legacy): <base64(JSON)>  （'.' を含まない）
 //
-// トークンは現時点では署名なし（base64 JSON のみ）。そのため tamper-proof では
-// ないが、クライアントコードの devtools 経由での単純な権限逸脱を抑止するために
-// DB 照合で store_ids を確定し、body/params に含まれる storeId と突き合わせる。
+// 優先順位:
+//   1. signed token → 署名 HMAC を検証、exp 期限チェック、payload 信用
+//   2. legacy token → ALLOW_LEGACY_TOKENS=true の時のみ受理（移行期間）
+//
+// いずれの場合でも DB の staff / staff_stores を照合して正規の storeIds を
+// 使う（payload の sid は補助的情報として無視）。
 //
 // トークンが無い場合は admin モード（全店舗許可）として扱う（既存の管理者ログイン
 // フローとの後方互換のため）。
 // ========================================
 
 import { supabase } from './supabase.js';
+import { verifyToken, looksSigned } from './sign.js';
 
-// base64(utf-8 json) を安全に decode する。失敗したら null
-function decodeStaffToken(token) {
+// 未署名トークンを受理するかどうか。本番運用で全スタッフの URL を再発行した
+// あとは false に切り替えて、古い URL をハード無効化できる。
+const ALLOW_LEGACY_TOKENS = String(process.env.ALLOW_LEGACY_TOKENS || 'true').toLowerCase() !== 'false';
+
+// legacy 形式 (base64(JSON)) を decode する。失敗したら null。
+// 新形式は sign.js の verifyToken を通すのでここには来ない。
+function decodeLegacyToken(token) {
   if (!token || typeof token !== 'string') return null;
   try {
-    // Node 環境では atob 利用可 (Node 16+) / fallback 含む
     const b = typeof atob === 'function' ? atob(token) : Buffer.from(token, 'base64').toString('binary');
-    // URL safe chars: utf-8 byte 列を一度 Uint8Array 経由にしてから復元
     const bytes = new Uint8Array(b.length);
     for (let i = 0; i < b.length; i++) bytes[i] = b.charCodeAt(i);
     const decoder = new TextDecoder('utf-8');
@@ -32,7 +40,6 @@ function decodeStaffToken(token) {
       staffId: String(obj.id || ''),
       name:    String(obj.n || ''),
       role:    String(obj.r || 'staff'),
-      // sid が無い/空配列の場合は storeIds=[] として扱う
       storeIds: Array.isArray(obj.sid) ? obj.sid.map(String) : [],
     };
   } catch (e) {
@@ -53,10 +60,8 @@ function readHeader(req, name) {
  * リクエストからスタッフコンテキストを抽出する。
  * 返り値:
  *   - null : admin モード（token 無し = 全店舗許可）
- *   - { staffId, role, storeIds, name, isAdmin: false, valid: true }
- *   - { isAdmin: false, valid: false, reason } : token が不正 / staff 無効
- *
- * NOTE: isAdmin=true のケースは null で表現（呼び出し側で判定しやすくするため）。
+ *   - { valid: true, staffId, role, storeIds, name, signed: bool }
+ *   - { valid: false, reason } : token が不正 / staff 無効
  */
 export async function extractStaffContext(req) {
   const tokenHeader = readHeader(req, 'x-staff-token');
@@ -67,11 +72,35 @@ export async function extractStaffContext(req) {
     return null;
   }
 
-  const decoded = tokenHeader ? decodeStaffToken(tokenHeader) : null;
-  if (!decoded) {
-    return { valid: false, reason: 'token_invalid' };
+  // --- 形式判定 + payload 抽出 ---
+  let decoded = null;
+  let tokenSigned = false;
+  if (tokenHeader && looksSigned(tokenHeader)) {
+    const v = verifyToken(tokenHeader);
+    if (!v.ok) {
+      // expired / bad_signature / malformed / invalid_payload を区別して返す
+      return { valid: false, reason: 'signed_' + v.reason };
+    }
+    const p = v.payload || {};
+    decoded = {
+      staffId: String(p.id || ''),
+      name:    String(p.n || ''),
+      role:    String(p.r || 'staff'),
+      storeIds: Array.isArray(p.sid) ? p.sid.map(String) : [],
+    };
+    tokenSigned = true;
+  } else if (tokenHeader) {
+    // legacy 形式。移行期間中のみ受理。
+    if (!ALLOW_LEGACY_TOKENS) {
+      return { valid: false, reason: 'legacy_token_disabled' };
+    }
+    decoded = decodeLegacyToken(tokenHeader);
+    if (!decoded) return { valid: false, reason: 'token_invalid' };
+  } else {
+    // staffId ヘッダのみで token 無し → 拒否
+    return { valid: false, reason: 'token_missing' };
   }
-  // ヘッダ側の staff_id と token の id を突き合わせる（不一致は拒否）
+
   if (staffIdHeader && String(staffIdHeader) !== decoded.staffId) {
     return { valid: false, reason: 'staff_id_mismatch' };
   }
@@ -80,7 +109,7 @@ export async function extractStaffContext(req) {
   }
 
   // DB でスタッフの実在と active 状態を確認し、staff_stores から正規の storeIds を取得する
-  // （トークンに埋め込まれた sid は信用せず、常に DB の値を権威とする）
+  // （トークンに埋め込まれた sid は補助情報、常に DB の値を権威とする）
   try {
     const { data: staffRow, error: staffErr } = await supabase
       .from('staff').select('id, name, role, status').eq('id', decoded.staffId).maybeSingle();
@@ -95,7 +124,7 @@ export async function extractStaffContext(req) {
 
     return {
       valid: true,
-      isAdmin: false,
+      signed: tokenSigned,
       staffId: staffRow.id,
       name: staffRow.name,
       role: staffRow.role || 'staff',
