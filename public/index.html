@@ -1619,6 +1619,30 @@
         };
 
         // ========================================
+        // ローカル時刻ヘルパー（グローバル）
+        // UTC toISOString() は JST 深夜/早朝で日付が前日になるため、
+        // 日付・時刻文字列はローカルタイムから生成する。
+        // ========================================
+        const todayLocalYMD = () => {
+            const d = new Date();
+            const y = d.getFullYear();
+            const m = String(d.getMonth() + 1).padStart(2, '0');
+            const day = String(d.getDate()).padStart(2, '0');
+            return `${y}-${m}-${day}`;
+        };
+        const nowLocalHM = () => {
+            const d = new Date();
+            return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+        };
+        const thisMonthLocalYM = () => todayLocalYMD().slice(0, 7);
+        // viewMonth の月送り: YYYY-MM を受け取って delta ヶ月ずらす
+        const shiftMonthLocalYM = (ym, delta) => {
+            const [y, m] = ym.split('-').map(Number);
+            const d = new Date(y, m - 1 + delta, 1);
+            return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+        };
+
+        // ========================================
         // 設定・定数
         // ========================================
 
@@ -4408,20 +4432,41 @@
             }, []);
 
             const clockIn = useCallback(async (staffId, staffName, storeId, lat, lng, method, qrToken) => {
+                if (!staffId || !storeId) {
+                    showToast('スタッフIDと店舗の両方が必要です', 'error');
+                    return null;
+                }
                 setSaving(true);
                 try {
-                    const body = { action: 'clockIn', staffId, staffName, storeId, lat, lng, method: method || 'gps' };
+                    // サーバが UTC でしか時刻を取れないため、クライアントの
+                    // ローカル日時を body に載せる。サーバはこれを採用し、
+                    // 無ければ UTC にフォールバック（旧クライアント互換）。
+                    const body = {
+                        action: 'clockIn', staffId, staffName, storeId, lat, lng,
+                        method: method || 'gps',
+                        date: todayLocalYMD(),
+                        time: nowLocalHM(),
+                    };
                     if (qrToken) body.qrToken = qrToken;
                     const data = await dbPost('attendance', body);
-                    if (!data || data.error) { showToast((data && data.error) || '出勤記録に失敗しました', 'error'); return null; }
+                    if (!data || data.error) {
+                        showToast((data && data.error) || '出勤記録に失敗しました', 'error');
+                        return null;
+                    }
                     if (data.success) {
                         showToast('出勤を記録しました', 'success');
                         setTodayRecord(data.record);
                         return data.record;
                     }
-                } catch (e) { showToast('出勤記録に失敗しました', 'error'); }
-                finally { setSaving(false); }
-                return null;
+                    // success/error のいずれでもないレスポンス → 想定外、明示的にエラー表示
+                    showToast('サーバから予期しない応答が返りました', 'error');
+                    return null;
+                } catch (e) {
+                    showToast('出勤記録に失敗しました（通信エラー）', 'error');
+                    return null;
+                } finally {
+                    setSaving(false);
+                }
             }, []);
 
             const clockOut = useCallback(async (staffId, lat, lng) => {
@@ -4429,17 +4474,31 @@
                 try {
                     // todayRecord.id を recordId として使う
                     const recordId = (todayRecord && todayRecord.id) || null;
-                    if (!recordId) { showToast('出勤記録が見つかりません', 'error'); return null; }
-                    const data = await dbPost('attendance', { action: 'clockOut', recordId, lat, lng });
-                    if (!data || data.error) { showToast((data && data.error) || '退勤記録に失敗しました', 'error'); return null; }
+                    if (!recordId) {
+                        showToast('出勤記録が見つかりません。リフレッシュしてからお試しください', 'error');
+                        return null;
+                    }
+                    const data = await dbPost('attendance', {
+                        action: 'clockOut', recordId, lat, lng,
+                        time: nowLocalHM(),
+                    });
+                    if (!data || data.error) {
+                        showToast((data && data.error) || '退勤記録に失敗しました', 'error');
+                        return null;
+                    }
                     if (data.success) {
                         showToast('退勤を記録しました', 'success');
                         setTodayRecord(prev => prev ? { ...prev, clockOut: data.record.clockOut, workMinutes: data.record.workMinutes } : null);
                         return data.record;
                     }
-                } catch (e) { showToast('退勤記録に失敗しました', 'error'); }
-                finally { setSaving(false); }
-                return null;
+                    showToast('サーバから予期しない応答が返りました', 'error');
+                    return null;
+                } catch (e) {
+                    showToast('退勤記録に失敗しました（通信エラー）', 'error');
+                    return null;
+                } finally {
+                    setSaving(false);
+                }
             }, [todayRecord]);
 
             // QRトークン生成（店舗端末用）
@@ -8158,7 +8217,8 @@
                     clockIn, clockOut, generateQrToken, getQrToken, validateQrToken, updateStoreCoordinates } = attendanceHook;
             // serverStores（GAS storeManage由来、lat/lng含む）を使用
             const stores = serverStores.filter(s => s.status !== 'inactive').filter(s => !currentAccess || currentAccess.storeIds.includes(s.id));
-            const [viewMonth, setViewMonth] = useState(new Date().toISOString().slice(0, 7));
+            // ローカル月（UTC toISOString はタイムゾーンずれを起こす）
+            const [viewMonth, setViewMonth] = useState(thisMonthLocalYM);
             const [gpsStatus, setGpsStatus] = useState(null); // null | 'checking' | {ok, dist, lat, lng, store} | {error}
             const [showQrScanner, setShowQrScanner] = useState(false);
             const [qrInput, setQrInput] = useState('');
@@ -8202,35 +8262,86 @@
 
             // 出勤処理
             const handleClockIn = useCallback(async (method) => {
+                if (saving) return; // 二重送信防止
                 if (!staffId) { showToast('ログインが必要です', 'error'); return; }
-                const storeId = gpsStatus?.store?.id || activeStoreId;
-                if (!storeId || storeId === 'all') { showToast('店舗を特定できません', 'error'); return; }
-                await clockIn(staffId, staffName, storeId, gpsStatus?.lat, gpsStatus?.lng, method);
-                checkTodayStatus(staffId);
-            }, [staffId, staffName, gpsStatus, activeStoreId, clockIn, checkTodayStatus]);
+                // 既にクロックイン済み（未退勤レコードあり）なら押しても無駄なので案内を出す
+                if (todayRecord && todayRecord.clockIn && !todayRecord.clockOut) {
+                    showToast('すでに出勤中です。退勤ボタンから操作してください', 'info');
+                    return;
+                }
+                // 店舗特定ロジック:
+                //   1. GPS で範囲内の店舗が取れた場合はそれを使う
+                //   2. activeStoreId が具体的な ID ならそれを使う
+                //   3. それ以外（'all'/未選択）で単一店舗権限ならその店舗を使う
+                //   4. どれも該当しなければエラー
+                let storeId = gpsStatus?.ok ? gpsStatus.store.id : null;
+                if (!storeId && activeStoreId && activeStoreId !== 'all') storeId = activeStoreId;
+                if (!storeId && currentAccess && currentAccess.storeIds.length === 1) storeId = currentAccess.storeIds[0];
+                if (!storeId) {
+                    showToast('店舗を特定できません。GPSで位置確認するか、店舗を選択してください', 'error');
+                    return;
+                }
+                // 権限外店舗の防止（アクセストークンの storeIds に無いものは拒否）
+                if (currentAccess && !currentAccess.storeIds.includes(storeId)) {
+                    showToast('この店舗への出勤権限がありません', 'error');
+                    return;
+                }
+                const result = await clockIn(staffId, staffName, storeId, gpsStatus?.lat, gpsStatus?.lng, method);
+                if (result) {
+                    checkTodayStatus(staffId);
+                }
+            }, [staffId, staffName, gpsStatus, activeStoreId, clockIn, checkTodayStatus, saving, todayRecord]);
 
             // 退勤処理
             const handleClockOut = useCallback(async () => {
+                if (saving) return;
                 if (!staffId) return;
+                if (!todayRecord || !todayRecord.clockIn) {
+                    showToast('本日の出勤記録が見つかりません', 'error');
+                    return;
+                }
+                if (todayRecord.clockOut) {
+                    showToast('本日は既に退勤済みです', 'info');
+                    return;
+                }
                 let lat, lng;
-                try { const pos = await getGPSPosition(); lat = pos.lat; lng = pos.lng; } catch(e) {}
-                await clockOut(staffId, lat, lng);
-                checkTodayStatus(staffId);
-            }, [staffId, clockOut, checkTodayStatus]);
+                try { const pos = await getGPSPosition(); lat = pos.lat; lng = pos.lng; } catch(e) { /* GPS 拒否でも退勤自体は続行 */ }
+                const result = await clockOut(staffId, lat, lng);
+                if (result) {
+                    checkTodayStatus(staffId);
+                }
+            }, [staffId, clockOut, checkTodayStatus, saving, todayRecord]);
 
             // QRスキャン → バリデート → 出勤
             const handleQrClockIn = useCallback(async (token) => {
+                if (saving) return;
                 if (!token) return;
+                if (!staffId) { showToast('ログインが必要です', 'error'); return; }
+                if (todayRecord && todayRecord.clockIn && !todayRecord.clockOut) {
+                    showToast('すでに出勤中です', 'info');
+                    return;
+                }
                 const result = await validateQrToken(token);
                 if (!result.valid) { showToast(result.error || 'QRコードが無効です', 'error'); return; }
                 const storeId = result.storeId;
+                if (!storeId) {
+                    showToast('QRコードから店舗を特定できませんでした', 'error');
+                    return;
+                }
+                // 権限外店舗の QR を拒否（店舗間アクセス防止）
+                if (currentAccess && !currentAccess.storeIds.includes(storeId)) {
+                    showToast('この店舗への出勤権限がありません', 'error');
+                    return;
+                }
                 let lat, lng;
-                try { const pos = await getGPSPosition(); lat = pos.lat; lng = pos.lng; } catch(e) {}
-                await clockIn(staffId, staffName, storeId, lat, lng, 'qr');
-                checkTodayStatus(staffId);
-                setShowQrScanner(false);
-                setQrInput('');
-            }, [staffId, staffName, validateQrToken, clockIn, checkTodayStatus]);
+                try { const pos = await getGPSPosition(); lat = pos.lat; lng = pos.lng; } catch(e) { /* GPS 失敗でも QR による店舗特定が済んでいるので続行 */ }
+                const r = await clockIn(staffId, staffName, storeId, lat, lng, 'qr');
+                if (r) {
+                    checkTodayStatus(staffId);
+                    setShowQrScanner(false);
+                    setQrInput('');
+                }
+            }, [staffId, staffName, validateQrToken, clockIn, checkTodayStatus, saving, todayRecord]);
 
             // QR表示（店舗端末用）- 5分ごと自動更新
             const startQrDisplay = useCallback(async (storeId) => {
@@ -8263,9 +8374,7 @@
             const getStoreName = (id) => { const s = stores.find(st => st.id === id); return s ? s.name : id; };
 
             const changeMonth = (d) => {
-                const dt = new Date(viewMonth + '-01');
-                dt.setMonth(dt.getMonth() + d);
-                setViewMonth(dt.toISOString().slice(0, 7));
+                setViewMonth(prev => shiftMonthLocalYM(prev, d));
             };
 
             const isClockedIn = todayRecord && todayRecord.clockIn && !todayRecord.clockOut;
@@ -8334,13 +8443,16 @@
                                             {/* 出勤ボタン */}
                                             <div className="flex items-center justify-center gap-3 pt-2">
                                                 <button onClick={() => handleClockIn('gps')}
-                                                    disabled={saving || !gpsStatus?.ok}
-                                                    className="px-8 py-4 rounded-2xl text-white font-extrabold text-base shadow-lg transition-all active:scale-95 disabled:opacity-40"
+                                                    disabled={saving || !gpsStatus?.ok || isClockedIn}
+                                                    aria-busy={saving || undefined}
+                                                    className="inline-flex items-center px-8 py-4 rounded-2xl text-white font-extrabold text-base shadow-lg transition-all active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
                                                     style={{background: gpsStatus?.ok ? 'linear-gradient(135deg, #0d9488, #14b8a6)' : '#94a3b8'}}>
-                                                    <Icon name="log-in" size={20} className="inline mr-2 -mt-0.5" />GPS出勤
+                                                    {saving ? <Spinner size={18} /> : <Icon name="log-in" size={20} className="inline mr-2 -mt-0.5" />}
+                                                    <span className="ml-2">{saving ? '記録中...' : 'GPS出勤'}</span>
                                                 </button>
                                                 <button onClick={() => setShowQrScanner(true)}
-                                                    className="px-6 py-4 rounded-2xl bg-white border-2 border-slate-200 text-slate-700 font-extrabold text-base shadow-sm hover:border-sise-300 transition-all active:scale-95">
+                                                    disabled={saving || isClockedIn}
+                                                    className="inline-flex items-center px-6 py-4 rounded-2xl bg-white border-2 border-slate-200 text-slate-700 font-extrabold text-base shadow-sm hover:border-sise-300 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed">
                                                     <Icon name="qr-code" size={20} className="inline mr-2 -mt-0.5" />QR出勤
                                                 </button>
                                             </div>
@@ -8354,9 +8466,11 @@
                                             </div>
                                             <p className="text-lg font-extrabold text-slate-800">出勤: {todayRecord.clockIn}</p>
                                             <button onClick={handleClockOut} disabled={saving}
-                                                className="px-8 py-4 rounded-2xl text-white font-extrabold text-base shadow-lg transition-all active:scale-95 disabled:opacity-50"
+                                                aria-busy={saving || undefined}
+                                                className="inline-flex items-center px-8 py-4 rounded-2xl text-white font-extrabold text-base shadow-lg transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
                                                 style={{background: 'linear-gradient(135deg, #ef4444, #f87171)'}}>
-                                                <Icon name="log-out" size={20} className="inline mr-2 -mt-0.5" />退勤する
+                                                {saving ? <Spinner size={18} /> : <Icon name="log-out" size={20} className="inline mr-2 -mt-0.5" />}
+                                                <span className="ml-2">{saving ? '記録中...' : '退勤する'}</span>
                                             </button>
                                         </div>
                                     )}
@@ -9904,17 +10018,6 @@
                     return currentAccess.storeIds[0];
                 }
                 return '';
-            };
-
-            // タイムゾーンずれを防ぐため、システムの表示日付ではなくローカル時刻から
-            // YYYY-MM-DD を生成する。toISOString() は UTC なので夜遅い時間だと日付が
-            // 翌日扱いになる問題があった。
-            const todayLocalYMD = () => {
-                const d = new Date();
-                const y = d.getFullYear();
-                const m = String(d.getMonth() + 1).padStart(2, '0');
-                const day = String(d.getDate()).padStart(2, '0');
-                return `${y}-${m}-${day}`;
             };
 
             // 店舗フィルタ
