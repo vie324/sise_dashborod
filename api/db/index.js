@@ -138,8 +138,19 @@ async function storesGet(params) {
   };
 }
 
-async function storesPost(body) {
+async function storesPost(body, staffCtx) {
   const action = body.action || '';
+  // スタッフモードでは店舗マスタ (作成/更新/削除/復元/座標変更/一括保存) を
+  // 一切変更できないようにする。UI でも admin/manager/headquarter のみに
+  // ボタンを出しているが、devtools 経由でも守るため server 側でも遮断する。
+  // role === 'manager' / 'headquarter' はスタッフモードでも店舗管理可にしたい
+  // 場合、ここを緩めればよい。現行は「role='staff' は全アクション拒否」。
+  if (staffCtx !== null) {
+    const role = String(staffCtx.role || '').toLowerCase();
+    if (role === 'staff') {
+      return { error: 'スタッフは店舗管理を変更できません' };
+    }
+  }
   switch (action) {
     case 'addStore': {
       const store = body.store || {};
