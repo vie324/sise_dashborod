@@ -393,6 +393,14 @@
             background-clip: text;
         }
 
+        /* ブランドカラー変数: 設定画面からの admin 変更に追従する。
+           本格的なテーマ変更は Tailwind の sise-* を変えないと難しいが、
+           meta theme-color + 一部アクセント要素には即時反映される。 */
+        :root { --theme-accent: #33a065; }
+        .theme-accent-text { color: var(--theme-accent); }
+        .theme-accent-bg { background-color: var(--theme-accent); }
+        .theme-accent-border { border-color: var(--theme-accent); }
+
         /* Card hover */
         .card-hover {
             transition: all 0.4s cubic-bezier(0.16,1,0.3,1);
@@ -15841,6 +15849,23 @@
             }, [viewMode]);
 
             // Draw skeleton overlay
+            // Viewport のサイズ変更（画面回転、ウィンドウリサイズ）時にも
+            // SVG overlay が正しく再描画されるよう ResizeObserver で監視する。
+            // 以前は landmarks が変わった時のみ再描画で、回転時にスケルトンが
+            // 古い viewport サイズのまま残って座標がずれていた。
+            const [vpSize, setVpSize] = useState({ w: 0, h: 0 });
+            useEffect(() => {
+                if (!vpRef.current || typeof ResizeObserver === 'undefined') return;
+                const ro = new ResizeObserver((entries) => {
+                    const r = entries[0];
+                    if (!r) return;
+                    const cr = r.contentRect;
+                    setVpSize(prev => (prev.w === cr.width && prev.h === cr.height) ? prev : { w: cr.width, h: cr.height });
+                });
+                ro.observe(vpRef.current);
+                return () => ro.disconnect();
+            }, []);
+
             useEffect(() => {
                 if (!landmarks || !svgRef.current || !vpRef.current) return;
                 const svg = svgRef.current;
@@ -15910,7 +15935,7 @@
                     }
                 }
                 svg.innerHTML = html;
-            }, [landmarks, analysis, phase, viewMode, overlayOn, viewConnections, viewPoints]);
+            }, [landmarks, analysis, phase, viewMode, overlayOn, viewConnections, viewPoints, vpSize]);
 
             // 比較データの有効ペア判定
             const hasFrontPair = compData.before_front && compData.after_front;
@@ -19896,6 +19921,74 @@
                         )}
                     </Card>
 
+                    {/* テーマカラー設定 (admin のみ) */}
+                    <Card>
+                        <h3 className="text-lg font-semibold text-slate-900 mb-2">ブランドカラー設定</h3>
+                        <p className="text-xs text-slate-500 mb-4">ヘッダの PWA テーマカラーと `--theme-accent` CSS 変数に反映されます。既定: <code>#33a065</code></p>
+                        {(() => {
+                            const [themeInput, setThemeInput] = useState(() => {
+                                try { return localStorage.getItem('sise_theme_accent') || '#33a065'; }
+                                catch (_) { return '#33a065'; }
+                            });
+                            const [themeSaving, setThemeSaving] = useState(false);
+                            const valid = /^#[0-9a-fA-F]{6}$/.test(themeInput);
+                            const apply = async () => {
+                                if (!valid) { showToast('#RRGGBB 形式で入力してください', 'error'); return; }
+                                setThemeSaving(true);
+                                try { localStorage.setItem('sise_theme_accent', themeInput); } catch (_) {}
+                                document.documentElement.style.setProperty('--theme-accent', themeInput);
+                                const metaTc = document.querySelector('meta[name="theme-color"]');
+                                if (metaTc) metaTc.setAttribute('content', themeInput);
+                                const res = await saveDashConfig('themeAccent', themeInput);
+                                setThemeSaving(false);
+                                if (!res || res.error) {
+                                    showToast('保存失敗: ' + ((res && res.error) || '通信エラー'), 'error');
+                                } else {
+                                    showToast('ブランドカラーを保存しました（他端末は再読込で反映）', 'success');
+                                    hapticSuccess();
+                                }
+                            };
+                            const reset = () => {
+                                setThemeInput('#33a065');
+                                document.documentElement.style.setProperty('--theme-accent', '#33a065');
+                                const metaTc = document.querySelector('meta[name="theme-color"]');
+                                if (metaTc) metaTc.setAttribute('content', '#33a065');
+                                try { localStorage.setItem('sise_theme_accent', '#33a065'); } catch (_) {}
+                                saveDashConfig('themeAccent', '#33a065');
+                            };
+                            return (
+                                <div className="flex items-center gap-3 flex-wrap">
+                                    <input
+                                        type="color"
+                                        value={valid ? themeInput : '#33a065'}
+                                        onChange={e => setThemeInput(e.target.value)}
+                                        className="w-14 h-10 rounded-lg border border-slate-200 cursor-pointer"
+                                    />
+                                    <input
+                                        type="text"
+                                        value={themeInput}
+                                        onChange={e => setThemeInput(e.target.value)}
+                                        placeholder="#33a065"
+                                        className={`px-3 py-2 border rounded-lg text-sm font-mono outline-none ${valid ? 'border-slate-200 focus:border-sise-500' : 'border-red-400 bg-red-50'}`}
+                                    />
+                                    <div className="w-24 h-10 rounded-lg" style={{ background: valid ? themeInput : '#f1f5f9', border: '1px solid #e2e8f0' }} />
+                                    <button
+                                        onClick={apply}
+                                        disabled={themeSaving || !valid}
+                                        className="inline-flex items-center gap-2 px-4 py-2 btn-gradient rounded-xl text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                        {themeSaving && <Spinner size={12} />}
+                                        {themeSaving ? '保存中...' : '適用'}
+                                    </button>
+                                    <button
+                                        onClick={reset}
+                                        className="px-3 py-2 rounded-xl text-xs text-slate-500 hover:bg-slate-100"
+                                    >既定に戻す</button>
+                                </div>
+                            );
+                        })()}
+                    </Card>
+
                     {/* Google Sheets 統合連携 */}
                     <Card>
                         <h3 className="text-lg font-semibold text-slate-900 mb-4">Google Sheets 連携</h3>
@@ -21314,6 +21407,33 @@
             useEffect(() => {
                 try { localStorage.setItem('sise_dark_mode', isDarkMode ? '1' : '0'); } catch (_) {}
             }, [isDarkMode]);
+
+            // テーマカラー (admin が設定画面から変更可能)。dashConfig に保存し
+            // boot 時に CSS custom property --theme-accent + PWA theme-color meta
+            // に適用する。既定値は si'se green (#33a065)。
+            const DEFAULT_THEME_ACCENT = '#33a065';
+            const [themeAccent, setThemeAccent] = useState(() => {
+                try { return localStorage.getItem('sise_theme_accent') || DEFAULT_THEME_ACCENT; }
+                catch (_) { return DEFAULT_THEME_ACCENT; }
+            });
+            useEffect(() => {
+                // サーバ側 dashConfig から最新値を読んで適用
+                (async () => {
+                    try {
+                        const v = await fetchDashConfig('themeAccent');
+                        if (v && typeof v === 'string' && /^#[0-9a-fA-F]{6}$/.test(v)) {
+                            setThemeAccent(v);
+                            try { localStorage.setItem('sise_theme_accent', v); } catch (_) {}
+                        }
+                    } catch (_) {}
+                })();
+            }, []);
+            useEffect(() => {
+                // CSS custom property と meta theme-color に反映
+                document.documentElement.style.setProperty('--theme-accent', themeAccent);
+                const metaTc = document.querySelector('meta[name="theme-color"]');
+                if (metaTc) metaTc.setAttribute('content', themeAccent);
+            }, [themeAccent]);
             const [flowMode, setFlowMode] = useState(false);
 
             // Phase 3 — ヘッダ縮退: 下スクロール時に opacity/shadow を減らして
