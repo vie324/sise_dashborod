@@ -1765,17 +1765,30 @@
             const token = params.get('v');
             if (!token) return null;
             try {
-                const json = decodeURIComponent(escape(atob(token)));
+                // 新形式 (signed): "<base64url(JSON)>.<base64url(HMAC)>"
+                //   → 先頭パートを base64url デコードして JSON 化
+                // 旧形式 (legacy): "<base64(JSON)>"
+                //   → そのまま base64 デコード
+                // いずれも UTF-8 マルチバイト安全に処理する。
+                const payloadPart = token.includes('.') ? token.split('.')[0] : token;
+                // base64url → 通常の base64 に変換
+                let b64 = payloadPart.replace(/-/g, '+').replace(/_/g, '/');
+                while (b64.length % 4) b64 += '=';
+                const bin = atob(b64);
+                // utf-8 バイト列を文字列化
+                const bytes = new Uint8Array(bin.length);
+                for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+                const json = new TextDecoder('utf-8').decode(bytes);
                 const decoded = JSON.parse(json);
                 return {
                     name: decoded.n || '不明',
                     role: decoded.r || 'staff',
-                    storeIds: decoded.sid || [],
+                    storeIds: Array.isArray(decoded.sid) ? decoded.sid.map(String) : [],
                     hasPassword: !!decoded.pw,
-                    staffId: decoded.id || '',
+                    staffId: String(decoded.id || ''),
                 };
             } catch (e) {
-                console.warn('Invalid access token');
+                console.warn('Invalid access token:', e);
                 return null;
             }
         };
@@ -8807,7 +8820,7 @@
             const [qrDisplayStore, setQrDisplayStore] = useState('');
             const [attTab, setAttTab] = useState('clock'); // clock | history | qr | settings
 
-            const staffId = currentAccess ? currentAccess.id : '';
+            const staffId = currentAccess ? currentAccess.staffId : '';
             const staffName = currentAccess ? currentAccess.name : '';
 
             // 初回: 今日のステータス + 履歴取得
@@ -21461,9 +21474,15 @@
             const [quickSearchOpen, setQuickSearchOpen] = useState(false);
 
             const isStaffMode = !!currentAccess;
-            const [activeStoreId, setActiveStoreId] = useState(
-                isStaffMode && currentAccess.storeIds.length === 1 ? currentAccess.storeIds[0] : 'all'
-            );
+            // スタッフモードでは 'all' 既定にすると全店舗データが意図せず混ざるため、
+            // 所属店舗が 1 つなら自動選択、複数でも先頭の店舗を既定とする。
+            // admin モードのみ 'all' (全店舗) を既定にする。
+            const [activeStoreId, setActiveStoreId] = useState(() => {
+                if (isStaffMode && currentAccess.storeIds.length > 0) {
+                    return currentAccess.storeIds[0];
+                }
+                return 'all';
+            });
             // Square データ取得（店舗選択に連動、アクセス制限適用）
             const { memberData, refreshSquareData, operateSubscription } = useSquareData(
                 activeStoreId,
@@ -21919,9 +21938,18 @@
                                             }}
                                         />
                                     </div>
-                                    <div className="ml-2.5">
+                                    <div className="ml-2.5 min-w-0">
                                         <h1 className="text-sm md:text-base font-extrabold tracking-wide gradient-text">si'se</h1>
-                                        <p className="text-[9px] text-sise-400 -mt-0.5 font-semibold tracking-[0.2em]">DASHBOARD</p>
+                                        {/* スタッフモード時はログイン中のスタッフ名を副題として表示 */}
+                                        {/* (モバイルでも表示、長い名前は省略) */}
+                                        {isStaffMode ? (
+                                            <p className="text-[10px] -mt-0.5 font-semibold text-sise-600 truncate max-w-[140px] md:max-w-[200px] flex items-center gap-1">
+                                                <Icon name={currentAccess.role === 'headquarter' ? 'building' : currentAccess.role === 'manager' ? 'shield' : 'user'} size={10} className="text-sise-500 flex-shrink-0" />
+                                                <span className="truncate">{currentAccess.name}</span>
+                                            </p>
+                                        ) : (
+                                            <p className="text-[9px] text-sise-400 -mt-0.5 font-semibold tracking-[0.2em]">DASHBOARD</p>
+                                        )}
                                     </div>
                                 </div>
                             </div>
@@ -21933,28 +21961,25 @@
                                         {currentView === 'counseling' ? 'カウンセリング中' : '施術レポート作成中'}
                                     </span>
                                 ) : null}
-                                {/* スタッフ表示 */}
-                                {!isFullscreenView && isStaffMode && (
-                                    <div className="flex items-center px-2 md:px-3 py-1.5 bg-sise-50/80 border border-sise-200 rounded-xl hide-mobile">
-                                        <Icon name={currentAccess.role === 'headquarter' ? 'building' : currentAccess.role === 'manager' ? 'shield' : 'user'} size={13} className="text-sise-500 mr-1" />
-                                        <span className="text-xs font-semibold text-sise-700">{currentAccess.name}</span>
-                                    </div>
-                                )}
+                                {/* スタッフ表示は左側ロゴ横に移動済み（上記）。右側の重複表示は削除。 */}
                                 {/* 以下はフルスクリーンビュー中は非表示 */}
                                 {!isFullscreenView && (
                                     <>
                                         {/* 店舗セレクター */}
+                                        {/* スタッフモードでは「全店舗」選択肢を出さない */}
+                                        {/* (所属店舗のみ、複数の時はドロップダウン、1つなら表示しない) */}
                                         {(() => {
                                             const visibleStores = isStaffMode
                                                 ? (memberData.stores || []).filter(s => currentAccess.storeIds.includes(s.id))
                                                 : (memberData.stores || []);
+                                            const canShowAll = !isStaffMode;
                                             return visibleStores.length > 1 ? (
                                                 <select
                                                     value={activeStoreId}
                                                     onChange={(e) => setActiveStoreId(e.target.value)}
                                                     className="px-2 md:px-3 py-1.5 border border-sise-200 rounded-xl text-xs font-semibold focus:border-sise-400 focus:ring-2 focus:ring-sise-400/20 outline-none bg-sise-50/60 text-sise-700"
                                                 >
-                                                    <option value="all">全店舗</option>
+                                                    {canShowAll && <option value="all">全店舗</option>}
                                                     {visibleStores.map(s => (
                                                         <option key={s.id} value={s.id}>{s.name}</option>
                                                     ))}
