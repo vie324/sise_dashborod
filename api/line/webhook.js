@@ -87,12 +87,28 @@ async function fetchAndUpsertProfile(storeId, userId, accessToken) {
 }
 
 // Persist one LINE event to Supabase. Store scoping is enforced here.
+// LINE Platform は webhook の再送を行うことがあり、同じ event が複数回
+// 到達して line_messages に重複挿入される可能性がある。message.id をキーに
+// 到達済み判定を行って冪等化する (follow/unfollow は message.id が無いので
+// 対象外 — 同じ user から短時間に複数回 follow する設計でない限り実害なし)。
 async function persistEvent(storeId, event) {
   const sid = String(storeId);
   const userId = event.source?.userId || '';
   if (!userId) return;
 
   if (event.type === 'message') {
+    const messageId = event.message?.id || '';
+    // LINE message.id が存在する場合は重複チェック。同じ (store, message_id)
+    // が既に存在すればスキップ (再送対策)。
+    if (messageId) {
+      const { data: existing } = await supabase
+        .from('line_messages')
+        .select('id').eq('store_id', sid).eq('message_id', messageId).limit(1).maybeSingle();
+      if (existing) {
+        console.log('[LINE webhook] duplicate message skipped:', messageId);
+        return;
+      }
+    }
     const msgType = event.message?.type || 'text';
     const text = event.message?.text
       || (msgType === 'image' ? '[画像]' : msgType === 'sticker' ? '[スタンプ]'
@@ -104,7 +120,7 @@ async function persistEvent(storeId, event) {
       direction: 'received',
       message_type: msgType,
       message_text: text,
-      message_id: event.message?.id || '',
+      message_id: messageId,
       timestamp: event.timestamp ? new Date(event.timestamp).toISOString() : new Date().toISOString(),
     });
   } else if (event.type === 'follow' || event.type === 'unfollow') {
