@@ -8808,8 +8808,29 @@
         const AttendanceView = ({ attendanceHook, activeStoreId, memberData }) => {
             const { records, loading, saving, todayRecord, fetchRecords, checkTodayStatus,
                     clockIn, clockOut, generateQrToken, getQrToken, validateQrToken, updateStoreCoordinates } = attendanceHook;
-            // serverStores（GAS storeManage由来、lat/lng含む）を使用
-            const stores = serverStores.filter(s => s.status !== 'inactive').filter(s => !currentAccess || currentAccess.storeIds.includes(s.id));
+            // 店舗の lat/lng は Supabase stores テーブルが正本。
+            // serverStores (Square config) には座標が含まれないため、
+            // GPS 距離判定・座標エディタともに supabaseStores を優先する。
+            const [supabaseStores, setSupabaseStores] = useState([]);
+            const reloadSupabaseStores = useCallback(async () => {
+                const data = await dbGet('stores', { includeInactive: 'true' });
+                if (data && Array.isArray(data.stores)) setSupabaseStores(data.stores);
+            }, []);
+            useEffect(() => { reloadSupabaseStores(); }, [reloadSupabaseStores]);
+            const stores = useMemo(() => {
+                // supabaseStores が読めていればそれを使う。未ロード時のみ
+                // serverStores へフォールバック (店舗名表示が空にならないように)。
+                const base = supabaseStores.length > 0 ? supabaseStores : serverStores;
+                return base
+                    .filter(s => s.status !== 'inactive')
+                    .filter(s => !currentAccess || currentAccess.storeIds.includes(s.id));
+            }, [supabaseStores]);
+            // 座標保存後は UI を最新化するため再取得を挟む
+            const handleSaveCoordinates = useCallback(async (storeId, lat, lng) => {
+                const data = await updateStoreCoordinates(storeId, lat, lng);
+                if (data && data.success) await reloadSupabaseStores();
+                return data;
+            }, [updateStoreCoordinates, reloadSupabaseStores]);
             // ローカル月（UTC toISOString はタイムゾーンずれを起こす）
             const [viewMonth, setViewMonth] = useState(thisMonthLocalYM);
             const [gpsStatus, setGpsStatus] = useState(null); // null | 'checking' | {ok, dist, lat, lng, store} | {error}
@@ -9231,10 +9252,10 @@
                                         <Icon name="map-pin" size={18} className="mr-2 text-sise-500" />
                                         店舗GPS座標設定
                                     </h4>
-                                    <p className="text-xs text-slate-400 mb-3">各店舗の緯度・経度を設定します。「現在地を取得」ボタンで店舗にいる時に設定できます。</p>
+                                    <p className="text-xs text-slate-400 mb-3">各店舗の緯度・経度を設定します。「現在地を取得」ボタンで店舗にいる時に設定できます。座標は Supabase の stores テーブルに保存されます。</p>
                                     <div className="space-y-3">
                                         {stores.map(s => (
-                                            <StoreCoordinateEditor key={s.id} store={s} onSave={updateStoreCoordinates} />
+                                            <StoreCoordinateEditor key={s.id} store={s} onSave={handleSaveCoordinates} />
                                         ))}
                                     </div>
                                 </Card>

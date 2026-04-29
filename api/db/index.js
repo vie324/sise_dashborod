@@ -175,9 +175,19 @@ async function storesPost(body, staffCtx) {
     }
     case 'updateCoordinates': {
       if (!body.storeId) return { error: 'storeIdが必要です' };
-      const { error } = await supabase.from('stores').update({ lat: body.lat, lng: body.lng }).eq('id', body.storeId);
+      // .select() を付けて影響行を取り、0 件なら明示エラー。
+      // 付けない update は対象 0 行でも error=null が返り、UI が成功と
+      // 誤認するため。設定画面で店舗を Supabase に登録していないケース
+      // (Square config だけで運用されている場合) を検知する。
+      const { data, error } = await supabase.from('stores')
+        .update({ lat: body.lat, lng: body.lng })
+        .eq('id', body.storeId)
+        .select('id, lat, lng');
       if (error) throw error;
-      return { success: true, storeId: body.storeId };
+      if (!data || data.length === 0) {
+        return { error: `店舗が Supabase に登録されていません (storeId=${body.storeId})。設定 → 店舗管理から先に追加してください` };
+      }
+      return { success: true, storeId: body.storeId, lat: data[0].lat, lng: data[0].lng };
     }
     case 'deleteStore':  return setStoreStatus(body.storeId, 'inactive');
     case 'restoreStore': return setStoreStatus(body.storeId, 'active');
