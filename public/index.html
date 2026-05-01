@@ -1969,12 +1969,15 @@
         // 現在のアクセス情報（URLから解析）
         const currentAccess = parseAccessFromUrl();
 
+        // 本部ロールは全店舗にアクセス可能（管理者と同等）
+        const hasFullStoreAccess = () => !currentAccess || currentAccess.role === 'headquarter';
+
         // 権限チェック: レポートの店舗名が許可されたstoreIdsに含まれるか判定
         // storeIds は Square の店舗ID（例: "LID..."）、r.store は店舗名（例: "本厚木店"）
         // serverStores（{id, name}の配列）を使って名前→ID変換して判定
         const isStoreAllowed = (storeName) => {
-            // 非スタッフモード（管理者ログイン）: 全店舗表示
-            if (!currentAccess) return true;
+            // 非スタッフモード（管理者）または本部ロール: 全店舗表示
+            if (hasFullStoreAccess()) return true;
             // スタッフモードで storeIds が未設定: アクセスなし（デフォルト拒否）
             if (!currentAccess.storeIds || currentAccess.storeIds.length === 0) return false;
             // serverStoresがロード済みならID→名前マッピングで判定
@@ -1987,6 +1990,13 @@
             }
             // serverStores未ロードの場合、storeIdsに名前が直接含まれるかも確認
             return currentAccess.storeIds.includes(storeName);
+        };
+
+        // store ID ベースの権限判定（出納帳・勤怠など store_id を直接使う系で利用）
+        const isStoreIdAllowed = (storeId) => {
+            if (hasFullStoreAccess()) return true;
+            if (!currentAccess.storeIds || currentAccess.storeIds.length === 0) return false;
+            return currentAccess.storeIds.includes(storeId);
         };
 
         // ========================================
@@ -4738,10 +4748,68 @@
                 } catch (e) { showToast('座標保存に失敗しました', 'error'); return { error: e.message }; }
             }, []);
 
+            // 勤怠レコード編集（管理者・本部用）
+            const updateRecord = useCallback(async (recordId, updates) => {
+                if (!recordId) return null;
+                setSaving(true);
+                try {
+                    const data = await dbPost('attendance', { action: 'update', recordId, updates });
+                    if (!data || data.error) {
+                        showToast((data && data.error) || '更新に失敗しました', 'error');
+                        return null;
+                    }
+                    // ローカル records を更新
+                    setRecords(prev => prev.map(r => {
+                        if (r.id !== recordId) return r;
+                        const next = { ...r };
+                        if (updates.clockIn !== undefined) next.clockIn = updates.clockIn;
+                        if (updates.clockOut !== undefined) next.clockOut = updates.clockOut;
+                        if (updates.notes !== undefined) next.notes = updates.notes;
+                        if (updates.method !== undefined) next.method = updates.method;
+                        // 労働時間を再計算（clockIn / clockOut が両方ある場合のみ）
+                        if (next.clockIn && next.clockOut) {
+                            const [ih, im] = next.clockIn.split(':').map(Number);
+                            const [oh, om] = next.clockOut.split(':').map(Number);
+                            let mins = (oh * 60 + om) - (ih * 60 + im);
+                            if (mins < 0) mins += 24 * 60;
+                            next.workMinutes = mins;
+                        } else {
+                            next.workMinutes = 0;
+                        }
+                        return next;
+                    }));
+                    showToast('勤怠記録を更新しました', 'success');
+                    return data;
+                } catch (e) {
+                    showToast('更新に失敗しました（通信エラー）', 'error');
+                    return null;
+                } finally { setSaving(false); }
+            }, []);
+
+            // 勤怠レコード削除（管理者・本部用）
+            const deleteRecord = useCallback(async (recordId) => {
+                if (!recordId) return null;
+                setSaving(true);
+                try {
+                    const data = await dbPost('attendance', { action: 'delete', recordId });
+                    if (!data || data.error) {
+                        showToast((data && data.error) || '削除に失敗しました', 'error');
+                        return null;
+                    }
+                    setRecords(prev => prev.filter(r => r.id !== recordId));
+                    showToast('勤怠記録を削除しました', 'success');
+                    return data;
+                } catch (e) {
+                    showToast('削除に失敗しました（通信エラー）', 'error');
+                    return null;
+                } finally { setSaving(false); }
+            }, []);
+
             return {
                 records, loading, saving, todayRecord,
                 fetchRecords, checkTodayStatus, clockIn, clockOut,
-                generateQrToken, getQrToken, validateQrToken, updateStoreCoordinates
+                generateQrToken, getQrToken, validateQrToken, updateStoreCoordinates,
+                updateRecord, deleteRecord
             };
         };
 
@@ -8807,7 +8875,13 @@
 
         const AttendanceView = ({ attendanceHook, activeStoreId, memberData }) => {
             const { records, loading, saving, todayRecord, fetchRecords, checkTodayStatus,
-                    clockIn, clockOut, generateQrToken, getQrToken, validateQrToken, updateStoreCoordinates } = attendanceHook;
+                    clockIn, clockOut, generateQrToken, getQrToken, validateQrToken, updateStoreCoordinates,
+                    updateRecord, deleteRecord } = attendanceHook;
+            // 勤怠レコードの編集権限（管理者・本部のみ）
+            const canEditAttendance = !currentAccess || currentAccess.role === 'headquarter';
+            // 編集モーダル状態
+            const [editingRecord, setEditingRecord] = useState(null);
+            const [editForm, setEditForm] = useState({ clockIn: '', clockOut: '', notes: '' });
             // 店舗の lat/lng は Supabase stores テーブルが正本。
             // serverStores (Square config) には座標が含まれないため、
             // GPS 距離判定・座標エディタともに supabaseStores を優先する。
@@ -8823,7 +8897,8 @@
                 const base = supabaseStores.length > 0 ? supabaseStores : serverStores;
                 return base
                     .filter(s => s.status !== 'inactive')
-                    .filter(s => !currentAccess || currentAccess.storeIds.includes(s.id));
+                    // 管理者・本部は全店舗、それ以外は割当店舗のみ
+                    .filter(s => hasFullStoreAccess() || currentAccess.storeIds.includes(s.id));
             }, [supabaseStores]);
             // 座標保存後は UI を最新化するため再取得を挟む
             const handleSaveCoordinates = useCallback(async (storeId, lat, lng) => {
@@ -8895,8 +8970,8 @@
                     showToast('店舗を特定できません。GPSで位置確認するか、店舗を選択してください', 'error');
                     return;
                 }
-                // 権限外店舗の防止（アクセストークンの storeIds に無いものは拒否）
-                if (currentAccess && !currentAccess.storeIds.includes(storeId)) {
+                // 権限外店舗の防止（アクセストークンの storeIds に無いものは拒否、本部・管理者は全店舗OK）
+                if (!isStoreIdAllowed(storeId)) {
                     showToast('この店舗への出勤権限がありません', 'error');
                     return;
                 }
@@ -8942,8 +9017,8 @@
                     showToast('QRコードから店舗を特定できませんでした', 'error');
                     return;
                 }
-                // 権限外店舗の QR を拒否（店舗間アクセス防止）
-                if (currentAccess && !currentAccess.storeIds.includes(storeId)) {
+                // 権限外店舗の QR を拒否（店舗間アクセス防止、本部・管理者は全店舗OK）
+                if (!isStoreIdAllowed(storeId)) {
                     showToast('この店舗への出勤権限がありません', 'error');
                     return;
                 }
@@ -9170,11 +9245,14 @@
                                                 <th className="text-center py-2.5 px-2 text-red-500 font-semibold">退勤</th>
                                                 <th className="text-center py-2.5 px-2 text-sise-600 font-semibold">勤務時間</th>
                                                 <th className="text-center py-2.5 px-2 text-slate-400 font-semibold">方法</th>
+                                                {canEditAttendance && (
+                                                    <th className="text-center py-2.5 px-2 text-slate-400 font-semibold">操作</th>
+                                                )}
                                             </tr>
                                         </thead>
                                         <tbody>
                                             {monthRecords.length === 0 && (
-                                                <tr><td colSpan="6" className="text-center py-8 text-slate-400">記録がありません</td></tr>
+                                                <tr><td colSpan={canEditAttendance ? 7 : 6} className="text-center py-8 text-slate-400">記録がありません</td></tr>
                                             )}
                                             {monthRecords.map(r => (
                                                 <tr key={r.id} className="border-b border-slate-50 hover:bg-slate-50/50">
@@ -9188,6 +9266,31 @@
                                                             {r.method === 'qr' ? 'QR' : 'GPS'}
                                                         </span>
                                                     </td>
+                                                    {canEditAttendance && (
+                                                        <td className="py-2.5 px-2 text-center whitespace-nowrap">
+                                                            <button
+                                                                onClick={() => {
+                                                                    setEditingRecord(r);
+                                                                    setEditForm({ clockIn: r.clockIn || '', clockOut: r.clockOut || '', notes: r.notes || '' });
+                                                                }}
+                                                                className="p-1 rounded hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
+                                                                title="編集"
+                                                                aria-label="勤怠記録を編集">
+                                                                <Icon name="edit-2" size={13} />
+                                                            </button>
+                                                            <button
+                                                                onClick={async () => {
+                                                                    if (await confirmDialog({ title:'勤怠記録の削除', message: `${r.date} ${r.staffName || ''}の記録を削除しますか？`, confirmLabel:'削除', variant:'danger' })) {
+                                                                        await deleteRecord(r.id);
+                                                                    }
+                                                                }}
+                                                                className="p-1 rounded hover:bg-red-50 text-slate-300 hover:text-red-400 transition-colors ml-0.5"
+                                                                title="削除"
+                                                                aria-label="勤怠記録を削除">
+                                                                <Icon name="trash-2" size={13} />
+                                                            </button>
+                                                        </td>
+                                                    )}
                                                 </tr>
                                             ))}
                                         </tbody>
@@ -9260,6 +9363,77 @@
                                     </div>
                                 </Card>
                             )}
+                        </div>
+                    )}
+
+                    {/* 勤怠記録編集モーダル（管理者・本部のみ） */}
+                    {canEditAttendance && editingRecord && (
+                        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 animate-fade-in"
+                             role="dialog" aria-modal="true" aria-labelledby="att-edit-title">
+                            <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-5 animate-scale-in">
+                                <div className="flex items-center justify-between mb-3">
+                                    <h3 id="att-edit-title" className="text-base font-bold text-slate-800 flex items-center">
+                                        <Icon name="edit-2" size={16} className="mr-2 text-sise-500" />
+                                        勤怠記録を編集
+                                    </h3>
+                                    <button onClick={() => setEditingRecord(null)} className="p-1 rounded hover:bg-slate-100 text-slate-400" aria-label="閉じる">
+                                        <Icon name="x" size={18} />
+                                    </button>
+                                </div>
+                                <div className="text-xs text-slate-500 mb-3">
+                                    {editingRecord.date}・{editingRecord.staffName || '不明'}・{getStoreName(editingRecord.storeId)}
+                                </div>
+                                <div className="space-y-3">
+                                    <div>
+                                        <label className="block text-xs font-semibold text-slate-600 mb-1">出勤時刻</label>
+                                        <input type="time" value={editForm.clockIn}
+                                            onChange={e => setEditForm(p => ({ ...p, clockIn: e.target.value }))}
+                                            className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:border-sise-400" />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-semibold text-slate-600 mb-1">退勤時刻</label>
+                                        <input type="time" value={editForm.clockOut}
+                                            onChange={e => setEditForm(p => ({ ...p, clockOut: e.target.value }))}
+                                            className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:border-sise-400" />
+                                        <p className="text-[11px] text-slate-400 mt-1">空欄にすると未退勤扱いになります。</p>
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-semibold text-slate-600 mb-1">備考</label>
+                                        <textarea value={editForm.notes}
+                                            onChange={e => setEditForm(p => ({ ...p, notes: e.target.value }))}
+                                            rows={2}
+                                            className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:border-sise-400 resize-none" />
+                                    </div>
+                                </div>
+                                <div className="flex justify-end gap-2 mt-4">
+                                    <button onClick={() => setEditingRecord(null)} disabled={saving}
+                                        className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg disabled:opacity-50">キャンセル</button>
+                                    <button
+                                        onClick={async () => {
+                                            const updates = {
+                                                clockIn: editForm.clockIn || '',
+                                                clockOut: editForm.clockOut || '',
+                                                notes: editForm.notes || ''
+                                            };
+                                            // 労働時間も同梱（サーバ側でも持つが UI 上の整合性のため）
+                                            if (updates.clockIn && updates.clockOut) {
+                                                const [ih, im] = updates.clockIn.split(':').map(Number);
+                                                const [oh, om] = updates.clockOut.split(':').map(Number);
+                                                let mins = (oh * 60 + om) - (ih * 60 + im);
+                                                if (mins < 0) mins += 24 * 60;
+                                                updates.workMinutes = mins;
+                                            } else {
+                                                updates.workMinutes = 0;
+                                            }
+                                            const result = await updateRecord(editingRecord.id, updates);
+                                            if (result) setEditingRecord(null);
+                                        }}
+                                        disabled={saving}
+                                        className="px-4 py-2 btn-gradient rounded-lg text-sm font-medium disabled:opacity-50">
+                                        {saving ? '保存中...' : '保存'}
+                                    </button>
+                                </div>
+                            </div>
                         </div>
                     )}
                 </div>
@@ -10741,7 +10915,8 @@
                     dailyCloses, auditLogs, lastSynced, syncError, closeDailyBooks, isDayClosed, refresh } = cashbookHook;
             const stores = memberData?.stores || [];
             const allActiveStores = stores.filter(s => s.status !== 'inactive');
-            const activeStores = currentAccess ? allActiveStores.filter(s => currentAccess.storeIds.includes(s.id)) : allActiveStores;
+            // 本部 (headquarter) は全店舗、スタッフ/マネージャは割当店舗のみ
+            const activeStores = hasFullStoreAccess() ? allActiveStores : allActiveStores.filter(s => currentAccess.storeIds.includes(s.id));
 
             // 記帳フォームが参照する store 初期値。'all'（全店舗フィルタ）や
             // アクセス権限外の ID を拒否して、サーバーに invalid-store を
@@ -10760,10 +10935,10 @@
             // タブ: overview / entries / audit / reconcile
             const [cashTab, setCashTab] = useState('overview');
 
-            // 権限のある店舗のみ表示
+            // 権限のある店舗のみ表示（本部・管理者は全店舗）
             const entries = useMemo(() => {
                 let filtered = rawEntries || [];
-                if (currentAccess) {
+                if (currentAccess && !hasFullStoreAccess()) {
                     filtered = filtered.filter(e => !e.store || currentAccess.storeIds.includes(e.store));
                 }
                 if (filterStore !== 'all') {
@@ -10952,7 +11127,7 @@
             // 現金残高計算（全期間・店舗別・現金区分別）
             const cashBalance = useMemo(() => {
                 const all = (rawEntries || []).filter(e => {
-                    if (currentAccess && e.store && !currentAccess.storeIds.includes(e.store)) return false;
+                    if (currentAccess && !hasFullStoreAccess() && e.store && !currentAccess.storeIds.includes(e.store)) return false;
                     return true;
                 });
                 const calcBalance = (items) => {
@@ -11067,7 +11242,7 @@
                     showToast('選択された店舗にアクセス権限がありません', 'error');
                     return;
                 }
-                if (currentAccess && !currentAccess.storeIds.includes(formData.store)) {
+                if (!isStoreIdAllowed(formData.store)) {
                     setStoreError(true);
                     showToast('この店舗への入力権限がありません', 'error'); return;
                 }

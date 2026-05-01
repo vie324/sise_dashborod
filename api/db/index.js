@@ -442,7 +442,7 @@ async function authPost(body, ctx) {
       if (!staffId) return { error: 'staffIdが必要です' };
 
       const { data: staffRow, error: staffErr } = await supabase
-        .from('staff').select('id, name, role, status').eq('id', staffId).maybeSingle();
+        .from('staff').select('id, name, role, status, password').eq('id', staffId).maybeSingle();
       if (staffErr) throw staffErr;
       if (!staffRow) return { error: 'スタッフが見つかりません' };
       if (staffRow.status === 'inactive') return { error: 'このスタッフは無効化されています' };
@@ -458,6 +458,12 @@ async function authPost(body, ctx) {
         r:  staffRow.role || 'staff',
         sid: storeIds,
       };
+      // パスワード設定済みなら pw フラグを立てる。クライアントは
+      // hasPassword をこのフラグから判定してロック画面を表示する。
+      // 平文パスワード自体はトークンに含めず、サーバ側で照合する。
+      if (staffRow.password && String(staffRow.password).length > 0) {
+        payload.pw = 1;
+      }
       const ttl = Math.min(Number(body.ttlSeconds) || AUTH_TOKEN_DEFAULT_TTL, AUTH_TOKEN_DEFAULT_TTL);
       const token = signToken(payload, ttl);
       const expiresAt = new Date((Math.floor(Date.now() / 1000) + ttl) * 1000).toISOString();
