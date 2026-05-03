@@ -143,22 +143,26 @@ export async function extractStaffContext(req) {
  *   - storeId が空          : ハンドラ側で別途「店舗必須」をチェックする前提。
  *                            ここでは true を返してはならず、false 扱いで防御的にする
  *                            （空 storeId でスルーされると cross-store 取得が漏れる）
- *   - admin/manager ロール  : 今は staff と同じくstoreIds で判定
+ *   - headquarter ロール    : 全店舗アクセス可（出納帳・勤怠など本部管轄業務）
+ *   - manager / staff       : staffCtx.storeIds で判定
  */
 export function canAccessStore(staffCtx, storeId) {
   if (staffCtx === null) return true; // admin mode
   if (!staffCtx || staffCtx.valid === false) return false;
   if (!storeId) return false;
+  if (staffCtx.role === 'headquarter') return true; // 本部は全店舗
   return (staffCtx.storeIds || []).includes(storeId);
 }
 
 /**
  * 「現在のスタッフが見ていい店舗 IDs」を返す（null なら全店舗）。
  * attendanceGet / cashbookGet 等で自動フィルタ掛けに使う。
+ * headquarter ロールは本部管轄として全店舗（null）扱い。
  */
 export function allowedStoreIds(staffCtx) {
   if (staffCtx === null) return null; // admin: no filter
   if (!staffCtx || staffCtx.valid === false) return [];
+  if (staffCtx.role === 'headquarter') return null; // 本部: 全店舗
   return Array.isArray(staffCtx.storeIds) ? staffCtx.storeIds : [];
 }
 
