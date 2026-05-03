@@ -1,4 +1,5 @@
 import { supabase } from './supabase.js';
+import { resolveStoreNameFromEnv } from './stores.js';
 
 // ============================================================
 // スタッフ管理 (staff)
@@ -48,18 +49,31 @@ export async function staffPost(body) {
 // staff_stores.store_id は stores(id) への FK があるため、まだ stores に無い
 // Square 由来の店舗 ID（"1" ～ "20"）を参照すると挿入が失敗する。
 // 欠けている store レコードを事前にアップサートして FK エラーを防ぐ。
+//
+// 名前は Square の環境変数 (SQUARE_STORE_{id}_NAME) から優先的に解決し、
+// 無い場合のみ "(未登録: {id})" というプレースホルダを使う。
+// 過去の "店舗 N" 形式は現在では使わず、プレースホルダ判定にのみ用いる。
 async function ensureStoresExist(storeIds) {
   if (!storeIds || storeIds.length === 0) return;
-  const uniqIds = [...new Set(storeIds)];
-  const rows = uniqIds.map(id => ({
-    id: String(id),
-    name: `店舗 ${id}`,
+  const uniqIds = [...new Set(storeIds)].map(String);
+
+  // 既存行は触らない: 一括 select して未登録 ID のみ insert する
+  const { data: existing, error: selErr } = await supabase
+    .from('stores').select('id').in('id', uniqIds);
+  if (selErr) {
+    console.warn('[staff] ensureStoresExist select error:', selErr.message);
+    return;
+  }
+  const existingSet = new Set((existing || []).map(r => String(r.id)));
+  const missing = uniqIds.filter(id => !existingSet.has(id));
+  if (missing.length === 0) return;
+
+  const rows = missing.map(id => ({
+    id,
+    name: resolveStoreNameFromEnv(id) || `(未登録: ${id})`,
     status: 'active'
   }));
-  // 既存レコードを上書きしないよう ignoreDuplicates: true で挿入のみ
-  const { error } = await supabase
-    .from('stores')
-    .upsert(rows, { onConflict: 'id', ignoreDuplicates: true });
+  const { error } = await supabase.from('stores').insert(rows);
   if (error) {
     console.warn('[staff] ensureStoresExist warning:', error.message);
   }

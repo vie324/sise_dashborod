@@ -24,6 +24,7 @@ import {
   qrTokenGet, qrTokenPost
 } from '../_lib/db-handlers-misc.js';
 import { sendEmail, formatDailyReportEmail } from '../_lib/email.js';
+import { resolveStoreNameFromEnv, listSquareEnvStores, isPlaceholderStoreName } from '../_lib/stores.js';
 
 // ============================================================
 // 統合DBエンドポイント
@@ -130,13 +131,34 @@ async function storesGet(params) {
   if (!includeInactive) query = query.eq('status', 'active');
   const { data, error } = await query;
   if (error) throw error;
-  return {
-    stores: (data || []).map(r => ({
-      id: r.id, name: r.name, status: r.status,
+
+  // 自動ヒーリング: 過去に "店舗 N" や "(未登録: X)" として保存された行が
+  // あり、いま env var に実名がある場合は名前を更新して返す。
+  // 書き込みは fire-and-forget（GET をブロックしない）。
+  const heals = [];
+  const rows = (data || []).map(r => {
+    const id = String(r.id);
+    let displayName = r.name;
+    if (isPlaceholderStoreName(r.name, id)) {
+      const real = resolveStoreNameFromEnv(id);
+      if (real && real !== r.name) {
+        displayName = real;
+        heals.push({ id, name: real });
+      }
+    }
+    return {
+      id: r.id, name: displayName, status: r.status,
       createdAt: r.created_at, memo: r.memo || '',
       lat: r.lat, lng: r.lng
-    }))
-  };
+    };
+  });
+  if (heals.length > 0) {
+    // 並列で UPDATE（個別行ごとに where=id 条件が異なるため）
+    Promise.all(heals.map(h =>
+      supabase.from('stores').update({ name: h.name }).eq('id', h.id)
+    )).catch(e => console.warn('[stores] auto-heal failed:', e && e.message));
+  }
+  return { stores: rows };
 }
 
 async function storesPost(body, staffCtx) {
@@ -202,6 +224,47 @@ async function storesPost(body, staffCtx) {
         if (error) throw error;
       }
       return { success: true, count: rows.length };
+    }
+    case 'syncSquareNames': {
+      // 環境変数に定義された Square 店舗を Supabase へ同期する。
+      // - 未登録の Square 店舗を name 込みで insert
+      // - 既存行の name が "店舗 N" / "(未登録: X)" などプレースホルダ
+      //   だった場合のみ env の実名で update（手動編集は尊重）
+      const envStores = listSquareEnvStores();
+      if (envStores.length === 0) {
+        return { success: true, inserted: 0, updated: 0, message: 'Square 店舗が env に定義されていません' };
+      }
+      const ids = envStores.map(s => s.id);
+      const { data: existing, error: selErr } = await supabase
+        .from('stores').select('id, name').in('id', ids);
+      if (selErr) throw selErr;
+      const existingMap = new Map((existing || []).map(r => [String(r.id), r]));
+
+      const toInsert = [];
+      const toUpdate = [];
+      for (const s of envStores) {
+        const cur = existingMap.get(s.id);
+        if (!cur) {
+          toInsert.push({ id: s.id, name: s.name, status: 'active' });
+        } else if (isPlaceholderStoreName(cur.name, s.id) && cur.name !== s.name) {
+          toUpdate.push({ id: s.id, name: s.name });
+        }
+      }
+
+      if (toInsert.length > 0) {
+        const { error } = await supabase.from('stores').insert(toInsert);
+        if (error) throw error;
+      }
+      for (const u of toUpdate) {
+        const { error } = await supabase.from('stores').update({ name: u.name }).eq('id', u.id);
+        if (error) throw error;
+      }
+      return {
+        success: true,
+        inserted: toInsert.length,
+        updated: toUpdate.length,
+        envStores: envStores.length,
+      };
     }
     default: return { error: '不明なaction: ' + action };
   }
