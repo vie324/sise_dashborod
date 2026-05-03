@@ -2043,7 +2043,37 @@
             }
             return '';
         };
+        // lucide が CDN から読み込まれるまでアイコンが空になるのを防ぐため、
+        // 「ready 通知」を発火するシングルトンを用意し、Icon が購読する。
+        // ロード後は最初の 1 回だけ全 Icon を強制再描画する。
+        let _lucideReady = !!(window.lucide && window.lucide.icons);
+        const _lucideListeners = new Set();
+        if (!_lucideReady) {
+            const _checkLucide = () => {
+                if (window.lucide && window.lucide.icons) {
+                    _lucideReady = true;
+                    _lucideListeners.forEach(fn => { try { fn(); } catch (_) {} });
+                    _lucideListeners.clear();
+                    return true;
+                }
+                return false;
+            };
+            // ポーリング (50ms x 100 = 最大 5 秒)。CDN ロードは通常 1 秒以内に完了するので
+            // 短時間のオーバーヘッドのみ。
+            let _checks = 0;
+            const _pid = setInterval(() => {
+                if (_checkLucide() || ++_checks > 100) clearInterval(_pid);
+            }, 50);
+        }
+
         const Icon = ({ name, size = 20, color = "currentColor", className = "" }) => {
+            const [, setTick] = useState(0);
+            useEffect(() => {
+                if (_lucideReady) return;
+                const fn = () => setTick(t => t + 1);
+                _lucideListeners.add(fn);
+                return () => _lucideListeners.delete(fn);
+            }, []);
             const svg = _getIconSvg(name, size, color);
             return svg
                 ? <span className={`inline-flex items-center justify-center shrink-0 ${className}`} style={{width: size, height: size}} dangerouslySetInnerHTML={{__html: svg}} />
@@ -6036,7 +6066,227 @@
         // 日報一覧ビュー
         // ========================================
 
-        const DailyReportListView = ({ reportData, allowedStoreNames }) => {
+        // 日報入力フォーム（スタッフ URL から日報を提出する）
+        // ========================================
+        const DailyReportInputForm = ({ memberData, onSubmitted }) => {
+            // 店舗候補: スタッフモードでは権限のある店舗のみ。本部・管理者は全店舗。
+            const stores = useMemo(() => {
+                const all = (memberData?.stores || []).filter(s => s.status !== 'inactive');
+                if (hasFullStoreAccess()) return all;
+                if (!currentAccess?.storeIds) return [];
+                return all.filter(s => currentAccess.storeIds.includes(s.id));
+            }, [memberData?.stores]);
+
+            const initialStoreName = useMemo(() => {
+                if (stores.length === 1) return stores[0].name;
+                return '';
+            }, [stores]);
+
+            const [form, setForm] = useState({
+                store: initialStoreName,
+                hpbNew: '', hpbContract: '',
+                metaNew: '', metaContract: '',
+                referralNew: '', referralContract: '',
+                discountNew: '', discountContract: '',
+                existingTreatments: '',
+                taskComplete: false,
+                prepComplete: false,
+                notes: '',
+            });
+            useEffect(() => {
+                if (initialStoreName && !form.store) {
+                    setForm(p => ({ ...p, store: initialStoreName }));
+                }
+            }, [initialStoreName]);
+
+            const [submitting, setSubmitting] = useState(false);
+            const [lastSubmitted, setLastSubmitted] = useState(null);
+
+            const setNum = (key) => (e) => {
+                const v = e.target.value;
+                if (v === '' || /^\d+$/.test(v)) setForm(p => ({ ...p, [key]: v }));
+            };
+
+            const totals = useMemo(() => {
+                const num = (k) => parseInt(form[k]) || 0;
+                return {
+                    newSum: num('hpbNew') + num('metaNew') + num('referralNew') + num('discountNew'),
+                    contractSum: num('hpbContract') + num('metaContract') + num('referralContract') + num('discountContract'),
+                };
+            }, [form]);
+
+            const submit = async () => {
+                if (submitting) return;
+                if (!form.store) { showToast('店舗を選択してください', 'error'); return; }
+                setSubmitting(true);
+                const payload = {
+                    store: form.store,
+                    hpbNew: parseInt(form.hpbNew) || 0,
+                    hpbContract: parseInt(form.hpbContract) || 0,
+                    metaNew: parseInt(form.metaNew) || 0,
+                    metaContract: parseInt(form.metaContract) || 0,
+                    referralNew: parseInt(form.referralNew) || 0,
+                    referralContract: parseInt(form.referralContract) || 0,
+                    discountNew: parseInt(form.discountNew) || 0,
+                    discountContract: parseInt(form.discountContract) || 0,
+                    existingTreatments: parseInt(form.existingTreatments) || 0,
+                    taskComplete: !!form.taskComplete,
+                    prepComplete: !!form.prepComplete,
+                    notes: form.notes || '',
+                    recorder: currentAccess ? currentAccess.name : '',
+                };
+                try {
+                    const res = await dbPost('reports', { action: 'create', report: payload });
+                    if (!res || res.error) {
+                        showToast((res && res.error) || '日報の送信に失敗しました', 'error');
+                        return;
+                    }
+                    if (res.mail && res.mail.skipped) {
+                        showToast('日報を送信しました（メール通知は未設定）', 'success');
+                    } else if (res.mail && res.mail.error) {
+                        showToast('日報を送信しました（メール通知は失敗）', 'warning');
+                    } else {
+                        showToast('日報を送信しメール通知しました', 'success');
+                    }
+                    setLastSubmitted(new Date());
+                    setForm({
+                        store: initialStoreName,
+                        hpbNew: '', hpbContract: '',
+                        metaNew: '', metaContract: '',
+                        referralNew: '', referralContract: '',
+                        discountNew: '', discountContract: '',
+                        existingTreatments: '',
+                        taskComplete: false,
+                        prepComplete: false,
+                        notes: '',
+                    });
+                    if (onSubmitted) onSubmitted();
+                } catch (e) {
+                    console.error('[reports] submit error', e);
+                    showToast('日報の送信中にエラーが発生しました', 'error');
+                } finally {
+                    setSubmitting(false);
+                }
+            };
+
+            const ChannelRow = ({ label, color, newKey, contractKey }) => (
+                <div className="grid grid-cols-3 gap-2 items-center py-2 border-b border-slate-100 last:border-0">
+                    <span className={`text-sm font-bold ${color}`}>{label}</span>
+                    <div>
+                        <label className="block text-[10px] text-slate-400 mb-0.5">新規来店</label>
+                        <input type="text" inputMode="numeric" pattern="\d*"
+                            value={form[newKey]} onChange={setNum(newKey)}
+                            placeholder="0"
+                            className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm text-right outline-none focus:border-sise-400" />
+                    </div>
+                    <div>
+                        <label className="block text-[10px] text-slate-400 mb-0.5">契約</label>
+                        <input type="text" inputMode="numeric" pattern="\d*"
+                            value={form[contractKey]} onChange={setNum(contractKey)}
+                            placeholder="0"
+                            className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm text-right outline-none focus:border-sise-400" />
+                    </div>
+                </div>
+            );
+
+            return (
+                <div className="space-y-4">
+                    {lastSubmitted && (
+                        <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-sm text-emerald-700 flex items-center gap-2">
+                            <Icon name="check-circle" size={16} className="text-emerald-500" />
+                            日報を送信しました（{lastSubmitted.toLocaleTimeString('ja-JP')}）。連続で別店舗の日報も入力できます。
+                        </div>
+                    )}
+
+                    <Card>
+                        <h4 className="font-bold text-slate-800 mb-3 flex items-center">
+                            <Icon name="store" size={16} className="mr-2 text-sise-500" />店舗
+                        </h4>
+                        {stores.length === 0 ? (
+                            <p className="text-sm text-slate-500">アクセス可能な店舗がありません。</p>
+                        ) : stores.length === 1 ? (
+                            <div className="px-3 py-2 bg-sise-50 border border-sise-200 rounded-lg text-sm font-bold text-sise-700">
+                                {stores[0].name}
+                            </div>
+                        ) : (
+                            <select value={form.store} onChange={e => setForm(p => ({ ...p, store: e.target.value }))}
+                                className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm outline-none focus:border-sise-400">
+                                <option value="">-- 店舗を選択 --</option>
+                                {stores.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
+                            </select>
+                        )}
+                    </Card>
+
+                    <Card>
+                        <div className="flex items-center justify-between mb-2">
+                            <h4 className="font-bold text-slate-800 flex items-center">
+                                <Icon name="users" size={16} className="mr-2 text-sise-500" />新規来店・契約件数
+                            </h4>
+                            <div className="text-[11px] text-slate-500">
+                                新規 <strong className="text-blue-600">{totals.newSum}</strong>・契約 <strong className="text-emerald-600">{totals.contractSum}</strong>
+                            </div>
+                        </div>
+                        <ChannelRow label="ホットペッパー" color="text-orange-600" newKey="hpbNew" contractKey="hpbContract" />
+                        <ChannelRow label="Meta広告" color="text-blue-600" newKey="metaNew" contractKey="metaContract" />
+                        <ChannelRow label="ご紹介" color="text-emerald-600" newKey="referralNew" contractKey="referralContract" />
+                        <ChannelRow label="割引クーポン" color="text-purple-600" newKey="discountNew" contractKey="discountContract" />
+                    </Card>
+
+                    <Card>
+                        <h4 className="font-bold text-slate-800 mb-3 flex items-center">
+                            <Icon name="activity" size={16} className="mr-2 text-sise-500" />既存会員 施術件数
+                        </h4>
+                        <input type="text" inputMode="numeric" pattern="\d*"
+                            value={form.existingTreatments} onChange={setNum('existingTreatments')}
+                            placeholder="0"
+                            className="w-full max-w-xs px-3 py-2.5 border border-slate-200 rounded-lg text-sm text-right outline-none focus:border-sise-400" />
+                    </Card>
+
+                    <Card>
+                        <h4 className="font-bold text-slate-800 mb-3 flex items-center">
+                            <Icon name="check-square" size={16} className="mr-2 text-sise-500" />チェックリスト
+                        </h4>
+                        <label className="flex items-center gap-3 p-2.5 rounded-lg hover:bg-slate-50 cursor-pointer">
+                            <input type="checkbox" checked={form.taskComplete}
+                                onChange={e => setForm(p => ({ ...p, taskComplete: e.target.checked }))}
+                                className="w-4 h-4 accent-sise-500" />
+                            <span className="text-sm font-medium text-slate-700">本日の業務を完了した</span>
+                        </label>
+                        <label className="flex items-center gap-3 p-2.5 rounded-lg hover:bg-slate-50 cursor-pointer">
+                            <input type="checkbox" checked={form.prepComplete}
+                                onChange={e => setForm(p => ({ ...p, prepComplete: e.target.checked }))}
+                                className="w-4 h-4 accent-sise-500" />
+                            <span className="text-sm font-medium text-slate-700">明日の準備を完了した</span>
+                        </label>
+                    </Card>
+
+                    <Card>
+                        <h4 className="font-bold text-slate-800 mb-3 flex items-center">
+                            <Icon name="message-square" size={16} className="mr-2 text-sise-500" />メモ・特記事項
+                        </h4>
+                        <textarea value={form.notes}
+                            onChange={e => setForm(p => ({ ...p, notes: e.target.value }))}
+                            rows={3} placeholder="今日の出来事・引き継ぎなど（任意）"
+                            className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:border-sise-400 resize-none" />
+                    </Card>
+
+                    <button onClick={submit} disabled={submitting || stores.length === 0}
+                        className="w-full py-3.5 btn-gradient rounded-xl font-bold text-base disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2">
+                        {submitting ? <Spinner size={18} /> : <Icon name="send" size={18} />}
+                        {submitting ? '送信中...' : '日報を送信（メール通知）'}
+                    </button>
+                    <p className="text-[11px] text-center text-slate-400">送信ボタンを押すと、本部宛にメール通知が届きます。</p>
+                </div>
+            );
+        };
+
+        // ========================================
+        // 日報一覧ビュー
+        // ========================================
+
+        const DailyReportListView = ({ reportData, allowedStoreNames, memberData, refreshReportData }) => {
+            // 入力タブ / 一覧タブ
+            const [reportTab, setReportTab] = useState('input');
             const [filterStore, setFilterStore] = useState('all');
             const [sortOrder, setSortOrder] = useState('desc');
 
@@ -6070,23 +6320,45 @@
 
             return (
                 <div className="space-y-4 md:space-y-5 animate-fade-in">
-                    <SectionHeader title="日報一覧" subtitle="DAILY REPORTS" icon="clipboard-list">
-                        <div className="flex items-center gap-2">
-                            <select value={filterStore} onChange={(e) => setFilterStore(e.target.value)}
-                                className="px-3 py-2 border border-slate-200 rounded-xl text-sm focus:border-sise-500 outline-none bg-white/80">
-                                <option value="all">全店舗</option>
-                                {(currentAccess ? serverStores.filter(s => currentAccess.storeIds.includes(s.id)) : serverStores).map(s =>
-                                    <option key={s.id} value={s.name}>{s.name}</option>
-                                )}
-                            </select>
-                            <button onClick={() => setSortOrder(sortOrder === 'desc' ? 'asc' : 'desc')}
-                                className="flex items-center px-3 py-2 border border-slate-200 rounded-xl text-sm hover:bg-sise-50 transition-colors bg-white/80">
-                                <Icon name={sortOrder === 'desc' ? 'arrow-down' : 'arrow-up'} size={15} className="mr-1" />
-                                <span className="hide-mobile">{sortOrder === 'desc' ? '新しい順' : '古い順'}</span>
-                            </button>
-                        </div>
+                    <SectionHeader title="日報" subtitle="DAILY REPORTS" icon="clipboard-list">
+                        {reportTab === 'list' && (
+                            <div className="flex items-center gap-2">
+                                <select value={filterStore} onChange={(e) => setFilterStore(e.target.value)}
+                                    className="px-3 py-2 border border-slate-200 rounded-xl text-sm focus:border-sise-500 outline-none bg-white/80">
+                                    <option value="all">全店舗</option>
+                                    {(hasFullStoreAccess() ? serverStores : serverStores.filter(s => currentAccess?.storeIds?.includes(s.id))).map(s =>
+                                        <option key={s.id} value={s.name}>{s.name}</option>
+                                    )}
+                                </select>
+                                <button onClick={() => setSortOrder(sortOrder === 'desc' ? 'asc' : 'desc')}
+                                    className="flex items-center px-3 py-2 border border-slate-200 rounded-xl text-sm hover:bg-sise-50 transition-colors bg-white/80">
+                                    <Icon name={sortOrder === 'desc' ? 'arrow-down' : 'arrow-up'} size={15} className="mr-1" />
+                                    <span className="hide-mobile">{sortOrder === 'desc' ? '新しい順' : '古い順'}</span>
+                                </button>
+                            </div>
+                        )}
                     </SectionHeader>
 
+                    {/* タブ切替: 入力 / 一覧 */}
+                    <div className="flex items-center gap-1 bg-slate-100 rounded-xl p-1 max-w-sm">
+                        <button onClick={() => setReportTab('input')}
+                            className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold transition-all ${reportTab === 'input' ? 'bg-white text-sise-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+                            <Icon name="edit-3" size={13} />日報入力
+                        </button>
+                        <button onClick={() => setReportTab('list')}
+                            className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold transition-all ${reportTab === 'list' ? 'bg-white text-sise-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+                            <Icon name="list" size={13} />一覧
+                        </button>
+                    </div>
+
+                    {reportTab === 'input' && (
+                        <DailyReportInputForm
+                            memberData={memberData}
+                            onSubmitted={() => { if (refreshReportData) refreshReportData(); }}
+                        />
+                    )}
+
+                    {reportTab === 'list' && (<>
                     {/* サマリーカード */}
                     <div className="grid grid-cols-4 gap-2 md:gap-3">
                         <div className="glass-card p-3 md:p-4 text-center">
@@ -6242,6 +6514,7 @@
                             <div className="text-center py-3 text-sm text-slate-400">{filteredReports.length}件中30件を表示</div>
                         )}
                     </div>
+                    </>)}
                 </div>
             );
         };
@@ -21706,8 +21979,10 @@
 
             // 権限のある店舗名リスト（レポートのstore名フィルタ用）
             // memberData.storesは全店舗、currentAccess.storeIdsでフィルタして名前リストを作る
+            // 本部 (headquarter) は全店舗扱い（null = フィルタなし）
             const allowedStoreNames = useMemo(() => {
                 if (!isStaffMode) return null; // null = フィルタなし（全店舗表示）
+                if (currentAccess && currentAccess.role === 'headquarter') return null;
                 const allStores = memberData.stores || [];
                 if (allStores.length === 0) return currentAccess.storeIds; // フォールバック: IDそのまま
                 return currentAccess.storeIds.map(sid => {
@@ -21985,7 +22260,7 @@
                             onStartFlow={() => setFlowMode(true)}
                         />;
                     case 'reports':
-                        return <DailyReportListView reportData={reportData} allowedStoreNames={allowedStoreNames} />;
+                        return <DailyReportListView reportData={reportData} allowedStoreNames={allowedStoreNames} memberData={memberData} refreshReportData={refreshReportData} />;
                     case 'members':
                         return <MemberManagementView memberData={memberData} refreshSquareData={refreshSquareData} operateSubscription={operateSubscription} activeStoreId={activeStoreId} manualMembersHook={manualMembersHook} counselingHook={counselingHook} lineChatHook={lineChatHook} reportData={reportData} />;
                     case 'cashbook':

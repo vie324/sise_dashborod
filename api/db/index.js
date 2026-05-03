@@ -23,6 +23,7 @@ import {
   membersGet, membersPost, attendanceGet, attendancePost,
   qrTokenGet, qrTokenPost
 } from '../_lib/db-handlers-misc.js';
+import { sendEmail, formatDailyReportEmail } from '../_lib/email.js';
 
 // ============================================================
 // 統合DBエンドポイント
@@ -294,7 +295,7 @@ async function reportsGet(params) {
   };
 }
 
-async function reportsPost(body) {
+async function reportsPost(body, staffCtx) {
   const action = body.action || 'create';
   switch (action) {
     case 'create': {
@@ -311,7 +312,29 @@ async function reportsPost(body) {
       };
       const { data, error } = await supabase.from('daily_reports').insert(row).select().single();
       if (error) throw error;
-      return { success: true, report: data };
+
+      // 送信通知メール（環境変数が揃っていれば送信、無ければスキップして
+      // 日報自体の保存は成功させる）。送信者名はトークンから取得。
+      let mailResult = null;
+      try {
+        const recorder = (staffCtx && staffCtx.name) || r.recorder || '';
+        const formatted = formatDailyReportEmail({
+          ...r,
+          store: r.store,
+          recorder,
+          timestamp: row.timestamp,
+        });
+        mailResult = await sendEmail({
+          subject: formatted.subject,
+          html: formatted.html,
+          text: formatted.text,
+        });
+      } catch (mailErr) {
+        console.error('[reports] メール送信例外:', mailErr);
+        mailResult = { error: 'send_exception' };
+      }
+
+      return { success: true, report: data, mail: mailResult };
     }
     case 'update': {
       const r = body.report || body;
