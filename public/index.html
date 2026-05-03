@@ -10699,16 +10699,43 @@
             const [gasConnected, setGasConnected] = useState(false);
             const [showInactive, setShowInactive] = useState(false);
             const [formData, setFormData] = useState({ id: '', name: '', memo: '' });
+            const [syncingSquare, setSyncingSquare] = useState(false);
 
-            useEffect(() => {
-                (async () => {
-                    const gasStores = await fetchStoresFromGas(true);
-                    if (gasStores) {
-                        setStoreList(gasStores);
-                        setGasConnected(true);
-                    }
-                })();
+            const reload = useCallback(async () => {
+                const gasStores = await fetchStoresFromGas(true);
+                if (gasStores) {
+                    setStoreList(gasStores);
+                    setGasConnected(true);
+                }
             }, []);
+
+            useEffect(() => { reload(); }, [reload]);
+
+            // Square 環境変数で定義された店舗を Supabase に同期する。
+            // 未登録の店舗を実名で insert、既存のプレースホルダ名 ("店舗 N" /
+            // "(未登録: X)") を実名で update。手動編集された名前は変更しない。
+            const handleSyncSquare = async () => {
+                if (syncingSquare) return;
+                setSyncingSquare(true);
+                try {
+                    const res = await dbPost('stores', { action: 'syncSquareNames' });
+                    if (res && res.success) {
+                        const msg = `Square店舗を同期しました（追加 ${res.inserted}件 / 更新 ${res.updated}件）`;
+                        showToast(msg, 'success', 3000);
+                        await reload();
+                    } else {
+                        showToast(res?.error || '同期に失敗しました', 'error');
+                    }
+                } catch (e) {
+                    showToast('同期エラー: ' + (e.message || e), 'error');
+                } finally { setSyncingSquare(false); }
+            };
+
+            // 名前がプレースホルダ ("店舗 N" / "(未登録: X)") の Supabase 行
+            const placeholderStores = useMemo(
+                () => storeList.filter(s => s.name === `店舗 ${s.id}` || s.name === `(未登録: ${s.id})`),
+                [storeList]
+            );
 
             const activeStores = storeList.filter(s => s.status !== 'inactive');
             const inactiveStores = storeList.filter(s => s.status === 'inactive');
@@ -10848,10 +10875,33 @@
                     {/* Square連携店舗（読み取り専用） */}
                     {serverStores.length > 0 && (
                         <div className="mb-3">
-                            <p className="text-xs text-slate-500 font-medium mb-2">
-                                <Icon name="zap" size={12} className="inline mr-1 text-amber-500" />
-                                Square API連携済み店舗（環境変数で設定済み）
-                            </p>
+                            <div className="flex items-center justify-between mb-2">
+                                <p className="text-xs text-slate-500 font-medium">
+                                    <Icon name="zap" size={12} className="inline mr-1 text-amber-500" />
+                                    Square API連携済み店舗（環境変数で設定済み）
+                                </p>
+                                <button
+                                    onClick={handleSyncSquare}
+                                    disabled={syncingSquare}
+                                    className="flex items-center gap-1 px-2.5 py-1 bg-amber-100 hover:bg-amber-200 text-amber-700 rounded-lg text-[11px] font-bold transition-all disabled:opacity-50"
+                                    title="Square 環境変数の店舗名を Supabase に同期します。プレースホルダ名(『店舗 N』など)を実名で上書きします。"
+                                >
+                                    <Icon name="refresh-cw" size={11} className={syncingSquare ? 'animate-spin' : ''} />
+                                    {syncingSquare ? '同期中...' : 'Square名を同期'}
+                                </button>
+                            </div>
+                            {placeholderStores.length > 0 && (
+                                <div className="mb-2 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-[11px] text-red-700 flex items-start gap-2">
+                                    <Icon name="alert-triangle" size={13} className="text-red-500 mt-0.5 flex-shrink-0" />
+                                    <div>
+                                        <p className="font-bold">プレースホルダ名のままの店舗が {placeholderStores.length} 件あります</p>
+                                        <p className="mt-0.5">
+                                            「Square名を同期」ボタンで環境変数の実名 (例: 本厚木店) に置き換わります。
+                                            手動で正しい名前にしている店舗は変更されません。
+                                        </p>
+                                    </div>
+                                </div>
+                            )}
                             <div className="space-y-1.5">
                                 {serverStores.map(s => (
                                     <div key={s.id} className="flex items-center px-3 py-2 bg-amber-50/50 rounded-lg border border-amber-100 text-sm">
@@ -10871,16 +10921,24 @@
                                 <Icon name="database" size={12} className="inline mr-1 text-sise-500" />
                                 スプレッドシート管理店舗
                             </p>
-                            {activeStores.map(store => (
-                                <div key={store.id} className="flex items-center px-4 py-3 bg-white rounded-xl border border-slate-200 hover:border-sise-200 transition-colors">
-                                    <div className="w-9 h-9 rounded-xl bg-sise-50 text-sise-600 flex items-center justify-center">
-                                        <Icon name="map-pin" size={18} />
+                            {activeStores.map(store => {
+                                const isPlaceholder = store.name === `店舗 ${store.id}` || store.name === `(未登録: ${store.id})`;
+                                return (
+                                <div key={store.id} className={`flex items-center px-4 py-3 rounded-xl border transition-colors ${isPlaceholder ? 'bg-red-50/40 border-red-200' : 'bg-white border-slate-200 hover:border-sise-200'}`}>
+                                    <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${isPlaceholder ? 'bg-red-50 text-red-500' : 'bg-sise-50 text-sise-600'}`}>
+                                        <Icon name={isPlaceholder ? 'alert-triangle' : 'map-pin'} size={18} />
                                     </div>
                                     <div className="ml-3 flex-1 min-w-0">
-                                        <p className="font-semibold text-slate-800 text-sm">{store.name}</p>
+                                        <p className={`font-semibold text-sm ${isPlaceholder ? 'text-red-600' : 'text-slate-800'}`}>
+                                            {store.name}
+                                            {isPlaceholder && <span className="ml-2 text-[10px] font-bold bg-red-100 text-red-700 px-1.5 py-0.5 rounded-full align-middle">仮の名前</span>}
+                                        </p>
                                         <div className="flex items-center gap-2">
                                             <span className="text-xs text-slate-400">ID: {store.id}</span>
                                             {store.memo && <span className="text-xs text-slate-400">/ {store.memo}</span>}
+                                            {isPlaceholder && (
+                                                <span className="text-[10px] text-red-500">「Square名を同期」または編集ボタンから本来の店舗名に変更してください</span>
+                                            )}
                                         </div>
                                     </div>
                                     <div className="flex items-center gap-1">
@@ -10892,7 +10950,8 @@
                                         </button>
                                     </div>
                                 </div>
-                            ))}
+                                );
+                            })}
                         </div>
                     ) : (
                         !isAdding && serverStores.length === 0 && (
