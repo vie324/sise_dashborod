@@ -333,35 +333,8 @@ export async function attendancePost(body, staffCtx) {
     case 'clockOut': return attClockOut(body, staffCtx);
     case 'update': return attUpdate(body.recordId, body.updates || {}, staffCtx);
     case 'delete': return attDelete(body.recordId, staffCtx);
-    case 'saveAll': return attSaveAll(body.records || [], body.replace, staffCtx);
     default: return { error: '不明なaction: ' + action };
   }
-}
-
-async function attSaveAll(records, replace, staffCtx) {
-  // 一括保存は全レコードの書き込みなので、スタッフモードでは拒否する。
-  // 管理者（staffCtx=null）のみ許可。
-  if (staffCtx !== null) {
-    return { error: '一括保存は管理者のみ許可されています' };
-  }
-  const rows = records.map(r => ({
-    id: r.id || ('att_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5)),
-    staff_id: r.staffId || '', staff_name: r.staffName || '',
-    store_id: r.storeId || '', date: r.date,
-    clock_in: r.clockIn || '', clock_out: r.clockOut || '',
-    work_minutes: r.workMinutes || 0,
-    lat: r.lat ?? null, lng: r.lng ?? null,
-    method: r.method || '', notes: r.notes || '',
-    clock_out_lat: r.clockOutLat ?? null, clock_out_lng: r.clockOutLng ?? null
-  }));
-  if (replace) {
-    await supabase.from('attendance').delete().neq('id', '');
-  }
-  if (rows.length > 0) {
-    const { error } = await supabase.from('attendance').upsert(rows, { onConflict: 'id' });
-    if (error) throw error;
-  }
-  return { success: true, count: rows.length };
 }
 
 async function attClockIn(body, staffCtx) {

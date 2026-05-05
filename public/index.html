@@ -1711,10 +1711,22 @@
         // 店舗マスタ（サーバーから動的に取得）
         let serverStores = [];
 
-        // Google Apps Script URL（カウンセリング機能専用・Googleフォーム回答シート連携）
-        // その他の機能は全て Supabase (/api/db) に移行済み
+        // Google Apps Script URL（カウンセリング機能専用・Google フォーム回答シート連携）
+        // その他の機能は全て Supabase (/api/db) に移行済み。
+        // 旧 'sise_unified_gas_url' から 'sise_counseling_gas_url' へ自動マイグレーション。
+        const COUNSELING_GAS_URL_STORAGE_KEY = 'sise_counseling_gas_url';
         const DEFAULT_GAS_URL = 'https://script.google.com/macros/s/AKfycbzEVvDqMrYC8QkWgHisvP_LXbjWigCfpqB2eHOzCBoFaf1B_5ANnEU48LGaZ83VMnY1TA/exec';
-        let UNIFIED_GAS_URL = localStorage.getItem('sise_unified_gas_url') || DEFAULT_GAS_URL;
+        (function migrateGasUrlKey() {
+            try {
+                const newVal = localStorage.getItem(COUNSELING_GAS_URL_STORAGE_KEY);
+                const oldVal = localStorage.getItem('sise_unified_gas_url');
+                if (!newVal && oldVal) {
+                    localStorage.setItem(COUNSELING_GAS_URL_STORAGE_KEY, oldVal);
+                }
+                if (oldVal) localStorage.removeItem('sise_unified_gas_url');
+            } catch (_) { /* localStorage 例外は無視 */ }
+        })();
+        let COUNSELING_GAS_URL = localStorage.getItem(COUNSELING_GAS_URL_STORAGE_KEY) || DEFAULT_GAS_URL;
 
         // API設定（サーバーサイドプロキシ経由）
         // APIキーはVercel環境変数で管理、フロントエンドには露出しない
@@ -3201,7 +3213,6 @@
                         extraCustomers.forEach(c => { c._storeId = storeId; c._storeName = store.name; c._extraSource = true; });
 
                         // Catalog fetchは後で非同期実行するため、ここではスキップ
-                        console.log(`Extra source ${extra.id}: +${extraSubs.length} subs, +${extraInvoices.length} invoices, +${extraCustomers.length} customers`);
                         return { customers: extraCustomers, subscriptions: extraSubs, invoices: extraInvoices, catalogMap: {} };
                     };
 
@@ -4853,8 +4864,7 @@
         // ========================================
         // カウンセリングデータ連携（5店舗対応）
         // ========================================
-        const COUNSELING_GAS_URL = UNIFIED_GAS_URL;
-
+        // COUNSELING_GAS_URL は冒頭で localStorage から読み込み済み
         const COUNSELING_STORES = [
             { id: 'honatsugi', name: '本厚木店' },
             { id: 'yamato', name: '大和店' },
@@ -4907,16 +4917,10 @@
             const storeParam = '&store=' + counselingStore;
 
             const fetchCustomerList = useCallback(async () => {
-                if (COUNSELING_GAS_URL === 'YOUR_UNIFIED_GAS_URL') {
-                    // 以前は silent return で設定画面への誘導がなく「カウンセリングが空」と誤解される原因だった
-                    console.warn('[カウンセリング] GAS URL が未設定です（設定画面から登録してください）');
-                    return;
-                }
                 if (!counselingStore) return; // 権限店舗が未確定（serverStores ロード待ち）
                 setLoading(true);
                 try {
                     const url = COUNSELING_GAS_URL + '?type=counseling&action=recent&limit=50' + storeParam;
-                    console.log('[カウンセリング] 顧客一覧取得:', url);
                     const res = await fetch(url);
                     if (!res.ok) {
                         // HTTP ステータスがエラーの場合は明示的に通知（GAS 401/500 等）
@@ -4924,12 +4928,8 @@
                         return;
                     }
                     const data = await res.json();
-                    console.log('[カウンセリング] 一覧レスポンス _debug:', JSON.stringify(data._debug || {}));
                     if (data && data.customers) {
                         setCustomers(data.customers);
-                        if (data.customers.length > 0) {
-                            console.log('[カウンセリング] 最初の顧客concerns:', data.customers[0].concerns);
-                        }
                     }
                     if (data && data.error) {
                         console.error('[カウンセリング] GASエラー:', data.error);
@@ -4945,7 +4945,7 @@
             }, [storeParam]);
 
             const searchCustomers = useCallback(async (q) => {
-                if (COUNSELING_GAS_URL === 'YOUR_UNIFIED_GAS_URL' || !q) return;
+                if (!q) return;
                 if (!counselingStore) return; // 権限店舗が未確定
                 setLoading(true);
                 try {
@@ -4962,17 +4962,14 @@
             }, [storeParam]);
 
             const fetchCustomerDetail = useCallback(async (name, index) => {
-                if (COUNSELING_GAS_URL === 'YOUR_UNIFIED_GAS_URL') return null;
                 if (!counselingStore) return null; // 権限店舗が未確定
                 setLoading(true);
                 try {
                     let url = COUNSELING_GAS_URL + '?type=counseling&action=detail' + storeParam;
                     if (index !== undefined) url += '&index=' + index;
                     else if (name) url += '&name=' + encodeURIComponent(name);
-                    console.log('[カウンセリング] detail URL:', url);
                     const res = await fetch(url);
                     const data = await res.json();
-                    console.log('[カウンセリング] GASレスポンス:', JSON.stringify(data._debug || {}));
                     if (data && data.customer) {
                         // 免責事項テキストが treatmentExperience に混入している場合を除外
                         if (data.customer.treatmentExperience) {
@@ -5006,7 +5003,6 @@
 
             // 自動リロード（30秒ごと）- お客様がフォームを送信した際に更新ボタンなしで反映
             useEffect(() => {
-                if (COUNSELING_GAS_URL === 'YOUR_UNIFIED_GAS_URL') return;
                 if (!counselingStore) return; // 権限店舗が未確定
                 const interval = setInterval(() => {
                     // バックグラウンドで取得（loadingフラグは立てない、代わりに同期インジケーターを点灯）
@@ -5205,7 +5201,6 @@
             // 前店舗のデータが一瞬残って表示されるのを防ぐため、新 fetch 前に
             // threads / messages / profiles / selectedThread をクリアする。
             useEffect(() => {
-                console.log('[LINE] useEffect lineStoreId changed:', lineStoreId);
                 setThreads([]);
                 setMessages([]);
                 setProfiles({});
@@ -5460,22 +5455,6 @@
                 } catch (e) { console.error('[LINE] タグ取得エラー:', e); }
             }, [lineStoreId]);
 
-            const saveTag = useCallback(async (tagData) => {
-                try {
-                    await dbPost('lineTags', { storeId: lineStoreId, ...tagData });
-                    await fetchTags();
-                    return true;
-                } catch (e) { console.error('タグ保存エラー:', e); return false; }
-            }, [lineStoreId, fetchTags]);
-
-            const saveUserTag = useCallback(async (utData) => {
-                try {
-                    await dbPost('lineUserTags', { storeId: lineStoreId, ...utData });
-                    await fetchTags();
-                    return true;
-                } catch (e) { console.error('ユーザータグ保存エラー:', e); return false; }
-            }, [lineStoreId, fetchTags]);
-
             // === 分析 ===
             // analytics: null = 未取得 / {error} = 取得失敗 / その他 = 成功レスポンス
             const [analytics, setAnalytics] = useState(null);
@@ -5513,7 +5492,7 @@
                 broadcasts, broadcastSending, fetchBroadcasts, sendBroadcast,
                 templates, fetchTemplates, saveTemplate,
                 autoReplies, fetchAutoReplies, saveAutoReply,
-                tags, userTags, fetchTags, saveTag, saveUserTag,
+                tags, userTags, fetchTags,
                 analytics, analyticsError, fetchAnalytics,
                 refreshingUserIds
             };
@@ -12923,7 +12902,7 @@
                 broadcasts, broadcastSending, fetchBroadcasts, sendBroadcast,
                 templates, fetchTemplates, saveTemplate,
                 autoReplies, fetchAutoReplies, saveAutoReply,
-                tags, userTags, fetchTags, saveTag, saveUserTag,
+                tags, userTags, fetchTags,
                 analytics, analyticsError, fetchAnalytics,
                 refreshingUserIds
             } = lineChatHook;
@@ -19356,7 +19335,6 @@
                     });
                     if (Object.keys(mapped).length > 0) {
                         setConcerns(mapped);
-                        console.log('[カウンセリング] フローから自動マッピング:', mapped);
                     }
                 }
             }, [selectedCustomer]);
@@ -19374,18 +19352,14 @@
                         }
                     });
                 });
-                console.log('[カウンセリング] フォーム悩み:', formConcerns, '→ マッピング結果:', newConcerns);
                 return newConcerns;
             }, []);
 
             // 顧客選択時の処理
             const handleSelectCustomer = useCallback(async (name, index) => {
                 const detail = await fetchCustomerDetail(name, index);
-                console.log('[カウンセリング] 顧客詳細:', detail);
                 if (detail) {
-                    console.log('[カウンセリング] concerns配列:', detail.concerns, '長さ:', detail.concerns?.length);
                     const mapped = mapFormConcerns(detail.concerns);
-                    console.log('[カウンセリング] マッピング済:', mapped, 'チェック数:', Object.keys(mapped).length);
                     setConcerns(mapped);
                     setFeedbacks({});
                 }
@@ -20475,9 +20449,8 @@
 
         const SettingsView = ({ onSettingsSaved }) => {
             const [squareStatus, setSquareStatus] = useState({ loading: true });
-            const [unifiedGasUrl, setUnifiedGasUrl] = useState(() => {
-                const stored = localStorage.getItem('sise_unified_gas_url');
-                return (stored && stored !== 'YOUR_UNIFIED_GAS_URL') ? stored : '';
+            const [counselingGasUrl, setCounselingGasUrl] = useState(() => {
+                return localStorage.getItem(COUNSELING_GAS_URL_STORAGE_KEY) || '';
             });
             // サーバーの接続状態を取得
             useEffect(() => {
@@ -20487,20 +20460,22 @@
             }, []);
 
             const handleSaveGas = () => {
-                if (unifiedGasUrl && unifiedGasUrl.trim()) {
-                    localStorage.setItem('sise_unified_gas_url', unifiedGasUrl.trim());
+                if (counselingGasUrl && counselingGasUrl.trim()) {
+                    localStorage.setItem(COUNSELING_GAS_URL_STORAGE_KEY, counselingGasUrl.trim());
+                    COUNSELING_GAS_URL = counselingGasUrl.trim();
                 } else {
-                    localStorage.removeItem('sise_unified_gas_url');
+                    localStorage.removeItem(COUNSELING_GAS_URL_STORAGE_KEY);
+                    COUNSELING_GAS_URL = DEFAULT_GAS_URL;
                 }
-                showToast('統合GAS URLを保存しました。リロードで全機能に反映されます。', 'success');
+                showToast('カウンセリング GAS URL を保存しました。リロードで反映されます。', 'success');
                 if (onSettingsSaved) onSettingsSaved();
             };
 
             const handleResetGas = () => {
-                localStorage.removeItem('sise_unified_gas_url');
-                setUnifiedGasUrl('');
-                UNIFIED_GAS_URL = DEFAULT_GAS_URL;
-                showToast('GAS URLをデフォルトにリセットしました。', 'success');
+                localStorage.removeItem(COUNSELING_GAS_URL_STORAGE_KEY);
+                setCounselingGasUrl('');
+                COUNSELING_GAS_URL = DEFAULT_GAS_URL;
+                showToast('GAS URL をデフォルトにリセットしました。', 'success');
                 if (onSettingsSaved) onSettingsSaved();
             };
 
@@ -20695,8 +20670,8 @@
                                 <div className="flex gap-2">
                                     <input
                                         type="url"
-                                        value={unifiedGasUrl}
-                                        onChange={(e) => setUnifiedGasUrl(e.target.value)}
+                                        value={counselingGasUrl}
+                                        onChange={(e) => setCounselingGasUrl(e.target.value)}
                                         className="flex-1 px-4 py-2.5 border border-slate-200 rounded-xl focus:border-sise-500 focus:ring-2 focus:ring-sise-500/20 outline-none text-sm"
                                         placeholder="https://script.google.com/macros/s/..."
                                     />

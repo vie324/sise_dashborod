@@ -86,30 +86,8 @@ export async function cashbookPost(body, staffCtx) {
     case 'updateEntry':   return cbUpdateEntry(body.entryId, body.updates || {}, body.operator || '', staffCtx);
     case 'deleteEntry':   return cbDeleteEntry(body.entryId, body.operator || '', staffCtx);
     case 'dailyClose':    return cbDailyClose(body, staffCtx);
-    case 'getDailyCloses': return cbGetDailyCloses(body.store || '', staffCtx);
-    case 'getLogs':       return cbGetLogs(body.store || '', body.limit || 100, staffCtx);
-    case 'saveCashbook':  return cbSaveAll(body.entries || [], body.operator || '', staffCtx);
-    case 'saveDailyCloses': return cbSaveDailyCloses(body.dailyCloses || [], staffCtx);
     default: return { error: '不明なaction: ' + action };
   }
-}
-
-async function cbSaveDailyCloses(closes) {
-  const rows = closes.map(c => ({
-    date: c.date, store_id: c.storeId,
-    safe_balance: c.safeBalance || 0,
-    petty_balance: c.pettyCashBalance || 0,
-    register_balance: c.registerBalance || 0,
-    closed_by: c.closedBy || '',
-    closed_at: c.closedAt || new Date().toISOString(),
-    notes: c.notes || '',
-    locked: c.locked !== undefined ? !!c.locked : true
-  }));
-  if (rows.length > 0) {
-    const { error } = await supabase.from('daily_close').upsert(rows, { onConflict: 'date,store_id' });
-    if (error) throw error;
-  }
-  return { success: true, count: rows.length };
 }
 
 async function cbAddEntry(entry, operator, staffCtx) {
@@ -245,55 +223,6 @@ async function cbDailyClose(body, staffCtx) {
   }, { onConflict: 'date,store_id' });
   if (error) throw error;
 
-  return { success: true };
-}
-
-async function cbGetDailyCloses(store) {
-  let query = supabase.from('daily_close').select('*').order('date', { ascending: false });
-  if (store) query = query.eq('store_id', store);
-  const { data, error } = await query;
-  if (error) throw error;
-  return {
-    dailyCloses: (data || []).map(d => ({
-      date: d.date, storeId: d.store_id,
-      safeBalance: d.safe_balance, pettyCashBalance: d.petty_balance,
-      registerBalance: d.register_balance, closedBy: d.closed_by || '',
-      closedAt: d.closed_at, notes: d.notes || '', locked: d.locked
-    }))
-  };
-}
-
-async function cbGetLogs(store, limit) {
-  let query = supabase.from('cashbook_log').select('*')
-    .order('timestamp', { ascending: false }).limit(limit || 100);
-  if (store) query = query.eq('store_id', store);
-  const { data, error } = await query;
-  if (error) throw error;
-  return {
-    logs: (data || []).map(l => ({
-      timestamp: l.timestamp, action: l.action, entryId: l.entry_id,
-      storeId: l.store_id, operator: l.operator,
-      before: l.before ? JSON.stringify(l.before) : '',
-      after: l.after ? JSON.stringify(l.after) : ''
-    }))
-  };
-}
-
-async function cbSaveAll(entries, operator) {
-  const rows = entries.map(e => ({
-    id: e.id || ('cb_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5)),
-    date: e.date, type: e.type || '', category: e.category || '',
-    description: e.description || '', amount: e.amount || 0,
-    customer_name: e.customerName || '', treatment_count: e.therapyCount || 0,
-    payment_method: e.paymentMethod || 'CASH', cash_type: e.cashType || 'register',
-    member_id: e.memberId || '', store_id: e.store || '',
-    recorder: e.recorder || operator, notes: e.notes || '',
-    updated_by: operator, deleted: !!e.deleted
-  }));
-  if (rows.length > 0) {
-    const { error } = await supabase.from('cashbook').upsert(rows, { onConflict: 'id' });
-    if (error) throw error;
-  }
   return { success: true };
 }
 

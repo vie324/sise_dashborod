@@ -10,7 +10,7 @@
 //    キャッシュしない（バージョン管理外、SW の責務外）
 // ==============================================
 
-const CACHE_NAME = 'sise-dash-v2';
+const CACHE_NAME = 'sise-dash-v3';
 const CORE_ASSETS = [
   '/',
   '/manifest.json',

@@ -69,33 +69,6 @@ export async function lineMessagesGet(params, staffCtx) {
 }
 
 export async function lineMessagesPost(body, staffCtx) {
-  // 移行用: direction を保持した一括保存（管理者のみ）
-  if (body.action === 'saveAll') {
-    if (staffCtx !== null) {
-      return { error: '一括保存は管理者のみ許可されています' };
-    }
-    const messages = body.messages || [];
-    const rows = messages.map(m => ({
-      store_id: m.storeId || '',
-      user_id: m.userId || '',
-      direction: m.direction || 'received',
-      message_type: m.messageType || 'text',
-      message_text: m.messageText || '',
-      message_id: m.messageId || '',
-      timestamp: m.timestamp || new Date().toISOString()
-    }));
-    if (body.replace) {
-      let del = supabase.from('line_messages').delete();
-      del = body.storeId ? del.eq('store_id', body.storeId) : del.neq('id', 0);
-      await del;
-    }
-    if (rows.length > 0) {
-      const { error } = await supabase.from('line_messages').insert(rows);
-      if (error) throw error;
-    }
-    return { success: true, count: rows.length };
-  }
-
   // Webhook形式 (events配列): LINE Platform からのコールバックで認証不要
   // （Webhook は api/line/webhook.js が店舗シークレットで署名検証済みなので素通し）
   if (body.events) {
@@ -295,29 +268,6 @@ export async function lineBroadcastsGet(params, staffCtx) {
 }
 
 export async function lineBroadcastsPost(body, staffCtx) {
-  if (body.action === 'saveAll') {
-    if (staffCtx !== null) return { error: '一括保存は管理者のみ許可されています' };
-    const broadcasts = body.broadcasts || [];
-    const rows = broadcasts.map(b => ({
-      store_id: b.storeId || '',
-      broadcast_type: b.broadcastType || '',
-      message_content: b.messageContent || '',
-      recipient_count: b.recipientCount || 0,
-      status: b.status || '',
-      timestamp: b.timestamp || new Date().toISOString()
-    }));
-    if (body.replace) {
-      let del = supabase.from('line_broadcasts').delete();
-      del = body.storeId ? del.eq('store_id', body.storeId) : del.neq('id', 0);
-      await del;
-    }
-    if (rows.length > 0) {
-      const { error } = await supabase.from('line_broadcasts').insert(rows);
-      if (error) throw error;
-    }
-    return { success: true, count: rows.length };
-  }
-
   if (!canAccessStore(staffCtx, body.storeId)) {
     return { error: 'この店舗の配信履歴を記録する権限がありません' };
   }
@@ -361,29 +311,6 @@ export async function lineTemplatesGet(params, staffCtx) {
 export async function lineTemplatesPost(body, staffCtx) {
   const action = body.action || 'create';
   switch (action) {
-    case 'saveAll': {
-      if (staffCtx !== null) return { error: '一括保存は管理者のみ許可されています' };
-      const templates = body.templates || [];
-      const rows = templates.map(t => ({
-        template_id: t.templateId || ('tmpl_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6)),
-        store_id: t.storeId || '',
-        name: t.name || '',
-        category: t.category || '',
-        message_type: t.messageType || 'text',
-        message_content: t.messageContent || '',
-        created_at: t.createdAt || new Date().toISOString()
-      }));
-      if (body.replace) {
-        let del = supabase.from('line_templates').delete();
-        del = body.storeId ? del.eq('store_id', body.storeId) : del.neq('template_id', '');
-        await del;
-      }
-      if (rows.length > 0) {
-        const { error } = await supabase.from('line_templates').upsert(rows, { onConflict: 'template_id' });
-        if (error) throw error;
-      }
-      return { success: true, count: rows.length };
-    }
     case 'create': {
       if (!canAccessStore(staffCtx, body.storeId)) {
         return { error: 'この店舗にテンプレートを作成する権限がありません' };
@@ -468,31 +395,6 @@ export async function lineAutoRepliesPost(body, staffCtx) {
     return data ? data.store_id : null;
   };
   switch (action) {
-    case 'saveAll': {
-      if (staffCtx !== null) return { error: '一括保存は管理者のみ許可されています' };
-      const rules = body.rules || [];
-      const rows = rules.map(r => ({
-        rule_id: r.ruleId || ('rule_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6)),
-        store_id: r.storeId || '',
-        keyword: r.keyword || '',
-        match_method: r.matchMethod || 'contains',
-        reply_type: r.replyType || 'text',
-        reply_content: r.replyContent || '',
-        priority: r.priority || 0,
-        enabled: r.enabled !== false,
-        created_at: r.createdAt || new Date().toISOString()
-      }));
-      if (body.replace) {
-        let del = supabase.from('line_auto_replies').delete();
-        del = body.storeId ? del.eq('store_id', body.storeId) : del.neq('rule_id', '');
-        await del;
-      }
-      if (rows.length > 0) {
-        const { error } = await supabase.from('line_auto_replies').upsert(rows, { onConflict: 'rule_id' });
-        if (error) throw error;
-      }
-      return { success: true, count: rows.length };
-    }
     case 'create': {
       if (!canAccessStore(staffCtx, body.storeId)) {
         return { error: 'この店舗に自動応答ルールを作成する権限がありません' };
@@ -573,27 +475,6 @@ export async function lineTagsPost(body, staffCtx) {
     return data ? data.store_id : null;
   };
   switch (action) {
-    case 'saveAll': {
-      if (staffCtx !== null) return { error: '一括保存は管理者のみ許可されています' };
-      const tags = body.tags || [];
-      const rows = tags.map(t => ({
-        tag_id: t.tagId || ('tag_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6)),
-        store_id: t.storeId || '',
-        name: t.name || '',
-        color: t.color || '#06C755',
-        created_at: t.createdAt || new Date().toISOString()
-      }));
-      if (body.replace) {
-        let del = supabase.from('line_tags').delete();
-        del = body.storeId ? del.eq('store_id', body.storeId) : del.neq('tag_id', '');
-        await del;
-      }
-      if (rows.length > 0) {
-        const { error } = await supabase.from('line_tags').upsert(rows, { onConflict: 'tag_id' });
-        if (error) throw error;
-      }
-      return { success: true, count: rows.length };
-    }
     case 'create': {
       if (!canAccessStore(staffCtx, body.storeId)) {
         return { error: 'この店舗にタグを作成する権限がありません' };
@@ -754,26 +635,6 @@ export async function lineAnalyticsGet(params, staffCtx) {
 export async function lineUserTagsPost(body, staffCtx) {
   const action = body.action || 'add';
   switch (action) {
-    case 'saveAll': {
-      if (staffCtx !== null) return { error: '一括保存は管理者のみ許可されています' };
-      const userTags = body.userTags || [];
-      const rows = userTags.map(ut => ({
-        store_id: ut.storeId || '',
-        user_id: ut.userId || '',
-        tag_id: ut.tagId || '',
-        assigned_at: ut.assignedAt || new Date().toISOString()
-      }));
-      if (body.replace) {
-        let del = supabase.from('line_user_tags').delete();
-        del = body.storeId ? del.eq('store_id', body.storeId) : del.neq('tag_id', '');
-        await del;
-      }
-      if (rows.length > 0) {
-        const { error } = await supabase.from('line_user_tags').upsert(rows, { onConflict: 'store_id,user_id,tag_id' });
-        if (error) throw error;
-      }
-      return { success: true, count: rows.length };
-    }
     case 'add': {
       if (!canAccessStore(staffCtx, body.storeId)) {
         return { error: 'この店舗のユーザータグを編集する権限がありません' };

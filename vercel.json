@@ -7,7 +7,6 @@
     { "source": "/api/db", "destination": "/api/db" },
     { "source": "/api/claude/advice", "destination": "/api/claude/advice" },
     { "source": "/api/photos/upload", "destination": "/api/photos" },
-    { "source": "/api/photos/list", "destination": "/api/photos" },
     { "source": "/api/square/config", "destination": "/api/square/config" },
     { "source": "/api/square/:path*", "destination": "/api/square/proxy?path=:path*" },
     { "source": "/api/meta/:path*", "destination": "/api/meta/proxy?path=:path*" },

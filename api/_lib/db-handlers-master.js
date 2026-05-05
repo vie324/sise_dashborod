@@ -159,19 +159,6 @@ export async function menuItemsGet(params) {
 export async function menuItemsPost(body) {
   const action = body.action || '';
   switch (action) {
-    case 'saveAll': {
-      const items = (body.menuItems || []).map(i => ({
-        id: i.id || ('menu_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5)),
-        name: i.name, category: i.category || '', price: i.price || 0,
-        item_type: i.itemType || 'menu', active: i.active !== false,
-        created_at: i.createdAt || new Date().toISOString()
-      }));
-      if (items.length > 0) {
-        const { error } = await supabase.from('menu_items').upsert(items, { onConflict: 'id' });
-        if (error) throw error;
-      }
-      return { success: true, count: items.length };
-    }
     case 'addItem': {
       const item = body.item || {};
       const id = item.id || ('menu_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5));
