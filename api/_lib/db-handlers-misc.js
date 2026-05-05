@@ -1,5 +1,6 @@
 import { supabase } from './supabase.js';
 import { canAccessStore, allowedStoreIds } from './auth.js';
+import { resolveStoreId } from './stores.js';
 
 // ============================================================
 // 利用回数 (usage)
@@ -376,6 +377,9 @@ async function attClockIn(body, staffCtx) {
     }
   }
 
+  // 重複統合先 (merged_into) を解決し、書き込み先を正規IDへ寄せる
+  const canonicalStoreId = await resolveStoreId(body.storeId);
+
   // クライアントのローカル日時を優先（サーバの UTC によるタイムゾーンずれ回避）。
   // 後方互換のため未指定なら UTC 派生値にフォールバック。
   const isValidDate = typeof body.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(body.date);
@@ -414,7 +418,7 @@ async function attClockIn(body, staffCtx) {
 
   const { error } = await supabase.from('attendance').insert({
     id, staff_id: body.staffId, staff_name: body.staffName || '',
-    store_id: body.storeId, date: today, clock_in: clockIn, clock_out: '',
+    store_id: canonicalStoreId, date: today, clock_in: clockIn, clock_out: '',
     work_minutes: 0, lat: body.lat || null, lng: body.lng || null,
     method: body.method || '', notes: body.notes || ''
   });
@@ -425,7 +429,7 @@ async function attClockIn(body, staffCtx) {
     success: true,
     record: {
       id, staffId: body.staffId, staffName: body.staffName || '',
-      storeId: body.storeId, date: today,
+      storeId: canonicalStoreId, date: today,
       clockIn, clockOut: '', workMinutes: 0,
       lat: body.lat || null, lng: body.lng || null,
       method: body.method || ''
