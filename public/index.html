@@ -1818,7 +1818,12 @@
             return `${base}?v=${encodeURIComponent(data.token)}`;
         };
 
-        // localStorage 管理（DB 接続失敗時のフォールバック用）
+        // localStorage 管理（Supabase 取得失敗時のオフライン耐性フォールバック）
+        // ---------------------------------------------------------------------
+        // 通信障害時にスタッフ一覧/権限判定が完全停止しないよう、最後に成功した
+        // staffGet レスポンスをローカルにミラーしておく。Supabase 接続が安定して
+        // いるなら削除可能（将来的に Supabase 単一信頼運用に切り替えるなら
+        // STAFF_STORAGE_KEY と loadStaffList / saveStaffListLocal を削除する）。
         const loadStaffList = () => {
             try { return JSON.parse(localStorage.getItem(STAFF_STORAGE_KEY)) || []; }
             catch (e) { return []; }
@@ -10166,7 +10171,9 @@
             const [editingStaff, setEditingStaff] = useState(null);
             const [isAdding, setIsAdding] = useState(false);
             const [copiedId, setCopiedId] = useState(null);
-            // 全スタッフ URL 一括再発行: 旧 legacy token から signed token への移行用
+            // 全スタッフ URL 一括再発行: 旧 legacy(base64) → signed(HMAC) 移行ツール
+            // 通常運用で押す必要はない。ALLOW_LEGACY_TOKENS=false へ切り替える前に
+            // 1 回だけ実行し、全スタッフへ新 URL を配布するためのもの。
             const [bulkReissuing, setBulkReissuing] = useState(false);
             const [bulkReissueResult, setBulkReissueResult] = useState(null); // { success: [{id, name, url}], failed: [{id, name, error}] }
             const [dbSyncing, setDbSyncing] = useState(false);
@@ -20672,12 +20679,18 @@
 
                     {/* Google Sheets 統合連携 */}
                     <Card>
-                        <h3 className="text-lg font-semibold text-slate-900 mb-4">Google Sheets 連携</h3>
+                        <h3 className="text-lg font-semibold text-slate-900 mb-4">カウンセリングフォーム連携 (GAS)</h3>
+                        <p className="text-xs text-slate-500 mb-4">
+                            <Icon name="info" size={12} className="inline mr-1 -mt-0.5" />
+                            カウンセリングデータのみ Google Apps Script (GAS) 経由で取得しています。
+                            その他の機能 (出納帳・勤怠・会員・回数券・スタッフ・店舗・日報・HPB 等) は
+                            Supabase に統合済みのため GAS の設定は不要です。
+                        </p>
                         <div className="space-y-5">
                             <div>
                                 <label className="block text-sm font-semibold text-slate-700 mb-2">
-                                    <Icon name="database" size={16} className="inline mr-2 text-sise-500" />
-                                    統合 GAS URL
+                                    <Icon name="heart-handshake" size={16} className="inline mr-2 text-sise-500" />
+                                    カウンセリング GAS URL
                                 </label>
                                 <div className="flex gap-2">
                                     <input
@@ -20701,42 +20714,20 @@
                                     </button>
                                 </div>
                                 <p className="text-xs text-slate-400 mt-1.5">
-                                    1つのスプレッドシートで全データを管理します（gas/unified.gs をデプロイ）。
-                                    このURL1つで日報・カウンセリング・利用回数・回数券・会員・出納帳すべてに対応します。
-                                    空欄で保存またはリセットするとデフォルトURLが使用されます。
+                                    カウンセリング Google フォームの回答先スプレッドシートに紐付けた
+                                    Apps Script (gas/unified.gs) のウェブアプリ URL を指定します。
+                                    空欄保存またはリセットでデフォルト URL が使用されます。
                                 </p>
                             </div>
 
                             <div className="bg-slate-50 rounded-lg p-4 border border-slate-200">
-                                <h4 className="font-semibold text-slate-900 mb-3">スプレッドシートのシート構成</h4>
+                                <h4 className="font-semibold text-slate-900 mb-3">必要なシート構成</h4>
                                 <div className="space-y-1.5 text-xs">
-                                    <div className="flex items-center gap-2 p-2 bg-white rounded border border-slate-200">
-                                        <Icon name="file-text" size={14} className="text-blue-500" />
-                                        <span className="font-semibold text-slate-700 w-48">日報</span>
-                                        <span className="text-slate-500">Googleフォーム回答（読み取り専用）</span>
-                                    </div>
                                     {['本厚木店', '大和店', '横浜店', '町田店', '川口店'].map(store => (
                                         <div key={store} className="flex items-center gap-2 p-2 bg-white rounded border border-slate-200">
                                             <Icon name="heart-handshake" size={14} className="text-sise-500" />
                                             <span className="font-semibold text-slate-700 w-48">カウンセリング回答_{store}</span>
-                                            <span className="text-slate-500">Googleフォーム回答（読み取り専用）</span>
-                                        </div>
-                                    ))}
-                                    {[
-                                        { name: '利用回数', icon: 'bar-chart-2', desc: '会員の月間利用回数' },
-                                        { name: '回数券プラン', icon: 'ticket', desc: '回数券プラン定義' },
-                                        { name: '回数券データ', icon: 'ticket', desc: '回数券購入・利用データ' },
-                                        { name: 'QR現金会員', icon: 'users', desc: 'QR・現金決済会員データ' },
-                                        { name: '出納帳', icon: 'book-open', desc: '金庫・小口・レジ管理 / 日次締め / 監査ログ' },
-                                        { name: 'スタッフ管理', icon: 'users', desc: 'スタッフ・パスワード管理' },
-                                        { name: '店舗管理', icon: 'map-pin', desc: '店舗の追加・無効化管理' },
-                                        { name: 'ダッシュボード設定', icon: 'settings', desc: 'プラン上限・繰越など各種設定' },
-                                        { name: 'HPBデータ', icon: 'bar-chart-2', desc: 'HPB月次マーケティングデータ' },
-                                    ].map(s => (
-                                        <div key={s.name} className="flex items-center gap-2 p-2 bg-white rounded border border-slate-200">
-                                            <Icon name={s.icon} size={14} className="text-amber-500" />
-                                            <span className="font-semibold text-slate-700 w-48">{s.name}</span>
-                                            <span className="text-slate-500">{s.desc}（自動作成・読み書き）</span>
+                                            <span className="text-slate-500">Google フォーム回答（読み取り専用）</span>
                                         </div>
                                     ))}
                                 </div>
@@ -20744,45 +20735,32 @@
                         </div>
                     </Card>
 
-                    {/* GAS セットアップガイド */}
+                    {/* GAS セットアップガイド（カウンセリング専用） */}
                     <Card>
                         <details className="group">
                             <summary className="flex items-center cursor-pointer list-none select-none">
                                 <Icon name="book-open" size={20} className="text-sise-500 mr-3" />
-                                <h3 className="text-lg font-semibold text-slate-900 flex-1">GAS セットアップガイド</h3>
+                                <h3 className="text-lg font-semibold text-slate-900 flex-1">GAS セットアップガイド（カウンセリング専用）</h3>
                                 <Icon name="chevron-down" size={18} className="text-slate-400 transition-transform duration-200 group-open:rotate-180" />
                             </summary>
                             <div className="mt-5 space-y-6">
                                 {/* Step 1 */}
                                 <div className="relative pl-8 border-l-2 border-sise-200 pb-5">
                                     <div className="absolute left-0 -translate-x-1/2 w-7 h-7 rounded-full bg-gradient-to-br from-sise-500 to-sise-600 text-white flex items-center justify-center text-xs font-bold shadow-sm">1</div>
-                                    <h4 className="font-bold text-slate-800 mb-2">スプレッドシートを作成</h4>
-                                    <p className="text-sm text-slate-600 mb-3">Google ドライブで新しいスプレッドシートを作成します。名前は「si'se 統合管理」などわかりやすいものにしてください。</p>
+                                    <h4 className="font-bold text-slate-800 mb-2">スプレッドシートを作成 + フォーム連携</h4>
+                                    <p className="text-sm text-slate-600 mb-3">Google ドライブで新しいスプレッドシートを作成し、カウンセリングフォーム（5 店舗分）の回答先に紐付けて、各シート名を以下に変更します。</p>
+                                    <div className="bg-slate-50 rounded-lg p-3 text-xs">
+                                        <div className="flex flex-wrap gap-1.5">
+                                            {['カウンセリング回答_本厚木店', 'カウンセリング回答_大和店', 'カウンセリング回答_横浜店', 'カウンセリング回答_町田店', 'カウンセリング回答_川口店'].map(name => (
+                                                <code key={name} className="bg-sise-50 text-sise-700 px-1.5 py-0.5 rounded font-bold">{name}</code>
+                                            ))}
+                                        </div>
+                                    </div>
                                 </div>
 
                                 {/* Step 2 */}
                                 <div className="relative pl-8 border-l-2 border-sise-200 pb-5">
                                     <div className="absolute left-0 -translate-x-1/2 w-7 h-7 rounded-full bg-gradient-to-br from-sise-500 to-sise-600 text-white flex items-center justify-center text-xs font-bold shadow-sm">2</div>
-                                    <h4 className="font-bold text-slate-800 mb-2">Googleフォームの回答先を設定</h4>
-                                    <p className="text-sm text-slate-600 mb-3">以下の2種類のフォームの回答先を、作成したスプレッドシートに設定します。</p>
-                                    <div className="bg-slate-50 rounded-lg p-3 space-y-2 text-xs">
-                                        <p className="font-semibold text-slate-700">日報フォーム:</p>
-                                        <p className="text-slate-500">フォームの「回答」タブ → スプレッドシートアイコン → 「既存のスプレッドシートを選択」→ 作成したシートを選択。<br/>シート名を<code className="bg-sise-50 text-sise-700 px-1.5 py-0.5 rounded font-bold">日報</code>に変更。</p>
-                                        <div className="border-t border-slate-200 pt-2 mt-2">
-                                            <p className="font-semibold text-slate-700">カウンセリングフォーム（5店舗分）:</p>
-                                            <p className="text-slate-500">各店舗のフォームも同様に同じスプレッドシートに接続し、シート名を以下に変更:</p>
-                                            <div className="flex flex-wrap gap-1.5 mt-1.5">
-                                                {['カウンセリング回答_本厚木店', 'カウンセリング回答_大和店', 'カウンセリング回答_横浜店', 'カウンセリング回答_町田店', 'カウンセリング回答_川口店'].map(name => (
-                                                    <code key={name} className="bg-sise-50 text-sise-700 px-1.5 py-0.5 rounded font-bold">{name}</code>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                {/* Step 3 */}
-                                <div className="relative pl-8 border-l-2 border-sise-200 pb-5">
-                                    <div className="absolute left-0 -translate-x-1/2 w-7 h-7 rounded-full bg-gradient-to-br from-sise-500 to-sise-600 text-white flex items-center justify-center text-xs font-bold shadow-sm">3</div>
                                     <h4 className="font-bold text-slate-800 mb-2">Apps Script にコードを貼り付け</h4>
                                     <ol className="text-sm text-slate-600 space-y-1.5 list-decimal list-inside">
                                         <li>スプレッドシートの<strong>「拡張機能」→「Apps Script」</strong>を開く</li>
@@ -20791,9 +20769,9 @@
                                     </ol>
                                 </div>
 
-                                {/* Step 4 */}
+                                {/* Step 3 */}
                                 <div className="relative pl-8 border-l-2 border-sise-200 pb-5">
-                                    <div className="absolute left-0 -translate-x-1/2 w-7 h-7 rounded-full bg-gradient-to-br from-sise-500 to-sise-600 text-white flex items-center justify-center text-xs font-bold shadow-sm">4</div>
+                                    <div className="absolute left-0 -translate-x-1/2 w-7 h-7 rounded-full bg-gradient-to-br from-sise-500 to-sise-600 text-white flex items-center justify-center text-xs font-bold shadow-sm">3</div>
                                     <h4 className="font-bold text-slate-800 mb-2">ウェブアプリとしてデプロイ</h4>
                                     <ol className="text-sm text-slate-600 space-y-1.5 list-decimal list-inside">
                                         <li>Apps Script 画面右上の<strong>「デプロイ」→「新しいデプロイ」</strong></li>
@@ -20801,17 +20779,17 @@
                                         <li>実行するユーザー: <strong>「自分」</strong></li>
                                         <li>アクセスできるユーザー: <strong>「全員」</strong></li>
                                         <li>「デプロイ」ボタンをクリック</li>
-                                        <li>初回は Google アカウントの<strong>アクセス許可</strong>が必要（「許可を確認」→ アカウント選択 → 「詳細」→「安全でないページに移動」→「許可」）</li>
+                                        <li>初回は Google アカウントの<strong>アクセス許可</strong>が必要</li>
                                     </ol>
                                 </div>
 
-                                {/* Step 5 */}
+                                {/* Step 4 */}
                                 <div className="relative pl-8 border-l-2 border-sise-200">
-                                    <div className="absolute left-0 -translate-x-1/2 w-7 h-7 rounded-full bg-gradient-to-br from-sise-500 to-sise-600 text-white flex items-center justify-center text-xs font-bold shadow-sm">5</div>
-                                    <h4 className="font-bold text-slate-800 mb-2">URLを上の設定欄に貼り付け</h4>
-                                    <p className="text-sm text-slate-600">デプロイ完了後に表示される<strong>ウェブアプリURL</strong>（https://script.google.com/macros/s/...）をコピーし、上の「統合 GAS URL」欄に貼り付けて保存してください。</p>
+                                    <div className="absolute left-0 -translate-x-1/2 w-7 h-7 rounded-full bg-gradient-to-br from-sise-500 to-sise-600 text-white flex items-center justify-center text-xs font-bold shadow-sm">4</div>
+                                    <h4 className="font-bold text-slate-800 mb-2">URL を上の設定欄に貼り付け</h4>
+                                    <p className="text-sm text-slate-600">デプロイ完了後に表示される<strong>ウェブアプリ URL</strong>（https://script.google.com/macros/s/...）をコピーし、上の「カウンセリング GAS URL」欄に貼り付けて保存してください。</p>
                                     <div className="mt-3 bg-amber-50 border border-amber-200 rounded-lg p-3">
-                                        <p className="text-xs text-amber-800"><Icon name="alert-triangle" size={14} className="inline mr-1" /><strong>コード更新時の注意:</strong> gas/unified.gs を更新した場合は、Apps Script で<strong>「デプロイ」→「デプロイを管理」→ 鉛筆アイコン → バージョン「新しいバージョン」→「デプロイ」</strong>で更新してください。URLは変わりません。</p>
+                                        <p className="text-xs text-amber-800"><Icon name="alert-triangle" size={14} className="inline mr-1" /><strong>コード更新時:</strong> gas/unified.gs を更新した場合は Apps Script で「デプロイ」→「デプロイを管理」→ 鉛筆アイコン → バージョン「新しいバージョン」→「デプロイ」で更新してください（URL は変わりません）。</p>
                                     </div>
                                 </div>
                             </div>

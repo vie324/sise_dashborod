@@ -24,6 +24,14 @@
 | `SISE_AUTH_SECRET_PREV` | 1世代前の HMAC 秘密鍵 | 未設定（ローテーション時のみ） |
 | `ALLOWED_ORIGIN` | CORS 制限 | `*` |
 
+### 日報メール通知（Resend）
+
+| 変数 | 用途 | 既定挙動 |
+|---|---|---|
+| `SISE_RESEND_API_KEY` | Resend API キー (`re_...`) | 未設定なら通知をスキップ（保存のみ成功） |
+| `SISE_DAILY_REPORT_FROM` | 送信元アドレス（Resend で検証済みドメイン） | 未設定なら通知スキップ |
+| `SISE_DAILY_REPORT_TO` | 送信先（カンマ区切り複数可） | 未設定なら通知スキップ |
+
 ### Square / LINE / Meta / TikTok / Claude（使う機能のみ）
 
 `.env.example` 参照。店舗ごとに `SQUARE_STORE_{N}_ACCESS_TOKEN` / `LINE_STORE_{N}_ACCESS_TOKEN` などを列挙。
@@ -166,16 +174,28 @@ ALLOW_LEGACY_TOKENS=false
 1. 管理者モードで 設定 > 店舗管理 > 「店舗を追加」
 2. ID（英数、任意）/ 名前 / 備考 を入力
 3. Square 連携する場合は Vercel env に `SQUARE_STORE_{N}_ACCESS_TOKEN` 等を追加
+4. env を反映するため設定画面で「Square名を同期」ボタンを押すと、env 上の店舗を Supabase へ実名で挿入する
 
-### ダミー店舗の掃除
+### ダミー店舗の掃除（"店舗 N" プレースホルダ）
 
-`店舗1`〜`店舗5` のような残骸が出ていた場合:
-- 一覧の「無効化」を押す → 表示から消える（データは残る）
-- 完全削除したい場合は Supabase SQL Editor で `DELETE FROM stores WHERE id='XX'`
+過去のバージョンでスタッフを店舗に紐付けた際に `店舗 N` という仮の名前で
+レコードが自動生成されていた問題の対処。`storesGet` には自動ヒーリング機構が
+あり、env に実名がある場合は GET 時に自動で実名へ置換される。手動で対処する
+場合は **設定 > 店舗管理 > 「Square名を同期」** ボタン。
+
+### 重複店舗の統合（マージ別名）
+
+同名の店舗が `stores` に複数ある場合（手動行 + Square 自動生成行 など）:
+
+- 設定 > 店舗管理 のバナーから **「重複を統合」** を押す
+- 内部的には `mergeStore` アクションで `merged_into=正規ID, status=inactive` に更新
+- **発行済みスタッフ URL は壊れない**（`extractStaffContext` が `merged_into` 経由で別名を展開）
+- 新規データ（cashbook / attendance / daily_close）はサーバ側で正規IDへ自動寄せ
+- 統合済みは「統合済み店舗」セクションに表示。「別名解除」で `unmergeStore` で戻せる
 
 ### 店舗の GPS 座標設定
 
-勤怠の GPS 出勤に使う。管理画面 > 店舗管理 > 「座標設定」。
+勤怠の GPS 出勤に使う。管理画面 > 勤怠管理 > QR 表示タブ > 店舗 GPS 座標設定。
 
 ---
 
@@ -201,6 +221,36 @@ https://<your-domain>/api/line/webhook?store={N}
 - チャネルシークレット（署名検証用）が正しいか
 - `line_messages` テーブルに INSERT されているか SQL で確認
 - 店舗 ID と環境変数の番号が一致しているか
+
+---
+
+## 8.5 日報フォーム + メール通知
+
+ダッシュボード内の「日報」タブから入力できる。送信時に `reportsPost` の create
+アクションが Supabase へ保存し、`api/_lib/email.js` の `sendEmail` を Resend
+API 経由で叩いて本部宛に通知メールを送る。
+
+### Resend のセットアップ
+
+1. <https://resend.com> でアカウント作成
+2. ドメインを追加して DNS（SPF / DKIM）検証を通す
+3. API キーを発行（`re_...` 形式）
+4. Vercel env に以下を設定:
+   - `SISE_RESEND_API_KEY`
+   - `SISE_DAILY_REPORT_FROM`（例: `noreply@your-domain.com`）
+   - `SISE_DAILY_REPORT_TO`（例: `manager@example.com,owner@example.com`）
+
+### 動作確認
+
+- 環境変数未設定でも日報は保存される（メールがスキップされる）
+- UI トーストで「日報を送信しました（メール通知は未設定）」と表示される
+- API レスポンスの `mail` フィールドで送信状態を確認可能（`{ success, id }` / `{ skipped, reason }` / `{ error, detail }`）
+
+### よくある失敗
+
+- **`resend_403`**: API キーが invalid。再発行
+- **`resend_400` + "from"**: 送信元ドメインが Resend で未検証。DNS 設定を見直し
+- **メールが届かない**: Resend Dashboard > Logs で実際の送信状態を確認
 
 ---
 

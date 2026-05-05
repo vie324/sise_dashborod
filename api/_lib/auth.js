@@ -22,8 +22,12 @@ import { supabase } from './supabase.js';
 import { signToken, verifyToken, looksSigned } from './sign.js';
 import { expandStoreIdsWithAliases } from './stores.js';
 
-// 未署名トークンを受理するかどうか。本番運用で全スタッフの URL を再発行した
-// あとは false に切り替えて、古い URL をハード無効化できる。
+// 未署名トークンを受理するかどうか。
+// ----------------------------------------------------------------------------
+// 旧 base64(JSON) 形式のスタッフ URL を受理するための互換フラグ。HMAC 署名付き
+// URL に全件移行できたら ALLOW_LEGACY_TOKENS=false に切り替えて旧 URL をハード
+// 無効化する。スタッフ管理画面の「全スタッフ URL 一括再発行」ボタンで signed
+// 形式へ移行できる（移行後はこのフラグと decodeLegacyToken を削除可能）。
 const ALLOW_LEGACY_TOKENS = String(process.env.ALLOW_LEGACY_TOKENS || 'true').toLowerCase() !== 'false';
 
 // legacy 形式 (base64(JSON)) を decode する。失敗したら null。

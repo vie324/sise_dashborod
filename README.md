@@ -7,8 +7,16 @@
 | Stack | React 18 (CDN) + Tailwind CSS + Recharts + Chart.js |
 | Backend | Vercel Serverless Functions + Supabase (Postgres) |
 | Auth | HMAC-SHA256 署名付きトークン (URL) + admin bcrypt + HttpOnly cookie |
+| Email | Resend HTTP API（日報通知。未設定なら送信スキップ） |
 | Deploy | Vercel (Hobby プランの 12 ファンクション上限に合わせて `/api/db` に集約) |
-| Entry | `public/index.html` (~20,700行、単一 SPA) |
+| Entry | `public/index.html`（単一 SPA） |
+
+## データソース
+
+- **Supabase** — 出納帳・勤怠・会員（QR/現金）・回数券・スタッフ・店舗・日報・HPB・LINE 各種・ダッシュボード設定・メニュー
+- **Square API** — Sub 会員・売上・ロケーション情報（読み取りのみ）
+- **GAS (gas/unified.gs)** — カウンセリングフォーム回答のみ（Google フォーム連携の都合で残存）
+- **Meta / TikTok API** — 広告データ（headquarter ロールのみ）
 
 ## ドキュメント
 
@@ -54,9 +62,12 @@ sise_dashborod/
 │       ├── cors.js         # CORS ヘルパー
 │       ├── auth.js         # staffCtx 抽出 + admin session + store 権限判定
 │       ├── sign.js         # HMAC-SHA256 トークン署名/検証
+│       ├── stores.js       # 店舗マスタ補助 (env→DB / merged_into 解決)
+│       ├── email.js        # Resend HTTP API (日報メール通知)
 │       └── db-handlers-*.js # table 別ハンドラ
 ├── supabase/migrations/    # DB スキーマ定義
-├── gas/                    # Google Apps Script (カウンセリングフォーム連携のみ)
+├── gas/
+│   └── unified.gs          # カウンセリングフォーム連携のみ (約 480 行)
 ├── scripts/
 │   └── gen-admin-hash.js   # 管理者パスワード bcrypt ハッシュ生成
 └── vercel.json             # リライト / ヘッダ設定
@@ -68,16 +79,17 @@ sise_dashborod/
 |---|---|---|
 | ダッシュボード | `DashboardView` | `reportsGet` |
 | 会員管理 | `MemberManagementView` / `useManualMembers` | `membersGet/Post` |
-| 出納帳 | `CashbookView` / `useCashbook` | `cashbookGet/Post` |
-| 勤怠 | `AttendanceView` / `useAttendance` | `attendanceGet/Post` |
-| カウンセリング | `ConceptFormView` / `useCounseling` | GAS (残存) |
+| 出納帳 | `CashbookView` / `useCashbook` | `cashbookGet/Post`（重複店舗の merged_into 解決済み） |
+| 勤怠 | `AttendanceView` / `useAttendance` | `attendanceGet/Post`（同上） |
+| 日報 | `DailyReportInputForm` / `DailyReportListView` | `reportsGet/Post`（送信時に Resend 経由で通知メール） |
+| カウンセリング | `ConceptFormView` / `useCounseling` | **GAS (gas/unified.gs)** — Google フォーム回答シート読み取り |
 | 施術レポート | `TreatmentReportView` | — |
 | 姿勢分析 | `PostureAnalysisView` | `/api/claude/advice` |
 | LINE | `LineChatView` / `useLineChat` | `line*` handlers + webhook |
 | 回数券 | `TicketManagementView` / `useTickets` | `ticketGet/Post` (per-entity) |
 | マーケティング | `MarketingView` | `/api/meta`, `/api/tiktok`, `hpbGet/Post` |
 | 来店フロー | `FlowNavigationView` | — |
-| 設定 | `SettingsView` + `StaffManagementSection` + `StoreManagementSection` | `staffGet/Post`, `storesGet/Post` |
+| 設定 | `SettingsView` + `StaffManagementSection` + `StoreManagementSection` | `staffGet/Post`, `storesGet/Post`（mergeStore / unmergeStore / syncSquareNames 含む） |
 
 ## 権限モデル
 
@@ -108,14 +120,18 @@ sise_dashborod/
 ## ブランチ運用
 
 - メインブランチ: `main`
-- フィーチャーブランチ: `claude/explore-ui-ux-animations-mdF4n` (現行作業ブランチ)
-- PR 経由でのみマージ
+- フィーチャーブランチで作業 → PR 経由でのみマージ
 
 ## よく使う SQL（Supabase SQL Editor 用）
 
 ```sql
--- 店舗一覧（非アクティブ含む）
-SELECT id, name, status, created_at FROM stores ORDER BY created_at;
+-- 店舗一覧（非アクティブ + 別名統合行も含む）
+SELECT id, name, status, merged_into, created_at FROM stores ORDER BY created_at;
+
+-- 重複統合（別名）の状態確認
+SELECT s.id, s.name, s.status, s.merged_into,
+       (SELECT name FROM stores WHERE id = s.merged_into) AS canonical_name
+FROM stores s WHERE s.merged_into IS NOT NULL;
 
 -- スタッフ + 所属店舗
 SELECT s.id, s.name, s.role, s.status, array_agg(ss.store_id) AS store_ids
@@ -132,3 +148,14 @@ GROUP BY store_id, type ORDER BY store_id, type;
 SELECT id, data->>'customerName' AS name, data->>'storeName' AS storeName
 FROM ticket_data WHERE (data->>'storeId') IS NULL;
 ```
+
+## アーキテクチャの注意点
+
+### 店舗マスタの二系統
+`stores` テーブルには 2 種類の行が混在する:
+- **Square 連携行** (id="1"〜"20" / "default"): `SQUARE_STORE_{N}_NAME` env で名前管理。`api/_lib/stores.js` が読み取って自動同期（`syncSquareNames` アクション）
+- **手動追加行** (任意 ID): 管理画面から作られる。Square 連携店舗と同名で重複したら **`merged_into`** で別名統合し、書き込みは正規 ID へ寄せる
+
+### スタッフ URL のトークン形式
+- **新形式** (signed): `<base64url(payload)>.<base64url(HMAC)>` — `SISE_AUTH_SECRET` で署名検証
+- **旧形式** (legacy): `<base64(JSON)>` — `ALLOW_LEGACY_TOKENS=true` の間のみ受理。全件再発行後に `false` で完全無効化
