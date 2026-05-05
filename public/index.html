@@ -1818,29 +1818,17 @@
             return `${base}?v=${encodeURIComponent(data.token)}`;
         };
 
-        // localStorage管理（GASフォールバック用）
+        // localStorage 管理（Supabase 取得失敗時のオフライン耐性フォールバック）
+        // ---------------------------------------------------------------------
+        // 通信障害時にスタッフ一覧/権限判定が完全停止しないよう、最後に成功した
+        // staffGet レスポンスをローカルにミラーしておく。Supabase 接続が安定して
+        // いるなら削除可能（将来的に Supabase 単一信頼運用に切り替えるなら
+        // STAFF_STORAGE_KEY と loadStaffList / saveStaffListLocal を削除する）。
         const loadStaffList = () => {
             try { return JSON.parse(localStorage.getItem(STAFF_STORAGE_KEY)) || []; }
             catch (e) { return []; }
         };
         const saveStaffListLocal = (list) => localStorage.setItem(STAFF_STORAGE_KEY, JSON.stringify(list));
-
-        // GASスプレッドシート経由のスタッフ管理
-        const gasPostRequest = async (body) => {
-            const gasUrl = localStorage.getItem('sise_unified_gas_url');
-            if (!gasUrl) return null;
-            try {
-                const resp = await fetch(gasUrl, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'text/plain' },
-                    body: JSON.stringify(body)
-                });
-                return await resp.json();
-            } catch (e) {
-                console.warn('GAS POST エラー:', e);
-                return null;
-            }
-        };
 
         // ============================================================
         // Supabase API ヘルパー
@@ -1903,7 +1891,7 @@
         // スタッフ管理 → Supabase
         // ============================================================
         // 応答: { ok: true, staff: [...] } または { ok: false, error: '...' }
-        const fetchStaffFromGas = async (includeInactive = true) => {
+        const fetchStaffFromDb = async (includeInactive = true) => {
             const data = await dbGet('staff', { includeInactive: includeInactive ? 'true' : 'false' });
             if (!data) return { ok: false, error: 'API接続エラー（/api/db に到達できません）' };
             if (data.error) return { ok: false, error: data.error };
@@ -1911,23 +1899,23 @@
             return { ok: true, staff: data.staff };
         };
 
-        const saveStaffToGas = async (staffList) => dbPost('staff', { action: 'saveStaff', staff: staffList });
-        const updateStaffGas = async (staffId, updates) => dbPost('staff', { action: 'updateStaff', staffId, updates });
-        const softDeleteStaffGas = async (staffId) => dbPost('staff', { action: 'deleteStaff', staffId });
-        const restoreStaffGas = async (staffId) => dbPost('staff', { action: 'restoreStaff', staffId });
+        const saveStaffToDb = async (staffList) => dbPost('staff', { action: 'saveStaff', staff: staffList });
+        const updateStaffDb = async (staffId, updates) => dbPost('staff', { action: 'updateStaff', staffId, updates });
+        const softDeleteStaffDb = async (staffId) => dbPost('staff', { action: 'deleteStaff', staffId });
+        const restoreStaffDb = async (staffId) => dbPost('staff', { action: 'restoreStaff', staffId });
 
         // ============================================================
         // 店舗管理 → Supabase
         // ============================================================
-        const fetchStoresFromGas = async (includeInactive = true) => {
+        const fetchStoresFromDb = async (includeInactive = true) => {
             const data = await dbGet('stores', { includeInactive: includeInactive ? 'true' : 'false' });
             return data ? (data.stores || []) : null;
         };
 
-        const addStoreToGas = async (store) => dbPost('stores', { action: 'addStore', store });
-        const updateStoreInGas = async (store) => dbPost('stores', { action: 'updateStore', store });
-        const softDeleteStoreGas = async (storeId) => dbPost('stores', { action: 'deleteStore', storeId });
-        const restoreStoreGas = async (storeId) => dbPost('stores', { action: 'restoreStore', storeId });
+        const addStoreToDb = async (store) => dbPost('stores', { action: 'addStore', store });
+        const updateStoreInDb = async (store) => dbPost('stores', { action: 'updateStore', store });
+        const softDeleteStoreDb = async (storeId) => dbPost('stores', { action: 'deleteStore', storeId });
+        const restoreStoreDb = async (storeId) => dbPost('stores', { action: 'restoreStore', storeId });
 
         // ============================================================
         // ダッシュボード設定 → Supabase
@@ -1944,19 +1932,19 @@
         // ============================================================
         // HPBデータ → Supabase
         // ============================================================
-        const fetchHpbFromGas = async () => {
+        const fetchHpbFromDb = async () => {
             const data = await dbGet('hpb');
             return data ? (data.monthly || null) : null;
         };
 
-        const upsertHpbMonthGas = async (entry) => dbPost('hpb', { action: 'upsert', entry });
-        const deleteHpbMonthGas = async (yearMonth) => dbPost('hpb', { action: 'delete', yearMonth });
-        const saveHpbAllGas = async (monthly) => dbPost('hpb', { action: 'saveAll', monthly });
+        const upsertHpbMonth = async (entry) => dbPost('hpb', { action: 'upsert', entry });
+        const deleteHpbMonth = async (yearMonth) => dbPost('hpb', { action: 'delete', yearMonth });
+        const saveHpbAll = async (monthly) => dbPost('hpb', { action: 'saveAll', monthly });
 
         // パスワード検証（URLアクセス時のスタッフ照合）
         const verifyStaffPassword = async (staffId, password) => {
             // まずSupabaseから最新のスタッフリストを取得
-            const result = await fetchStaffFromGas();
+            const result = await fetchStaffFromDb();
             // Supabase取得失敗時または空の場合は localStorage にフォールバック
             const list = (result.ok && result.staff.length > 0) ? result.staff : loadStaffList();
             const staff = list.find(s => s.id === staffId);
@@ -3669,7 +3657,7 @@
 
             const currentMonth = new Date().toISOString().slice(0, 7); // YYYY-MM
 
-            // GASからプラン上限・繰越を初回取得
+            // Supabase からプラン上限・繰越を初回取得
             useEffect(() => {
                 (async () => {
                     const config = await fetchDashConfig();
@@ -3719,7 +3707,7 @@
             }, [planLimits]);
 
             // Supabaseからデータを取得する関数
-            const fetchFromGAS = useCallback(async () => {
+            const fetchFromDb = useCallback(async () => {
                 const data = await dbGet('usage', { month: currentMonth });
                 if (data && data.usage) {
                     setUsageData(prev => {
@@ -3742,16 +3730,16 @@
                     setUsageData(stored[currentMonth] || {});
                 } catch (e) { setUsageData({}); }
 
-                fetchFromGAS();
-            }, [currentMonth, fetchFromGAS]);
+                fetchFromDb();
+            }, [currentMonth, fetchFromDb]);
 
             // 定期同期（60秒ごとにデータ取得）
             useEffect(() => {
                 const interval = setInterval(() => {
-                    fetchFromGAS();
+                    fetchFromDb();
                 }, 60000);
                 return () => clearInterval(interval);
-            }, [fetchFromGAS]);
+            }, [fetchFromDb]);
 
             // 利用回数を更新（期間キーに対応）+ 即時同期
             const updateUsage = useCallback((memberId, count, periodKey) => {
@@ -3771,7 +3759,7 @@
             }, [currentMonth]);
 
             // Supabaseに保存
-            const saveToSheet = useCallback(async (members) => {
+            const saveToDb = useCallback(async (members) => {
                 setSaving(true);
                 try {
                     const all = JSON.parse(localStorage.getItem('sise_member_usage') || '{}');
@@ -3810,12 +3798,12 @@
             }, [usageData]);
 
             // 手動同期ボタン用
-            const syncFromGAS = useCallback(async () => {
-                await fetchFromGAS();
-            }, [fetchFromGAS]);
+            const syncFromDb = useCallback(async () => {
+                await fetchFromDb();
+            }, [fetchFromDb]);
 
             return {
-                usageData, updateUsage, saveToSheet, getUsage, saving, lastSaved, lastSynced, syncFromGAS, currentMonth,
+                usageData, updateUsage, saveToDb, getUsage, saving, lastSaved, lastSynced, syncFromDb, currentMonth,
                 planLimits, setPlanLimit, getPlanLimit,
                 carryoverData, setCarryover, getCarryover
             };
@@ -3837,7 +3825,7 @@
             const [lastSynced, setLastSynced] = useState(null);
 
             // Supabaseからデータを取得する関数
-            const fetchTicketsFromGAS = useCallback(async () => {
+            const fetchTicketsFromDb = useCallback(async () => {
                 const data = await dbGet('ticket');
                 if (!data) return;
                 if (data.plans) setTicketPlans(data.plans);
@@ -3853,7 +3841,7 @@
                 }
             }, []);
 
-            // ローカルストレージから読み込み + GAS初回読み込み
+            // ローカルストレージから読み込み + Supabase 初回読み込み
             useEffect(() => {
                 try {
                     const stored = JSON.parse(localStorage.getItem(TICKET_STORAGE_KEY) || '{}');
@@ -3865,16 +3853,16 @@
                     setCustomerTickets(stored.tickets || []);
                 } catch (e) { }
 
-                fetchTicketsFromGAS();
-            }, [fetchTicketsFromGAS]);
+                fetchTicketsFromDb();
+            }, [fetchTicketsFromDb]);
 
             // 定期同期（60秒ごとにデータ取得）
             useEffect(() => {
                 const interval = setInterval(() => {
-                    fetchTicketsFromGAS();
+                    fetchTicketsFromDb();
                 }, 60000);
                 return () => clearInterval(interval);
-            }, [fetchTicketsFromGAS]);
+            }, [fetchTicketsFromDb]);
 
             // ローカル保存
             const saveLocal = useCallback((plans, tickets) => {
@@ -4068,7 +4056,7 @@
 
             // Supabaseに一括保存（admin 専用: 旧 migration フロー向け）
             // 個別操作は add/update/delete/useSession で自動同期されるため、通常は呼ばない。
-            const saveToSheet = useCallback(async () => {
+            const saveToDb = useCallback(async () => {
                 setSaving(true);
                 try {
                     saveLocal(ticketPlans, customerTickets);
@@ -4112,15 +4100,15 @@
             }, [customerTickets]);
 
             // 手動同期ボタン用
-            const syncFromGAS = useCallback(async () => {
-                await fetchTicketsFromGAS();
-            }, [fetchTicketsFromGAS]);
+            const syncFromDb = useCallback(async () => {
+                await fetchTicketsFromDb();
+            }, [fetchTicketsFromDb]);
 
             return {
                 ticketPlans, customerTickets, stats,
                 addPlan, updatePlan, deletePlan,
                 addCustomerTicket, updateCustomerTicket, useSession, undoSession, deleteCustomerTicket,
-                saveToSheet, saving, lastSaved, lastSynced, syncFromGAS
+                saveToDb, saving, lastSaved, lastSynced, syncFromDb
             };
         };
 
@@ -4136,7 +4124,7 @@
             const [lastSynced, setLastSynced] = useState(null);
 
             // Supabaseから取得
-            const fetchFromGAS = useCallback(async () => {
+            const fetchFromDb = useCallback(async () => {
                 const data = await dbGet('members');
                 if (data && data.members) {
                     setManualMembers(data.members);
@@ -4151,21 +4139,21 @@
                     const stored = JSON.parse(localStorage.getItem(MANUAL_MEMBERS_STORAGE_KEY) || '[]');
                     setManualMembers(stored);
                 } catch (e) {}
-                fetchFromGAS();
-            }, [fetchFromGAS]);
+                fetchFromDb();
+            }, [fetchFromDb]);
 
             // 定期同期（60秒ごと）
             useEffect(() => {
-                const interval = setInterval(fetchFromGAS, 60000);
+                const interval = setInterval(fetchFromDb, 60000);
                 return () => clearInterval(interval);
-            }, [fetchFromGAS]);
+            }, [fetchFromDb]);
 
             const saveLocal = useCallback((members) => {
                 try { localStorage.setItem(MANUAL_MEMBERS_STORAGE_KEY, JSON.stringify(members)); } catch (e) {}
             }, []);
 
             // Supabaseに保存
-            const saveToGAS = useCallback(async (members) => {
+            const saveToDb = useCallback(async (members) => {
                 setSaving(true);
                 try {
                     const result = await dbPost('members', { members });
@@ -4210,14 +4198,14 @@
                 setManualMembers(prev => {
                     const updated = [newMember, ...prev];
                     saveLocal(updated);
-                    saveToGAS(updated).then(ok => {
-                        if (ok) showToast(newMember.name + 'さんを登録・スプシ保存しました', 'success');
-                        else showToast(newMember.name + 'さんを登録しました（スプシ保存失敗）', 'error');
+                    saveToDb(updated).then(ok => {
+                        if (ok) showToast(newMember.name + 'さんを登録しました', 'success');
+                        else showToast(newMember.name + 'さんを登録しました（DB 保存失敗）', 'error');
                     });
                     return updated;
                 });
                 return newMember;
-            }, [saveLocal, saveToGAS]);
+            }, [saveLocal, saveToDb]);
 
             // 退会処理
             const cancelMember = useCallback((memberId, note) => {
@@ -4232,12 +4220,12 @@
                         };
                     });
                     saveLocal(updated);
-                    saveToGAS(updated).then(ok => {
-                        if (ok) showToast('退会処理をスプシに保存しました', 'success');
+                    saveToDb(updated).then(ok => {
+                        if (ok) showToast('退会処理を保存しました', 'success');
                     });
                     return updated;
                 });
-            }, [saveLocal, saveToGAS]);
+            }, [saveLocal, saveToDb]);
 
             // 再入会
             const reactivateMember = useCallback((memberId) => {
@@ -4252,12 +4240,12 @@
                         };
                     });
                     saveLocal(updated);
-                    saveToGAS(updated).then(ok => {
-                        if (ok) showToast('再入会をスプシに保存しました', 'success');
+                    saveToDb(updated).then(ok => {
+                        if (ok) showToast('再入会を保存しました', 'success');
                     });
                     return updated;
                 });
-            }, [saveLocal, saveToGAS]);
+            }, [saveLocal, saveToDb]);
 
             // プラン変更
             const changePlan = useCallback((memberId, newPlanName, newPrice) => {
@@ -4273,36 +4261,36 @@
                         };
                     });
                     saveLocal(updated);
-                    saveToGAS(updated).then(ok => {
-                        if (ok) showToast('プラン変更をスプシに保存しました', 'success');
+                    saveToDb(updated).then(ok => {
+                        if (ok) showToast('プラン変更を保存しました', 'success');
                     });
                     return updated;
                 });
-            }, [saveLocal, saveToGAS]);
+            }, [saveLocal, saveToDb]);
 
             // 会員情報更新
             const updateMember = useCallback((memberId, updates) => {
                 setManualMembers(prev => {
                     const updated = prev.map(m => m.id === memberId ? { ...m, ...updates } : m);
                     saveLocal(updated);
-                    saveToGAS(updated);
+                    saveToDb(updated);
                     return updated;
                 });
-            }, [saveLocal, saveToGAS]);
+            }, [saveLocal, saveToDb]);
 
             // 会員削除
             const deleteMember = useCallback((memberId) => {
                 setManualMembers(prev => {
                     const updated = prev.filter(m => m.id !== memberId);
                     saveLocal(updated);
-                    saveToGAS(updated).then(ok => {
-                        if (ok) showToast('会員削除をスプシに保存しました', 'success');
+                    saveToDb(updated).then(ok => {
+                        if (ok) showToast('会員削除を保存しました', 'success');
                     });
                     return updated;
                 });
-            }, [saveLocal, saveToGAS]);
+            }, [saveLocal, saveToDb]);
 
-            const syncFromGAS = useCallback(async () => { await fetchFromGAS(); }, [fetchFromGAS]);
+            const syncFromDb = useCallback(async () => { await fetchFromDb(); }, [fetchFromDb]);
 
             // 支払記録を追加
             const addPayment = useCallback((memberId, payment) => {
@@ -4320,12 +4308,12 @@
                         return { ...m, payments: [...(m.payments || []), newPayment] };
                     });
                     saveLocal(updated);
-                    saveToGAS(updated).then(ok => {
-                        if (ok) showToast('入金記録をスプシに保存しました', 'success');
+                    saveToDb(updated).then(ok => {
+                        if (ok) showToast('入金記録を保存しました', 'success');
                     });
                     return updated;
                 });
-            }, [saveLocal, saveToGAS]);
+            }, [saveLocal, saveToDb]);
 
             // 支払記録を削除
             const removePayment = useCallback((memberId, paymentId) => {
@@ -4335,17 +4323,17 @@
                         return { ...m, payments: (m.payments || []).filter(p => p.id !== paymentId) };
                     });
                     saveLocal(updated);
-                    saveToGAS(updated).then(ok => {
-                        if (ok) showToast('入金削除をスプシに保存しました', 'success');
+                    saveToDb(updated).then(ok => {
+                        if (ok) showToast('入金削除を保存しました', 'success');
                     });
                     return updated;
                 });
-            }, [saveLocal, saveToGAS]);
+            }, [saveLocal, saveToDb]);
 
             return {
                 manualMembers, addMember, cancelMember, reactivateMember,
                 changePlan, updateMember, deleteMember, addPayment, removePayment,
-                syncFromGAS, saveToGAS, lastSynced, saving
+                syncFromDb, saveToDb, lastSynced, saving
             };
         };
 
@@ -4429,7 +4417,7 @@
         };
 
         // ========================================
-        // 出納帳（キャッシュブック）- スプレッドシートファースト
+        // 出納帳（キャッシュブック）- Supabase ファースト
         // ========================================
 
         const CASHBOOK_CACHE_KEY = 'sise_cashbook_cache';
@@ -4444,7 +4432,7 @@
             const [syncError, setSyncError] = useState(null);
 
             // Supabaseからフェッチ（メイン）、キャッシュはフォールバック
-            const fetchFromGAS = useCallback(async (showLoading) => {
+            const fetchFromDb = useCallback(async (showLoading) => {
                 if (showLoading) setLoading(true);
                 setSyncError(null);
                 try {
@@ -4475,14 +4463,14 @@
                     const cached = JSON.parse(localStorage.getItem(CASHBOOK_CACHE_KEY) || '{}');
                     if (cached.entries) { setEntries(cached.entries); setDailyCloses(cached.dailyCloses || []); }
                 } catch(e) {}
-                fetchFromGAS(true);
+                fetchFromDb(true);
             }, []);
 
             // 定期同期（60秒ごと）
             useEffect(() => {
-                const interval = setInterval(() => fetchFromGAS(false), 60000);
+                const interval = setInterval(() => fetchFromDb(false), 60000);
                 return () => clearInterval(interval);
-            }, [fetchFromGAS]);
+            }, [fetchFromDb]);
 
             // 操作者名取得
             const getOperator = useCallback(() => {
@@ -4494,7 +4482,7 @@
                 return dailyCloses.some(c => c.date === date && c.storeId === storeId && c.locked);
             }, [dailyCloses]);
 
-            // エントリー追加（スプレッドシートファースト）
+            // エントリー追加（Supabase ファースト）
             const addEntry = useCallback(async (entry) => {
                 if (isDayClosed(entry.date, entry.store)) {
                     showToast('この日は締め済みのため記帳できません', 'error');
@@ -4545,7 +4533,7 @@
                 }
             }, [getOperator, isDayClosed]);
 
-            // エントリー更新（スプレッドシートファースト）
+            // エントリー更新（Supabase ファースト）
             const updateEntry = useCallback(async (entryId, updates) => {
                 const target = entries.find(e => e.id === entryId);
                 if (target && isDayClosed(target.date, target.store)) {
@@ -4629,7 +4617,7 @@
             }, [getOperator]);
 
             // 手動リフレッシュ
-            const refresh = useCallback(() => fetchFromGAS(true), [fetchFromGAS]);
+            const refresh = useCallback(() => fetchFromDb(true), [fetchFromDb]);
 
             return {
                 entries, dailyCloses, auditLogs, saving, loading, lastSynced, syncError,
@@ -6525,7 +6513,7 @@
 
         // QR・現金決済 会員管理セクションコンポーネント
         const ManualMembersSection = ({ manualMembersHook, squareMembers, stores }) => {
-            const { manualMembers, addMember, cancelMember, reactivateMember, changePlan, deleteMember, addPayment, removePayment, syncFromGAS, lastSynced, saving } = manualMembersHook;
+            const { manualMembers, addMember, cancelMember, reactivateMember, changePlan, deleteMember, addPayment, removePayment, syncFromDb, lastSynced, saving } = manualMembersHook;
             const [showManualAddForm, setShowManualAddForm] = useState(false);
             const [manualFilter, setManualFilter] = useState('all');
             const [manualSearch, setManualSearch] = useState('');
@@ -6612,7 +6600,7 @@
                             <span className="text-xs bg-sise-50 text-sise-700 px-2 py-1 rounded-lg font-bold">{formatCurrency(manualRevenue)}/月</span>
                             <button
                                 onClick={async () => {
-                                    const ok = await manualMembersHook.saveToGAS(manualMembers);
+                                    const ok = await manualMembersHook.saveToDb(manualMembers);
                                     if (ok) {
                                         // 保存後にGETで検証
                                         try {
@@ -6633,15 +6621,15 @@
                                 className="flex items-center px-3 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-xl text-sm font-medium shadow-lg shadow-blue-500/25 transition-all active:scale-95 disabled:opacity-50"
                             >
                                 <Icon name={saving ? "loader" : "save"} size={16} className={saving ? "mr-1.5 animate-spin" : "mr-1.5"} />
-                                {saving ? '保存中...' : 'スプシ保存'}
+                                {saving ? '保存中...' : '保存'}
                             </button>
                             <button
                                 onClick={async () => {
-                                    await syncFromGAS();
-                                    showToast('スプレッドシートから同期しました', 'success');
+                                    await syncFromDb();
+                                    showToast('最新データを取得しました', 'success');
                                 }}
                                 className="flex items-center px-2.5 py-2 bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 rounded-xl text-sm font-medium transition-all active:scale-95"
-                                title="スプレッドシートから同期"
+                                title="他のデバイスの変更を取得"
                             >
                                 <Icon name="refresh-cw" size={15} />
                             </button>
@@ -8381,7 +8369,7 @@
                 ticketPlans, customerTickets, stats,
                 addPlan, updatePlan, deletePlan,
                 addCustomerTicket, updateCustomerTicket, useSession, undoSession, deleteCustomerTicket,
-                saveToSheet, saving, lastSaved
+                saveToDb, saving, lastSaved
             } = ticketHook;
 
             const [activeTab, setActiveTab] = useState('tickets'); // 'tickets' | 'plans'
@@ -8612,7 +8600,7 @@
             };
 
             const handleSave = async () => {
-                await saveToSheet();
+                await saveToDb();
                 setShowSaved(true);
                 setTimeout(() => setShowSaved(false), 3000);
             };
@@ -8632,7 +8620,7 @@
                             className="flex items-center px-4 py-2.5 btn-gradient rounded-xl font-medium text-sm transition-all disabled:opacity-50"
                         >
                             <Icon name={saving ? "loader" : "save"} size={16} className={`mr-2 ${saving ? 'animate-spin' : ''}`} />
-                            {saving ? '保存中...' : 'スプシ保存'}
+                            {saving ? '保存中...' : '保存'}
                         </button>
                     </SectionHeader>
 
@@ -9131,7 +9119,7 @@
                             <Icon name="info" size={18} className="text-sise-500 mr-3 mt-0.5 flex-shrink-0" />
                             <div className="text-sm text-slate-600">
                                 <p className="font-semibold text-slate-700 mb-1">回数券の管理について</p>
-                                <p>回数券プランの作成、顧客への発行、消化状況のトラッキングが行えます。「スプシ保存」で Google Sheets にデータを送信できます。データはローカルにも自動保存されます。</p>
+                                <p>回数券プランの作成、顧客への発行、消化状況のトラッキングが行えます。「保存」ボタンで Supabase にデータを送信できます。データはローカルにも自動保存されます。</p>
                                 {lastSaved && (
                                     <p className="text-xs text-sise-500 mt-2">最終保存: {lastSaved.toLocaleString('ja-JP')}</p>
                                 )}
@@ -9774,12 +9762,12 @@
         };
 
         // ========================================
-        // 利用管理ビュー（利用回数入力 + スプシ保存）
+        // 利用管理ビュー（利用回数入力 + DB 保存）
         // ========================================
 
         const MemberUsageView = ({ memberData, usageHook }) => {
             const {
-                usageData, updateUsage, saveToSheet, getUsage, saving, lastSaved, lastSynced, syncFromGAS, currentMonth,
+                usageData, updateUsage, saveToDb, getUsage, saving, lastSaved, lastSynced, syncFromDb, currentMonth,
                 planLimits, setPlanLimit, getPlanLimit,
                 carryoverData, setCarryover, getCarryover
             } = usageHook;
@@ -9836,7 +9824,7 @@
             const renewingSoonCount = activeMembers.filter(m => m.billing && m.billing.daysUntilRenewal <= 7).length;
 
             const handleSave = async () => {
-                await saveToSheet(memberData.members || []);
+                await saveToDb(memberData.members || []);
                 setShowSaved(true);
                 setTimeout(() => setShowSaved(false), 3000);
             };
@@ -9846,7 +9834,7 @@
                     <SectionHeader title="利用管理" subtitle="USAGE TRACKING" icon="clipboard-check">
                         <div className="flex items-center gap-2">
                             <button
-                                onClick={syncFromGAS}
+                                onClick={syncFromDb}
                                 className="flex items-center px-3 py-2.5 bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-700 rounded-xl font-medium text-sm transition-all"
                                 title="他のデバイスの変更を取得"
                             >
@@ -9859,7 +9847,7 @@
                                 className="flex items-center px-4 py-2.5 btn-gradient rounded-xl font-medium text-sm transition-all disabled:opacity-50"
                             >
                                 <Icon name={saving ? "loader" : "save"} size={16} className={`mr-2 ${saving ? 'animate-spin' : ''}`} />
-                                {saving ? '保存中...' : 'スプシ保存'}
+                                {saving ? '保存中...' : '保存'}
                             </button>
                         </div>
                     </SectionHeader>
@@ -10183,27 +10171,29 @@
             const [editingStaff, setEditingStaff] = useState(null);
             const [isAdding, setIsAdding] = useState(false);
             const [copiedId, setCopiedId] = useState(null);
-            // 全スタッフ URL 一括再発行: 旧 legacy token から signed token への移行用
+            // 全スタッフ URL 一括再発行: 旧 legacy(base64) → signed(HMAC) 移行ツール
+            // 通常運用で押す必要はない。ALLOW_LEGACY_TOKENS=false へ切り替える前に
+            // 1 回だけ実行し、全スタッフへ新 URL を配布するためのもの。
             const [bulkReissuing, setBulkReissuing] = useState(false);
             const [bulkReissueResult, setBulkReissueResult] = useState(null); // { success: [{id, name, url}], failed: [{id, name, error}] }
-            const [gasSyncing, setGasSyncing] = useState(false);
-            const [gasConnected, setGasConnected] = useState(false);
+            const [dbSyncing, setDbSyncing] = useState(false);
+            const [dbConnected, setDbConnected] = useState(false);
             const [dbError, setDbError] = useState(null);
             const [showInactive, setShowInactive] = useState(false);
             const [formData, setFormData] = useState({ name: '', role: 'staff', password: '', storeIds: [] });
 
             // Supabase からスタッフリストを初回取得（inactive含む）
             const reloadStaffList = async () => {
-                const result = await fetchStaffFromGas(true);
+                const result = await fetchStaffFromDb(true);
                 if (result.ok) {
                     setStaffList(result.staff);
                     saveStaffListLocal(result.staff);
-                    setGasConnected(true);
+                    setDbConnected(true);
                     setDbError(null);
                 } else {
                     // 接続失敗時は localStorage のローカルデータを表示
                     setStaffList(loadStaffList());
-                    setGasConnected(false);
+                    setDbConnected(false);
                     setDbError(result.error);
                     console.error('[Staff] Supabase取得失敗:', result.error);
                 }
@@ -10227,9 +10217,9 @@
                     updated = staffList.map(s => s.id === editingStaff.id ? { ...s, ...changes } : s);
                     setStaffList(updated);
                     saveStaffListLocal(updated);
-                    setGasSyncing(true);
-                    resp = await updateStaffGas(editingStaff.id, changes);
-                    setGasSyncing(false);
+                    setDbSyncing(true);
+                    resp = await updateStaffDb(editingStaff.id, changes);
+                    setDbSyncing(false);
                     if (!resp || resp.error) {
                         showToast(`保存エラー: ${resp?.error || 'サーバーに接続できません'}`, 'error', 5000);
                         return;
@@ -10249,9 +10239,9 @@
                     updated = [...staffList, newStaff];
                     setStaffList(updated);
                     saveStaffListLocal(updated);
-                    setGasSyncing(true);
-                    resp = await saveStaffToGas(updated);
-                    setGasSyncing(false);
+                    setDbSyncing(true);
+                    resp = await saveStaffToDb(updated);
+                    setDbSyncing(false);
                     if (!resp || resp.error) {
                         showToast(`保存エラー: ${resp?.error || 'サーバーに接続できません'}`, 'error', 5000);
                         return;
@@ -10278,9 +10268,9 @@
                     saveStaffListLocal(updated);
                     return updated;
                 });
-                setGasSyncing(true);
-                await softDeleteStaffGas(id);
-                setGasSyncing(false);
+                setDbSyncing(true);
+                await softDeleteStaffDb(id);
+                setDbSyncing(false);
                 showToast(`「${staff?.name || ''}」を削除しました（データは保持されています）`, 'success', 2500);
             };
 
@@ -10291,9 +10281,9 @@
                     saveStaffListLocal(updated);
                     return updated;
                 });
-                setGasSyncing(true);
-                await restoreStaffGas(id);
-                setGasSyncing(false);
+                setDbSyncing(true);
+                await restoreStaffDb(id);
+                setDbSyncing(false);
                 showToast(`「${staff?.name || ''}」を復元しました`, 'success', 2000);
             };
 
@@ -10623,8 +10613,8 @@
                                 </button>
                                 <button
                                     onClick={handleSave}
-                                    disabled={gasSyncing || !formData.name.trim() || formData.storeIds.length === 0}
-                                    aria-busy={gasSyncing || undefined}
+                                    disabled={dbSyncing || !formData.name.trim() || formData.storeIds.length === 0}
+                                    aria-busy={dbSyncing || undefined}
                                     className="px-4 py-2 bg-sise-500 hover:bg-sise-600 text-white rounded-xl text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                                 >
                                     {editingStaff ? '更新' : '追加'}
@@ -10634,12 +10624,12 @@
                     )}
 
                     {/* DB同期ステータス */}
-                    <div className={`mb-3 flex items-start gap-2 px-3 py-2 rounded-lg text-xs ${gasConnected ? 'bg-green-50 border border-green-200 text-green-700' : dbError ? 'bg-red-50 border border-red-200 text-red-600' : 'bg-slate-50 border border-slate-200 text-slate-500'}`}>
-                        <Icon name={gasConnected ? 'cloud' : dbError ? 'alert-triangle' : 'hard-drive'} size={13} className="mt-0.5 flex-shrink-0" />
+                    <div className={`mb-3 flex items-start gap-2 px-3 py-2 rounded-lg text-xs ${dbConnected ? 'bg-green-50 border border-green-200 text-green-700' : dbError ? 'bg-red-50 border border-red-200 text-red-600' : 'bg-slate-50 border border-slate-200 text-slate-500'}`}>
+                        <Icon name={dbConnected ? 'cloud' : dbError ? 'alert-triangle' : 'hard-drive'} size={13} className="mt-0.5 flex-shrink-0" />
                         <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2">
-                                <span>{gasConnected ? 'Supabase 接続済み' : dbError ? 'Supabase 接続エラー' : 'ローカル保存'}</span>
-                                {gasSyncing && <span className="animate-pulse">保存中...</span>}
+                                <span>{dbConnected ? 'Supabase 接続済み' : dbError ? 'Supabase 接続エラー' : 'ローカル保存'}</span>
+                                {dbSyncing && <span className="animate-pulse">保存中...</span>}
                                 <button
                                     onClick={reloadStaffList}
                                     className="ml-auto px-2 py-0.5 rounded bg-white/50 hover:bg-white border border-current/20 text-[10px] font-medium transition-colors"
@@ -10716,8 +10706,8 @@
             const [storeList, setStoreList] = useState([]);
             const [isAdding, setIsAdding] = useState(false);
             const [editingStore, setEditingStore] = useState(null);
-            const [gasSyncing, setGasSyncing] = useState(false);
-            const [gasConnected, setGasConnected] = useState(false);
+            const [dbSyncing, setDbSyncing] = useState(false);
+            const [dbConnected, setDbConnected] = useState(false);
             const [showInactive, setShowInactive] = useState(false);
             const [formData, setFormData] = useState({ id: '', name: '', memo: '' });
             const [syncingSquare, setSyncingSquare] = useState(false);
@@ -10729,7 +10719,7 @@
                 const list = data ? (data.stores || []) : null;
                 if (list) {
                     setStoreList(list);
-                    setGasConnected(true);
+                    setDbConnected(true);
                 }
             }, []);
 
@@ -10852,18 +10842,18 @@
                 if (editingStore) {
                     // 編集
                     setStoreList(prev => prev.map(s => s.id === editingStore.id ? { ...s, name: formData.name, memo: formData.memo } : s));
-                    setGasSyncing(true);
-                    await updateStoreInGas({ id: editingStore.id, name: formData.name, memo: formData.memo });
-                    setGasSyncing(false);
+                    setDbSyncing(true);
+                    await updateStoreInDb({ id: editingStore.id, name: formData.name, memo: formData.memo });
+                    setDbSyncing(false);
                 } else {
                     // 新規追加
                     const storeId = formData.id.trim() || Date.now().toString(36);
                     if (storeList.find(s => s.id === storeId)) { alert('このIDは既に使われています'); return; }
                     const newStore = { id: storeId, name: formData.name, status: 'active', memo: formData.memo, createdAt: todayLocalYMD() };
                     setStoreList(prev => [...prev, newStore]);
-                    setGasSyncing(true);
-                    await addStoreToGas(newStore);
-                    setGasSyncing(false);
+                    setDbSyncing(true);
+                    await addStoreToDb(newStore);
+                    setDbSyncing(false);
                 }
                 setEditingStore(null);
                 setIsAdding(false);
@@ -10874,17 +10864,17 @@
                 if (!await confirmDialog({ title:'店舗の無効化', message:'この店舗を無効にしますか？データは保持されます。', confirmLabel:'無効にする', variant:'danger' })) return;
                 const store = storeList.find(s => s.id === id);
                 setStoreList(prev => prev.map(s => s.id === id ? { ...s, status: 'inactive' } : s));
-                setGasSyncing(true);
-                await softDeleteStoreGas(id);
-                setGasSyncing(false);
+                setDbSyncing(true);
+                await softDeleteStoreDb(id);
+                setDbSyncing(false);
                 showToast(`「${store?.name || '店舗'}」を無効にしました`, 'success', 2000);
             };
 
             const handleRestore = async (id) => {
                 setStoreList(prev => prev.map(s => s.id === id ? { ...s, status: 'active' } : s));
-                setGasSyncing(true);
-                await restoreStoreGas(id);
-                setGasSyncing(false);
+                setDbSyncing(true);
+                await restoreStoreDb(id);
+                setDbSyncing(false);
             };
 
             const handleEdit = (store) => {
@@ -10973,10 +10963,10 @@
                     )}
 
                     {/* DB同期ステータス */}
-                    <div className={`mb-3 flex items-center gap-2 px-3 py-2 rounded-lg text-xs ${gasConnected ? 'bg-green-50 border border-green-200 text-green-700' : 'bg-slate-50 border border-slate-200 text-slate-500'}`}>
-                        <Icon name={gasConnected ? 'cloud' : 'hard-drive'} size={13} />
-                        {gasConnected ? 'Supabase 接続済み' : 'ローカル保存（Supabase 未接続）'}
-                        {gasSyncing && <span className="ml-auto animate-pulse">保存中...</span>}
+                    <div className={`mb-3 flex items-center gap-2 px-3 py-2 rounded-lg text-xs ${dbConnected ? 'bg-green-50 border border-green-200 text-green-700' : 'bg-slate-50 border border-slate-200 text-slate-500'}`}>
+                        <Icon name={dbConnected ? 'cloud' : 'hard-drive'} size={13} />
+                        {dbConnected ? 'Supabase 接続済み' : 'ローカル保存（Supabase 未接続）'}
+                        {dbSyncing && <span className="ml-auto animate-pulse">保存中...</span>}
                     </div>
 
                     {/* Square連携店舗（読み取り専用） */}
@@ -11076,7 +11066,7 @@
                         <div className="space-y-2">
                             <p className="text-xs text-slate-500 font-medium">
                                 <Icon name="database" size={12} className="inline mr-1 text-sise-500" />
-                                スプレッドシート管理店舗
+                                DB 管理店舗
                             </p>
                             {activeStores.map(store => {
                                 const isPlaceholder = store.name === `店舗 ${store.id}` || store.name === `(未登録: ${store.id})`;
@@ -11191,23 +11181,23 @@
                 } catch { return { monthly: [], settings: { avgViews: 300, avgBookingRate: 2.5 } }; }
             });
 
-            // GASからHPBデータを初回取得
+            // Supabase から HPB データを初回取得
             useEffect(() => {
                 (async () => {
                     // HPB月次データ
-                    const gasMonthly = await fetchHpbFromGas();
-                    if (gasMonthly) {
+                    const dbMonthly = await fetchHpbFromDb();
+                    if (dbMonthly) {
                         setHpbData(prev => {
-                            const updated = { ...prev, monthly: gasMonthly };
+                            const updated = { ...prev, monthly: dbMonthly };
                             localStorage.setItem(HPB_STORAGE_KEY, JSON.stringify(updated));
                             return updated;
                         });
                     }
                     // HPB設定
-                    const gasSettings = await fetchDashConfig('hpbSettings');
-                    if (gasSettings) {
+                    const dbSettings = await fetchDashConfig('hpbSettings');
+                    if (dbSettings) {
                         setHpbData(prev => {
-                            const updated = { ...prev, settings: { ...prev.settings, ...gasSettings } };
+                            const updated = { ...prev, settings: { ...prev.settings, ...dbSettings } };
                             localStorage.setItem(HPB_STORAGE_KEY, JSON.stringify(updated));
                             return updated;
                         });
@@ -11219,7 +11209,7 @@
             const saveHpbData = useCallback((data) => {
                 setHpbData(data);
                 localStorage.setItem(HPB_STORAGE_KEY, JSON.stringify(data));
-                saveHpbAllGas(data.monthly || []);
+                saveHpbAll(data.monthly || []);
                 if (data.settings) saveDashConfig('hpbSettings', data.settings);
             }, []);
 
@@ -11236,7 +11226,7 @@
                     }
                     localStorage.setItem(HPB_STORAGE_KEY, JSON.stringify(updated));
                     // サーバー保存失敗時はトーストで通知（localStorage はすでに更新済み）
-                    upsertHpbMonthGas(entry).then(res => {
+                    upsertHpbMonth(entry).then(res => {
                         if (!res || res.error) {
                             showToast('HPBデータの保存に失敗しました: ' + ((res && res.error) || '通信エラー'), 'error');
                         }
@@ -11260,7 +11250,7 @@
                 setHpbData(prev => {
                     const updated = { ...prev, monthly: prev.monthly.filter(m => m.yearMonth !== yearMonth) };
                     localStorage.setItem(HPB_STORAGE_KEY, JSON.stringify(updated));
-                    deleteHpbMonthGas(yearMonth).then(res => {
+                    deleteHpbMonth(yearMonth).then(res => {
                         if (!res || res.error) {
                             showToast('HPB月次データの削除に失敗しました: ' + ((res && res.error) || '通信エラー'), 'error');
                         }
@@ -11901,7 +11891,7 @@
                             {lastSynced && (
                                 <span className="text-[11px] text-slate-400 flex items-center">
                                     <Icon name="check-circle" size={11} className="mr-1 text-green-500" />
-                                    スプシ同期: {lastSynced.toLocaleString('ja-JP')}
+                                    最終同期: {lastSynced.toLocaleString('ja-JP')}
                                 </span>
                             )}
                             {saving && <span className="text-[11px] text-amber-500 font-medium animate-pulse">保存中...</span>}
@@ -12373,7 +12363,7 @@
                                 <button onClick={() => { setShowMenuManager(false); setEditingMenuId(null); setMenuForm({ name: '', category: '', price: '', itemType: 'menu' }); }}
                                     className="text-slate-400 hover:text-slate-600 text-xl">&times;</button>
                             </div>
-                            <p className="text-xs text-slate-400 mb-3">登録したメニューは出納帳の入力時にプルダウンから選択でき、金額が自動反映されます。GASスプシに保存されます。</p>
+                            <p className="text-xs text-slate-400 mb-3">登録したメニューは出納帳の入力時にプルダウンから選択でき、金額が自動反映されます。Supabase に保存されます。</p>
 
                             {/* 新規追加/編集フォーム */}
                             <div className="grid grid-cols-1 md:grid-cols-5 gap-2 mb-4 p-3 bg-slate-50 rounded-xl border border-slate-200">
@@ -12702,7 +12692,7 @@
                                 <Icon name="shield" size={16} className="mr-2 text-sise-500" />
                                 操作ログ（監査証跡）
                             </h4>
-                            <p className="text-xs text-slate-400 mb-4">出納帳の全操作はスプレッドシートに記録されます。誰が、いつ、何を操作したかを追跡できます。</p>
+                            <p className="text-xs text-slate-400 mb-4">出納帳の全操作は監査ログとして記録されます。誰が、いつ、何を操作したかを追跡できます。</p>
                             {auditLogs.length === 0 ? (
                                 <div className="text-center py-10 text-slate-400">
                                     <Icon name="shield" size={32} className="mx-auto mb-3 text-slate-300" />
@@ -20689,12 +20679,18 @@
 
                     {/* Google Sheets 統合連携 */}
                     <Card>
-                        <h3 className="text-lg font-semibold text-slate-900 mb-4">Google Sheets 連携</h3>
+                        <h3 className="text-lg font-semibold text-slate-900 mb-4">カウンセリングフォーム連携 (GAS)</h3>
+                        <p className="text-xs text-slate-500 mb-4">
+                            <Icon name="info" size={12} className="inline mr-1 -mt-0.5" />
+                            カウンセリングデータのみ Google Apps Script (GAS) 経由で取得しています。
+                            その他の機能 (出納帳・勤怠・会員・回数券・スタッフ・店舗・日報・HPB 等) は
+                            Supabase に統合済みのため GAS の設定は不要です。
+                        </p>
                         <div className="space-y-5">
                             <div>
                                 <label className="block text-sm font-semibold text-slate-700 mb-2">
-                                    <Icon name="database" size={16} className="inline mr-2 text-sise-500" />
-                                    統合 GAS URL
+                                    <Icon name="heart-handshake" size={16} className="inline mr-2 text-sise-500" />
+                                    カウンセリング GAS URL
                                 </label>
                                 <div className="flex gap-2">
                                     <input
@@ -20718,42 +20714,20 @@
                                     </button>
                                 </div>
                                 <p className="text-xs text-slate-400 mt-1.5">
-                                    1つのスプレッドシートで全データを管理します（gas/unified.gs をデプロイ）。
-                                    このURL1つで日報・カウンセリング・利用回数・回数券・会員・出納帳すべてに対応します。
-                                    空欄で保存またはリセットするとデフォルトURLが使用されます。
+                                    カウンセリング Google フォームの回答先スプレッドシートに紐付けた
+                                    Apps Script (gas/unified.gs) のウェブアプリ URL を指定します。
+                                    空欄保存またはリセットでデフォルト URL が使用されます。
                                 </p>
                             </div>
 
                             <div className="bg-slate-50 rounded-lg p-4 border border-slate-200">
-                                <h4 className="font-semibold text-slate-900 mb-3">スプレッドシートのシート構成</h4>
+                                <h4 className="font-semibold text-slate-900 mb-3">必要なシート構成</h4>
                                 <div className="space-y-1.5 text-xs">
-                                    <div className="flex items-center gap-2 p-2 bg-white rounded border border-slate-200">
-                                        <Icon name="file-text" size={14} className="text-blue-500" />
-                                        <span className="font-semibold text-slate-700 w-48">日報</span>
-                                        <span className="text-slate-500">Googleフォーム回答（読み取り専用）</span>
-                                    </div>
                                     {['本厚木店', '大和店', '横浜店', '町田店', '川口店'].map(store => (
                                         <div key={store} className="flex items-center gap-2 p-2 bg-white rounded border border-slate-200">
                                             <Icon name="heart-handshake" size={14} className="text-sise-500" />
                                             <span className="font-semibold text-slate-700 w-48">カウンセリング回答_{store}</span>
-                                            <span className="text-slate-500">Googleフォーム回答（読み取り専用）</span>
-                                        </div>
-                                    ))}
-                                    {[
-                                        { name: '利用回数', icon: 'bar-chart-2', desc: '会員の月間利用回数' },
-                                        { name: '回数券プラン', icon: 'ticket', desc: '回数券プラン定義' },
-                                        { name: '回数券データ', icon: 'ticket', desc: '回数券購入・利用データ' },
-                                        { name: 'QR現金会員', icon: 'users', desc: 'QR・現金決済会員データ' },
-                                        { name: '出納帳', icon: 'book-open', desc: '金庫・小口・レジ管理 / 日次締め / 監査ログ' },
-                                        { name: 'スタッフ管理', icon: 'users', desc: 'スタッフ・パスワード管理' },
-                                        { name: '店舗管理', icon: 'map-pin', desc: '店舗の追加・無効化管理' },
-                                        { name: 'ダッシュボード設定', icon: 'settings', desc: 'プラン上限・繰越など各種設定' },
-                                        { name: 'HPBデータ', icon: 'bar-chart-2', desc: 'HPB月次マーケティングデータ' },
-                                    ].map(s => (
-                                        <div key={s.name} className="flex items-center gap-2 p-2 bg-white rounded border border-slate-200">
-                                            <Icon name={s.icon} size={14} className="text-amber-500" />
-                                            <span className="font-semibold text-slate-700 w-48">{s.name}</span>
-                                            <span className="text-slate-500">{s.desc}（自動作成・読み書き）</span>
+                                            <span className="text-slate-500">Google フォーム回答（読み取り専用）</span>
                                         </div>
                                     ))}
                                 </div>
@@ -20761,45 +20735,32 @@
                         </div>
                     </Card>
 
-                    {/* GAS セットアップガイド */}
+                    {/* GAS セットアップガイド（カウンセリング専用） */}
                     <Card>
                         <details className="group">
                             <summary className="flex items-center cursor-pointer list-none select-none">
                                 <Icon name="book-open" size={20} className="text-sise-500 mr-3" />
-                                <h3 className="text-lg font-semibold text-slate-900 flex-1">GAS セットアップガイド</h3>
+                                <h3 className="text-lg font-semibold text-slate-900 flex-1">GAS セットアップガイド（カウンセリング専用）</h3>
                                 <Icon name="chevron-down" size={18} className="text-slate-400 transition-transform duration-200 group-open:rotate-180" />
                             </summary>
                             <div className="mt-5 space-y-6">
                                 {/* Step 1 */}
                                 <div className="relative pl-8 border-l-2 border-sise-200 pb-5">
                                     <div className="absolute left-0 -translate-x-1/2 w-7 h-7 rounded-full bg-gradient-to-br from-sise-500 to-sise-600 text-white flex items-center justify-center text-xs font-bold shadow-sm">1</div>
-                                    <h4 className="font-bold text-slate-800 mb-2">スプレッドシートを作成</h4>
-                                    <p className="text-sm text-slate-600 mb-3">Google ドライブで新しいスプレッドシートを作成します。名前は「si'se 統合管理」などわかりやすいものにしてください。</p>
+                                    <h4 className="font-bold text-slate-800 mb-2">スプレッドシートを作成 + フォーム連携</h4>
+                                    <p className="text-sm text-slate-600 mb-3">Google ドライブで新しいスプレッドシートを作成し、カウンセリングフォーム（5 店舗分）の回答先に紐付けて、各シート名を以下に変更します。</p>
+                                    <div className="bg-slate-50 rounded-lg p-3 text-xs">
+                                        <div className="flex flex-wrap gap-1.5">
+                                            {['カウンセリング回答_本厚木店', 'カウンセリング回答_大和店', 'カウンセリング回答_横浜店', 'カウンセリング回答_町田店', 'カウンセリング回答_川口店'].map(name => (
+                                                <code key={name} className="bg-sise-50 text-sise-700 px-1.5 py-0.5 rounded font-bold">{name}</code>
+                                            ))}
+                                        </div>
+                                    </div>
                                 </div>
 
                                 {/* Step 2 */}
                                 <div className="relative pl-8 border-l-2 border-sise-200 pb-5">
                                     <div className="absolute left-0 -translate-x-1/2 w-7 h-7 rounded-full bg-gradient-to-br from-sise-500 to-sise-600 text-white flex items-center justify-center text-xs font-bold shadow-sm">2</div>
-                                    <h4 className="font-bold text-slate-800 mb-2">Googleフォームの回答先を設定</h4>
-                                    <p className="text-sm text-slate-600 mb-3">以下の2種類のフォームの回答先を、作成したスプレッドシートに設定します。</p>
-                                    <div className="bg-slate-50 rounded-lg p-3 space-y-2 text-xs">
-                                        <p className="font-semibold text-slate-700">日報フォーム:</p>
-                                        <p className="text-slate-500">フォームの「回答」タブ → スプレッドシートアイコン → 「既存のスプレッドシートを選択」→ 作成したシートを選択。<br/>シート名を<code className="bg-sise-50 text-sise-700 px-1.5 py-0.5 rounded font-bold">日報</code>に変更。</p>
-                                        <div className="border-t border-slate-200 pt-2 mt-2">
-                                            <p className="font-semibold text-slate-700">カウンセリングフォーム（5店舗分）:</p>
-                                            <p className="text-slate-500">各店舗のフォームも同様に同じスプレッドシートに接続し、シート名を以下に変更:</p>
-                                            <div className="flex flex-wrap gap-1.5 mt-1.5">
-                                                {['カウンセリング回答_本厚木店', 'カウンセリング回答_大和店', 'カウンセリング回答_横浜店', 'カウンセリング回答_町田店', 'カウンセリング回答_川口店'].map(name => (
-                                                    <code key={name} className="bg-sise-50 text-sise-700 px-1.5 py-0.5 rounded font-bold">{name}</code>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                {/* Step 3 */}
-                                <div className="relative pl-8 border-l-2 border-sise-200 pb-5">
-                                    <div className="absolute left-0 -translate-x-1/2 w-7 h-7 rounded-full bg-gradient-to-br from-sise-500 to-sise-600 text-white flex items-center justify-center text-xs font-bold shadow-sm">3</div>
                                     <h4 className="font-bold text-slate-800 mb-2">Apps Script にコードを貼り付け</h4>
                                     <ol className="text-sm text-slate-600 space-y-1.5 list-decimal list-inside">
                                         <li>スプレッドシートの<strong>「拡張機能」→「Apps Script」</strong>を開く</li>
@@ -20808,9 +20769,9 @@
                                     </ol>
                                 </div>
 
-                                {/* Step 4 */}
+                                {/* Step 3 */}
                                 <div className="relative pl-8 border-l-2 border-sise-200 pb-5">
-                                    <div className="absolute left-0 -translate-x-1/2 w-7 h-7 rounded-full bg-gradient-to-br from-sise-500 to-sise-600 text-white flex items-center justify-center text-xs font-bold shadow-sm">4</div>
+                                    <div className="absolute left-0 -translate-x-1/2 w-7 h-7 rounded-full bg-gradient-to-br from-sise-500 to-sise-600 text-white flex items-center justify-center text-xs font-bold shadow-sm">3</div>
                                     <h4 className="font-bold text-slate-800 mb-2">ウェブアプリとしてデプロイ</h4>
                                     <ol className="text-sm text-slate-600 space-y-1.5 list-decimal list-inside">
                                         <li>Apps Script 画面右上の<strong>「デプロイ」→「新しいデプロイ」</strong></li>
@@ -20818,17 +20779,17 @@
                                         <li>実行するユーザー: <strong>「自分」</strong></li>
                                         <li>アクセスできるユーザー: <strong>「全員」</strong></li>
                                         <li>「デプロイ」ボタンをクリック</li>
-                                        <li>初回は Google アカウントの<strong>アクセス許可</strong>が必要（「許可を確認」→ アカウント選択 → 「詳細」→「安全でないページに移動」→「許可」）</li>
+                                        <li>初回は Google アカウントの<strong>アクセス許可</strong>が必要</li>
                                     </ol>
                                 </div>
 
-                                {/* Step 5 */}
+                                {/* Step 4 */}
                                 <div className="relative pl-8 border-l-2 border-sise-200">
-                                    <div className="absolute left-0 -translate-x-1/2 w-7 h-7 rounded-full bg-gradient-to-br from-sise-500 to-sise-600 text-white flex items-center justify-center text-xs font-bold shadow-sm">5</div>
-                                    <h4 className="font-bold text-slate-800 mb-2">URLを上の設定欄に貼り付け</h4>
-                                    <p className="text-sm text-slate-600">デプロイ完了後に表示される<strong>ウェブアプリURL</strong>（https://script.google.com/macros/s/...）をコピーし、上の「統合 GAS URL」欄に貼り付けて保存してください。</p>
+                                    <div className="absolute left-0 -translate-x-1/2 w-7 h-7 rounded-full bg-gradient-to-br from-sise-500 to-sise-600 text-white flex items-center justify-center text-xs font-bold shadow-sm">4</div>
+                                    <h4 className="font-bold text-slate-800 mb-2">URL を上の設定欄に貼り付け</h4>
+                                    <p className="text-sm text-slate-600">デプロイ完了後に表示される<strong>ウェブアプリ URL</strong>（https://script.google.com/macros/s/...）をコピーし、上の「カウンセリング GAS URL」欄に貼り付けて保存してください。</p>
                                     <div className="mt-3 bg-amber-50 border border-amber-200 rounded-lg p-3">
-                                        <p className="text-xs text-amber-800"><Icon name="alert-triangle" size={14} className="inline mr-1" /><strong>コード更新時の注意:</strong> gas/unified.gs を更新した場合は、Apps Script で<strong>「デプロイ」→「デプロイを管理」→ 鉛筆アイコン → バージョン「新しいバージョン」→「デプロイ」</strong>で更新してください。URLは変わりません。</p>
+                                        <p className="text-xs text-amber-800"><Icon name="alert-triangle" size={14} className="inline mr-1" /><strong>コード更新時:</strong> gas/unified.gs を更新した場合は Apps Script で「デプロイ」→「デプロイを管理」→ 鉛筆アイコン → バージョン「新しいバージョン」→「デプロイ」で更新してください（URL は変わりません）。</p>
                                     </div>
                                 </div>
                             </div>

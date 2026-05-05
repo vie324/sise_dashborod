@@ -1,98 +1,40 @@
 /**
- * si'se 統合データ管理 GAS (Google Apps Script)
+ * si'se カウンセリング GAS (Google Apps Script)
  *
- * 1つのスプレッドシートで全データを一元管理します。
+ * カウンセリング Google フォームの回答を si'se ダッシュボードに供給するための
+ * 唯一の GAS 関数群です。出納帳・勤怠・会員・回数券・スタッフ・店舗・日報・HPB
+ * など他のデータは Supabase (/api/db) に集約済みのため、ここには含まれません。
  *
  * 【セットアップ手順】
- * 1. Google スプレッドシートを作成し、以下のシートを用意する
- *    ─ 日報（Googleフォーム回答シート）
- *    ─ カウンセリング回答_本厚木店（Googleフォーム回答シート）
- *    ─ カウンセリング回答_大和店
- *    ─ カウンセリング回答_横浜店
- *    ─ カウンセリング回答_町田店
- *    ─ カウンセリング回答_川口店
- *    ─ 利用回数      （GASが自動で読み書き）
- *    ─ 回数券プラン    （GASが自動で読み書き）
- *    ─ 回数券データ    （GASが自動で読み書き）
- *    ─ QR現金会員     （GASが自動で読み書き）
- *    ─ 出納帳        （GASが自動で読み書き）
- *    ─ スタッフ管理    （GASが自動で作成・読み書き）
- *    ─ 店舗管理       （GASが自動で作成・読み書き）
- *    ─ ダッシュボード設定 （GASが自動で作成・読み書き）
- *    ─ HPBデータ      （GASが自動で作成・読み書き）
- *    ─ メニュー        （GASが自動で作成・読み書き）
+ * 1. Google スプレッドシートを作成し、各店舗のカウンセリングフォーム回答先に
+ *    指定する。シート名を以下に変更:
+ *      ─ カウンセリング回答_本厚木店
+ *      ─ カウンセリング回答_大和店
+ *      ─ カウンセリング回答_横浜店
+ *      ─ カウンセリング回答_町田店
+ *      ─ カウンセリング回答_川口店
+ * 2. 拡張機能 → Apps Script を開き、このコードを貼り付け
+ * 3. デプロイ → 新しいデプロイ → ウェブアプリ
+ *      - 実行するユーザー: 自分
+ *      - アクセスできるユーザー: 全員
+ * 4. 生成された URL をダッシュボードの「カウンセリング GAS URL」設定欄に貼り付け
  *
- * 2. 拡張機能 → Apps Script を開く
- * 3. このコードを貼り付ける
- * 4. デプロイ → 新しいデプロイ → ウェブアプリ
- *    - 実行するユーザー: 自分
- *    - アクセスできるユーザー: 全員
- * 5. 生成されたURLをダッシュボードの設定画面に貼り付ける（1つだけ！）
- *
- * 【APIリファレンス】
- * GET ?type=report&months=2          → 日報データ（直近2ヶ月）
- * GET ?type=counseling&store=honatsugi&action=recent&limit=50 → カウンセリング
- * GET ?type=usage&month=2026-03      → 利用回数データ
- * GET ?type=ticket                   → 回数券データ
- * GET ?type=members                  → QR現金会員データ
- * GET ?type=cashbook                 → 出納帳データ
- * GET ?type=stores                   → 店舗一覧
- * GET ?type=staff                    → スタッフ一覧（&includeInactive=true で無効含む）
- * GET ?type=storeManage              → 店舗一覧（&includeInactive=true で無効含む）
- *
- * POST { type:"usage", action:"saveUsage", data:[...] }
- * POST { type:"staff", action:"saveStaff", staff:[...] }
- * POST { type:"staff", action:"updateStaff", staffId:"xxx", updates:{name,role,password,storeIds} }
- * POST { type:"staff", action:"deleteStaff", staffId:"xxx" }  → ソフトデリート
- * POST { type:"staff", action:"restoreStaff", staffId:"xxx" } → 復元
- * POST { type:"storeManage", action:"addStore", store:{id,name} }
- * POST { type:"storeManage", action:"deleteStore", storeId:"xxx" } → ソフトデリート
- * POST { type:"storeManage", action:"restoreStore", storeId:"xxx" } → 復元
- * GET ?type=dashConfig                → 全設定取得
- * GET ?type=dashConfig&key=planLimits → 個別キー取得
- * POST { type:"dashConfig", action:"set", key:"planLimits", value:{...} }
- * POST { type:"dashConfig", action:"setBulk", entries:{key1:val1, key2:val2} }
- * GET ?type=hpb                       → HPB月次データ取得
- * POST { type:"hpb", action:"upsert", entry:{yearMonth,views,...} }
- * POST { type:"hpb", action:"delete", yearMonth:"2026-03" }
- * POST { type:"ticket", action:"saveTickets", plans:[...], tickets:[...] }
- * POST { type:"members", action:"saveManualMembers", members:[...] }
- * GET ?type=menuItems                  → メニュー一覧
- * POST { type:"menuItems", action:"addItem", item:{name,category,price,itemType} }
- * POST { type:"menuItems", action:"updateItem", itemId:"xxx", updates:{...} }
- * POST { type:"menuItems", action:"deleteItem", itemId:"xxx" }
- * POST { type:"menuItems", action:"saveAll", menuItems:[...] }
- * POST { type:"cashbook", action:"saveCashbook", entries:[...] }
+ * 【API リファレンス】
+ * GET ?type=counseling&action=stores
+ *   → カウンセリング店舗一覧
+ * GET ?type=counseling&store=honatsugi&action=recent&limit=50
+ *   → 直近 50 件のカウンセリング顧客
+ * GET ?type=counseling&store=honatsugi&action=detail&name=xxx
+ *   → 個別の顧客カウンセリング詳細
+ * GET ?type=counseling&store=honatsugi&action=search&q=xxx
+ *   → 名前で検索
+ * GET ?type=counseling&action=diagnose
+ *   → 全店舗のシート/カラム検出を診断
  */
 
 // ============================================================
-// シート名定義
+// 定数
 // ============================================================
-
-const SHEETS = {
-  REPORT: '日報',
-  USAGE: '利用回数',
-  TICKET_PLANS: '回数券プラン',
-  TICKET_DATA: '回数券データ',
-  MEMBERS: 'QR現金会員',
-  CASHBOOK: '出納帳',
-  CASHBOOK_LOG: '出納帳ログ',
-  DAILY_CLOSE: '日次締め',
-  STAFF: 'スタッフ管理',
-  STORES: '店舗管理',
-  DASH_CONFIG: 'ダッシュボード設定',
-  HPB: 'HPBデータ',
-  LINE_MESSAGES: 'LINEメッセージ',
-  LINE_PROFILES: 'LINEプロフィール',
-  LINE_BROADCASTS: 'LINE一斉配信',
-  LINE_TEMPLATES: 'LINEテンプレート',
-  LINE_AUTO_REPLIES: 'LINE自動応答',
-  LINE_TAGS: 'LINEタグ',
-  LINE_USER_TAGS: 'LINEユーザータグ',
-  MENU_ITEMS: 'メニュー',
-  ATTENDANCE: '勤怠',
-  QR_TOKENS: '勤怠QRトークン'
-};
 
 const COUNSELING_STORES = {
   honatsugi: 'カウンセリング回答_本厚木店',
@@ -102,19 +44,7 @@ const COUNSELING_STORES = {
   kawaguchi: 'カウンセリング回答_川口店'
 };
 
-// ============================================================
-// 列定義
-// ============================================================
-
-// 日報
-const REPORT_COL = {
-  TIMESTAMP: 0, STORE: 1, HPB_NEW: 2, META_NEW: 3,
-  REFERRAL_NEW: 4, DISCOUNT_NEW: 5, HPB_CONTRACT: 6, META_CONTRACT: 7,
-  REFERRAL_CONTRACT: 8, DISCOUNT_CONTRACT: 9, EXISTING_TREATMENTS: 10,
-  TASK_COMPLETE: 11, PREP_COMPLETE: 12
-};
-
-// カウンセリング（本厚木店のフォーム列順のフォールバック）
+// 本厚木店のフォーム列順のフォールバック (ヘッダー検出失敗時の保険)
 const COUNSELING_COL_DEFAULT = {
   TIMESTAMP: 0, NAME: 1, BIRTHDAY: 2, PHONE: 3, EMAIL: 4,
   OCCUPATION: 5, ADDRESS: 6, VISIT_PURPOSE: 7, CONCERNS: 8,
@@ -123,7 +53,6 @@ const COUNSELING_COL_DEFAULT = {
   COSMETIC_SURGERY: 15, PREGNANCY_CHECK: 16, DISCLAIMER: 17
 };
 
-// ヘッダー行からカラム位置を動的に検出するためのキーワードマッピング
 // ヘッダーテキストに含まれるキーワードでマッチング（優先度の高いものを先に）
 const COUNSELING_HEADER_KEYWORDS = {
   TIMESTAMP:            ['タイムスタンプ', 'timestamp', '日時', '送信日'],
@@ -146,13 +75,118 @@ const COUNSELING_HEADER_KEYWORDS = {
   DISCLAIMER:           ['異議を申し立て', '上記の内容を理解', '同意します', '注意事項', '免責', '確認事項', '確認いたしました', '確認しました', '同意']
 };
 
+// 医療系フィールドから免責・同意系の誤検出値を除外
+var DISCLAIMER_VALUES = ['確認いたしました', '確認しました', '同意します', '同意しました', '同意いたします', '了承しました', '了承いたしました', '承知しました'];
+
+// CONCERNS フォールバックスキャン用キーワード
+var CONCERN_SCAN_KEYWORDS = ['肩こり', '腰痛', '頭痛', '猫背', '骨盤', 'むくみ', '冷え', '眼精疲労',
+  'ストレートネック', '反り腰', '股関節', '姿勢', '食いしばり', '頬のたるみ', '生理痛', '下半身',
+  'X脚', 'O脚', 'はちの張り', '顔の左右差', 'エラの張り', '首', '膝'];
+
+// 施術経験フォールバックスキャン用キーワード
+var TREATMENT_EXP_SCAN_KEYWORDS = ['整体', 'マッサージ', 'カイロ', '鍼灸', 'エステ', 'リラクゼーション', '接骨院', '整骨院', 'ストレッチ専門'];
+
+// 免責事項テキストの判定キーワード
+var DISCLAIMER_KEYWORDS = ['異議を申し立て', '上記の内容を理解', '施術をうけ', '同意します', '確認いたしました'];
+
+// ============================================================
+// ルーター
+// ============================================================
+
+function doGet(e) {
+  try {
+    var params = e ? (e.parameter || {}) : {};
+    var type = params.type || 'counseling';
+    if (type !== 'counseling') {
+      return jsonResponse({
+        error: 'このエンドポイントはカウンセリングデータ専用です (type=counseling)。' +
+               'その他のデータは Supabase (/api/db) を利用してください。'
+      });
+    }
+    return jsonResponse(handleCounselingGet(params));
+  } catch (err) {
+    return jsonResponse({ error: 'Server error: ' + (err.message || err) });
+  }
+}
+
+// POST は使用しない（カウンセリングは読み取り専用）
+function doPost() {
+  return jsonResponse({
+    error: 'このエンドポイントは GET のみ対応です。書き込みは Supabase (/api/db) を利用してください。'
+  });
+}
+
+// ============================================================
+// カウンセリング（読み取り専用 - Google フォーム入力）
+// ============================================================
+
+function handleCounselingGet(params) {
+  var action = params.action || 'list';
+
+  if (action === 'stores') {
+    return {
+      stores: Object.keys(COUNSELING_STORES).map(function(key) {
+        return { id: key, name: COUNSELING_STORES[key].replace('カウンセリング回答_', '') };
+      })
+    };
+  }
+
+  if (action === 'diagnose') return diagnoseCounselingSheets();
+
+  var storeKey = params.store || '';
+  if (!storeKey || !COUNSELING_STORES[storeKey]) {
+    return { error: '店舗を指定してください（store=' + Object.keys(COUNSELING_STORES).join('|') + '）' };
+  }
+
+  var sheetName = COUNSELING_STORES[storeKey];
+  var sheet = getSheet(sheetName);
+  if (!sheet) return { error: 'シート "' + sheetName + '" が見つかりません' };
+
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return { customers: [], total: 0, store: storeKey };
+
+  var numCols = sheet.getLastColumn();
+  // ヘッダー行を読み取り、カラムを動的検出
+  var headerRow = sheet.getRange(1, 1, 1, numCols).getValues()[0];
+  var C = detectCounselingColumns(headerRow);
+  var data = sheet.getRange(2, 1, lastRow - 1, numCols).getValues();
+
+  // デバッグ用
+  var debugHeaders = headerRow.map(function(h, i) { return i + ':' + String(h || '').trim().substring(0, 30); });
+  var sampleConcern = '';
+  if (C.CONCERNS >= 0) {
+    for (var si = 0; si < Math.min(data.length, 10); si++) {
+      var sv = colVal(data[si], C.CONCERNS);
+      if (sv) { sampleConcern = String(sv).substring(0, 100); break; }
+    }
+  }
+  var _debug = { colMap: C, headers: debugHeaders, sampleConcern: sampleConcern, sheetName: sheetName };
+
+  switch (action) {
+    case 'list':
+      return Object.assign({ store: storeKey, _debug: _debug }, counselingList(data, C));
+    case 'recent':
+      var limit = parseInt(params.limit) || 20;
+      var recent = counselingList(data, C);
+      recent.customers = recent.customers.slice(0, limit);
+      recent.total = recent.customers.length;
+      return Object.assign({ store: storeKey, _debug: _debug }, recent);
+    case 'detail':
+      return Object.assign({ store: storeKey, _debug: _debug }, counselingDetail(data, C, params.name, params.index));
+    case 'search':
+      return Object.assign({ store: storeKey, _debug: _debug }, counselingSearch(data, C, params.q || ''));
+    default:
+      return { error: '不明なアクション: ' + action };
+  }
+}
+
 // ヘッダー行から動的にカラムマッピングを構築
 function detectCounselingColumns(headerRow) {
   var C = {};
   var headers = headerRow.map(function(h) { return String(h || '').trim(); });
   var headersLower = headers.map(function(h) { return h.toLowerCase(); });
   var keys = Object.keys(COUNSELING_HEADER_KEYWORDS);
-  var usedCols = {}; // 同じ列が複数キーに割り当てられるのを防ぐ
+  var usedCols = {};
 
   for (var k = 0; k < keys.length; k++) {
     var key = keys[k];
@@ -161,11 +195,8 @@ function detectCounselingColumns(headerRow) {
     for (var j = 0; j < keywords.length; j++) {
       var kw = keywords[j].toLowerCase();
       for (var i = 0; i < headersLower.length; i++) {
-        if (usedCols[i]) continue; // 既に別のキーに使われている列はスキップ
-        if (headersLower[i].indexOf(kw) !== -1) {
-          found = i;
-          break;
-        }
+        if (usedCols[i]) continue;
+        if (headersLower[i].indexOf(kw) !== -1) { found = i; break; }
       }
       if (found !== -1) break;
     }
@@ -179,226 +210,13 @@ function detectCounselingColumns(headerRow) {
   return C;
 }
 
-// ============================================================
-// ルーター
-// ============================================================
-
-function doGet(e) {
-  try {
-    const params = e ? (e.parameter || {}) : {};
-    const type = params.type || 'report';
-
-    switch (type) {
-      case 'report':     return jsonResponse(handleReportGet(params));
-      case 'counseling': return jsonResponse(handleCounselingGet(params));
-      case 'usage':      return jsonResponse(handleUsageGet(params));
-      case 'ticket':     return jsonResponse(handleTicketGet(params));
-      case 'members':    return jsonResponse(handleMembersGet(params));
-      case 'cashbook':   return jsonResponse(handleCashbookGet(params));
-      case 'stores':     return jsonResponse(handleStoresGet());
-      case 'staff':       return jsonResponse(handleStaffGet(params));
-      case 'storeManage': return jsonResponse(handleStoreManageGet(params));
-      case 'dashConfig':  return jsonResponse(handleDashConfigGet(params));
-      case 'hpb':         return jsonResponse(handleHpbGet(params));
-      case 'lineMessages': return jsonResponse(handleLineMessagesGet(params));
-      case 'lineProfiles': return jsonResponse(handleLineProfilesGet(params));
-      case 'lineBroadcasts': return jsonResponse(handleLineBroadcastsGet(params));
-      case 'lineTemplates': return jsonResponse(handleLineTemplatesGet(params));
-      case 'lineAutoReplies': return jsonResponse(handleLineAutoRepliesGet(params));
-      case 'lineTags': return jsonResponse(handleLineTagsGet(params));
-      case 'lineUserTags': return jsonResponse(handleLineUserTagsGet(params));
-      case 'lineAnalytics': return jsonResponse(handleLineAnalyticsGet(params));
-      case 'menuItems':    return jsonResponse(handleMenuItemsGet(params));
-      case 'attendance':   return jsonResponse(handleAttendanceGet(params));
-      case 'qrToken':      return jsonResponse(handleQrTokenGet(params));
-      default:            return jsonResponse({ error: '不明なtype: ' + type }, 400);
-    }
-  } catch (error) {
-    return jsonResponse({ error: error.message }, 500);
-  }
-}
-
-function doPost(e) {
-  try {
-    const body = JSON.parse(e.postData.contents);
-    const type = body.type || '';
-
-    switch (type) {
-      case 'usage':    return jsonResponse(handleUsagePost(body));
-      case 'ticket':   return jsonResponse(handleTicketPost(body));
-      case 'members':  return jsonResponse(handleMembersPost(body));
-      case 'cashbook':    return jsonResponse(handleCashbookPost(body));
-      case 'staff':       return jsonResponse(handleStaffPost(body));
-      case 'storeManage': return jsonResponse(handleStoreManagePost(body));
-      case 'dashConfig':  return jsonResponse(handleDashConfigPost(body));
-      case 'hpb':         return jsonResponse(handleHpbPost(body));
-      case 'lineWebhook':  return jsonResponse(handleLineWebhookPost(body));
-      case 'lineProfile':  return jsonResponse(handleLineProfilePost(body));
-      case 'lineSend':     return jsonResponse(handleLineSendPost(body));
-      case 'lineBroadcast': return jsonResponse(handleLineBroadcastPost(body));
-      case 'lineTemplate': return jsonResponse(handleLineTemplatePost(body));
-      case 'lineAutoReply': return jsonResponse(handleLineAutoReplyPost(body));
-      case 'lineTag': return jsonResponse(handleLineTagPost(body));
-      case 'lineUserTag': return jsonResponse(handleLineUserTagPost(body));
-      case 'menuItems':   return jsonResponse(handleMenuItemsPost(body));
-      case 'attendance':  return jsonResponse(handleAttendancePost(body));
-      case 'qrToken':     return jsonResponse(handleQrTokenPost(body));
-      default:         return jsonResponse({ error: '不明なtype: ' + type }, 400);
-    }
-  } catch (error) {
-    return jsonResponse({ error: error.message }, 500);
-  }
-}
-
-// ============================================================
-// 店舗一覧
-// ============================================================
-
-function handleStoresGet() {
-  return {
-    stores: Object.keys(COUNSELING_STORES).map(key => ({
-      id: key,
-      name: COUNSELING_STORES[key].replace('カウンセリング回答_', '')
-    }))
-  };
-}
-
-// ============================================================
-// 日報（読み取り専用 - Googleフォーム入力）
-// ============================================================
-
-function handleReportGet(params) {
-  const sheet = getSheet(SHEETS.REPORT);
-  if (!sheet) return { error: 'シート "' + SHEETS.REPORT + '" が見つかりません' };
-
-  const lastRow = sheet.getLastRow();
-  if (lastRow < 2) return { reports: [], total: 0 };
-
-  const data = sheet.getRange(2, 1, lastRow - 1, 13).getValues();
-
-  // フィルタ範囲の決定
-  let startDate = null, endDate = null;
-  if (params.all === 'true') {
-    // 全データ
-  } else if (params.month) {
-    const [y, m] = params.month.split('-').map(Number);
-    startDate = new Date(y, m - 1, 1);
-    endDate = new Date(y, m, 0, 23, 59, 59);
-  } else if (params.months) {
-    const n = parseInt(params.months) || 1;
-    const now = new Date();
-    startDate = new Date(now.getFullYear(), now.getMonth() - (n - 1), 1);
-  } else {
-    const now = new Date();
-    startDate = new Date(now.getFullYear(), now.getMonth(), 1);
-  }
-
-  const C = REPORT_COL;
-  const reports = [];
-  for (let i = 0; i < data.length; i++) {
-    const row = data[i];
-    const ts = row[C.TIMESTAMP];
-    if (!ts) continue;
-    const date = ts instanceof Date ? ts : new Date(ts);
-    if (isNaN(date.getTime())) continue;
-    if (startDate && date < startDate) continue;
-    if (endDate && date > endDate) continue;
-
-    reports.push({
-      timestamp: date.toISOString(),
-      store: String(row[C.STORE] || '').trim(),
-      hpbNew: toInt(row[C.HPB_NEW]),
-      metaNew: toInt(row[C.META_NEW]),
-      referralNew: toInt(row[C.REFERRAL_NEW]),
-      discountNew: toInt(row[C.DISCOUNT_NEW]),
-      hpbContract: toInt(row[C.HPB_CONTRACT]),
-      metaContract: toInt(row[C.META_CONTRACT]),
-      referralContract: toInt(row[C.REFERRAL_CONTRACT]),
-      discountContract: toInt(row[C.DISCOUNT_CONTRACT]),
-      existingTreatments: toInt(row[C.EXISTING_TREATMENTS]),
-      taskComplete: String(row[C.TASK_COMPLETE] || '') === '完了しました',
-      prepComplete: String(row[C.PREP_COMPLETE] || '') === '完了しました'
-    });
-  }
-
-  reports.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-  return { reports, total: reports.length, lastUpdated: new Date().toISOString() };
-}
-
-// ============================================================
-// カウンセリング（読み取り専用 - Googleフォーム入力）
-// ============================================================
-
-function handleCounselingGet(params) {
-  const action = params.action || 'list';
-
-  // 店舗一覧
-  if (action === 'stores') return handleStoresGet();
-
-  // 全店舗診断モード
-  if (action === 'diagnose') return diagnoseCounselingSheets();
-
-  const storeKey = params.store || '';
-  if (!storeKey || !COUNSELING_STORES[storeKey]) {
-    return { error: '店舗を指定してください（store=' + Object.keys(COUNSELING_STORES).join('|') + '）' };
-  }
-
-  const sheetName = COUNSELING_STORES[storeKey];
-  const sheet = getSheet(sheetName);
-  if (!sheet) return { error: 'シート "' + sheetName + '" が見つかりません' };
-
-  const lastRow = sheet.getLastRow();
-  if (lastRow < 2) return { customers: [], total: 0, store: storeKey };
-
-  const numCols = sheet.getLastColumn();
-  // ヘッダー行を読み取り、カラムを動的検出
-  const headerRow = sheet.getRange(1, 1, 1, numCols).getValues()[0];
-  const C = detectCounselingColumns(headerRow);
-  const data = sheet.getRange(2, 1, lastRow - 1, numCols).getValues();
-
-  // デバッグ用: 検出されたカラム位置＋実際のヘッダー名
-  var debugHeaders = headerRow.map(function(h, i) { return i + ':' + String(h || '').trim().substring(0, 30); });
-  // CONCERNSカラムのサンプルデータ（最初の非空行）
-  var sampleConcern = '';
-  if (C.CONCERNS >= 0) {
-    for (var si = 0; si < Math.min(data.length, 10); si++) {
-      var sv = colVal(data[si], C.CONCERNS);
-      if (sv) { sampleConcern = String(sv).substring(0, 100); break; }
-    }
-  }
-  var _debug = {
-    colMap: C,
-    headers: debugHeaders,
-    sampleConcern: sampleConcern,
-    sheetName: sheetName
-  };
-
-  switch (action) {
-    case 'list':
-      return { ...counselingList(data, C), store: storeKey, _debug: _debug };
-    case 'recent':
-      var limit = parseInt(params.limit) || 20;
-      var result = counselingList(data, C);
-      result.customers = result.customers.slice(0, limit);
-      result.total = result.customers.length;
-      return { ...result, store: storeKey, _debug: _debug };
-    case 'detail':
-      return { ...counselingDetail(data, C, params.name, params.index), store: storeKey, _debug: _debug };
-    case 'search':
-      return { ...counselingSearch(data, C, params.q || ''), store: storeKey, _debug: _debug };
-    default:
-      return { error: '不明なアクション: ' + action };
-  }
-}
-
-// 安全なカラムアクセス（列が見つからない場合は空値を返す）
+// 安全なカラムアクセス
 function colVal(row, colIndex) {
   if (colIndex === undefined || colIndex < 0 || colIndex >= row.length) return '';
   return row[colIndex];
 }
 
 // 医療系フィールドから免責・同意系の誤検出値を除外
-var DISCLAIMER_VALUES = ['確認いたしました', '確認しました', '同意します', '同意しました', '同意いたします', '了承しました', '了承いたしました', '承知しました'];
 function sanitizeMedicalField(val) {
   var s = String(val || '').trim();
   if (!s) return '';
@@ -408,15 +226,10 @@ function sanitizeMedicalField(val) {
   return s;
 }
 
-// フォールバック: 全列をスキャンしてお悩みデータを含むセルを探す
-var CONCERN_SCAN_KEYWORDS = ['肩こり', '腰痛', '頭痛', '猫背', '骨盤', 'むくみ', '冷え', '眼精疲労',
-  'ストレートネック', '反り腰', '股関節', '姿勢', '食いしばり', '頬のたるみ', '生理痛', '下半身',
-  'X脚', 'O脚', 'はちの張り', '顔の左右差', 'エラの張り', '首', '膝'];
-
+// 全列をスキャンしてお悩みデータを含むセルを探す（フォールバック）
 function scanForConcerns(row, C) {
   var best = [];
   for (var ci = 0; ci < row.length; ci++) {
-    // 既知の非お悩み列はスキップ
     if (ci === C.NAME || ci === C.TIMESTAMP || ci === C.PHONE || ci === C.EMAIL || ci === C.ADDRESS || ci === C.BIRTHDAY) continue;
     var cellVal = String(row[ci] || '').trim();
     if (!cellVal || cellVal.length > 200) continue;
@@ -426,39 +239,29 @@ function scanForConcerns(row, C) {
     }
     if (matchCount >= 1) {
       var candidate = parseMultiSelect(cellVal);
-      if (candidate.length > best.length) {
-        best = candidate;
-      }
+      if (candidate.length > best.length) best = candidate;
     }
   }
   return best;
 }
 
 function counselingList(data, C) {
-  const customers = [];
-  for (let i = 0; i < data.length; i++) {
-    const row = data[i];
-    const ts = colVal(row, C.TIMESTAMP);
+  var customers = [];
+  for (var i = 0; i < data.length; i++) {
+    var row = data[i];
+    var ts = colVal(row, C.TIMESTAMP);
     if (!ts) continue;
-    const date = ts instanceof Date ? ts : new Date(ts);
+    var date = ts instanceof Date ? ts : new Date(ts);
     if (isNaN(date.getTime())) continue;
-    const name = String(colVal(row, C.NAME) || '').trim();
+    var name = String(colVal(row, C.NAME) || '').trim();
     if (!name) continue;
     var concerns = parseMultiSelect(colVal(row, C.CONCERNS));
-    // フォールバック: CONCERNSカラムが空なら全列スキャン
-    if (concerns.length === 0) {
-      concerns = scanForConcerns(row, C);
-    }
-    customers.push({ index: i, name, timestamp: date.toISOString(), concerns: concerns });
+    if (concerns.length === 0) concerns = scanForConcerns(row, C);
+    customers.push({ index: i, name: name, timestamp: date.toISOString(), concerns: concerns });
   }
-  customers.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-  return { customers, total: customers.length, lastUpdated: new Date().toISOString() };
+  customers.sort(function(a, b) { return new Date(b.timestamp) - new Date(a.timestamp); });
+  return { customers: customers, total: customers.length, lastUpdated: new Date().toISOString() };
 }
-
-// フォールバック: 全列をスキャンして施術経験データを含むセルを探す
-var TREATMENT_EXP_SCAN_KEYWORDS = ['整体', 'マッサージ', 'カイロ', '鍼灸', 'エステ', 'リラクゼーション', '接骨院', '整骨院', 'ストレッチ専門'];
-// 免責事項テキストの判定キーワード
-var DISCLAIMER_KEYWORDS = ['異議を申し立て', '上記の内容を理解', '施術をうけ', '同意します', '確認いたしました'];
 
 function isDisclaimerText(val) {
   if (!val) return false;
@@ -480,32 +283,33 @@ function scanForTreatmentExperience(row, C) {
     for (var ck = 0; ck < TREATMENT_EXP_SCAN_KEYWORDS.length; ck++) {
       if (cellVal.indexOf(TREATMENT_EXP_SCAN_KEYWORDS[ck]) !== -1) matchCount++;
     }
-    if (matchCount >= 1) {
-      return parseMultiSelect(cellVal);
-    }
+    if (matchCount >= 1) return parseMultiSelect(cellVal);
   }
   return [];
 }
 
 function counselingDetail(data, C, name, index) {
-  let row = null, rowIndex = -1;
+  var row = null, rowIndex = -1;
   if (index !== undefined && index !== '') {
-    const idx = parseInt(index);
+    var idx = parseInt(index);
     if (idx >= 0 && idx < data.length) { row = data[idx]; rowIndex = idx; }
   } else if (name) {
-    for (let i = data.length - 1; i >= 0; i--) {
+    for (var i = data.length - 1; i >= 0; i--) {
       if (String(colVal(data[i], C.NAME) || '').trim() === name) { row = data[i]; rowIndex = i; break; }
     }
   }
   if (!row) return { error: '顧客が見つかりません', customer: null };
-  const ts = colVal(row, C.TIMESTAMP);
-  const date = ts instanceof Date ? ts : new Date(ts);
+  var ts = colVal(row, C.TIMESTAMP);
+  var date = ts instanceof Date ? ts : new Date(ts);
 
-  // CONCERNSカラムのデータを取得。空なら全カラムをスキャンしてお悩みデータを探す
   var rawConcerns = colVal(row, C.CONCERNS);
   var concerns = parseMultiSelect(rawConcerns);
-  if (concerns.length === 0) {
-    concerns = scanForConcerns(row, C);
+  if (concerns.length === 0) concerns = scanForConcerns(row, C);
+
+  var treatmentExpRaw = parseMultiSelect(colVal(row, C.TREATMENT_EXPERIENCE));
+  var treatmentExp = treatmentExpRaw.filter(function(v) { return !isDisclaimerText(v); });
+  if (treatmentExp.length === 0 && treatmentExpRaw.length > 0) {
+    treatmentExp = scanForTreatmentExperience(row, C);
   }
 
   return {
@@ -522,16 +326,7 @@ function counselingDetail(data, C, name, index) {
       concerns: concerns,
       improvementTimeline: String(colVal(row, C.IMPROVEMENT_TIMELINE) || '').trim(),
       treatmentRequest: String(colVal(row, C.TREATMENT_REQUEST) || '').trim(),
-      treatmentExperience: (function() {
-        var raw = parseMultiSelect(colVal(row, C.TREATMENT_EXPERIENCE));
-        // 免責事項テキストが混入した場合を除外
-        var filtered = raw.filter(function(v) { return !isDisclaimerText(v); });
-        // フォールバック: 除外で空になったら全列スキャンで正しいデータを探す
-        if (filtered.length === 0 && raw.length > 0) {
-          filtered = scanForTreatmentExperience(row, C);
-        }
-        return filtered;
-      })(),
+      treatmentExperience: treatmentExp,
       surgeryHistory: String(colVal(row, C.SURGERY_HISTORY) || '').trim(),
       currentTreatment: String(colVal(row, C.CURRENT_TREATMENT) || '').trim(),
       allergy: String(colVal(row, C.ALLERGY) || '').trim(),
@@ -544,24 +339,24 @@ function counselingDetail(data, C, name, index) {
 
 function counselingSearch(data, C, query) {
   if (!query) return { customers: [], total: 0 };
-  const customers = [], seen = {};
-  for (let i = data.length - 1; i >= 0; i--) {
-    const row = data[i];
-    const name = String(colVal(row, C.NAME) || '').trim();
-    if (!name || !name.includes(query) || seen[name]) continue;
+  var customers = [], seen = {};
+  for (var i = data.length - 1; i >= 0; i--) {
+    var row = data[i];
+    var name = String(colVal(row, C.NAME) || '').trim();
+    if (!name || name.indexOf(query) === -1 || seen[name]) continue;
     seen[name] = true;
-    const ts = colVal(row, C.TIMESTAMP);
-    const date = ts instanceof Date ? ts : new Date(ts);
+    var ts = colVal(row, C.TIMESTAMP);
+    var date = ts instanceof Date ? ts : new Date(ts);
     if (isNaN(date.getTime())) continue;
     var concerns = parseMultiSelect(colVal(row, C.CONCERNS));
     if (concerns.length === 0) concerns = scanForConcerns(row, C);
-    customers.push({ index: i, name, timestamp: date.toISOString(), concerns: concerns });
+    customers.push({ index: i, name: name, timestamp: date.toISOString(), concerns: concerns });
   }
-  return { customers, total: customers.length, lastUpdated: new Date().toISOString() };
+  return { customers: customers, total: customers.length, lastUpdated: new Date().toISOString() };
 }
 
 // ============================================================
-// カウンセリング診断（全店舗のシート状態を一括チェック）
+// 診断（全店舗のシート/カラム検出状態をチェック）
 // ============================================================
 
 function diagnoseCounselingSheets() {
@@ -577,7 +372,6 @@ function diagnoseCounselingSheets() {
 
     var sheet = ss.getSheetByName(expectedName);
     if (!sheet) {
-      // 部分一致でシートを探す
       var partialMatch = null;
       for (var a = 0; a < allSheetNames.length; a++) {
         if (allSheetNames[a].indexOf(storeKey === 'honatsugi' ? '本厚木' :
@@ -592,7 +386,7 @@ function diagnoseCounselingSheets() {
       info.error = 'シートが見つかりません';
       info.suggestion = partialMatch
         ? '似た名前のシートがあります: "' + partialMatch + '" → シート名を "' + expectedName + '" に変更してください'
-        : 'このスプレッドシートにシートを作成するか、GASコードのCOUNSELING_STORESのシート名を修正してください';
+        : 'このスプレッドシートにシートを作成してください';
       info.allSheetNames = allSheetNames;
       results[storeKey] = info;
       continue;
@@ -601,7 +395,7 @@ function diagnoseCounselingSheets() {
     info.exists = true;
     var lastRow = sheet.getLastRow();
     var numCols = sheet.getLastColumn();
-    info.rows = lastRow - 1; // ヘッダー除く
+    info.rows = lastRow - 1;
     info.cols = numCols;
 
     if (lastRow < 1 || numCols < 1) {
@@ -610,11 +404,9 @@ function diagnoseCounselingSheets() {
       continue;
     }
 
-    // ヘッダー行
     var headerRow = sheet.getRange(1, 1, 1, numCols).getValues()[0];
     info.headers = headerRow.map(function(h, i) { return { col: i, header: String(h || '').trim() }; });
 
-    // カラム検出
     var C = detectCounselingColumns(headerRow);
     info.detectedColumns = {};
     var allKeys = Object.keys(COUNSELING_COL_DEFAULT);
@@ -625,7 +417,6 @@ function diagnoseCounselingSheets() {
       info.detectedColumns[colKey] = { column: colIdx, header: headerText };
     }
 
-    // CONCERNS列のサンプルデータ
     if (lastRow >= 2) {
       var sampleRows = Math.min(lastRow - 1, 5);
       var data = sheet.getRange(2, 1, sampleRows, numCols).getValues();
@@ -638,12 +429,10 @@ function diagnoseCounselingSheets() {
           rawConcernsValue: C.CONCERNS >= 0 ? String(row[C.CONCERNS] || '').substring(0, 100) : '(列未検出)',
           parsedConcerns: C.CONCERNS >= 0 ? parseMultiSelect(row[C.CONCERNS]) : []
         };
-        // フォールバックスキャンも実行
         if (sample.parsedConcerns.length === 0) {
           var scanned = scanForConcerns(row, C);
           if (scanned.length > 0) {
             sample.fallbackScanFound = scanned;
-            // どの列で見つかったかも記録
             for (var ci = 0; ci < row.length; ci++) {
               var cv = String(row[ci] || '').trim();
               if (cv && scanned.join(',') === parseMultiSelect(cv).join(',')) {
@@ -669,491 +458,18 @@ function diagnoseCounselingSheets() {
 }
 
 // ============================================================
-// 利用回数（読み書き）
-// ============================================================
-
-function handleUsageGet(params) {
-  const sheet = getOrCreateSheet(SHEETS.USAGE, ['会員ID', '会員名', '店舗', 'プラン', '月', '期間キー', '回数', '更新日時']);
-  const lastRow = sheet.getLastRow();
-  if (lastRow < 2) return { usage: {} };
-
-  const data = sheet.getRange(2, 1, lastRow - 1, 8).getValues();
-  const month = params.month || new Date().toISOString().slice(0, 7);
-  const usage = {};
-
-  for (let i = 0; i < data.length; i++) {
-    if (String(data[i][4]) !== month) continue;
-    const memberId = String(data[i][0]);
-    const periodKey = String(data[i][5] || '');
-    const key = periodKey ? memberId + '__' + periodKey : memberId;
-    usage[key] = toInt(data[i][6]);
-  }
-
-  return { usage, month, lastUpdated: new Date().toISOString() };
-}
-
-function handleUsagePost(body) {
-  const sheet = getOrCreateSheet(SHEETS.USAGE, ['会員ID', '会員名', '店舗', 'プラン', '月', '期間キー', '回数', '更新日時']);
-  const items = body.data || [];
-  if (!items.length) return { success: true, updated: 0 };
-
-  const lastRow = sheet.getLastRow();
-  const existing = lastRow >= 2 ? sheet.getRange(2, 1, lastRow - 1, 8).getValues() : [];
-
-  let updated = 0;
-  items.forEach(item => {
-    const memberId = String(item.memberId || '');
-    const month = String(item.month || '');
-    const periodKey = String(item.periodKey || '');
-    if (!memberId || !month) return;
-
-    // 既存行を検索
-    let found = false;
-    for (let i = 0; i < existing.length; i++) {
-      if (String(existing[i][0]) === memberId && String(existing[i][4]) === month && String(existing[i][5] || '') === periodKey) {
-        sheet.getRange(i + 2, 7).setValue(item.count);
-        sheet.getRange(i + 2, 8).setValue(item.updatedAt || new Date().toISOString());
-        found = true;
-        break;
-      }
-    }
-    if (!found) {
-      sheet.appendRow([memberId, item.memberName || '', item.storeName || '', item.planName || '', month, periodKey, item.count, item.updatedAt || new Date().toISOString()]);
-      existing.push([memberId, item.memberName || '', item.storeName || '', item.planName || '', month, periodKey, item.count, '']);
-    }
-    updated++;
-  });
-
-  return { success: true, updated };
-}
-
-// ============================================================
-// 回数券（読み書き）
-// ============================================================
-
-function handleTicketGet(params) {
-  const planSheet = getOrCreateSheet(SHEETS.TICKET_PLANS, ['ID', 'プラン名', '回数', '金額', '有効日数', '有効']);
-  const dataSheet = getOrCreateSheet(SHEETS.TICKET_DATA, ['JSON']);
-
-  // プラン
-  const plans = [];
-  const planLastRow = planSheet.getLastRow();
-  if (planLastRow >= 2) {
-    const planData = planSheet.getRange(2, 1, planLastRow - 1, 6).getValues();
-    planData.forEach(row => {
-      if (!row[0]) return;
-      plans.push({ id: String(row[0]), name: String(row[1]), sessions: toInt(row[2]), price: toInt(row[3]), validityDays: toInt(row[4]), active: row[5] !== false && row[5] !== 'FALSE' });
-    });
-  }
-
-  // 回数券データ（JSON形式で保存）
-  let tickets = [];
-  const dataLastRow = dataSheet.getLastRow();
-  if (dataLastRow >= 2) {
-    const raw = dataSheet.getRange(2, 1, dataLastRow - 1, 1).getValues();
-    raw.forEach(row => {
-      try { if (row[0]) tickets.push(JSON.parse(row[0])); } catch(e) {}
-    });
-  }
-
-  return { plans, tickets, lastUpdated: new Date().toISOString() };
-}
-
-function handleTicketPost(body) {
-  // プラン保存
-  if (body.plans) {
-    const planSheet = getOrCreateSheet(SHEETS.TICKET_PLANS, ['ID', 'プラン名', '回数', '金額', '有効日数', '有効']);
-    planSheet.getRange(2, 1, Math.max(planSheet.getLastRow(), 2), 6).clearContent();
-    body.plans.forEach(p => {
-      planSheet.appendRow([p.id, p.name, p.sessions, p.price, p.validityDays, p.active !== false]);
-    });
-  }
-
-  // 回数券データ保存
-  if (body.tickets) {
-    const dataSheet = getOrCreateSheet(SHEETS.TICKET_DATA, ['JSON']);
-    const lastRow = dataSheet.getLastRow();
-    if (lastRow >= 2) dataSheet.getRange(2, 1, lastRow - 1, 1).clearContent();
-    body.tickets.forEach(t => {
-      dataSheet.appendRow([JSON.stringify(t)]);
-    });
-  }
-
-  return { success: true };
-}
-
-// ============================================================
-// QR・現金会員（読み書き）
-// ============================================================
-
-function handleMembersGet(params) {
-  const sheet = getOrCreateSheet(SHEETS.MEMBERS, ['JSON']);
-  const lastRow = sheet.getLastRow();
-  if (lastRow < 2) return { members: [] };
-
-  const data = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
-  const members = [];
-  data.forEach(row => {
-    try { if (row[0]) members.push(JSON.parse(row[0])); } catch(e) {}
-  });
-
-  return { members, lastUpdated: new Date().toISOString() };
-}
-
-function handleMembersPost(body) {
-  const sheet = getOrCreateSheet(SHEETS.MEMBERS, ['JSON']);
-  const lastRow = sheet.getLastRow();
-  if (lastRow >= 2) sheet.getRange(2, 1, lastRow - 1, 1).clearContent();
-
-  var members = body.members || [];
-  members.forEach(m => {
-    sheet.appendRow([JSON.stringify(m)]);
-  });
-
-  return { success: true, count: members.length, savedAt: new Date().toISOString() };
-}
-
-// ============================================================
-// 出納帳（列ベース構造 + 監査ログ + 日次締め）
-// ============================================================
-
-var CASHBOOK_HEADERS = ['ID','日付','種別','カテゴリ','摘要','金額','顧客名','施術回数','支払方法','現金区分','会員ID','店舗ID','記帳者','備考','作成日時','更新日時','更新者','削除フラグ'];
-var CASHBOOK_LOG_HEADERS = ['日時','操作','エントリID','店舗ID','操作者','変更前','変更後'];
-var DAILY_CLOSE_HEADERS = ['日付','店舗ID','金庫残高','小口残高','レジ残高','締め者','締め日時','備考','ロック'];
-
-function ensureCashbookSheet() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName(SHEETS.CASHBOOK);
-  if (!sheet) {
-    sheet = ss.insertSheet(SHEETS.CASHBOOK);
-    sheet.getRange(1, 1, 1, CASHBOOK_HEADERS.length).setValues([CASHBOOK_HEADERS]);
-    sheet.getRange(1, 1, 1, CASHBOOK_HEADERS.length).setFontWeight('bold');
-    sheet.setFrozenRows(1);
-  } else {
-    // 旧JSONフォーマットからのマイグレーション
-    var h = sheet.getRange(1, 1).getValue();
-    if (h === 'JSON') {
-      migrateCashbookFromJson(sheet);
-    }
-  }
-  return sheet;
-}
-
-function migrateCashbookFromJson(sheet) {
-  var lastRow = sheet.getLastRow();
-  var oldEntries = [];
-  if (lastRow >= 2) {
-    var data = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
-    data.forEach(function(row) {
-      try { if (row[0]) oldEntries.push(JSON.parse(row[0])); } catch(e) {}
-    });
-    sheet.clear();
-  }
-  sheet.getRange(1, 1, 1, CASHBOOK_HEADERS.length).setValues([CASHBOOK_HEADERS]);
-  sheet.getRange(1, 1, 1, CASHBOOK_HEADERS.length).setFontWeight('bold');
-  sheet.setFrozenRows(1);
-  oldEntries.forEach(function(e) {
-    sheet.appendRow([
-      e.id || '', e.date || '', e.type || '', e.category || '', e.description || '',
-      e.amount || 0, e.customerName || '', e.treatmentCount || 0, e.paymentMethod || 'CASH',
-      e.cashType || 'register', e.memberId || '', e.store || '', e.recorder || '',
-      e.notes || '', e.createdAt || new Date().toISOString(), '', '', ''
-    ]);
-  });
-}
-
-function ensureCashbookLogSheet() {
-  return getOrCreateSheet(SHEETS.CASHBOOK_LOG, CASHBOOK_LOG_HEADERS);
-}
-
-function ensureDailyCloseSheet() {
-  return getOrCreateSheet(SHEETS.DAILY_CLOSE, DAILY_CLOSE_HEADERS);
-}
-
-function appendCashbookLog(action, entryId, storeId, operator, before, after) {
-  var logSheet = ensureCashbookLogSheet();
-  logSheet.appendRow([
-    new Date().toISOString(), action, entryId || '', storeId || '',
-    operator || '', before ? JSON.stringify(before) : '', after ? JSON.stringify(after) : ''
-  ]);
-}
-
-function cashbookRowToEntry(row) {
-  return {
-    id: String(row[0] || ''), date: String(row[1] || ''), type: String(row[2] || ''),
-    category: String(row[3] || ''), description: String(row[4] || ''),
-    amount: toInt(row[5]), customerName: String(row[6] || ''),
-    treatmentCount: toInt(row[7]), paymentMethod: String(row[8] || 'CASH'),
-    cashType: String(row[9] || 'register'), memberId: String(row[10] || ''),
-    store: String(row[11] || ''), recorder: String(row[12] || ''),
-    notes: String(row[13] || ''), createdAt: String(row[14] || ''),
-    updatedAt: String(row[15] || ''), updatedBy: String(row[16] || ''),
-    deleted: String(row[17] || '') === 'true'
-  };
-}
-
-function entryToRow(e) {
-  return [
-    e.id, e.date, e.type, e.category, e.description || '',
-    e.amount || 0, e.customerName || '', e.treatmentCount || 0,
-    e.paymentMethod || 'CASH', e.cashType || 'register',
-    e.memberId || '', e.store || '', e.recorder || '',
-    e.notes || '', e.createdAt || new Date().toISOString(),
-    e.updatedAt || '', e.updatedBy || '', e.deleted ? 'true' : ''
-  ];
-}
-
-// GET: エントリ取得（店舗・月フィルタ対応）
-function handleCashbookGet(params) {
-  var sheet = ensureCashbookSheet();
-  var lastRow = sheet.getLastRow();
-  if (lastRow < 2) return { entries: [], dailyCloses: [], lastUpdated: new Date().toISOString() };
-
-  var data = sheet.getRange(2, 1, lastRow - 1, CASHBOOK_HEADERS.length).getValues();
-  var entries = [];
-  var storeFilter = params.store || '';
-  var monthFilter = params.month || '';
-
-  data.forEach(function(row) {
-    if (!row[0]) return;
-    var entry = cashbookRowToEntry(row);
-    if (entry.deleted) return;
-    if (storeFilter && entry.store !== storeFilter) return;
-    if (monthFilter && !entry.date.startsWith(monthFilter)) return;
-    entries.push(entry);
-  });
-
-  // 日次締めデータも返す
-  var dailyCloses = getDailyCloses(storeFilter);
-
-  // 監査ログ（直近100件）
-  var logs = [];
-  if (params.includeLogs === 'true') {
-    logs = getRecentLogs(100, storeFilter);
-  }
-
-  return { entries: entries, dailyCloses: dailyCloses, logs: logs, lastUpdated: new Date().toISOString() };
-}
-
-function getDailyCloses(storeFilter) {
-  var sheet = ensureDailyCloseSheet();
-  var lastRow = sheet.getLastRow();
-  if (lastRow < 2) return [];
-  var data = sheet.getRange(2, 1, lastRow - 1, DAILY_CLOSE_HEADERS.length).getValues();
-  var closes = [];
-  data.forEach(function(row) {
-    if (!row[0]) return;
-    if (storeFilter && String(row[1]) !== storeFilter) return;
-    closes.push({
-      date: formatDate(row[0]), storeId: String(row[1] || ''),
-      safeBalance: toInt(row[2]), pettyCashBalance: toInt(row[3]),
-      registerBalance: toInt(row[4]), closedBy: String(row[5] || ''),
-      closedAt: String(row[6] || ''), notes: String(row[7] || ''),
-      locked: String(row[8] || '') === 'true'
-    });
-  });
-  return closes;
-}
-
-function getRecentLogs(limit, storeFilter) {
-  var logSheet = ensureCashbookLogSheet();
-  var lastRow = logSheet.getLastRow();
-  if (lastRow < 2) return [];
-  var data = logSheet.getRange(2, 1, lastRow - 1, CASHBOOK_LOG_HEADERS.length).getValues();
-  var logs = [];
-  for (var i = data.length - 1; i >= 0 && logs.length < limit; i--) {
-    var row = data[i];
-    if (storeFilter && String(row[3]) !== storeFilter) continue;
-    logs.push({
-      timestamp: String(row[0] || ''), action: String(row[1] || ''),
-      entryId: String(row[2] || ''), storeId: String(row[3] || ''),
-      operator: String(row[4] || ''),
-      before: row[5] ? String(row[5]) : '', after: row[6] ? String(row[6]) : ''
-    });
-  }
-  return logs;
-}
-
-// POST: 各種操作
-function handleCashbookPost(body) {
-  var action = body.action || '';
-
-  // 後方互換: 旧saveCashbook（全件上書き）
-  if (action === 'saveCashbook' && body.entries) {
-    return handleCashbookBulkSave(body);
-  }
-
-  switch (action) {
-    case 'addEntry':    return handleCashbookAddEntry(body);
-    case 'updateEntry': return handleCashbookUpdateEntry(body);
-    case 'deleteEntry': return handleCashbookDeleteEntry(body);
-    case 'dailyClose':  return handleDailyClose(body);
-    case 'getDailyCloses': return { dailyCloses: getDailyCloses(body.store || '') };
-    case 'getLogs':     return { logs: getRecentLogs(body.limit || 100, body.store || '') };
-    default: return { error: '不明なaction: ' + action };
-  }
-}
-
-// 後方互換: 全件保存（ただしログは記録）
-function handleCashbookBulkSave(body) {
-  var sheet = ensureCashbookSheet();
-  var lastRow = sheet.getLastRow();
-  if (lastRow >= 2) sheet.getRange(2, 1, lastRow - 1, CASHBOOK_HEADERS.length).clearContent();
-  (body.entries || []).forEach(function(e) {
-    if (!e.cashType) e.cashType = 'register';
-    sheet.appendRow(entryToRow(e));
-  });
-  appendCashbookLog('bulkSave', '', '', body.operator || '', null, { count: (body.entries || []).length });
-  return { success: true };
-}
-
-// エントリ追加（個別・ログ付き）
-function handleCashbookAddEntry(body) {
-  var entry = body.entry || {};
-  // 日次締め済みチェック
-  if (isDayClosed(entry.date, entry.store)) {
-    return { error: 'この日は締め済みのため記帳できません', closed: true };
-  }
-  var sheet = ensureCashbookSheet();
-  if (!entry.id) entry.id = 'cb_' + new Date().getTime().toString(36) + Math.random().toString(36).slice(2, 5);
-  if (!entry.createdAt) entry.createdAt = new Date().toISOString();
-  if (!entry.cashType) entry.cashType = 'register';
-  sheet.appendRow(entryToRow(entry));
-  appendCashbookLog('add', entry.id, entry.store, body.operator || entry.recorder || '', null, entry);
-  return { success: true, entry: entry };
-}
-
-// エントリ更新（差分・ログ付き）
-function handleCashbookUpdateEntry(body) {
-  var entryId = body.entryId || '';
-  var updates = body.updates || {};
-  if (!entryId) return { error: 'entryId必須' };
-
-  var sheet = ensureCashbookSheet();
-  var lastRow = sheet.getLastRow();
-  if (lastRow < 2) return { error: 'エントリが見つかりません' };
-
-  var data = sheet.getRange(2, 1, lastRow - 1, CASHBOOK_HEADERS.length).getValues();
-  for (var i = 0; i < data.length; i++) {
-    if (String(data[i][0]) === entryId) {
-      var before = cashbookRowToEntry(data[i]);
-      // 日次締め済みチェック
-      if (isDayClosed(before.date, before.store)) {
-        return { error: 'この日は締め済みのため編集できません', closed: true };
-      }
-      var after = Object.assign({}, before, updates);
-      after.updatedAt = new Date().toISOString();
-      after.updatedBy = body.operator || '';
-      var newRow = entryToRow(after);
-      sheet.getRange(i + 2, 1, 1, newRow.length).setValues([newRow]);
-      appendCashbookLog('update', entryId, before.store, body.operator || '', before, after);
-      return { success: true, entry: after };
-    }
-  }
-  return { error: 'エントリが見つかりません' };
-}
-
-// エントリ削除（論理削除・ログ付き）
-function handleCashbookDeleteEntry(body) {
-  var entryId = body.entryId || '';
-  if (!entryId) return { error: 'entryId必須' };
-
-  var sheet = ensureCashbookSheet();
-  var lastRow = sheet.getLastRow();
-  if (lastRow < 2) return { error: 'エントリが見つかりません' };
-
-  var data = sheet.getRange(2, 1, lastRow - 1, CASHBOOK_HEADERS.length).getValues();
-  for (var i = 0; i < data.length; i++) {
-    if (String(data[i][0]) === entryId) {
-      var before = cashbookRowToEntry(data[i]);
-      if (isDayClosed(before.date, before.store)) {
-        return { error: 'この日は締め済みのため削除できません', closed: true };
-      }
-      // 論理削除
-      sheet.getRange(i + 2, 18).setValue('true'); // 削除フラグ列
-      sheet.getRange(i + 2, 16).setValue(new Date().toISOString()); // 更新日時
-      sheet.getRange(i + 2, 17).setValue(body.operator || ''); // 更新者
-      appendCashbookLog('delete', entryId, before.store, body.operator || '', before, null);
-      return { success: true };
-    }
-  }
-  return { error: 'エントリが見つかりません' };
-}
-
-// 日次締め
-function handleDailyClose(body) {
-  var date = body.date || '';
-  var storeId = body.storeId || '';
-  if (!date || !storeId) return { error: '日付と店舗IDが必須です' };
-
-  var sheet = ensureDailyCloseSheet();
-  // 既に締められていないかチェック
-  var lastRow = sheet.getLastRow();
-  if (lastRow >= 2) {
-    var data = sheet.getRange(2, 1, lastRow - 1, DAILY_CLOSE_HEADERS.length).getValues();
-    for (var i = 0; i < data.length; i++) {
-      if (formatDate(data[i][0]) === date && String(data[i][1]) === storeId && String(data[i][8]) === 'true') {
-        return { error: 'この日は既に締め済みです', closed: true };
-      }
-    }
-  }
-
-  sheet.appendRow([
-    date, storeId,
-    toInt(body.safeBalance), toInt(body.pettyCashBalance), toInt(body.registerBalance),
-    body.closedBy || '', new Date().toISOString(), body.notes || '', 'true'
-  ]);
-
-  appendCashbookLog('dailyClose', '', storeId, body.closedBy || '', null, {
-    date: date, safeBalance: body.safeBalance, pettyCashBalance: body.pettyCashBalance,
-    registerBalance: body.registerBalance
-  });
-
-  return { success: true };
-}
-
-function isDayClosed(date, storeId) {
-  if (!date || !storeId) return false;
-  var sheet;
-  try { sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEETS.DAILY_CLOSE); } catch(e) { return false; }
-  if (!sheet) return false;
-  var lastRow = sheet.getLastRow();
-  if (lastRow < 2) return false;
-  var data = sheet.getRange(2, 1, lastRow - 1, DAILY_CLOSE_HEADERS.length).getValues();
-  for (var i = 0; i < data.length; i++) {
-    if (formatDate(data[i][0]) === date && String(data[i][1]) === storeId && String(data[i][8]) === 'true') {
-      return true;
-    }
-  }
-  return false;
-}
-
-// ============================================================
-// ユーティリティ
+// 共通ユーティリティ
 // ============================================================
 
 function getSheet(name) {
   return SpreadsheetApp.getActiveSpreadsheet().getSheetByName(name);
 }
 
-function getOrCreateSheet(name, headers) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  let sheet = ss.getSheetByName(name);
-  if (!sheet) {
-    sheet = ss.insertSheet(name);
-    if (headers && headers.length) {
-      sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
-      sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold');
-    }
-  }
-  return sheet;
-}
-
 function parseMultiSelect(val) {
   if (!val) return [];
   var str = String(val).trim();
   if (!str) return [];
-  // Google Formsの複数選択: カンマ区切り、セミコロン区切り、読点区切り、改行区切りに対応
+  // Google Forms 複数選択: カンマ/セミコロン/読点/改行 で分割
   return str.split(/[,;、\n\r]+/).map(function(s) { return s.trim(); }).filter(function(s) { return s; });
 }
 
@@ -1163,1458 +479,6 @@ function formatDate(val) {
     return val.getFullYear() + '-' + String(val.getMonth() + 1).padStart(2, '0') + '-' + String(val.getDate()).padStart(2, '0');
   }
   return String(val).trim();
-}
-
-function toInt(val) {
-  const n = parseInt(val, 10);
-  return isNaN(n) ? 0 : n;
-}
-
-// ============================================================
-// スタッフ管理
-// ============================================================
-// シート列: A=ID, B=名前, C=役割, D=パスワード, E=店舗IDs, F=作成日, G=ステータス(active/inactive)
-
-function ensureStaffSheet() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  let sheet = ss.getSheetByName(SHEETS.STAFF);
-  if (!sheet) {
-    sheet = ss.insertSheet(SHEETS.STAFF);
-    sheet.appendRow(['ID', '名前', '役割', 'パスワード', '店舗IDs', '作成日', 'ステータス']);
-    sheet.setFrozenRows(1);
-    sheet.getRange('A1:G1').setFontWeight('bold');
-  } else {
-    // 既存シートにG列が無い場合はヘッダー追加
-    var header = sheet.getRange(1, 7).getValue();
-    if (!header) sheet.getRange(1, 7).setValue('ステータス');
-  }
-  return sheet;
-}
-
-function handleStaffGet(params) {
-  var includeInactive = params.includeInactive === 'true' || params.includeInactive === '1';
-  var sheet = ensureStaffSheet();
-  var rows = sheet.getDataRange().getValues();
-  if (rows.length <= 1) return { staff: [] };
-
-  var staff = [];
-  for (var i = 1; i < rows.length; i++) {
-    var r = rows[i];
-    if (!r[0]) continue;
-    var status = String(r[6] || 'active');
-    if (!includeInactive && status === 'inactive') continue;
-    staff.push({
-      id: String(r[0]),
-      name: String(r[1] || ''),
-      role: String(r[2] || 'staff'),
-      password: String(r[3] || ''),
-      storeIds: parseMultiSelect(r[4]),
-      createdAt: formatDate(r[5]),
-      status: status
-    });
-  }
-  return { staff: staff };
-}
-
-function handleStaffPost(body) {
-  var action = body.action || '';
-  switch (action) {
-    case 'saveStaff':    return saveStaffList(body.staff || []);
-    case 'updateStaff':  return updateSingleStaff(body.staffId, body.updates || {});
-    case 'deleteStaff':  return softDeleteStaff(body.staffId);
-    case 'restoreStaff': return restoreStaff(body.staffId);
-    default: return { error: '不明なstaff action: ' + action };
-  }
-}
-
-function saveStaffList(staffArr) {
-  var sheet = ensureStaffSheet();
-  var lastRow = sheet.getLastRow();
-  if (lastRow > 1) {
-    sheet.getRange(2, 1, lastRow - 1, 7).clearContent();
-  }
-  var rows = staffArr.map(function(s) {
-    return [
-      s.id || '',
-      s.name || '',
-      s.role || 'staff',
-      s.password || '',
-      (s.storeIds || []).join(','),
-      s.createdAt || new Date(),
-      s.status || 'active'
-    ];
-  });
-  if (rows.length > 0) {
-    sheet.getRange(2, 1, rows.length, 7).setValues(rows);
-  }
-  return { success: true, count: rows.length };
-}
-
-function updateSingleStaff(staffId, updates) {
-  if (!staffId) return { error: 'staffIdが必要です' };
-  var sheet = ensureStaffSheet();
-  var rows = sheet.getDataRange().getValues();
-  for (var i = 1; i < rows.length; i++) {
-    if (String(rows[i][0]) === String(staffId)) {
-      // B=名前, C=役割, D=パスワード, E=店舗IDs
-      if (updates.name !== undefined)     sheet.getRange(i + 1, 2).setValue(updates.name);
-      if (updates.role !== undefined)     sheet.getRange(i + 1, 3).setValue(updates.role);
-      if (updates.password !== undefined) sheet.getRange(i + 1, 4).setValue(updates.password);
-      if (updates.storeIds !== undefined) sheet.getRange(i + 1, 5).setValue((updates.storeIds || []).join(','));
-      return { success: true, staffId: staffId };
-    }
-  }
-  return { error: 'スタッフが見つかりません: ' + staffId };
-}
-
-function softDeleteStaff(staffId) {
-  if (!staffId) return { error: 'staffIdが必要です' };
-  var sheet = ensureStaffSheet();
-  var rows = sheet.getDataRange().getValues();
-  for (var i = rows.length - 1; i >= 1; i--) {
-    if (String(rows[i][0]) === String(staffId)) {
-      sheet.getRange(i + 1, 7).setValue('inactive');
-      return { success: true, staffId: staffId, status: 'inactive' };
-    }
-  }
-  return { error: 'スタッフが見つかりません: ' + staffId };
-}
-
-function restoreStaff(staffId) {
-  if (!staffId) return { error: 'staffIdが必要です' };
-  var sheet = ensureStaffSheet();
-  var rows = sheet.getDataRange().getValues();
-  for (var i = rows.length - 1; i >= 1; i--) {
-    if (String(rows[i][0]) === String(staffId)) {
-      sheet.getRange(i + 1, 7).setValue('active');
-      return { success: true, staffId: staffId, status: 'active' };
-    }
-  }
-  return { error: 'スタッフが見つかりません: ' + staffId };
-}
-
-// ============================================================
-// 店舗管理
-// ============================================================
-// シート列: A=ID, B=店舗名, C=ステータス(active/inactive), D=作成日, E=メモ, F=緯度, G=経度
-
-function ensureStoreSheet() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName(SHEETS.STORES);
-  if (!sheet) {
-    sheet = ss.insertSheet(SHEETS.STORES);
-    sheet.appendRow(['ID', '店舗名', 'ステータス', '作成日', 'メモ', '緯度', '経度']);
-    sheet.setFrozenRows(1);
-    sheet.getRange('A1:G1').setFontWeight('bold');
-  } else {
-    // 既存シートにF,G列が無い場合はヘッダー追加
-    var h6 = sheet.getRange(1, 6).getValue();
-    if (!h6) { sheet.getRange(1, 6).setValue('緯度'); sheet.getRange(1, 7).setValue('経度'); }
-  }
-  return sheet;
-}
-
-function handleStoreManageGet(params) {
-  var includeInactive = params.includeInactive === 'true' || params.includeInactive === '1';
-  var sheet = ensureStoreSheet();
-  var rows = sheet.getDataRange().getValues();
-  if (rows.length <= 1) return { stores: [] };
-
-  var stores = [];
-  for (var i = 1; i < rows.length; i++) {
-    var r = rows[i];
-    if (!r[0]) continue;
-    var status = String(r[2] || 'active');
-    if (!includeInactive && status === 'inactive') continue;
-    stores.push({
-      id: String(r[0]),
-      name: String(r[1] || ''),
-      status: status,
-      createdAt: formatDate(r[3]),
-      memo: String(r[4] || ''),
-      lat: r[5] ? parseFloat(r[5]) : null,
-      lng: r[6] ? parseFloat(r[6]) : null
-    });
-  }
-  return { stores: stores };
-}
-
-function handleStoreManagePost(body) {
-  var action = body.action || '';
-  switch (action) {
-    case 'saveStores':    return saveStoreList(body.stores || []);
-    case 'addStore':      return addStore(body.store || {});
-    case 'updateStore':   return updateStore(body.store || {});
-    case 'updateCoordinates': return updateStoreCoordinates(body.storeId, body.lat, body.lng);
-    case 'deleteStore':   return softDeleteStore(body.storeId);
-    case 'restoreStore':  return restoreStore(body.storeId);
-    default: return { error: '不明なstoreManage action: ' + action };
-  }
-}
-
-function saveStoreList(storeArr) {
-  var sheet = ensureStoreSheet();
-  var lastRow = sheet.getLastRow();
-  if (lastRow > 1) {
-    sheet.getRange(2, 1, lastRow - 1, 5).clearContent();
-  }
-  var rows = storeArr.map(function(s) {
-    return [
-      s.id || '',
-      s.name || '',
-      s.status || 'active',
-      s.createdAt || new Date(),
-      s.memo || ''
-    ];
-  });
-  if (rows.length > 0) {
-    sheet.getRange(2, 1, rows.length, 5).setValues(rows);
-  }
-  return { success: true, count: rows.length };
-}
-
-function addStore(store) {
-  if (!store.id || !store.name) return { error: 'IDと店舗名が必要です' };
-  var sheet = ensureStoreSheet();
-  sheet.appendRow([
-    store.id,
-    store.name,
-    'active',
-    new Date(),
-    store.memo || ''
-  ]);
-  return { success: true, store: { id: store.id, name: store.name, status: 'active' } };
-}
-
-function updateStore(store) {
-  if (!store.id) return { error: 'storeIdが必要です' };
-  var sheet = ensureStoreSheet();
-  var rows = sheet.getDataRange().getValues();
-  for (var i = 1; i < rows.length; i++) {
-    if (String(rows[i][0]) === String(store.id)) {
-      if (store.name) sheet.getRange(i + 1, 2).setValue(store.name);
-      if (store.memo !== undefined) sheet.getRange(i + 1, 5).setValue(store.memo);
-      if (store.lat !== undefined) sheet.getRange(i + 1, 6).setValue(store.lat);
-      if (store.lng !== undefined) sheet.getRange(i + 1, 7).setValue(store.lng);
-      return { success: true, storeId: store.id };
-    }
-  }
-  return { error: '店舗が見つかりません: ' + store.id };
-}
-
-function updateStoreCoordinates(storeId, lat, lng) {
-  if (!storeId) return { error: 'storeIdが必要です' };
-  if (lat === undefined || lng === undefined) return { error: '緯度・経度が必要です' };
-  var sheet = ensureStoreSheet();
-  var rows = sheet.getDataRange().getValues();
-  for (var i = 1; i < rows.length; i++) {
-    if (String(rows[i][0]) === String(storeId)) {
-      sheet.getRange(i + 1, 6).setValue(parseFloat(lat));
-      sheet.getRange(i + 1, 7).setValue(parseFloat(lng));
-      return { success: true, storeId: storeId, lat: parseFloat(lat), lng: parseFloat(lng) };
-    }
-  }
-  return { error: '店舗が見つかりません: ' + storeId };
-}
-
-function softDeleteStore(storeId) {
-  if (!storeId) return { error: 'storeIdが必要です' };
-  var sheet = ensureStoreSheet();
-  var rows = sheet.getDataRange().getValues();
-  for (var i = 1; i < rows.length; i++) {
-    if (String(rows[i][0]) === String(storeId)) {
-      sheet.getRange(i + 1, 3).setValue('inactive');
-      return { success: true, storeId: storeId, status: 'inactive' };
-    }
-  }
-  return { error: '店舗が見つかりません: ' + storeId };
-}
-
-function restoreStore(storeId) {
-  if (!storeId) return { error: 'storeIdが必要です' };
-  var sheet = ensureStoreSheet();
-  var rows = sheet.getDataRange().getValues();
-  for (var i = 1; i < rows.length; i++) {
-    if (String(rows[i][0]) === String(storeId)) {
-      sheet.getRange(i + 1, 3).setValue('active');
-      return { success: true, storeId: storeId, status: 'active' };
-    }
-  }
-  return { error: '店舗が見つかりません: ' + storeId };
-}
-
-// ============================================================
-// ダッシュボード設定（キー・バリュー型）
-// ============================================================
-// シート列: A=キー, B=値(JSON文字列)
-
-function ensureDashConfigSheet() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName(SHEETS.DASH_CONFIG);
-  if (!sheet) {
-    sheet = ss.insertSheet(SHEETS.DASH_CONFIG);
-    sheet.appendRow(['キー', '値']);
-    sheet.setFrozenRows(1);
-    sheet.getRange('A1:B1').setFontWeight('bold');
-  }
-  return sheet;
-}
-
-function handleDashConfigGet(params) {
-  var key = params.key || '';
-  var sheet = ensureDashConfigSheet();
-  var rows = sheet.getDataRange().getValues();
-  if (key) {
-    for (var i = 1; i < rows.length; i++) {
-      if (String(rows[i][0]) === key) {
-        try { return { key: key, value: JSON.parse(String(rows[i][1])) }; }
-        catch(e) { return { key: key, value: String(rows[i][1]) }; }
-      }
-    }
-    return { key: key, value: null };
-  }
-  // 全件取得
-  var result = {};
-  for (var i = 1; i < rows.length; i++) {
-    if (!rows[i][0]) continue;
-    try { result[String(rows[i][0])] = JSON.parse(String(rows[i][1])); }
-    catch(e) { result[String(rows[i][0])] = String(rows[i][1]); }
-  }
-  return { config: result };
-}
-
-function handleDashConfigPost(body) {
-  var action = body.action || 'set';
-  if (action === 'set') {
-    return setDashConfig(body.key, body.value);
-  } else if (action === 'setBulk') {
-    return setDashConfigBulk(body.entries || {});
-  }
-  return { error: '不明なdashConfig action: ' + action };
-}
-
-function setDashConfig(key, value) {
-  if (!key) return { error: 'keyが必要です' };
-  var sheet = ensureDashConfigSheet();
-  var rows = sheet.getDataRange().getValues();
-  var jsonVal = JSON.stringify(value);
-  for (var i = 1; i < rows.length; i++) {
-    if (String(rows[i][0]) === key) {
-      sheet.getRange(i + 1, 2).setValue(jsonVal);
-      return { success: true, key: key };
-    }
-  }
-  sheet.appendRow([key, jsonVal]);
-  return { success: true, key: key };
-}
-
-function setDashConfigBulk(entries) {
-  var keys = Object.keys(entries);
-  for (var k = 0; k < keys.length; k++) {
-    setDashConfig(keys[k], entries[keys[k]]);
-  }
-  return { success: true, count: keys.length };
-}
-
-// ============================================================
-// HPBデータ
-// ============================================================
-// シート列: A=年月, B=PV数, C=予約数, D=掲載費, E=クリック数, F=CVR, G=メモ
-
-function ensureHpbSheet() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName(SHEETS.HPB);
-  if (!sheet) {
-    sheet = ss.insertSheet(SHEETS.HPB);
-    sheet.appendRow(['年月', 'PV数', '予約数', '掲載費', 'クリック数', 'CVR', 'メモ']);
-    sheet.setFrozenRows(1);
-    sheet.getRange('A1:G1').setFontWeight('bold');
-  }
-  return sheet;
-}
-
-function handleHpbGet(params) {
-  var sheet = ensureHpbSheet();
-  var rows = sheet.getDataRange().getValues();
-  var monthly = [];
-  for (var i = 1; i < rows.length; i++) {
-    var r = rows[i];
-    if (!r[0]) continue;
-    monthly.push({
-      yearMonth: String(r[0]),
-      views: toInt(r[1]),
-      bookings: toInt(r[2]),
-      cost: toInt(r[3]),
-      clicks: toInt(r[4]),
-      cvr: r[5] ? parseFloat(r[5]) : 0,
-      memo: String(r[6] || '')
-    });
-  }
-  return { monthly: monthly };
-}
-
-function handleHpbPost(body) {
-  var action = body.action || '';
-  switch (action) {
-    case 'saveAll':   return saveHpbAll(body.monthly || []);
-    case 'upsert':    return upsertHpbMonth(body.entry || {});
-    case 'delete':    return deleteHpbMonth(body.yearMonth);
-    default: return { error: '不明なhpb action: ' + action };
-  }
-}
-
-function saveHpbAll(monthly) {
-  var sheet = ensureHpbSheet();
-  var lastRow = sheet.getLastRow();
-  if (lastRow > 1) {
-    sheet.getRange(2, 1, lastRow - 1, 7).clearContent();
-  }
-  var rows = monthly.map(function(m) {
-    return [
-      m.yearMonth || '',
-      m.views || 0,
-      m.bookings || 0,
-      m.cost || 0,
-      m.clicks || 0,
-      m.cvr || 0,
-      m.memo || ''
-    ];
-  });
-  if (rows.length > 0) {
-    sheet.getRange(2, 1, rows.length, 7).setValues(rows);
-  }
-  return { success: true, count: rows.length };
-}
-
-function upsertHpbMonth(entry) {
-  if (!entry.yearMonth) return { error: 'yearMonthが必要です' };
-  var sheet = ensureHpbSheet();
-  var rows = sheet.getDataRange().getValues();
-  var rowData = [
-    entry.yearMonth,
-    entry.views || 0,
-    entry.bookings || 0,
-    entry.cost || 0,
-    entry.clicks || 0,
-    entry.cvr || 0,
-    entry.memo || ''
-  ];
-  for (var i = 1; i < rows.length; i++) {
-    if (String(rows[i][0]) === String(entry.yearMonth)) {
-      sheet.getRange(i + 1, 1, 1, 7).setValues([rowData]);
-      return { success: true, yearMonth: entry.yearMonth, action: 'updated' };
-    }
-  }
-  sheet.appendRow(rowData);
-  return { success: true, yearMonth: entry.yearMonth, action: 'added' };
-}
-
-function deleteHpbMonth(yearMonth) {
-  if (!yearMonth) return { error: 'yearMonthが必要です' };
-  var sheet = ensureHpbSheet();
-  var rows = sheet.getDataRange().getValues();
-  for (var i = rows.length - 1; i >= 1; i--) {
-    if (String(rows[i][0]) === String(yearMonth)) {
-      sheet.deleteRow(i + 1);
-      return { success: true, yearMonth: yearMonth };
-    }
-  }
-  return { error: 'データが見つかりません: ' + yearMonth };
-}
-
-// ============================================================
-// LINE メッセージ管理
-// ============================================================
-
-// LINEメッセージシート: [タイムスタンプ, 店舗ID, ユーザーID, 方向, メッセージ種別, メッセージ内容, メッセージID]
-// 方向: "received" (ユーザー→店舗) / "sent" (店舗→ユーザー)
-function ensureLineMessagesSheet() {
-  return getOrCreateSheet(SHEETS.LINE_MESSAGES, [
-    'タイムスタンプ', '店舗ID', 'ユーザーID', '方向', 'メッセージ種別', 'メッセージ内容', 'メッセージID'
-  ]);
-}
-
-// LINEプロフィールシート: [ユーザーID, 店舗ID, 表示名, プロフィール画像URL, 最終更新]
-function ensureLineProfilesSheet() {
-  return getOrCreateSheet(SHEETS.LINE_PROFILES, [
-    'ユーザーID', '店舗ID', '表示名', 'プロフィール画像URL', '最終更新'
-  ]);
-}
-
-// Webhook受信: メッセージを保存
-function handleLineWebhookPost(body) {
-  var sheet = ensureLineMessagesSheet();
-  var storeId = body.storeId || '';
-  var events = body.events || [];
-  var count = 0;
-
-  for (var i = 0; i < events.length; i++) {
-    var ev = events[i];
-    if (ev.type === 'message') {
-      sheet.appendRow([
-        new Date(ev.timestamp),
-        storeId,
-        ev.userId || '',
-        'received',
-        ev.messageType || 'text',
-        ev.messageText || '',
-        ev.messageId || ''
-      ]);
-      count++;
-    }
-    // follow/unfollowイベントも記録
-    if (ev.type === 'follow' || ev.type === 'unfollow') {
-      sheet.appendRow([
-        new Date(ev.timestamp),
-        storeId,
-        ev.userId || '',
-        'received',
-        ev.type,
-        ev.type === 'follow' ? '友だち追加' : 'ブロック',
-        ''
-      ]);
-      count++;
-    }
-  }
-
-  return { success: true, stored: count };
-}
-
-// プロフィール保存（upsert）
-function handleLineProfilePost(body) {
-  var sheet = ensureLineProfilesSheet();
-  var userId = body.userId || '';
-  var storeId = body.storeId || '';
-  if (!userId) return { error: 'userIdが必要です' };
-
-  var rows = sheet.getDataRange().getValues();
-  for (var i = 1; i < rows.length; i++) {
-    if (String(rows[i][0]) === userId && String(rows[i][1]) === storeId) {
-      // Update existing
-      sheet.getRange(i + 1, 3).setValue(body.displayName || '');
-      sheet.getRange(i + 1, 4).setValue(body.pictureUrl || '');
-      sheet.getRange(i + 1, 5).setValue(new Date());
-      return { success: true, action: 'updated' };
-    }
-  }
-  // Insert new
-  sheet.appendRow([userId, storeId, body.displayName || '', body.pictureUrl || '', new Date()]);
-  return { success: true, action: 'added' };
-}
-
-// 送信メッセージを記録
-function handleLineSendPost(body) {
-  var sheet = ensureLineMessagesSheet();
-  var storeId = body.storeId || '';
-  var userId = body.userId || '';
-  var messageText = body.messageText || '';
-  if (!userId || !messageText) return { error: 'userId と messageText が必要です' };
-
-  sheet.appendRow([
-    new Date(),
-    storeId,
-    userId,
-    'sent',
-    'text',
-    messageText,
-    ''
-  ]);
-  return { success: true };
-}
-
-// メッセージ取得（店舗別、ユーザー別）
-function handleLineMessagesGet(params) {
-  var sheet = getSheet(SHEETS.LINE_MESSAGES);
-  if (!sheet) return { messages: [], threads: [] };
-
-  var lastRow = sheet.getLastRow();
-  if (lastRow < 2) return { messages: [], threads: [] };
-
-  var data = sheet.getRange(2, 1, lastRow - 1, 7).getValues();
-  var storeId = params.store || '';
-  var userId = params.userId || '';
-  var limit = parseInt(params.limit) || 100;
-
-  var messages = [];
-  for (var i = 0; i < data.length; i++) {
-    var row = data[i];
-    if (storeId && String(row[1]) !== storeId) continue;
-    if (userId && String(row[2]) !== userId) continue;
-    messages.push({
-      timestamp: row[0] instanceof Date ? row[0].toISOString() : String(row[0]),
-      storeId: String(row[1]),
-      userId: String(row[2]),
-      direction: String(row[3]),
-      messageType: String(row[4]),
-      messageText: String(row[5]),
-      messageId: String(row[6])
-    });
-  }
-
-  // 最新順にソート
-  messages.sort(function(a, b) { return new Date(b.timestamp) - new Date(a.timestamp); });
-
-  // ユーザー指定の場合はメッセージ一覧を返す（時系列順）
-  if (userId) {
-    messages.reverse(); // 古い順に
-    return { messages: messages.slice(-limit) };
-  }
-
-  // ユーザー未指定の場合はスレッド一覧を返す（最新メッセージ付き）
-  var threadMap = {};
-  for (var j = 0; j < messages.length; j++) {
-    var msg = messages[j];
-    var key = msg.storeId + ':' + msg.userId;
-    if (!threadMap[key]) {
-      threadMap[key] = {
-        storeId: msg.storeId,
-        userId: msg.userId,
-        lastMessage: msg,
-        unread: 0
-      };
-    }
-  }
-  var threads = Object.keys(threadMap).map(function(k) { return threadMap[k]; });
-  threads.sort(function(a, b) { return new Date(b.lastMessage.timestamp) - new Date(a.lastMessage.timestamp); });
-
-  return { threads: threads.slice(0, limit) };
-}
-
-// プロフィール取得
-function handleLineProfilesGet(params) {
-  var sheet = getSheet(SHEETS.LINE_PROFILES);
-  if (!sheet) return { profiles: [] };
-
-  var lastRow = sheet.getLastRow();
-  if (lastRow < 2) return { profiles: [] };
-
-  var data = sheet.getRange(2, 1, lastRow - 1, 5).getValues();
-  var storeId = params.store || '';
-
-  var profiles = [];
-  for (var i = 0; i < data.length; i++) {
-    var row = data[i];
-    if (storeId && String(row[1]) !== storeId) continue;
-    profiles.push({
-      userId: String(row[0]),
-      storeId: String(row[1]),
-      displayName: String(row[2]),
-      pictureUrl: String(row[3]),
-      updatedAt: row[4] instanceof Date ? row[4].toISOString() : String(row[4])
-    });
-  }
-
-  return { profiles: profiles };
-}
-
-// ============================================================
-// LINE 一斉配信管理
-// ============================================================
-
-function ensureLineBroadcastsSheet() {
-  return getOrCreateSheet(SHEETS.LINE_BROADCASTS, [
-    'タイムスタンプ', '店舗ID', '配信種別', 'メッセージ内容', '対象数', 'ステータス'
-  ]);
-}
-
-function handleLineBroadcastPost(body) {
-  var sheet = ensureLineBroadcastsSheet();
-  sheet.appendRow([
-    new Date(body.timestamp || new Date()),
-    body.storeId || '',
-    body.broadcastType || 'broadcast',
-    body.messageContent || '',
-    body.recipientCount || 0,
-    'sent'
-  ]);
-  return { success: true };
-}
-
-function handleLineBroadcastsGet(params) {
-  var sheet = getSheet(SHEETS.LINE_BROADCASTS);
-  if (!sheet) return { broadcasts: [] };
-  var lastRow = sheet.getLastRow();
-  if (lastRow < 2) return { broadcasts: [] };
-  var data = sheet.getRange(2, 1, lastRow - 1, 6).getValues();
-  var storeId = params.store || '';
-  var broadcasts = [];
-  for (var i = data.length - 1; i >= 0; i--) {
-    var row = data[i];
-    if (storeId && String(row[1]) !== storeId) continue;
-    broadcasts.push({
-      timestamp: row[0] instanceof Date ? row[0].toISOString() : String(row[0]),
-      storeId: String(row[1]),
-      broadcastType: String(row[2]),
-      messageContent: String(row[3]),
-      recipientCount: Number(row[4]),
-      status: String(row[5])
-    });
-  }
-  return { broadcasts: broadcasts.slice(0, 50) };
-}
-
-// ============================================================
-// LINE テンプレートメッセージ管理
-// ============================================================
-
-function ensureLineTemplatesSheet() {
-  return getOrCreateSheet(SHEETS.LINE_TEMPLATES, [
-    'テンプレートID', '店舗ID', 'テンプレート名', 'カテゴリ', 'メッセージ種別', 'メッセージ内容', '作成日', '更新日'
-  ]);
-}
-
-function handleLineTemplatePost(body) {
-  var sheet = ensureLineTemplatesSheet();
-  var action = body.action || 'create';
-
-  if (action === 'delete') {
-    var rows = sheet.getDataRange().getValues();
-    for (var i = 1; i < rows.length; i++) {
-      if (String(rows[i][0]) === body.templateId) {
-        sheet.deleteRow(i + 1);
-        return { success: true, action: 'deleted' };
-      }
-    }
-    return { error: 'テンプレートが見つかりません' };
-  }
-
-  if (action === 'update') {
-    var rows = sheet.getDataRange().getValues();
-    for (var i = 1; i < rows.length; i++) {
-      if (String(rows[i][0]) === body.templateId) {
-        sheet.getRange(i + 1, 3).setValue(body.name || '');
-        sheet.getRange(i + 1, 4).setValue(body.category || '');
-        sheet.getRange(i + 1, 5).setValue(body.messageType || 'text');
-        sheet.getRange(i + 1, 6).setValue(body.messageContent || '');
-        sheet.getRange(i + 1, 8).setValue(new Date());
-        return { success: true, action: 'updated' };
-      }
-    }
-    return { error: 'テンプレートが見つかりません' };
-  }
-
-  // create
-  var templateId = 'tmpl_' + new Date().getTime();
-  sheet.appendRow([
-    templateId,
-    body.storeId || '',
-    body.name || '',
-    body.category || '',
-    body.messageType || 'text',
-    body.messageContent || '',
-    new Date(),
-    new Date()
-  ]);
-  return { success: true, templateId: templateId, action: 'created' };
-}
-
-function handleLineTemplatesGet(params) {
-  var sheet = getSheet(SHEETS.LINE_TEMPLATES);
-  if (!sheet) return { templates: [] };
-  var lastRow = sheet.getLastRow();
-  if (lastRow < 2) return { templates: [] };
-  var data = sheet.getRange(2, 1, lastRow - 1, 8).getValues();
-  var storeId = params.store || '';
-  var templates = [];
-  for (var i = 0; i < data.length; i++) {
-    var row = data[i];
-    if (storeId && String(row[1]) !== storeId) continue;
-    templates.push({
-      templateId: String(row[0]),
-      storeId: String(row[1]),
-      name: String(row[2]),
-      category: String(row[3]),
-      messageType: String(row[4]),
-      messageContent: String(row[5]),
-      createdAt: row[6] instanceof Date ? row[6].toISOString() : String(row[6]),
-      updatedAt: row[7] instanceof Date ? row[7].toISOString() : String(row[7])
-    });
-  }
-  return { templates: templates };
-}
-
-// ============================================================
-// LINE 自動応答管理
-// ============================================================
-
-function ensureLineAutoRepliesSheet() {
-  return getOrCreateSheet(SHEETS.LINE_AUTO_REPLIES, [
-    'ルールID', '店舗ID', 'キーワード', 'マッチ方法', '応答メッセージ種別', '応答メッセージ内容', '優先順位', '有効フラグ', '作成日'
-  ]);
-}
-
-function handleLineAutoReplyPost(body) {
-  var sheet = ensureLineAutoRepliesSheet();
-  var action = body.action || 'create';
-
-  if (action === 'delete') {
-    var rows = sheet.getDataRange().getValues();
-    for (var i = 1; i < rows.length; i++) {
-      if (String(rows[i][0]) === body.ruleId) {
-        sheet.deleteRow(i + 1);
-        return { success: true, action: 'deleted' };
-      }
-    }
-    return { error: 'ルールが見つかりません' };
-  }
-
-  if (action === 'update') {
-    var rows = sheet.getDataRange().getValues();
-    for (var i = 1; i < rows.length; i++) {
-      if (String(rows[i][0]) === body.ruleId) {
-        sheet.getRange(i + 1, 3).setValue(body.keyword || '');
-        sheet.getRange(i + 1, 4).setValue(body.matchMethod || 'contains');
-        sheet.getRange(i + 1, 5).setValue(body.replyType || 'text');
-        sheet.getRange(i + 1, 6).setValue(body.replyContent || '');
-        sheet.getRange(i + 1, 7).setValue(body.priority || 0);
-        sheet.getRange(i + 1, 8).setValue(body.enabled !== false);
-        return { success: true, action: 'updated' };
-      }
-    }
-    return { error: 'ルールが見つかりません' };
-  }
-
-  // create
-  var ruleId = 'rule_' + new Date().getTime();
-  sheet.appendRow([
-    ruleId,
-    body.storeId || '',
-    body.keyword || '',
-    body.matchMethod || 'contains',
-    body.replyType || 'text',
-    body.replyContent || '',
-    body.priority || 0,
-    true,
-    new Date()
-  ]);
-  return { success: true, ruleId: ruleId, action: 'created' };
-}
-
-function handleLineAutoRepliesGet(params) {
-  var sheet = getSheet(SHEETS.LINE_AUTO_REPLIES);
-  if (!sheet) return { rules: [] };
-  var lastRow = sheet.getLastRow();
-  if (lastRow < 2) return { rules: [] };
-  var data = sheet.getRange(2, 1, lastRow - 1, 9).getValues();
-  var storeId = params.store || '';
-  var rules = [];
-  for (var i = 0; i < data.length; i++) {
-    var row = data[i];
-    if (storeId && String(row[1]) !== storeId) continue;
-    rules.push({
-      ruleId: String(row[0]),
-      storeId: String(row[1]),
-      keyword: String(row[2]),
-      matchMethod: String(row[3]),
-      replyType: String(row[4]),
-      replyContent: String(row[5]),
-      priority: Number(row[6]),
-      enabled: row[7] === true || row[7] === 'true',
-      createdAt: row[8] instanceof Date ? row[8].toISOString() : String(row[8])
-    });
-  }
-  rules.sort(function(a, b) { return b.priority - a.priority; });
-  return { rules: rules };
-}
-
-// ============================================================
-// LINE タグ管理
-// ============================================================
-
-function ensureLineTagsSheet() {
-  return getOrCreateSheet(SHEETS.LINE_TAGS, [
-    'タグID', '店舗ID', 'タグ名', 'タグ色', '作成日'
-  ]);
-}
-
-function ensureLineUserTagsSheet() {
-  return getOrCreateSheet(SHEETS.LINE_USER_TAGS, [
-    '店舗ID', 'ユーザーID', 'タグID', '付与日'
-  ]);
-}
-
-function handleLineTagPost(body) {
-  var sheet = ensureLineTagsSheet();
-  var action = body.action || 'create';
-
-  if (action === 'delete') {
-    var rows = sheet.getDataRange().getValues();
-    for (var i = 1; i < rows.length; i++) {
-      if (String(rows[i][0]) === body.tagId) {
-        sheet.deleteRow(i + 1);
-        // Also delete user-tag associations
-        var utSheet = getSheet(SHEETS.LINE_USER_TAGS);
-        if (utSheet) {
-          var utRows = utSheet.getDataRange().getValues();
-          for (var j = utRows.length - 1; j >= 1; j--) {
-            if (String(utRows[j][2]) === body.tagId) {
-              utSheet.deleteRow(j + 1);
-            }
-          }
-        }
-        return { success: true, action: 'deleted' };
-      }
-    }
-    return { error: 'タグが見つかりません' };
-  }
-
-  var tagId = 'tag_' + new Date().getTime();
-  sheet.appendRow([
-    tagId,
-    body.storeId || '',
-    body.name || '',
-    body.color || '#06C755',
-    new Date()
-  ]);
-  return { success: true, tagId: tagId, action: 'created' };
-}
-
-function handleLineTagsGet(params) {
-  var sheet = getSheet(SHEETS.LINE_TAGS);
-  if (!sheet) return { tags: [] };
-  var lastRow = sheet.getLastRow();
-  if (lastRow < 2) return { tags: [] };
-  var data = sheet.getRange(2, 1, lastRow - 1, 5).getValues();
-  var storeId = params.store || '';
-  var tags = [];
-  for (var i = 0; i < data.length; i++) {
-    var row = data[i];
-    if (storeId && String(row[1]) !== storeId) continue;
-    tags.push({
-      tagId: String(row[0]),
-      storeId: String(row[1]),
-      name: String(row[2]),
-      color: String(row[3]),
-      createdAt: row[4] instanceof Date ? row[4].toISOString() : String(row[4])
-    });
-  }
-  return { tags: tags };
-}
-
-function handleLineUserTagPost(body) {
-  var sheet = ensureLineUserTagsSheet();
-  var action = body.action || 'add';
-
-  if (action === 'remove') {
-    var rows = sheet.getDataRange().getValues();
-    for (var i = rows.length - 1; i >= 1; i--) {
-      if (String(rows[i][0]) === body.storeId && String(rows[i][1]) === body.userId && String(rows[i][2]) === body.tagId) {
-        sheet.deleteRow(i + 1);
-        return { success: true, action: 'removed' };
-      }
-    }
-    return { error: '該当タグが見つかりません' };
-  }
-
-  // Check for duplicate
-  var existing = sheet.getDataRange().getValues();
-  for (var i = 1; i < existing.length; i++) {
-    if (String(existing[i][0]) === body.storeId && String(existing[i][1]) === body.userId && String(existing[i][2]) === body.tagId) {
-      return { success: true, action: 'already_exists' };
-    }
-  }
-
-  sheet.appendRow([body.storeId || '', body.userId || '', body.tagId || '', new Date()]);
-  return { success: true, action: 'added' };
-}
-
-function handleLineUserTagsGet(params) {
-  var sheet = getSheet(SHEETS.LINE_USER_TAGS);
-  if (!sheet) return { userTags: [] };
-  var lastRow = sheet.getLastRow();
-  if (lastRow < 2) return { userTags: [] };
-  var data = sheet.getRange(2, 1, lastRow - 1, 4).getValues();
-  var storeId = params.store || '';
-  var userId = params.userId || '';
-  var userTags = [];
-  for (var i = 0; i < data.length; i++) {
-    var row = data[i];
-    if (storeId && String(row[0]) !== storeId) continue;
-    if (userId && String(row[1]) !== userId) continue;
-    userTags.push({
-      storeId: String(row[0]),
-      userId: String(row[1]),
-      tagId: String(row[2]),
-      assignedAt: row[3] instanceof Date ? row[3].toISOString() : String(row[3])
-    });
-  }
-  return { userTags: userTags };
-}
-
-// ============================================================
-// LINE 分析
-// ============================================================
-
-function handleLineAnalyticsGet(params) {
-  var sheet = getSheet(SHEETS.LINE_MESSAGES);
-  if (!sheet) return { analytics: {} };
-  var lastRow = sheet.getLastRow();
-  if (lastRow < 2) return { analytics: {} };
-  var data = sheet.getRange(2, 1, lastRow - 1, 7).getValues();
-  var storeId = params.store || '';
-
-  var now = new Date();
-  var thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-  var sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-
-  var totalReceived = 0, totalSent = 0;
-  var last30Received = 0, last30Sent = 0;
-  var last7Received = 0, last7Sent = 0;
-  var follows = 0, unfollows = 0;
-  var uniqueUsers = {};
-  var dailyStats = {};
-  var hourlyStats = {};
-
-  for (var i = 0; i < data.length; i++) {
-    var row = data[i];
-    if (storeId && String(row[1]) !== storeId) continue;
-
-    var ts = row[0] instanceof Date ? row[0] : new Date(row[0]);
-    var direction = String(row[3]);
-    var msgType = String(row[4]);
-    var userId = String(row[2]);
-
-    if (msgType === 'follow') { follows++; continue; }
-    if (msgType === 'unfollow') { unfollows++; continue; }
-
-    if (direction === 'received') {
-      totalReceived++;
-      uniqueUsers[userId] = true;
-      if (ts >= thirtyDaysAgo) last30Received++;
-      if (ts >= sevenDaysAgo) last7Received++;
-    } else {
-      totalSent++;
-      if (ts >= thirtyDaysAgo) last30Sent++;
-      if (ts >= sevenDaysAgo) last7Sent++;
-    }
-
-    // Daily stats (last 30 days)
-    if (ts >= thirtyDaysAgo) {
-      var dateKey = ts.toISOString().slice(0, 10);
-      if (!dailyStats[dateKey]) dailyStats[dateKey] = { received: 0, sent: 0 };
-      if (direction === 'received') dailyStats[dateKey].received++;
-      else dailyStats[dateKey].sent++;
-    }
-
-    // Hourly distribution
-    var hour = ts.getHours();
-    if (!hourlyStats[hour]) hourlyStats[hour] = { received: 0, sent: 0 };
-    if (direction === 'received') hourlyStats[hour].received++;
-    else hourlyStats[hour].sent++;
-  }
-
-  // Convert dailyStats to array
-  var dailyArray = Object.keys(dailyStats).sort().map(function(date) {
-    return { date: date, received: dailyStats[date].received, sent: dailyStats[date].sent };
-  });
-
-  // Convert hourlyStats to array
-  var hourlyArray = [];
-  for (var h = 0; h < 24; h++) {
-    hourlyArray.push({
-      hour: h,
-      received: (hourlyStats[h] || { received: 0 }).received,
-      sent: (hourlyStats[h] || { sent: 0 }).sent
-    });
-  }
-
-  return {
-    analytics: {
-      total: { received: totalReceived, sent: totalSent },
-      last30Days: { received: last30Received, sent: last30Sent },
-      last7Days: { received: last7Received, sent: last7Sent },
-      follows: follows,
-      unfollows: unfollows,
-      uniqueUsers: Object.keys(uniqueUsers).length,
-      dailyStats: dailyArray,
-      hourlyStats: hourlyArray
-    }
-  };
-}
-
-// ============================================================
-// メニュー管理（出納帳プルダウン用）
-// ============================================================
-// シート列: A=ID, B=メニュー名, C=カテゴリ, D=金額, E=種別(menu/coupon), F=有効, G=作成日
-
-function ensureMenuItemsSheet() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName(SHEETS.MENU_ITEMS);
-  if (!sheet) {
-    sheet = ss.insertSheet(SHEETS.MENU_ITEMS);
-    sheet.appendRow(['ID', 'メニュー名', 'カテゴリ', '金額', '種別', '有効', '作成日']);
-    sheet.setFrozenRows(1);
-    sheet.getRange('A1:G1').setFontWeight('bold');
-  }
-  return sheet;
-}
-
-function handleMenuItemsGet(params) {
-  var sheet = ensureMenuItemsSheet();
-  var rows = sheet.getDataRange().getValues();
-  if (rows.length <= 1) return { menuItems: [] };
-
-  var includeInactive = params.includeInactive === 'true';
-  var items = [];
-  for (var i = 1; i < rows.length; i++) {
-    var r = rows[i];
-    if (!r[0]) continue;
-    var active = r[5] !== false && r[5] !== 'FALSE' && String(r[5]) !== 'false';
-    if (!includeInactive && !active) continue;
-    items.push({
-      id: String(r[0]),
-      name: String(r[1] || ''),
-      category: String(r[2] || ''),
-      price: toInt(r[3]),
-      itemType: String(r[4] || 'menu'),
-      active: active,
-      createdAt: formatDate(r[6])
-    });
-  }
-  return { menuItems: items };
-}
-
-function handleMenuItemsPost(body) {
-  var action = body.action || '';
-  switch (action) {
-    case 'saveAll':    return saveAllMenuItems(body.menuItems || []);
-    case 'addItem':    return addMenuItem(body.item || {});
-    case 'updateItem': return updateMenuItem(body.itemId, body.updates || {});
-    case 'deleteItem': return deleteMenuItem(body.itemId);
-    default: return { error: '不明なmenuItems action: ' + action };
-  }
-}
-
-function saveAllMenuItems(items) {
-  var sheet = ensureMenuItemsSheet();
-  var lastRow = sheet.getLastRow();
-  if (lastRow > 1) {
-    sheet.getRange(2, 1, lastRow - 1, 7).clearContent();
-  }
-  var rows = items.map(function(item) {
-    return [
-      item.id || '',
-      item.name || '',
-      item.category || '',
-      item.price || 0,
-      item.itemType || 'menu',
-      item.active !== false,
-      item.createdAt || new Date()
-    ];
-  });
-  if (rows.length > 0) {
-    sheet.getRange(2, 1, rows.length, 7).setValues(rows);
-  }
-  return { success: true, count: rows.length };
-}
-
-function addMenuItem(item) {
-  if (!item.name) return { error: 'メニュー名が必要です' };
-  var sheet = ensureMenuItemsSheet();
-  var id = item.id || 'menu_' + new Date().getTime().toString(36) + Math.random().toString(36).slice(2, 5);
-  sheet.appendRow([
-    id,
-    item.name,
-    item.category || '',
-    item.price || 0,
-    item.itemType || 'menu',
-    true,
-    new Date()
-  ]);
-  return { success: true, item: { id: id, name: item.name, category: item.category || '', price: item.price || 0, itemType: item.itemType || 'menu', active: true } };
-}
-
-function updateMenuItem(itemId, updates) {
-  if (!itemId) return { error: 'itemIdが必要です' };
-  var sheet = ensureMenuItemsSheet();
-  var rows = sheet.getDataRange().getValues();
-  for (var i = 1; i < rows.length; i++) {
-    if (String(rows[i][0]) === String(itemId)) {
-      if (updates.name !== undefined) sheet.getRange(i + 1, 2).setValue(updates.name);
-      if (updates.category !== undefined) sheet.getRange(i + 1, 3).setValue(updates.category);
-      if (updates.price !== undefined) sheet.getRange(i + 1, 4).setValue(updates.price);
-      if (updates.itemType !== undefined) sheet.getRange(i + 1, 5).setValue(updates.itemType);
-      if (updates.active !== undefined) sheet.getRange(i + 1, 6).setValue(updates.active);
-      return { success: true, itemId: itemId };
-    }
-  }
-  return { error: 'メニューが見つかりませ��: ' + itemId };
-}
-
-function deleteMenuItem(itemId) {
-  if (!itemId) return { error: 'itemIdが必要です' };
-  var sheet = ensureMenuItemsSheet();
-  var rows = sheet.getDataRange().getValues();
-  for (var i = 1; i < rows.length; i++) {
-    if (String(rows[i][0]) === String(itemId)) {
-      // 論理削除（有効フラグをfalseに）
-      sheet.getRange(i + 1, 6).setValue(false);
-      return { success: true, itemId: itemId };
-    }
-  }
-  return { error: 'メニューが見つかりません: ' + itemId };
-}
-
-// ============================================================
-// 勤怠管理
-// ============================================================
-// シート列: A=ID, B=スタッフID, C=スタッフ名, D=店舗ID, E=日付, F=出勤時刻, G=退勤時刻,
-//           H=実労働分, I=GPS緯度, J=GPS経度, K=打刻方法, L=備考, M=退勤GPS緯度, N=退勤GPS経度
-
-var ATTENDANCE_HEADERS = ['ID','スタッフID','スタッフ名','店舗ID','日付','出勤時刻','退勤時刻','実労働分','GPS緯度','GPS経度','打刻方法','備考','退勤GPS緯度','退勤GPS経度'];
-
-function ensureAttendanceSheet() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName(SHEETS.ATTENDANCE);
-  if (!sheet) {
-    sheet = ss.insertSheet(SHEETS.ATTENDANCE);
-    sheet.getRange(1, 1, 1, ATTENDANCE_HEADERS.length).setValues([ATTENDANCE_HEADERS]);
-    sheet.getRange(1, 1, 1, ATTENDANCE_HEADERS.length).setFontWeight('bold');
-    sheet.setFrozenRows(1);
-  }
-  return sheet;
-}
-
-// QRトークン管理: A=トークン, B=店舗ID, C=作成日時, D=有効期限, E=使用済み
-var QR_TOKEN_HEADERS = ['トークン','店舗ID','作成日時','有効期限','使用済み'];
-
-function ensureQrTokenSheet() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName(SHEETS.QR_TOKENS);
-  if (!sheet) {
-    sheet = ss.insertSheet(SHEETS.QR_TOKENS);
-    sheet.getRange(1, 1, 1, QR_TOKEN_HEADERS.length).setValues([QR_TOKEN_HEADERS]);
-    sheet.getRange(1, 1, 1, QR_TOKEN_HEADERS.length).setFontWeight('bold');
-    sheet.setFrozenRows(1);
-  }
-  return sheet;
-}
-
-// GET: 勤怠一覧（月・店舗・スタッフフィルタ）
-function handleAttendanceGet(params) {
-  var sheet = ensureAttendanceSheet();
-  var lastRow = sheet.getLastRow();
-  if (lastRow < 2) return { records: [], lastUpdated: new Date().toISOString() };
-
-  var data = sheet.getRange(2, 1, lastRow - 1, ATTENDANCE_HEADERS.length).getValues();
-  var storeFilter = params.store || '';
-  var staffFilter = params.staffId || '';
-  var monthFilter = params.month || '';
-  var dateFilter = params.date || '';
-
-  var records = [];
-  for (var i = 0; i < data.length; i++) {
-    var r = data[i];
-    if (!r[0]) continue;
-    if (storeFilter && String(r[3]) !== storeFilter) continue;
-    if (staffFilter && String(r[1]) !== staffFilter) continue;
-    if (monthFilter && !String(r[4]).startsWith(monthFilter)) continue;
-    if (dateFilter && String(r[4]) !== dateFilter) continue;
-    records.push({
-      id: String(r[0]), staffId: String(r[1]), staffName: String(r[2]),
-      storeId: String(r[3]), date: String(r[4]),
-      clockIn: String(r[5] || ''), clockOut: String(r[6] || ''),
-      workMinutes: toInt(r[7]),
-      lat: r[8] ? parseFloat(r[8]) : null, lng: r[9] ? parseFloat(r[9]) : null,
-      method: String(r[10] || 'gps'), notes: String(r[11] || ''),
-      clockOutLat: r[12] ? parseFloat(r[12]) : null, clockOutLng: r[13] ? parseFloat(r[13]) : null
-    });
-  }
-  records.sort(function(a, b) { return b.date.localeCompare(a.date) || (b.clockIn || '').localeCompare(a.clockIn || ''); });
-  return { records: records, lastUpdated: new Date().toISOString() };
-}
-
-// POST: 勤怠操作
-function handleAttendancePost(body) {
-  var action = body.action || '';
-  switch (action) {
-    case 'clockIn':  return handleClockIn(body);
-    case 'clockOut': return handleClockOut(body);
-    case 'update':   return handleAttendanceUpdate(body);
-    case 'delete':   return handleAttendanceDelete(body);
-    default: return { error: '不明なattendance action: ' + action };
-  }
-}
-
-function handleClockIn(body) {
-  var staffId = body.staffId || '';
-  var staffName = body.staffName || '';
-  var storeId = body.storeId || '';
-  if (!staffId || !storeId) return { error: 'スタッフIDと店舗IDが必要です' };
-
-  var today = new Date().toISOString().slice(0, 10);
-  var now = new Date();
-  var timeStr = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
-
-  // 既に出勤済みかチェック
-  var sheet = ensureAttendanceSheet();
-  var lastRow = sheet.getLastRow();
-  if (lastRow >= 2) {
-    var data = sheet.getRange(2, 1, lastRow - 1, ATTENDANCE_HEADERS.length).getValues();
-    for (var i = 0; i < data.length; i++) {
-      if (String(data[i][1]) === staffId && String(data[i][4]) === today && !data[i][6]) {
-        return { error: '既に出勤済みです（退勤がまだ記録されていません）', alreadyClockedIn: true };
-      }
-    }
-  }
-
-  var id = 'att_' + now.getTime().toString(36) + Math.random().toString(36).slice(2, 5);
-  sheet.appendRow([
-    id, staffId, staffName, storeId, today, timeStr, '',
-    0, body.lat || '', body.lng || '', body.method || 'gps', body.notes || '', '', ''
-  ]);
-  return { success: true, record: { id: id, staffId: staffId, storeId: storeId, date: today, clockIn: timeStr } };
-}
-
-function handleClockOut(body) {
-  var staffId = body.staffId || '';
-  if (!staffId) return { error: 'スタッフIDが必要です' };
-
-  var today = new Date().toISOString().slice(0, 10);
-  var now = new Date();
-  var timeStr = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
-
-  var sheet = ensureAttendanceSheet();
-  var lastRow = sheet.getLastRow();
-  if (lastRow < 2) return { error: '出勤記録が見つかりません' };
-
-  var data = sheet.getRange(2, 1, lastRow - 1, ATTENDANCE_HEADERS.length).getValues();
-  for (var i = data.length - 1; i >= 0; i--) {
-    if (String(data[i][1]) === staffId && String(data[i][4]) === today && !data[i][6]) {
-      // 退勤時刻記録
-      sheet.getRange(i + 2, 7).setValue(timeStr);
-      // 退勤GPS
-      if (body.lat) sheet.getRange(i + 2, 13).setValue(body.lat);
-      if (body.lng) sheet.getRange(i + 2, 14).setValue(body.lng);
-      // 実労働時間計算
-      var clockIn = String(data[i][5]);
-      var inParts = clockIn.split(':');
-      var outParts = timeStr.split(':');
-      var inMin = parseInt(inParts[0]) * 60 + parseInt(inParts[1]);
-      var outMin = parseInt(outParts[0]) * 60 + parseInt(outParts[1]);
-      var workMin = Math.max(0, outMin - inMin);
-      sheet.getRange(i + 2, 8).setValue(workMin);
-      return { success: true, record: { id: String(data[i][0]), clockIn: clockIn, clockOut: timeStr, workMinutes: workMin } };
-    }
-  }
-  return { error: '本日の出勤記録が見つかりません' };
-}
-
-function handleAttendanceUpdate(body) {
-  var recordId = body.recordId || '';
-  if (!recordId) return { error: 'recordIdが必要です' };
-  var sheet = ensureAttendanceSheet();
-  var lastRow = sheet.getLastRow();
-  if (lastRow < 2) return { error: '記録が見つかりません' };
-  var data = sheet.getRange(2, 1, lastRow - 1, ATTENDANCE_HEADERS.length).getValues();
-  for (var i = 0; i < data.length; i++) {
-    if (String(data[i][0]) === recordId) {
-      if (body.clockIn !== undefined) sheet.getRange(i + 2, 6).setValue(body.clockIn);
-      if (body.clockOut !== undefined) sheet.getRange(i + 2, 7).setValue(body.clockOut);
-      if (body.notes !== undefined) sheet.getRange(i + 2, 12).setValue(body.notes);
-      // 再計算
-      var ci = body.clockIn !== undefined ? body.clockIn : String(data[i][5]);
-      var co = body.clockOut !== undefined ? body.clockOut : String(data[i][6]);
-      if (ci && co) {
-        var ip = ci.split(':'), op = co.split(':');
-        sheet.getRange(i + 2, 8).setValue(Math.max(0, (parseInt(op[0])*60+parseInt(op[1])) - (parseInt(ip[0])*60+parseInt(ip[1]))));
-      }
-      return { success: true };
-    }
-  }
-  return { error: '記録が見つかりません' };
-}
-
-function handleAttendanceDelete(body) {
-  var recordId = body.recordId || '';
-  if (!recordId) return { error: 'recordIdが必要です' };
-  var sheet = ensureAttendanceSheet();
-  var rows = sheet.getDataRange().getValues();
-  for (var i = rows.length - 1; i >= 1; i--) {
-    if (String(rows[i][0]) === recordId) {
-      sheet.deleteRow(i + 1);
-      return { success: true };
-    }
-  }
-  return { error: '記録が見つかりません' };
-}
-
-// ============================================================
-// 勤怠QRトークン管理
-// ============================================================
-
-function handleQrTokenGet(params) {
-  // 店舗用: 現在有効なトークンを取得（なければ自動生成）
-  var storeId = params.store || '';
-  if (!storeId) return { error: '店舗IDが必要です' };
-  var sheet = ensureQrTokenSheet();
-  var now = new Date();
-
-  // 有効なトークンを探す
-  var lastRow = sheet.getLastRow();
-  if (lastRow >= 2) {
-    var data = sheet.getRange(2, 1, lastRow - 1, QR_TOKEN_HEADERS.length).getValues();
-    for (var i = data.length - 1; i >= 0; i--) {
-      if (String(data[i][1]) === storeId && String(data[i][4]) !== 'true') {
-        var exp = new Date(data[i][3]);
-        if (exp > now) {
-          return { token: String(data[i][0]), storeId: storeId, expiresAt: exp.toISOString(), valid: true };
-        }
-      }
-    }
-  }
-  // なければ新規生成
-  return generateQrToken(storeId);
-}
-
-function handleQrTokenPost(body) {
-  var action = body.action || '';
-  switch (action) {
-    case 'generate': return generateQrToken(body.storeId);
-    case 'validate': return validateQrToken(body.token, body.storeId);
-    default: return { error: '不明なqrToken action: ' + action };
-  }
-}
-
-function generateQrToken(storeId) {
-  if (!storeId) return { error: '店舗IDが必要です' };
-  var sheet = ensureQrTokenSheet();
-  var now = new Date();
-  var exp = new Date(now.getTime() + 5 * 60 * 1000); // 5分有効
-  var token = 'qr_' + storeId.slice(0, 8) + '_' + now.getTime().toString(36) + Math.random().toString(36).slice(2, 8);
-  sheet.appendRow([token, storeId, now.toISOString(), exp.toISOString(), '']);
-  return { token: token, storeId: storeId, expiresAt: exp.toISOString(), valid: true };
-}
-
-function validateQrToken(token, storeId) {
-  if (!token) return { valid: false, error: 'トークンが必要です' };
-  var sheet = ensureQrTokenSheet();
-  var lastRow = sheet.getLastRow();
-  if (lastRow < 2) return { valid: false, error: '無効なトークンです' };
-
-  var now = new Date();
-  var data = sheet.getRange(2, 1, lastRow - 1, QR_TOKEN_HEADERS.length).getValues();
-  for (var i = data.length - 1; i >= 0; i--) {
-    if (String(data[i][0]) === token) {
-      // 店舗IDチェック
-      if (storeId && String(data[i][1]) !== storeId) {
-        return { valid: false, error: '店舗が一致しません' };
-      }
-      // 使用済みチェック
-      if (String(data[i][4]) === 'true') {
-        return { valid: false, error: 'このQRコードは使用済みです' };
-      }
-      // 期限チェック
-      var exp = new Date(data[i][3]);
-      if (exp < now) {
-        return { valid: false, error: 'QRコードの有効期限が切れています' };
-      }
-      // 有効 → 使用済みにマーク
-      sheet.getRange(i + 2, 5).setValue('true');
-      return { valid: true, storeId: String(data[i][1]) };
-    }
-  }
-  return { valid: false, error: '無効なトークンです' };
 }
 
 function jsonResponse(data) {
