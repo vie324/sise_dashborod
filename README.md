@@ -36,13 +36,11 @@ sise_dashborod/
 │   ├── index.html          # SPA 本体 (React + 全ロジック)
 │   ├── manifest.json       # PWA マニフェスト
 │   ├── sw.js               # Service Worker
-│   ├── images/
-│   │   ├── logo.png
-│   │   ├── icon-192.png        # PWA アイコン
-│   │   ├── icon-512.png
-│   │   └── icon-maskable-512.png
-│   ├── get-location-id.html    # Square ロケーションID 取得ユーティリティ
-│   └── setup-test-data.html    # サンドボックス用テストデータ生成
+│   └── images/
+│       ├── logo.png
+│       ├── icon-192.png        # PWA アイコン
+│       ├── icon-512.png
+│       └── icon-maskable-512.png
 ├── api/                    # Vercel Serverless Functions
 │   ├── db/index.js         # 統合DB エンドポイント (table ベース dispatch)
 │   ├── line/               # LINE Messaging API プロキシ/webhook/broadcast
@@ -58,7 +56,7 @@ sise_dashborod/
 │       ├── sign.js         # HMAC-SHA256 トークン署名/検証
 │       └── db-handlers-*.js # table 別ハンドラ
 ├── supabase/migrations/    # DB スキーマ定義
-├── gas/                    # Google Apps Script (カウンセリングデータ移行用)
+├── gas/                    # Google Apps Script (カウンセリングフォーム連携のみ)
 ├── scripts/
 │   └── gen-admin-hash.js   # 管理者パスワード bcrypt ハッシュ生成
 └── vercel.json             # リライト / ヘッダ設定
