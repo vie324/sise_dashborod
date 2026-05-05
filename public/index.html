@@ -10723,9 +10723,12 @@
             const [syncingSquare, setSyncingSquare] = useState(false);
 
             const reload = useCallback(async () => {
-                const gasStores = await fetchStoresFromGas(true);
-                if (gasStores) {
-                    setStoreList(gasStores);
+                // includeMerged=true で別名行（merged_into 付き）も取得する。
+                // UI では別名と通常行を分けて表示する。
+                const data = await dbGet('stores', { includeInactive: 'true', includeMerged: 'true' });
+                const list = data ? (data.stores || []) : null;
+                if (list) {
+                    setStoreList(list);
                     setGasConnected(true);
                 }
             }, []);
@@ -10761,11 +10764,13 @@
             // 同名 (trim+小文字で比較) のアクティブ行を検出
             // 過去にプレースホルダ名のまま放置されていた頃に、同じ店舗を手動で
             // 追加してしまったケースで起きる典型的な重複。
+            // ※既に merged_into 設定済みの行は除外（既に統合済み）
             const isSquareId = (id) => id === 'default' || /^([1-9]|1[0-9]|20)$/.test(String(id));
             const duplicateGroups = useMemo(() => {
                 const map = new Map();
                 for (const s of storeList) {
                     if (s.status === 'inactive') continue;
+                    if (s.mergedInto) continue;
                     const key = String(s.name || '').trim().toLowerCase();
                     if (!key) continue;
                     if (!map.has(key)) map.set(key, []);
@@ -10776,45 +10781,71 @@
                     .map(([name, list]) => ({ name, list }));
             }, [storeList]);
 
-            // 重複行のうち「Square ID でないもの」をまとめて無効化する。
-            // 各グループから Square ID を保持し、それ以外を inactive へ。
+            // 既に統合済み（別名）の行
+            const mergedStores = useMemo(
+                () => storeList.filter(s => s.mergedInto),
+                [storeList]
+            );
+            const storeNameById = useMemo(() => {
+                const m = new Map();
+                for (const s of storeList) m.set(String(s.id), s.name || s.id);
+                return m;
+            }, [storeList]);
+
+            // 重複行を「正規IDへの別名」として統合する（mergeStore アクション）。
+            // duplicate 行は status=inactive + merged_into=canonical となり、
+            // FK 参照は維持されるので発行済みURLや過去データは引き続き機能する。
+            // 新規データはサーバ側で canonical へ自動転送される。
             const handleCleanupDuplicates = async () => {
                 if (duplicateGroups.length === 0) return;
-                const targets = [];
+                const pairs = []; // { duplicateId, canonicalId }
                 for (const g of duplicateGroups) {
-                    // Square ID を keep 候補に、他は無効化対象に
                     const squareOne = g.list.find(s => isSquareId(s.id));
-                    const keep = squareOne || g.list.reduce((best, cur) => {
-                        // 緯度経度が入っている方を優先
+                    const canonical = squareOne || g.list.reduce((best, cur) => {
                         if ((cur.lat != null && cur.lng != null) && !(best.lat != null && best.lng != null)) return cur;
                         return best;
                     }, g.list[0]);
                     for (const s of g.list) {
-                        if (s.id !== keep.id) targets.push(s);
+                        if (s.id !== canonical.id) pairs.push({ duplicateId: s.id, canonicalId: canonical.id });
                     }
                 }
-                if (targets.length === 0) {
-                    showToast('整理対象がありません', 'info');
-                    return;
-                }
+                if (pairs.length === 0) { showToast('整理対象がありません', 'info'); return; }
                 const ok = await confirmDialog({
-                    title: '重複店舗の整理',
-                    message: `${targets.length} 件の重複行を「無効」にします（データは保持され、後で復元可能）。Square 環境変数で管理されている行を優先して残します。`,
-                    confirmLabel: '無効化する',
+                    title: '重複店舗の統合',
+                    message: `${pairs.length} 件の重複行を正規店舗の別名として統合します。\n発行済みのスタッフURLや過去のデータは引き続き機能し、新規記帳/勤怠は正規店舗に自動で寄ります。\n（後から「別名解除」で元に戻せます）`,
+                    confirmLabel: '統合する',
                     variant: 'danger'
                 });
                 if (!ok) return;
                 let success = 0;
-                for (const s of targets) {
-                    const r = await dbPost('stores', { action: 'deleteStore', storeId: s.id });
+                for (const p of pairs) {
+                    const r = await dbPost('stores', { action: 'mergeStore', duplicateId: p.duplicateId, canonicalId: p.canonicalId });
                     if (r && r.success) success++;
                 }
-                showToast(`${success}/${targets.length} 件を整理しました`, 'success', 3000);
+                showToast(`${success}/${pairs.length} 件を統合しました`, 'success', 3000);
                 await reload();
             };
 
-            const activeStores = storeList.filter(s => s.status !== 'inactive');
-            const inactiveStores = storeList.filter(s => s.status === 'inactive');
+            const handleUnmerge = async (storeId) => {
+                const ok = await confirmDialog({
+                    title: '別名を解除',
+                    message: 'この店舗を独立した店舗に戻します（status=active + merged_into=NULL）。',
+                    confirmLabel: '解除する',
+                });
+                if (!ok) return;
+                const r = await dbPost('stores', { action: 'unmergeStore', storeId });
+                if (r && r.success) {
+                    showToast('別名を解除しました', 'success');
+                    await reload();
+                } else {
+                    showToast(r?.error || '解除に失敗しました', 'error');
+                }
+            };
+
+            // 統合済み (merged_into) の行は別セクションで扱うので、active/inactive
+            // の両リストからは除外する。
+            const activeStores = storeList.filter(s => s.status !== 'inactive' && !s.mergedInto);
+            const inactiveStores = storeList.filter(s => s.status === 'inactive' && !s.mergedInto);
 
             const handleSave = async () => {
                 if (!formData.name.trim()) return;
@@ -10985,7 +11016,8 @@
                                         <p className="font-bold">同名の店舗が重複しています ({duplicateGroups.length} グループ)</p>
                                         <p className="mt-0.5 mb-1.5">
                                             手動追加した店舗と Square 連携の自動生成行が二重になっています。
-                                            「重複を整理」を押すと Square 側を残して片方を無効化します（データは保持されます）。
+                                            「重複を統合」を押すと、片方を Square 側の別名として統合します。
+                                            <strong>発行済みURLや過去データはそのまま動作し、新規データは正規店舗に自動で寄ります。</strong>
                                         </p>
                                         <ul className="text-[10px] text-amber-700 mb-1.5 list-disc pl-4">
                                             {duplicateGroups.map(g => (
@@ -10996,9 +11028,34 @@
                                         </ul>
                                         <button onClick={handleCleanupDuplicates}
                                             className="px-2.5 py-1 bg-amber-200 hover:bg-amber-300 text-amber-900 rounded-md text-[11px] font-bold transition-all">
-                                            <Icon name="archive" size={11} className="inline mr-1 -mt-0.5" />
-                                            重複を整理（非Square 側を無効化）
+                                            <Icon name="git-merge" size={11} className="inline mr-1 -mt-0.5" />
+                                            重複を統合（別名としてリンク）
                                         </button>
+                                    </div>
+                                </div>
+                            )}
+                            {mergedStores.length > 0 && (
+                                <div className="mb-2 px-3 py-2 bg-violet-50 border border-violet-200 rounded-lg text-[11px] text-violet-800">
+                                    <p className="font-bold mb-1">
+                                        <Icon name="git-merge" size={12} className="inline mr-1 -mt-0.5 text-violet-600" />
+                                        統合済み店舗 ({mergedStores.length} 件)
+                                    </p>
+                                    <p className="text-[10px] text-violet-700 mb-1.5">
+                                        以下の店舗は別の店舗の別名として統合されています。発行済みURL・過去データは引き続き機能し、新規データは正規店舗に集約されます。
+                                    </p>
+                                    <div className="space-y-1">
+                                        {mergedStores.map(s => (
+                                            <div key={s.id} className="flex items-center gap-2 px-2 py-1.5 bg-white/70 rounded-md border border-violet-100">
+                                                <span className="font-semibold text-slate-700">{s.name || s.id}</span>
+                                                <span className="text-slate-400">→</span>
+                                                <span className="font-semibold text-violet-700">{storeNameById.get(String(s.mergedInto)) || s.mergedInto}</span>
+                                                <span className="text-[10px] text-slate-400 ml-auto">ID: {s.id} → {s.mergedInto}</span>
+                                                <button onClick={() => handleUnmerge(s.id)}
+                                                    className="px-1.5 py-0.5 bg-violet-100 hover:bg-violet-200 text-violet-700 rounded text-[10px] font-bold">
+                                                    別名解除
+                                                </button>
+                                            </div>
+                                        ))}
                                     </div>
                                 </div>
                             )}

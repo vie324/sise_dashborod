@@ -1,5 +1,6 @@
 import { supabase } from './supabase.js';
 import { canAccessStore, allowedStoreIds } from './auth.js';
+import { resolveStoreId } from './stores.js';
 
 // ============================================================
 // 出納帳 (cashbook) + 出納帳ログ + 日次締め
@@ -120,10 +121,14 @@ async function cbAddEntry(entry, operator, staffCtx) {
     return { error: 'この店舗への記帳権限がありません' };
   }
 
+  // 重複統合 (merged_into) を解決して正規IDへ寄せる。
+  // 旧IDのスタッフURLからの記帳でも、新規データは統合先の正規行に集約。
+  const canonicalStoreId = await resolveStoreId(entry.store);
+
   // 日次締めロック確認
-  if (entry.store) {
+  if (canonicalStoreId) {
     const { data: dc } = await supabase.from('daily_close')
-      .select('locked').eq('date', entry.date).eq('store_id', entry.store).maybeSingle();
+      .select('locked').eq('date', entry.date).eq('store_id', canonicalStoreId).maybeSingle();
     if (dc && dc.locked) return { error: 'この日は締め済みです', closed: true };
   }
 
@@ -134,7 +139,7 @@ async function cbAddEntry(entry, operator, staffCtx) {
     customer_name: entry.customerName || '',
     treatment_count: parseInt(entry.treatmentCount ?? entry.therapyCount) || 0,
     payment_method: entry.paymentMethod || 'CASH', cash_type: entry.cashType || 'register',
-    member_id: entry.memberId || '', store_id: entry.store || '',
+    member_id: entry.memberId || '', store_id: canonicalStoreId,
     recorder: entry.recorder || operator, notes: entry.notes || '',
     updated_by: operator, deleted: false
   };
@@ -182,7 +187,10 @@ async function cbUpdateEntry(entryId, updates, operator, staffCtx) {
   if (updates.cashType !== undefined) dbUpdates.cash_type = updates.cashType;
   if (updates.memberId !== undefined) dbUpdates.member_id = updates.memberId;
   if (updates.notes !== undefined) dbUpdates.notes = updates.notes;
-  if (updates.store !== undefined) dbUpdates.store_id = updates.store;
+  if (updates.store !== undefined) {
+    // 重複統合先 (merged_into) があれば正規IDへ寄せる
+    dbUpdates.store_id = await resolveStoreId(updates.store);
+  }
 
   const { error } = await supabase.from('cashbook').update(dbUpdates).eq('id', entryId);
   if (error) throw error;
@@ -221,12 +229,15 @@ async function cbDailyClose(body, staffCtx) {
     return { error: 'この店舗の日次締めを行う権限がありません' };
   }
 
+  // 重複統合先を解決
+  const canonicalStoreId = await resolveStoreId(storeId);
+
   const { data: existing } = await supabase.from('daily_close')
-    .select('locked').eq('date', date).eq('store_id', storeId).maybeSingle();
+    .select('locked').eq('date', date).eq('store_id', canonicalStoreId).maybeSingle();
   if (existing && existing.locked) return { error: 'この日は既に締め済みです', closed: true };
 
   const { error } = await supabase.from('daily_close').upsert({
-    date, store_id: storeId,
+    date, store_id: canonicalStoreId,
     safe_balance: safeBalance || 0, petty_balance: pettyCashBalance || 0,
     register_balance: registerBalance || 0,
     closed_by: closedBy || '', closed_at: new Date().toISOString(),

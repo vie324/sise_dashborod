@@ -127,6 +127,9 @@ export default async function handler(req, res) {
 
 async function storesGet(params) {
   const includeInactive = params.includeInactive === 'true' || params.includeInactive === '1';
+  // includeMerged=true で別名行 (merged_into NOT NULL) も含める。
+  // デフォルトでは結合済みの正規行のみを返し、UI で重複を見えなくする。
+  const includeMerged = params.includeMerged === 'true' || params.includeMerged === '1';
   let query = supabase.from('stores').select('*').order('created_at');
   if (!includeInactive) query = query.eq('status', 'active');
   const { data, error } = await query;
@@ -149,16 +152,18 @@ async function storesGet(params) {
     return {
       id: r.id, name: displayName, status: r.status,
       createdAt: r.created_at, memo: r.memo || '',
-      lat: r.lat, lng: r.lng
+      lat: r.lat, lng: r.lng,
+      mergedInto: r.merged_into || null,
     };
   });
   if (heals.length > 0) {
-    // 並列で UPDATE（個別行ごとに where=id 条件が異なるため）
     Promise.all(heals.map(h =>
       supabase.from('stores').update({ name: h.name }).eq('id', h.id)
     )).catch(e => console.warn('[stores] auto-heal failed:', e && e.message));
   }
-  return { stores: rows };
+  // includeMerged=false なら別名行を除外する（既定）
+  const filtered = includeMerged ? rows : rows.filter(r => !r.mergedInto);
+  return { stores: filtered };
 }
 
 async function storesPost(body, staffCtx) {
@@ -224,6 +229,51 @@ async function storesPost(body, staffCtx) {
         if (error) throw error;
       }
       return { success: true, count: rows.length };
+    }
+    case 'mergeStore': {
+      // duplicate を canonical へ「別名」として統合する。
+      // duplicate 行は status=inactive + merged_into=canonical となり、
+      // FK 参照は壊れない。今後の書き込みはサーバ側で canonical へ寄る。
+      const dup = String(body.duplicateId || '').trim();
+      const canonical = String(body.canonicalId || '').trim();
+      if (!dup || !canonical) return { error: 'duplicateId と canonicalId が必要です' };
+      if (dup === canonical) return { error: '同じIDをマージできません' };
+      // 両方の存在確認
+      const { data: rows, error: selErr } = await supabase
+        .from('stores').select('id, merged_into').in('id', [dup, canonical]);
+      if (selErr) throw selErr;
+      const map = new Map((rows || []).map(r => [String(r.id), r]));
+      if (!map.has(dup) || !map.has(canonical)) {
+        return { error: '指定された店舗IDが見つかりません' };
+      }
+      // canonical 側が既に別名なら、その先 (チェーン回避) を採用する
+      const canonicalRow = map.get(canonical);
+      const finalCanonical = canonicalRow.merged_into ? String(canonicalRow.merged_into) : canonical;
+      if (dup === finalCanonical) return { error: '循環参照になります' };
+
+      const { error: updErr } = await supabase
+        .from('stores')
+        .update({ merged_into: finalCanonical, status: 'inactive' })
+        .eq('id', dup);
+      if (updErr) throw updErr;
+
+      // dup を merged_into に持つ別名行が既存だった場合、新しい canonical へ
+      // 付け替えてチェーンを 1 段に保つ
+      await supabase.from('stores').update({ merged_into: finalCanonical }).eq('merged_into', dup);
+
+      return { success: true, duplicateId: dup, canonicalId: finalCanonical };
+    }
+    case 'unmergeStore': {
+      // 別名 (merged_into) を解除し、独立した店舗に戻す。
+      // status は呼び出し元判断で active に戻す（既定で戻す）。
+      const id = String(body.storeId || '').trim();
+      if (!id) return { error: 'storeIdが必要です' };
+      const restoreActive = body.restoreActive !== false;
+      const update = { merged_into: null };
+      if (restoreActive) update.status = 'active';
+      const { error } = await supabase.from('stores').update(update).eq('id', id);
+      if (error) throw error;
+      return { success: true, storeId: id };
     }
     case 'syncSquareNames': {
       // 環境変数に定義された Square 店舗を Supabase へ同期する。

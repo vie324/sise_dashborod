@@ -20,6 +20,7 @@
 
 import { supabase } from './supabase.js';
 import { signToken, verifyToken, looksSigned } from './sign.js';
+import { expandStoreIdsWithAliases } from './stores.js';
 
 // 未署名トークンを受理するかどうか。本番運用で全スタッフの URL を再発行した
 // あとは false に切り替えて、古い URL をハード無効化できる。
@@ -120,7 +121,11 @@ export async function extractStaffContext(req) {
     const { data: ssRows, error: ssErr } = await supabase
       .from('staff_stores').select('store_id').eq('staff_id', decoded.staffId);
     if (ssErr) throw ssErr;
-    const storeIds = (ssRows || []).map(r => r.store_id).filter(Boolean);
+    const baseStoreIds = (ssRows || []).map(r => r.store_id).filter(Boolean);
+    // 重複統合された別名 (merged_into) を加味して storeIds を拡張する。
+    // 旧IDで発行済みのスタッフURLでも、統合先の正規IDにアクセスでき、
+    // 逆に新IDで紐付いていても過去の別名IDのデータを参照できるようにする。
+    const storeIds = await expandStoreIdsWithAliases(baseStoreIds);
 
     return {
       valid: true,
