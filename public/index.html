@@ -9196,7 +9196,11 @@
             const [showQrDisplay, setShowQrDisplay] = useState(false);
             const [qrDisplayData, setQrDisplayData] = useState(null);
             const [qrDisplayStore, setQrDisplayStore] = useState('');
-            const [attTab, setAttTab] = useState('clock'); // clock | history | qr | settings
+            const [attTab, setAttTab] = useState('clock'); // clock | today | history | qr | settings
+            // 今日タブ用: 全スタッフの本日の打刻状況
+            const [todayRecords, setTodayRecords] = useState([]);
+            const [allStaff, setAllStaff] = useState([]);
+            const [todayLoading, setTodayLoading] = useState(false);
 
             const staffId = currentAccess ? currentAccess.staffId : '';
             const staffName = currentAccess ? currentAccess.name : '';
@@ -9206,6 +9210,83 @@
                 if (staffId) checkTodayStatus(staffId);
                 fetchRecords({ month: viewMonth, store: activeStoreId !== 'all' ? activeStoreId : '' });
             }, [staffId, viewMonth, activeStoreId]);
+
+            // 今日の出退勤状況を取得（全スタッフ + 本日のレコード）
+            const fetchTodayData = useCallback(async () => {
+                setTodayLoading(true);
+                try {
+                    const today = todayLocalYMD();
+                    const params = { date: today };
+                    if (activeStoreId && activeStoreId !== 'all') params.store = activeStoreId;
+                    const [recData, staffResult] = await Promise.all([
+                        dbGet('attendance', params),
+                        fetchStaffFromDb(false),
+                    ]);
+                    setTodayRecords((recData && recData.records) || []);
+                    if (staffResult && staffResult.ok) setAllStaff(staffResult.staff || []);
+                } catch (e) {
+                    console.error('[勤怠] 今日の状況取得エラー:', e);
+                } finally { setTodayLoading(false); }
+            }, [activeStoreId]);
+
+            // 今日タブを開いた時 / 店舗切替時に再取得
+            useEffect(() => {
+                if (attTab === 'today') fetchTodayData();
+            }, [attTab, fetchTodayData]);
+
+            // 今日のスタッフ別ステータスを集計
+            const todayStatus = useMemo(() => {
+                // 表示対象スタッフ: 権限・店舗フィルタ
+                const filteredStaff = (allStaff || [])
+                    .filter(s => s.status !== 'inactive')
+                    .filter(s => {
+                        if (activeStoreId && activeStoreId !== 'all') {
+                            return (s.storeIds || []).includes(activeStoreId);
+                        }
+                        if (currentAccess && !hasFullStoreAccess()) {
+                            return (s.storeIds || []).some(sid => currentAccess.storeIds.includes(sid));
+                        }
+                        return true;
+                    });
+
+                // スタッフ毎に最新（clockIn の遅い）レコードを採用
+                const latestByStaff = new Map();
+                for (const r of todayRecords) {
+                    if (!r.staffId) continue;
+                    const cur = latestByStaff.get(r.staffId);
+                    if (!cur || (r.clockIn || '') > (cur.clockIn || '')) latestByStaff.set(r.staffId, r);
+                }
+
+                const clockedIn = [];
+                const clockedOut = [];
+                const notYet = [];
+                const seen = new Set();
+
+                for (const s of filteredStaff) {
+                    const rec = latestByStaff.get(s.id);
+                    if (!rec) {
+                        notYet.push({ id: s.id, name: s.name, storeIds: s.storeIds || [] });
+                    } else {
+                        seen.add(rec.id);
+                        const item = { ...rec, staffName: rec.staffName || s.name };
+                        if (rec.clockOut) clockedOut.push(item);
+                        else clockedIn.push(item);
+                    }
+                }
+                // スタッフ表に無い記録（削除済みスタッフ等）も漏らさず表示
+                for (const r of todayRecords) {
+                    if (seen.has(r.id)) continue;
+                    const item = { ...r, staffName: r.staffName || '不明' };
+                    if (r.clockOut) clockedOut.push(item);
+                    else clockedIn.push(item);
+                }
+
+                clockedIn.sort((a, b) => (a.clockIn || '').localeCompare(b.clockIn || ''));
+                clockedOut.sort((a, b) => (b.clockOut || '').localeCompare(a.clockOut || ''));
+                notYet.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ja'));
+
+                return { clockedIn, clockedOut, notYet };
+            }, [allStaff, todayRecords, activeStoreId]);
 
             // GPS位置チェック
             const checkGPS = useCallback(async () => {
@@ -9366,6 +9447,7 @@
                     <div className="flex items-center gap-1 bg-slate-100 rounded-xl p-1">
                         {[
                             { id: 'clock', label: '打刻', icon: 'log-in' },
+                            { id: 'today', label: '今日の状況', icon: 'users' },
                             { id: 'history', label: '勤怠履歴', icon: 'calendar' },
                             { id: 'qr', label: 'QR表示', icon: 'qr-code' },
                         ].map(t => (
@@ -9491,6 +9573,139 @@
                                     </div>
                                 </Card>
                             )}
+                        </div>
+                    )}
+
+                    {/* ===== 今日の状況タブ（誰が出勤・退勤したか） ===== */}
+                    {attTab === 'today' && (
+                        <div className="space-y-4">
+                            <Card>
+                                <div className="flex items-start justify-between">
+                                    <div>
+                                        <h4 className="font-bold text-slate-800 flex items-center">
+                                            <Icon name="users" size={18} className="mr-2 text-sise-500" />
+                                            本日の出退勤状況
+                                        </h4>
+                                        <p className="text-xs text-slate-400 mt-1">
+                                            {new Date().toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'short' })}
+                                            {activeStoreId && activeStoreId !== 'all' && (
+                                                <span className="ml-2 px-1.5 py-0.5 bg-sise-50 text-sise-700 rounded text-[10px] font-bold">
+                                                    {getStoreName(activeStoreId)}
+                                                </span>
+                                            )}
+                                        </p>
+                                    </div>
+                                    <button onClick={fetchTodayData} disabled={todayLoading}
+                                        className="flex items-center px-3 py-2 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-xl text-xs font-medium transition-all active:scale-95 disabled:opacity-50">
+                                        <Icon name="refresh-cw" size={14} className={`mr-1 ${todayLoading ? 'animate-spin' : ''}`} />更新
+                                    </button>
+                                </div>
+                            </Card>
+
+                            {/* サマリー */}
+                            <div className="grid grid-cols-3 gap-2.5">
+                                <KpiCard title="勤務中" value={todayStatus.clockedIn.length + '人'} icon="play-circle"
+                                    gradientFrom="from-green-400" gradientTo="to-green-600" />
+                                <KpiCard title="退勤済" value={todayStatus.clockedOut.length + '人'} icon="check-circle"
+                                    gradientFrom="from-blue-400" gradientTo="to-blue-600" />
+                                <KpiCard title="未出勤" value={todayStatus.notYet.length + '人'} icon="moon"
+                                    gradientFrom="from-slate-400" gradientTo="to-slate-500" />
+                            </div>
+
+                            {/* 勤務中 */}
+                            <Card className="!border-green-200">
+                                <h4 className="font-bold text-slate-800 mb-3 flex items-center">
+                                    <span className="inline-block w-2.5 h-2.5 rounded-full bg-green-500 animate-pulse mr-2" />
+                                    勤務中（{todayStatus.clockedIn.length}人）
+                                </h4>
+                                {todayStatus.clockedIn.length === 0 ? (
+                                    <p className="text-sm text-slate-400 text-center py-4">現在勤務中のスタッフはいません</p>
+                                ) : (
+                                    <div className="space-y-2">
+                                        {todayStatus.clockedIn.map(item => (
+                                            <div key={item.id} className="flex items-center justify-between p-3 rounded-xl border border-green-100 bg-green-50/40">
+                                                <div className="min-w-0">
+                                                    <p className="font-bold text-slate-800 truncate">{item.staffName}</p>
+                                                    <p className="text-xs text-slate-500 truncate">
+                                                        <Icon name="map-pin" size={11} className="inline -mt-0.5 mr-0.5" />
+                                                        {getStoreName(item.storeId)}
+                                                        {item.method && (
+                                                            <span className={`ml-2 px-1.5 py-0.5 rounded text-[10px] font-bold ${item.method === 'qr' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>
+                                                                {item.method === 'qr' ? 'QR' : 'GPS'}
+                                                            </span>
+                                                        )}
+                                                    </p>
+                                                </div>
+                                                <div className="text-right shrink-0 ml-3">
+                                                    <p className="text-[10px] text-slate-400">出勤時刻</p>
+                                                    <p className="text-lg font-extrabold text-green-600 leading-tight">{item.clockIn || '-'}</p>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </Card>
+
+                            {/* 退勤済み */}
+                            <Card>
+                                <h4 className="font-bold text-slate-800 mb-3 flex items-center">
+                                    <Icon name="check-circle" size={16} className="mr-2 text-blue-500" />
+                                    退勤済み（{todayStatus.clockedOut.length}人）
+                                </h4>
+                                {todayStatus.clockedOut.length === 0 ? (
+                                    <p className="text-sm text-slate-400 text-center py-4">退勤済みのスタッフはまだいません</p>
+                                ) : (
+                                    <div className="space-y-2">
+                                        {todayStatus.clockedOut.map(item => (
+                                            <div key={item.id} className="flex items-center justify-between p-3 rounded-xl bg-slate-50/60 border border-slate-100">
+                                                <div className="min-w-0">
+                                                    <p className="font-bold text-slate-800 truncate">{item.staffName}</p>
+                                                    <p className="text-xs text-slate-500 truncate">
+                                                        <Icon name="map-pin" size={11} className="inline -mt-0.5 mr-0.5" />
+                                                        {getStoreName(item.storeId)}
+                                                    </p>
+                                                </div>
+                                                <div className="flex items-center gap-2 shrink-0 ml-3">
+                                                    <div className="text-right">
+                                                        <p className="text-[10px] text-slate-400">出勤</p>
+                                                        <p className="text-sm font-bold text-green-600 leading-tight">{item.clockIn || '-'}</p>
+                                                    </div>
+                                                    <Icon name="arrow-right" size={12} className="text-slate-300" />
+                                                    <div className="text-right">
+                                                        <p className="text-[10px] text-slate-400">退勤</p>
+                                                        <p className="text-sm font-bold text-red-500 leading-tight">{item.clockOut || '-'}</p>
+                                                    </div>
+                                                    {item.workMinutes > 0 && (
+                                                        <div className="text-right pl-2 border-l border-slate-200">
+                                                            <p className="text-[10px] text-slate-400">勤務</p>
+                                                            <p className="text-sm font-bold text-sise-600 leading-tight">{formatMinutes(item.workMinutes)}</p>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </Card>
+
+                            {/* 未出勤 */}
+                            <Card>
+                                <h4 className="font-bold text-slate-800 mb-3 flex items-center">
+                                    <Icon name="moon" size={16} className="mr-2 text-slate-400" />
+                                    未出勤（{todayStatus.notYet.length}人）
+                                </h4>
+                                {todayStatus.notYet.length === 0 ? (
+                                    <p className="text-sm text-slate-400 text-center py-4">対象スタッフはいません</p>
+                                ) : (
+                                    <div className="flex flex-wrap gap-2">
+                                        {todayStatus.notYet.map(s => (
+                                            <div key={s.id} className="px-3 py-1.5 bg-slate-100 text-slate-600 rounded-lg text-sm font-medium">
+                                                {s.name}
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </Card>
                         </div>
                     )}
 
