@@ -9399,9 +9399,17 @@
             const startQrDisplay = useCallback(async (storeId) => {
                 setQrDisplayStore(storeId);
                 setShowQrDisplay(true);
-                const data = await getQrToken(storeId);
+                setQrDisplayData(null);
+                // まず既存の有効トークンを再利用。無ければ即時生成。
+                let data = await getQrToken(storeId);
+                if (!data || !data.token || data.error) {
+                    data = await generateQrToken(storeId);
+                }
+                if (!data || !data.token || data.error) {
+                    showToast((data && data.error) || 'QRトークンの生成に失敗しました', 'error');
+                }
                 setQrDisplayData(data);
-            }, [getQrToken]);
+            }, [getQrToken, generateQrToken]);
 
             useEffect(() => {
                 if (!showQrDisplay || !qrDisplayStore) return;
