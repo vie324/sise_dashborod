@@ -2131,6 +2131,72 @@
             return id;
         };
 
+        // ============================================================
+        // クリップボード書き込み（iOS Safari 対応）
+        // ============================================================
+        // iOS Safari は user gesture 中の同期コンテキストでしか
+        // navigator.clipboard.writeText() を許可しない。await でネットワーク
+        // を待った後に writeText を呼ぶと NotAllowedError になる。
+        // → ClipboardItem に Promise<Blob> を渡せば、Safari は元の user
+        //   gesture を保ったまま async fetch の完了を待ってくれる。
+        //
+        // 引数 textOrPromise:
+        //   - string             : 既知のテキストをそのままコピー
+        //   - Promise<string>    : 後から解決するテキスト（API 経由で生成する URL 等）
+        // 戻り値: { ok: true, text } | { ok: false, text? }
+        //   text は最終的に解決された文字列（fallback モーダル表示用）
+        const copyToClipboard = async (textOrPromise) => {
+            const isPromise = textOrPromise && typeof textOrPromise.then === 'function';
+            // 1) ClipboardItem に Promise を渡す（iOS Safari 13.4+, Chrome 76+, Firefox 116+）
+            //    user gesture 中に同期的に navigator.clipboard.write を呼びつつ
+            //    実際のテキスト解決は内部 Promise に委ねるパターン。
+            if (typeof ClipboardItem !== 'undefined' && navigator.clipboard && navigator.clipboard.write) {
+                try {
+                    let resolvedText = '';
+                    const blobPromise = Promise.resolve(textOrPromise).then(t => {
+                        resolvedText = String(t || '');
+                        if (!resolvedText) throw new Error('空文字列はコピーできません');
+                        return new Blob([resolvedText], { type: 'text/plain' });
+                    });
+                    await navigator.clipboard.write([new ClipboardItem({ 'text/plain': blobPromise })]);
+                    return { ok: true, text: resolvedText };
+                } catch (e) {
+                    console.warn('[clipboard] ClipboardItem write failed:', e && e.message);
+                    // fall through
+                }
+            }
+            // 2) writeText（同期的に呼ばないと iOS で失敗するが、最終 fallback として試行）
+            let text = '';
+            try {
+                text = isPromise ? String((await textOrPromise) || '') : String(textOrPromise || '');
+                if (!text) return { ok: false };
+                await navigator.clipboard.writeText(text);
+                return { ok: true, text };
+            } catch (e) {
+                console.warn('[clipboard] writeText failed:', e && e.message);
+            }
+            // 3) execCommand fallback（旧 Safari / 一部 WebView 用）
+            try {
+                if (!text) return { ok: false };
+                const ta = document.createElement('textarea');
+                ta.value = text;
+                ta.setAttribute('readonly', '');
+                ta.style.position = 'fixed';
+                ta.style.top = '0';
+                ta.style.left = '0';
+                ta.style.opacity = '0';
+                document.body.appendChild(ta);
+                ta.select();
+                ta.setSelectionRange(0, text.length);
+                const ok = document.execCommand('copy');
+                document.body.removeChild(ta);
+                return ok ? { ok: true, text } : { ok: false, text };
+            } catch (e) {
+                console.warn('[clipboard] execCommand failed:', e && e.message);
+                return { ok: false, text };
+            }
+        };
+
         // Phase 2 — B13: toast with swipe-to-dismiss and stacking.
         const ToastItem = ({ toast, depth, onDismiss }) => {
             const ref = useRef(null);
@@ -7301,20 +7367,12 @@
             // URLコピー
             const copyUrl = async () => {
                 if (!generatedLink) return;
-                try {
-                    await navigator.clipboard.writeText(generatedLink.url);
+                const r = await copyToClipboard(generatedLink.url);
+                if (r.ok) {
                     setCopied(true);
                     setTimeout(() => setCopied(false), 2000);
-                } catch (e) {
-                    // フォールバック
-                    const ta = document.createElement('textarea');
-                    ta.value = generatedLink.url;
-                    document.body.appendChild(ta);
-                    ta.select();
-                    document.execCommand('copy');
-                    document.body.removeChild(ta);
-                    setCopied(true);
-                    setTimeout(() => setCopied(false), 2000);
+                } else {
+                    showToast('コピーできませんでした。URLを長押しして手動でコピーしてください', 'error', 4000);
                 }
             };
 
@@ -10404,6 +10462,8 @@
             const [dbError, setDbError] = useState(null);
             const [showInactive, setShowInactive] = useState(false);
             const [formData, setFormData] = useState({ name: '', role: 'staff', password: '', storeIds: [] });
+            // クリップボード書き込みが完全に失敗した時の URL 表示モーダル（iOS の最終フォールバック）
+            const [urlFallback, setUrlFallback] = useState(null); // { name, url }
 
             // Supabase からスタッフリストを初回取得（inactive含む）
             const reloadStaffList = async () => {
@@ -10544,26 +10604,39 @@
             const copyAllReissuedUrls = async () => {
                 if (!bulkReissueResult || bulkReissueResult.success.length === 0) return;
                 const text = bulkReissueResult.success.map(s => `${s.name}: ${s.url}`).join('\n');
-                try {
-                    await navigator.clipboard.writeText(text);
+                const result = await copyToClipboard(text);
+                if (result.ok) {
                     showToast('全URLをクリップボードにコピーしました', 'success');
-                } catch (e) {
-                    showToast('クリップボードへのコピーに失敗しました', 'error');
+                } else {
+                    // 失敗時は最後の手段として URL 一覧モーダルを表示
+                    setUrlFallback({ name: '全スタッフURL一覧', url: text, multi: true });
                 }
             };
 
             const handleCopyUrl = async (staff) => {
                 // サーバーで HMAC 署名付き token を発行してから URL を組み立てる。
-                // 通信エラーや権限エラーは generateStaffUrl 内でトースト通知済み。
-                const url = await generateStaffUrl(staff);
-                if (!url) return;
-                try {
-                    await navigator.clipboard.writeText(url);
+                // iOS Safari では await の後で writeText を呼ぶと user gesture が
+                // 切れて NotAllowedError になる。copyToClipboard が ClipboardItem
+                // に Promise<Blob> を渡すパターンで gesture を維持する。
+                let cachedUrl = '';
+                const urlPromise = generateStaffUrl(staff).then(u => {
+                    cachedUrl = u || '';
+                    return cachedUrl;
+                });
+                const result = await copyToClipboard(urlPromise);
+                if (result.ok) {
                     setCopiedId(staff.id);
                     setTimeout(() => setCopiedId(null), 2000);
-                } catch (e) {
-                    console.error('[staff] クリップボード書き込みエラー:', e);
-                    showToast('クリップボードへのコピーに失敗しました', 'error');
+                    showToast(`${staff.name} のURLをコピーしました`, 'success', 1500);
+                    return;
+                }
+                // クリップボード書き込みが全て失敗した場合は URL 表示モーダルを開き、
+                // ユーザーが手動コピー / 共有 / 直接開く で対応できるようにする。
+                const url = cachedUrl || result.text || '';
+                if (url) {
+                    setUrlFallback({ name: staff.name, url });
+                } else {
+                    showToast('URLの発行に失敗しました', 'error');
                 }
             };
 
@@ -10701,8 +10774,9 @@
                                         <span className="text-xs font-medium text-slate-700 truncate flex-1">{s.name}</span>
                                         <button
                                             onClick={async () => {
-                                                try { await navigator.clipboard.writeText(s.url); showToast(`${s.name} のURLをコピー`, 'success', 1500); }
-                                                catch (_) { showToast('コピー失敗', 'error'); }
+                                                const r = await copyToClipboard(s.url);
+                                                if (r.ok) showToast(`${s.name} のURLをコピー`, 'success', 1500);
+                                                else setUrlFallback({ name: s.name, url: s.url });
                                             }}
                                             className="ml-2 px-2 py-1 rounded-md bg-sise-100 text-sise-700 text-[10px] font-semibold hover:bg-sise-200"
                                         >コピー</button>
@@ -10917,6 +10991,70 @@
                             パスワードを設定するとURL共有時にパスワード入力が必要になります。
                         </p>
                     </div>
+
+                    {/* URL 表示 fallback モーダル — クリップボード書き込みが拒否された時の手動コピー用 */}
+                    {urlFallback && (
+                        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 p-4 animate-fade-in"
+                             role="dialog" aria-modal="true" aria-labelledby="url-fallback-title">
+                            <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-5 animate-scale-in">
+                                <div className="flex items-center justify-between mb-3">
+                                    <h3 id="url-fallback-title" className="text-base font-bold text-slate-800 flex items-center">
+                                        <Icon name="link" size={16} className="mr-2 text-sise-500" />
+                                        {urlFallback.name} のURL
+                                    </h3>
+                                    <button onClick={() => setUrlFallback(null)} className="p-1 rounded hover:bg-slate-100 text-slate-400" aria-label="閉じる">
+                                        <Icon name="x" size={18} />
+                                    </button>
+                                </div>
+                                <p className="text-[11px] text-slate-500 mb-2">
+                                    自動コピーがブラウザにブロックされました。下のテキストを長押しして「すべて選択 → コピー」、または「コピー」ボタンをタップしてください。
+                                </p>
+                                <textarea
+                                    readOnly
+                                    value={urlFallback.url}
+                                    rows={urlFallback.multi ? 6 : 3}
+                                    onFocus={(e) => { try { e.target.select(); } catch (_) {} }}
+                                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs font-mono bg-slate-50 outline-none focus:border-sise-400 break-all"
+                                    style={{ wordBreak: 'break-all' }}
+                                />
+                                <div className="flex flex-wrap gap-2 mt-3">
+                                    <button
+                                        onClick={async () => {
+                                            // モーダル内のボタン → 新たな user gesture コンテキストなので
+                                            // copyToClipboard が成功する確率が高い
+                                            const r = await copyToClipboard(urlFallback.url);
+                                            if (r.ok) {
+                                                showToast('コピーしました', 'success', 1500);
+                                                setUrlFallback(null);
+                                            } else {
+                                                showToast('コピーできませんでした。テキストを長押しして手動でコピーしてください', 'error', 4000);
+                                            }
+                                        }}
+                                        className="flex-1 min-w-[80px] px-3 py-2 btn-gradient rounded-lg text-sm font-semibold">
+                                        <Icon name="copy" size={14} className="inline mr-1 -mt-0.5" />コピー
+                                    </button>
+                                    {!urlFallback.multi && typeof navigator !== 'undefined' && navigator.share && (
+                                        <button
+                                            onClick={async () => {
+                                                try {
+                                                    await navigator.share({ title: `${urlFallback.name} のスタッフURL`, url: urlFallback.url });
+                                                } catch (_) { /* user canceled */ }
+                                            }}
+                                            className="flex-1 min-w-[80px] px-3 py-2 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg text-sm font-semibold text-slate-700">
+                                            <Icon name="share-2" size={14} className="inline mr-1 -mt-0.5" />共有
+                                        </button>
+                                    )}
+                                    {!urlFallback.multi && (
+                                        <button
+                                            onClick={() => { window.open(urlFallback.url, '_blank', 'noopener,noreferrer'); }}
+                                            className="flex-1 min-w-[80px] px-3 py-2 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg text-sm font-semibold text-slate-700">
+                                            <Icon name="external-link" size={14} className="inline mr-1 -mt-0.5" />開く
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    )}
                 </Card>
             );
         };
@@ -19547,18 +19685,13 @@
 
             const copyQrUrl = async () => {
                 if (!qrLink) return;
-                try {
-                    await navigator.clipboard.writeText(qrLink.url);
-                } catch (e) {
-                    const ta = document.createElement('textarea');
-                    ta.value = qrLink.url;
-                    document.body.appendChild(ta);
-                    ta.select();
-                    document.execCommand('copy');
-                    document.body.removeChild(ta);
+                const r = await copyToClipboard(qrLink.url);
+                if (r.ok) {
+                    setQrCopied(true);
+                    setTimeout(() => setQrCopied(false), 2000);
+                } else {
+                    showToast('コピーできませんでした。URLを長押しして手動でコピーしてください', 'error', 4000);
                 }
-                setQrCopied(true);
-                setTimeout(() => setQrCopied(false), 2000);
             };
 
             // フロー等で selectedCustomer が事前セットされていた場合、自動で concerns をマッピング
