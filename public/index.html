@@ -219,19 +219,31 @@
     <!-- ============================================================
          iOS / Android: スタッフ個別 PWA マニフェスト注入
          ============================================================
-         「ホーム画面に追加」した時に start_url が manifest.json の "/"
-         で固定されると、誰のスタッフ URL を開いていても admin 用の全体
-         URL に飛ばされてしまう。?v=<token> がある時だけ blob: URL で
-         動的マニフェストを生成し、start_url にトークン付きパスを入れる。
-         apple-mobile-web-app-title もスタッフ名にして、ホーム画面アイ
-         コン名が「si'se」固定にならないようにする。
+         「ホーム画面に追加」した時に manifest.json の start_url が "/"
+         固定だと、誰のスタッフ URL を開いていても admin の全体 URL に
+         飛ばされてしまう。?v=<token> がある時は同期的にマニフェストを
+         作って <link rel="manifest"> の href を `/manifest.json?v=<...>`
+         に差し替え、Service Worker でも intercept して token 入りの
+         start_url を返す（多重防御）。
+
+         ポイント:
+           - 同期 (fetch しない): iOS Safari がリンク tag を読む前に href
+             を確定させる。timing race 回避。
+           - data: URL (Blob ではなく): iOS Safari の data: 受理は安定。
+           - 別 URL (?v= をクエリに): 旧マニフェストが iOS の cache に
+             残っていても、URL が違うので強制再読込される。
          ============================================================ -->
     <script>
         (function injectStaffManifest() {
             try {
                 var qs = new URLSearchParams(window.location.search);
                 var token = qs.get('v');
-                if (!token) return; // 管理者モード: 既存の静的 manifest をそのまま使う
+                var link = document.querySelector('link[rel="manifest"]');
+
+                if (!token) {
+                    // 管理者モード: 既存の静的 /manifest.json をそのまま使う
+                    return;
+                }
 
                 // トークンの payload 部分を base64url デコードしてスタッフ名を取り出す。
                 // 失敗しても致命傷ではない（名前無しで manifest だけ差し替える）。
@@ -260,30 +272,38 @@
                     titleMeta.setAttribute('content', staffName.length > 12 ? staffName.slice(0, 12) : staffName);
                 }
 
-                // 静的マニフェストを取得 → start_url を ?v=<token> 付きに書き換え
-                // → blob: URL 化して <link rel="manifest"> の href を差し替える。
-                fetch('/manifest.json', { credentials: 'same-origin' })
-                    .then(function (r) { return r.ok ? r.json() : null; })
-                    .then(function (m) {
-                        if (!m) return;
-                        var encoded = encodeURIComponent(token);
-                        m.start_url = '/?v=' + encoded;
-                        // scope は '/' のままで OK（PWA 内ナビゲーションを制限したくないため）
-                        if (staffName) {
-                            m.name = "si'se - " + staffName;
-                            m.short_name = staffName.length > 12 ? staffName.slice(0, 12) : staffName;
-                        }
-                        var blob = new Blob([JSON.stringify(m)], { type: 'application/manifest+json' });
-                        var blobUrl = URL.createObjectURL(blob);
-                        var link = document.querySelector('link[rel="manifest"]');
-                        if (!link) {
-                            link = document.createElement('link');
-                            link.rel = 'manifest';
-                            document.head.appendChild(link);
-                        }
-                        link.href = blobUrl;
-                    })
-                    .catch(function (e) { console.warn('[PWA] dynamic manifest failed:', e && e.message); });
+                // 同期生成するマニフェスト本体（fetch 不要、race condition なし）
+                var manifest = {
+                    name: staffName ? "si'se - " + staffName : "si'se Dashboard",
+                    short_name: staffName ? (staffName.length > 12 ? staffName.slice(0, 12) : staffName) : "si'se",
+                    description: "si'se 整体院経営ダッシュボード",
+                    start_url: "/?v=" + encodeURIComponent(token),
+                    scope: "/",
+                    display: "standalone",
+                    orientation: "portrait",
+                    background_color: "#f4f8f5",
+                    theme_color: "#33a065",
+                    lang: "ja",
+                    icons: [
+                        { src: "/images/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
+                        { src: "/images/icon-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
+                        { src: "/images/icon-maskable-512.png", sizes: "512x512", type: "image/png", purpose: "maskable" }
+                    ],
+                    categories: ["business", "productivity"]
+                };
+
+                // データ URL（iOS Safari でも確実に読まれる）
+                var dataUrl = 'data:application/manifest+json;charset=utf-8,' +
+                    encodeURIComponent(JSON.stringify(manifest));
+
+                // 既存リンクを差し替えるのではなく、新しい link 要素を一度生成
+                // して置き換える。古い link の href が iOS にキャッシュされ
+                // ているケースを避けるため、必ず element ごと作り直す。
+                if (link && link.parentNode) link.parentNode.removeChild(link);
+                var newLink = document.createElement('link');
+                newLink.rel = 'manifest';
+                newLink.href = dataUrl;
+                document.head.appendChild(newLink);
             } catch (e) { console.warn('[PWA] dynamic manifest error:', e && e.message); }
         })();
     </script>
