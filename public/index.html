@@ -922,10 +922,20 @@
             button, a { min-height: 44px; }
             .hide-mobile { display: none !important; }
 
-            /* フォントサイズ最低保証 - 10px/11pxを11px以上に強制 */
-            [class*="text-\[9px\]"] { font-size: 11px !important; }
-            [class*="text-\[10px\]"] { font-size: 11px !important; }
-            [class*="text-\[11px\]"] { font-size: 11.5px !important; }
+            /* フォントサイズ最低保証 - スマホでの可読性のため 12px 未満は底上げ */
+            [class*="text-\[9px\]"]  { font-size: 12px !important; line-height: 1.45 !important; }
+            [class*="text-\[10px\]"] { font-size: 12px !important; line-height: 1.45 !important; }
+            [class*="text-\[11px\]"] { font-size: 12.5px !important; line-height: 1.5 !important; }
+            .text-xs { font-size: 12.5px !important; line-height: 1.5 !important; }
+            /* tracking-widest を持つラベルはスマホで字間を緩める（潰れ防止） */
+            .tracking-widest { letter-spacing: 0.06em !important; }
+
+            /* 数字の桁揃え: スマホは表示幅が狭く、桁が動くと一瞬「化けた」ように見える */
+            .text-2xl, .text-3xl, .text-4xl, .text-5xl,
+            [class*="font-extrabold"], [class*="font-bold"][class*="text-xl"] {
+                font-variant-numeric: tabular-nums;
+                font-feature-settings: "tnum";
+            }
 
             /* スマホ用カードの密度調整 */
             .glass-card { border-radius: 16px; }
@@ -936,6 +946,87 @@
 
             /* チャートのモバイル最適化 */
             .recharts-wrapper { touch-action: pan-x pan-y; }
+
+            /* ============================================================
+               モバイルパフォーマンス最適化
+               backdrop-filter は GPU を強く使うためスマホでは大幅に弱める。
+               iOS Safari では blur(20px+) でスクロールがガタつくケースがある。
+               ============================================================ */
+            .glass-panel {
+                backdrop-filter: blur(8px) saturate(1.2) !important;
+                -webkit-backdrop-filter: blur(8px) saturate(1.2) !important;
+                background: rgba(255,255,255,0.96) !important;
+            }
+            .dark .glass-panel { background: rgba(18,35,27,0.96) !important; }
+            .glass-card, .glass-card-glow {
+                backdrop-filter: none !important;
+                -webkit-backdrop-filter: none !important;
+                background: #ffffff !important;
+            }
+            .dark .glass-card, .dark .glass-card-glow { background: #12231b !important; }
+            /* ホバー浮き上がり効果はモバイルでは不要（タップで残ったまま見える） */
+            .glass-card:hover, .glass-card-glow:hover, .card-hover:hover {
+                transform: none !important;
+                box-shadow: 0 4px 16px -4px rgba(51,160,101,0.12) !important;
+            }
+            /* 装飾用 floating orbs はモバイルでは完全停止（高負荷の blur(80px)） */
+            .bg-orb { display: none !important; }
+            /* 永続的シマー/グロー系もモバイルでは停止（バッテリー & ジャンク対策） */
+            .glass-card-glow::before { animation: none !important; display: none !important; }
+            /* mesh グラデも軽く */
+            .bg-mesh { background-image: none !important; background-color: #f4f8f5 !important; }
+            .dark .bg-mesh { background-color: #0a1610 !important; }
+
+            /* 永続アニメーションはモバイルでは止めるか短く */
+            .animate-float, .animate-float-slow,
+            .animate-gradient-shift, .animate-glow-pulse,
+            [class*="animate-shimmer"] {
+                animation: none !important;
+            }
+
+            /* 遷移時間をモバイル向けに短縮（待ち時間を減らして「キビキビ」感を出す） */
+            .glass-card, .glass-card-glow, .card-hover, .modal-bg, .modal-content {
+                transition-duration: 0.2s !important;
+            }
+
+            /* GPU レイヤヒント: タブやモーダルなど移動・フェードする要素 */
+            .top-tab-underline,
+            .modal-content,
+            .toast,
+            .more-sheet,
+            .pull-indicator { will-change: transform, opacity; }
+
+            /* Top tab nav 自体の blur も緩める（スマホで一番触るUI、滑らかさ最優先） */
+            .top-tab-nav {
+                backdrop-filter: blur(8px) saturate(1.2) !important;
+                -webkit-backdrop-filter: blur(8px) saturate(1.2) !important;
+                background: rgba(255,255,255,0.97) !important;
+            }
+            .dark .top-tab-nav { background: rgba(18,35,27,0.97) !important; }
+
+            /* モーダル背景の blur も同様に軽量化（スクロール中ガタつき対策） */
+            .modal-backdrop, .modal-bg {
+                backdrop-filter: blur(6px) !important;
+                -webkit-backdrop-filter: blur(6px) !important;
+            }
+            .more-sheet-overlay {
+                backdrop-filter: blur(2px) !important;
+                -webkit-backdrop-filter: blur(2px) !important;
+            }
+
+            /* タップ領域・タブ間の最低 gap（gap-1 / p-1 を直接上書き） */
+            .gap-1 { gap: 0.5rem !important; }
+            .p-1   { padding: 0.375rem !important; }
+            .px-2.py-1 { padding-top: 0.375rem !important; padding-bottom: 0.375rem !important; }
+
+            /* 横スクロールテーブルのヒント（端でフェード+影） */
+            .overflow-x-auto {
+                -webkit-overflow-scrolling: touch;
+                scroll-snap-type: x proximity;
+            }
+
+            /* テキスト省略の安全策: ボタン内テキストが折り返してレイアウトが崩れる事故を防ぐ */
+            button > span, a > span { min-width: 0; }
 
             /* スワイプ可能ヒント */
             .swipe-hint {
@@ -984,12 +1075,15 @@
         /* 小さいスマホ (375px以下) 専用 */
         @media (max-width: 380px) {
             .top-tab-item {
-                padding: 0 8px;
-                font-size: 11px;
-                gap: 3px;
+                padding: 0 10px;
+                font-size: 12px;
+                gap: 4px;
             }
-            .top-tab-item svg { width: 15px; height: 15px; }
+            .top-tab-item svg { width: 16px; height: 16px; }
             .kpi-card { min-height: 100px; }
+            /* この幅では数字も窮屈になりがち。基準サイズを若干上げる */
+            .text-2xl { font-size: 1.375rem !important; }
+            .text-3xl { font-size: 1.625rem !important; }
         }
 
         /* Safe Area */
@@ -2101,20 +2195,42 @@
         // アイコンコンポーネント
         // Lucideアイコンキャッシュ（SVG文字列を一度だけ生成してキャッシュ）
         const _iconCache = {};
+        // Lucide UMD のバージョンによって icons のキー形式が異なる:
+        //  - 旧バージョン: kebab-case (例: 'chevron-down')
+        //  - 新バージョン: PascalCase (例: 'ChevronDown')
+        //  - 一部: camelCase (例: 'chevronDown')
+        // どの形式でも動くよう全パターンを試して見つけた最初のものを使う。
+        // これでスマホで「アイコンだけ表示されない（記号化け）」という事故を防ぐ。
+        const _kebabToPascal = (s) => String(s || '').split('-').map(p => p.charAt(0).toUpperCase() + p.slice(1)).join('');
+        const _kebabToCamel  = (s) => { const p = _kebabToPascal(s); return p.charAt(0).toLowerCase() + p.slice(1); };
+        const _resolveIconData = (name) => {
+            const reg = window.lucide && window.lucide.icons;
+            if (!reg) return null;
+            return reg[name]
+                || reg[_kebabToPascal(name)]
+                || reg[_kebabToCamel(name)]
+                || null;
+        };
         const _getIconSvg = (name, size, color) => {
             const key = `${name}_${size}_${color}`;
             if (_iconCache[key]) return _iconCache[key];
-            if (window.lucide && window.lucide.icons) {
-                const iconData = window.lucide.icons[name];
-                if (iconData) {
-                    // Lucide icons format: [[tag, attrs], [tag, attrs], ...]
-                    const elements = Array.isArray(iconData[0]) ? iconData : (iconData[1] || iconData);
-                    const inner = (Array.isArray(elements) ? elements : []).map(el => {
-                        if (!Array.isArray(el)) return '';
-                        const [tag, a] = el;
-                        const attrStr = Object.entries(a || {}).map(([k,v]) => `${k}="${v}"`).join(' ');
-                        return `<${tag} ${attrStr}/>`;
-                    }).join('');
+            const iconData = _resolveIconData(name);
+            if (iconData) {
+                // Lucide icons format: [[tag, attrs], [tag, attrs], ...] か
+                // [tag, attrs, [[tag, attrs], ...]] (新形式) のいずれか。
+                let elements = iconData;
+                if (Array.isArray(iconData) && iconData.length === 3 && Array.isArray(iconData[2])) {
+                    elements = iconData[2];
+                } else if (!Array.isArray(iconData[0])) {
+                    elements = iconData[1] || iconData;
+                }
+                const inner = (Array.isArray(elements) ? elements : []).map(el => {
+                    if (!Array.isArray(el)) return '';
+                    const [tag, a] = el;
+                    const attrStr = Object.entries(a || {}).map(([k,v]) => `${k}="${v}"`).join(' ');
+                    return `<${tag} ${attrStr}/>`;
+                }).join('');
+                if (inner) {
                     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${inner}</svg>`;
                     _iconCache[key] = svg;
                     return svg;
@@ -5894,9 +6010,9 @@
                                 <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-sise-400 to-sise-600 text-white flex items-center justify-center shadow-lg shadow-sise-500/25 group-hover:scale-105 transition-transform">
                                     <Icon name="footprints" size={22} />
                                 </div>
-                                <div className="text-left flex-1">
+                                <div className="text-left flex-1 min-w-0">
                                     <h3 className="text-sm font-extrabold text-sise-800">来店フローを開始</h3>
-                                    <p className="text-[11px] text-sise-500 mt-0.5">受付 → カウンセリング → 施術 → レポート → 契約</p>
+                                    <p className="text-[11px] text-sise-500 mt-0.5 truncate">受付 → カウンセリング → 施術 → レポート → 契約</p>
                                 </div>
                                 <Icon name="chevron-right" size={20} className="text-sise-400 group-hover:translate-x-1 transition-transform" />
                             </div>
