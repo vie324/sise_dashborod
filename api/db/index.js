@@ -372,26 +372,37 @@ async function dashConfigPost(body) {
 // ============================================================
 
 async function reportsGet(params) {
-  let query = supabase.from('daily_reports').select('*')
-    .order('timestamp', { ascending: false });
+  // フィルタ済みクエリを毎回生成（ページングのたびに使い回せないため）
+  const buildQuery = () => {
+    let query = supabase.from('daily_reports').select('*')
+      .order('timestamp', { ascending: false });
+    if (params.all === 'true') {
+      // 全データ
+    } else if (params.month) {
+      const [y, m] = params.month.split('-').map(Number);
+      query = query.gte('timestamp', new Date(y, m - 1, 1).toISOString())
+                   .lte('timestamp', new Date(y, m, 0, 23, 59, 59).toISOString());
+    } else if (params.months) {
+      const n = parseInt(params.months, 10) || 1;
+      const now = new Date();
+      query = query.gte('timestamp', new Date(now.getFullYear(), now.getMonth() - (n - 1), 1).toISOString());
+    } else {
+      const now = new Date();
+      query = query.gte('timestamp', new Date(now.getFullYear(), now.getMonth(), 1).toISOString());
+    }
+    return query;
+  };
 
-  if (params.all === 'true') {
-    // 全データ
-  } else if (params.month) {
-    const [y, m] = params.month.split('-').map(Number);
-    query = query.gte('timestamp', new Date(y, m - 1, 1).toISOString())
-                 .lte('timestamp', new Date(y, m, 0, 23, 59, 59).toISOString());
-  } else if (params.months) {
-    const n = parseInt(params.months) || 1;
-    const now = new Date();
-    query = query.gte('timestamp', new Date(now.getFullYear(), now.getMonth() - (n - 1), 1).toISOString());
-  } else {
-    const now = new Date();
-    query = query.gte('timestamp', new Date(now.getFullYear(), now.getMonth(), 1).toISOString());
+  // Supabase/PostgREST は1リクエスト最大1000行のため、全件取得時はページングする
+  const PAGE = 1000;
+  let data = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data: page, error } = await buildQuery().range(from, from + PAGE - 1);
+    if (error) throw error;
+    if (!page || page.length === 0) break;
+    data = data.concat(page);
+    if (page.length < PAGE) break;
   }
-
-  const { data, error } = await query;
-  if (error) throw error;
 
   return {
     reports: (data || []).map(r => ({
