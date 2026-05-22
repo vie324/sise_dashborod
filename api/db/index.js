@@ -436,6 +436,21 @@ async function reportsPost(body, staffCtx) {
         task_complete: !!r.taskComplete, prep_complete: !!r.prepComplete,
         notes: r.notes || ''
       };
+
+      // 同店舗・同JST日の既存日報があれば、force指定が無い限り確認のため中断する
+      if (!body.force) {
+        const baseUtc = Date.parse(new Date(new Date(row.timestamp).getTime() + 9 * 3600 * 1000).toISOString().slice(0, 10) + 'T00:00:00Z') - 9 * 3600 * 1000;
+        const { data: dup, error: dupErr } = await supabase.from('daily_reports')
+          .select('id')
+          .eq('store', r.store)
+          .gte('timestamp', new Date(baseUtc).toISOString())
+          .lt('timestamp', new Date(baseUtc + 24 * 3600 * 1000).toISOString());
+        if (dupErr) throw dupErr;
+        if (dup && dup.length > 0) {
+          return { duplicate: true, count: dup.length, store: r.store };
+        }
+      }
+
       const { data, error } = await supabase.from('daily_reports').insert(row).select().single();
       if (error) throw error;
 

@@ -6424,7 +6424,13 @@
                     recorder: currentAccess ? currentAccess.name : '',
                 };
                 try {
-                    const res = await dbPost('reports', { action: 'create', report: payload });
+                    let res = await dbPost('reports', { action: 'create', report: payload });
+                    if (res && res.duplicate) {
+                        const label = res.store || form.store;
+                        const ok = window.confirm(`本日の「${label}」の日報は既に送信されています（${res.count || 1}件）。\n追加で送信しますか？`);
+                        if (!ok) { showToast('送信をキャンセルしました', 'warning'); return; }
+                        res = await dbPost('reports', { action: 'create', report: payload, force: true });
+                    }
                     if (!res || res.error) {
                         showToast((res && res.error) || '日報の送信に失敗しました', 'error');
                         return;
