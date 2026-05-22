@@ -5819,7 +5819,13 @@
             );
         };
 
-        const DashboardView = ({ memberData, reportData, selectedStore, setSelectedStore, allowedStoreNames, manualMembersHook, onStartFlow }) => {
+        const DashboardView = ({ memberData, reportData, activeStoreId, setActiveStoreId, allowedStoreNames, manualMembersHook, onStartFlow }) => {
+            // 店舗タブの選択値(activeStoreId=店舗ID)を、日報・現金会員フィルタで使う店舗名に変換する。
+            // serverStores と memberData.stores はどちらも /api/square/config 由来で同一の {id,name}。
+            const dashStores = (memberData?.stores && memberData.stores.length > 0) ? memberData.stores : (serverStores || []);
+            const selectedStoreName = (activeStoreId && activeStoreId !== 'all')
+                ? ((dashStores.find(s => s.id === activeStoreId) || {}).name || null)
+                : 'all';
             // Phase 2 — E30: daily trend chart series visibility toggle
             const [dailyTrendHidden, setDailyTrendHidden] = useState(() => new Set());
             const toggleDailyTrend = useCallback((key) => {
@@ -5835,9 +5841,9 @@
                 const activeStores = memberData?.stores || [];
                 return manualMembersHook.manualMembers.filter(m => {
                     if (m.status !== 'ACTIVE' || m.paymentMethod !== 'CASH') return false;
-                    // 店舗フィルタ: selectedStoreが'all'でなければ、会員のstoreNameと照合
-                    if (selectedStore && selectedStore !== 'all') {
-                        return m.storeName === selectedStore;
+                    // 店舗フィルタ: 選択店舗が'all'でなければ、会員のstoreNameと照合
+                    if (selectedStoreName && selectedStoreName !== 'all') {
+                        return m.storeName === selectedStoreName;
                     }
                     // allowedStoreNames（スタッフ権限）が設定されていれば絞り込み
                     if (allowedStoreNames && allowedStoreNames.length > 0) {
@@ -5845,15 +5851,15 @@
                     }
                     return true;
                 }).length;
-            }, [manualMembersHook?.manualMembers, selectedStore, allowedStoreNames, memberData?.stores]);
+            }, [manualMembersHook?.manualMembers, selectedStoreName, allowedStoreNames, memberData?.stores]);
             const totalActiveMembers = (memberData.activeMembers || 0) + cashActiveMembers;
             const cashActiveRevenue = useMemo(() => {
                 if (!manualMembersHook?.manualMembers) return 0;
                 return manualMembersHook.manualMembers
                     .filter(m => {
                         if (m.status !== 'ACTIVE' || m.paymentMethod !== 'CASH') return false;
-                        if (selectedStore && selectedStore !== 'all') {
-                            return m.storeName === selectedStore;
+                        if (selectedStoreName && selectedStoreName !== 'all') {
+                            return m.storeName === selectedStoreName;
                         }
                         if (allowedStoreNames && allowedStoreNames.length > 0) {
                             return allowedStoreNames.includes(m.storeName);
@@ -5861,7 +5867,7 @@
                         return true;
                     })
                     .reduce((sum, m) => sum + (m.monthlyPrice || 0), 0);
-            }, [manualMembersHook?.manualMembers, selectedStore, allowedStoreNames]);
+            }, [manualMembersHook?.manualMembers, selectedStoreName, allowedStoreNames]);
             const totalExpectedRevenue = (memberData.expectedRevenue || 0) + cashActiveRevenue;
             const [dateRange, setDateRange] = useState('month');
 
@@ -5884,8 +5890,8 @@
                 if (allowedStoreNames) {
                     filtered = filtered.filter(r => allowedStoreNames.includes(r.store));
                 }
-                if (selectedStore !== 'all') {
-                    filtered = filtered.filter(r => r.store === selectedStore);
+                if (selectedStoreName && selectedStoreName !== 'all') {
+                    filtered = filtered.filter(r => r.store === selectedStoreName);
                 }
 
                 const now = new Date();
@@ -5964,7 +5970,7 @@
                     dailyNewTrend, dailyContractTrend, dailyTreatmentTrend,
                     bestChannel, topStore
                 };
-            }, [reportData.reports, selectedStore, dateRange, allowedStoreNames]);
+            }, [reportData.reports, selectedStoreName, dateRange, allowedStoreNames]);
 
             const storeColors = ['#33a065', '#3b82f6', '#f97316', '#a855f7', '#ec4899'];
             const tooltipStyle = { backgroundColor: 'rgba(255,255,255,0.95)', borderColor: '#e2e8f0', borderRadius: '16px', boxShadow: '0 12px 40px -8px rgba(0,0,0,0.1)', padding: '12px 16px' };
@@ -5979,11 +5985,11 @@
                         <div className="flex flex-wrap items-center justify-between gap-3">
                             <div className="flex items-center gap-2">
                                 <Icon name="building-2" size={16} className="text-sise-500 hide-mobile" />
-                                <select value={selectedStore} onChange={(e) => setSelectedStore(e.target.value)}
+                                <select value={activeStoreId} onChange={(e) => setActiveStoreId(e.target.value)}
                                     className="px-3 py-2 border border-slate-200 rounded-xl text-sm focus:border-sise-500 focus:ring-2 focus:ring-sise-500/20 outline-none bg-white/80">
                                     <option value="all">全店舗</option>
-                                    {(currentAccess ? serverStores.filter(s => currentAccess.storeIds.includes(s.id)) : serverStores).map(s =>
-                                        <option key={s.id} value={s.name}>{s.name}</option>
+                                    {(currentAccess ? dashStores.filter(s => currentAccess.storeIds.includes(s.id)) : dashStores).map(s =>
+                                        <option key={s.id} value={s.id}>{s.name}</option>
                                     )}
                                 </select>
                             </div>
@@ -22619,7 +22625,6 @@
                 window.location.reload();
             }, [setAdminAuth]);
             const [currentView, setCurrentView] = useState('dashboard');
-            const [selectedStore, setSelectedStore] = useState('all');
             const [isSidebarOpen, setIsSidebarOpen] = useState(false);
             // viewport が lg (1024px) 以上かを React 状態で管理する。
             // Tailwind の lg:hidden だと JIT 取りこぼし時に空ボタン枠が残る
@@ -22993,8 +22998,8 @@
                         return <DashboardView
                             memberData={memberData}
                             reportData={reportData}
-                            selectedStore={selectedStore}
-                            setSelectedStore={setSelectedStore}
+                            activeStoreId={activeStoreId}
+                            setActiveStoreId={setActiveStoreId}
                             allowedStoreNames={allowedStoreNames}
                             manualMembersHook={manualMembersHook}
                             onStartFlow={() => setFlowMode(true)}
@@ -23039,19 +23044,19 @@
                     case 'marketing':
                         // マーケティングは本部のみアクセス可
                         if (isStaffMode && (!currentAccess || currentAccess.role !== 'headquarter')) {
-                            return <DashboardView memberData={memberData} reportData={reportData} selectedStore={selectedStore} setSelectedStore={setSelectedStore} allowedStoreNames={allowedStoreNames} manualMembersHook={manualMembersHook} onStartFlow={() => setFlowMode(true)} />;
+                            return <DashboardView memberData={memberData} reportData={reportData} activeStoreId={activeStoreId} setActiveStoreId={setActiveStoreId} allowedStoreNames={allowedStoreNames} manualMembersHook={manualMembersHook} onStartFlow={() => setFlowMode(true)} />;
                         }
                         return <MarketingView marketingHook={marketingHook} />;
                     case 'settings':
                         return isStaffMode
-                            ? <DashboardView memberData={memberData} reportData={reportData} selectedStore={selectedStore} setSelectedStore={setSelectedStore} allowedStoreNames={allowedStoreNames} manualMembersHook={manualMembersHook} onStartFlow={() => setFlowMode(true)} />
+                            ? <DashboardView memberData={memberData} reportData={reportData} activeStoreId={activeStoreId} setActiveStoreId={setActiveStoreId} allowedStoreNames={allowedStoreNames} manualMembersHook={manualMembersHook} onStartFlow={() => setFlowMode(true)} />
                             : <SettingsView onSettingsSaved={() => { refreshReportData(); }} />;
                     default:
                         return <DashboardView
                             memberData={memberData}
                             reportData={reportData}
-                            selectedStore={selectedStore}
-                            setSelectedStore={setSelectedStore}
+                            activeStoreId={activeStoreId}
+                            setActiveStoreId={setActiveStoreId}
                             allowedStoreNames={allowedStoreNames}
                             manualMembersHook={manualMembersHook}
                             onStartFlow={() => setFlowMode(true)}
