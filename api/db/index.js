@@ -412,7 +412,8 @@ async function reportsGet(params) {
       hpbContract: r.hpb_contract, metaContract: r.meta_contract,
       referralContract: r.referral_contract, discountContract: r.discount_contract,
       existingTreatments: r.existing_treatments,
-      taskComplete: r.task_complete, prepComplete: r.prep_complete
+      taskComplete: r.task_complete, prepComplete: r.prep_complete,
+      notes: r.notes
     })),
     total: (data || []).length,
     lastUpdated: new Date().toISOString()
@@ -432,7 +433,8 @@ async function reportsPost(body, staffCtx) {
         hpb_contract: parseInt(r.hpbContract) || 0, meta_contract: parseInt(r.metaContract) || 0,
         referral_contract: parseInt(r.referralContract) || 0, discount_contract: parseInt(r.discountContract) || 0,
         existing_treatments: parseInt(r.existingTreatments) || 0,
-        task_complete: !!r.taskComplete, prep_complete: !!r.prepComplete
+        task_complete: !!r.taskComplete, prep_complete: !!r.prepComplete,
+        notes: r.notes || ''
       };
       const { data, error } = await supabase.from('daily_reports').insert(row).select().single();
       if (error) throw error;
@@ -476,6 +478,7 @@ async function reportsPost(body, staffCtx) {
       if (r.existingTreatments !== undefined) updates.existing_treatments = parseInt(r.existingTreatments) || 0;
       if (r.taskComplete !== undefined) updates.task_complete = !!r.taskComplete;
       if (r.prepComplete !== undefined) updates.prep_complete = !!r.prepComplete;
+      if (r.notes !== undefined) updates.notes = r.notes || '';
       const { error } = await supabase.from('daily_reports').update(updates).eq('id', r.id);
       if (error) throw error;
       return { success: true, id: r.id };
@@ -501,7 +504,8 @@ async function reportsPost(body, staffCtx) {
         discount_contract: parseInt(r.discountContract) || 0,
         existing_treatments: parseInt(r.existingTreatments) || 0,
         task_complete: !!r.taskComplete,
-        prep_complete: !!r.prepComplete
+        prep_complete: !!r.prepComplete,
+        notes: r.notes || ''
       }));
       if (body.replace) {
         await supabase.from('daily_reports').delete().neq('id', 0);

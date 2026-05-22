@@ -5871,8 +5871,6 @@
             const totalExpectedRevenue = (memberData.expectedRevenue || 0) + cashActiveRevenue;
             const [dateRange, setDateRange] = useState('month');
 
-            if (!window.Recharts) return <div className="p-8 text-center">チャートを読み込み中...</div>;
-
             // 日報データの集計
             const aggregatedData = useMemo(() => {
                 if (!reportData.reports || reportData.reports.length === 0) {
@@ -5906,13 +5904,14 @@
                 }
                 filtered = filtered.filter(r => new Date(r.timestamp) >= startDate);
 
-                // 本日のレポート（権限のある店舗のみ）
-                const todayStr = now.toISOString().slice(0, 10);
+                // 本日のレポート（権限のある店舗のみ）。ローカル日付で判定し、ヘッダー・推移グラフと基準を揃える
+                const ymdLocal = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+                const todayStr = ymdLocal(now);
                 let todayBase = reportData.reports;
                 if (allowedStoreNames) {
                     todayBase = todayBase.filter(r => allowedStoreNames.includes(r.store));
                 }
-                const todayReports = todayBase.filter(r => r.timestamp && r.timestamp.startsWith(todayStr));
+                const todayReports = todayBase.filter(r => r.timestamp && ymdLocal(new Date(r.timestamp)) === todayStr);
                 const todayNew = todayReports.reduce((s, r) => s + (r.hpbNew||0) + (r.metaNew||0) + (r.referralNew||0) + (r.discountNew||0), 0);
                 const todayContract = todayReports.reduce((s, r) => s + (r.hpbContract||0) + (r.metaContract||0) + (r.referralContract||0) + (r.discountContract||0), 0);
                 const todayTreatments = todayReports.reduce((s, r) => s + (r.existingTreatments||0), 0);
@@ -5989,6 +5988,9 @@
             const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
             const chartHeight = isMobile ? 200 : 260;
             const barChartHeight = isMobile ? 190 : 240;
+
+            // Recharts未読込時は全フック実行後に早期リターン（フック呼び出し順を一定に保つ）
+            if (!window.Recharts) return <div className="p-8 text-center">チャートを読み込み中...</div>;
 
             return (
                 <div className="space-y-4 md:space-y-5">

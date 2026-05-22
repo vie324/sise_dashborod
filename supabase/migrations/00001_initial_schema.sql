@@ -375,7 +375,8 @@ CREATE TABLE daily_reports (
   discount_contract    INTEGER NOT NULL DEFAULT 0,
   existing_treatments  INTEGER NOT NULL DEFAULT 0,
   task_complete        BOOLEAN NOT NULL DEFAULT false,
-  prep_complete        BOOLEAN NOT NULL DEFAULT false
+  prep_complete        BOOLEAN NOT NULL DEFAULT false,
+  notes                TEXT NOT NULL DEFAULT ''
 );
 
 CREATE INDEX idx_daily_reports_store_ts ON daily_reports(store, timestamp);
