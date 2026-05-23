@@ -376,10 +376,12 @@ CREATE TABLE daily_reports (
   existing_treatments  INTEGER NOT NULL DEFAULT 0,
   task_complete        BOOLEAN NOT NULL DEFAULT false,
   prep_complete        BOOLEAN NOT NULL DEFAULT false,
-  notes                TEXT NOT NULL DEFAULT ''
+  notes                TEXT NOT NULL DEFAULT '',
+  recorder             TEXT NOT NULL DEFAULT ''
 );
 
 CREATE INDEX idx_daily_reports_store_ts ON daily_reports(store, timestamp);
+CREATE INDEX idx_daily_reports_recorder ON daily_reports(recorder) WHERE recorder <> '';
 
 COMMENT ON TABLE daily_reports IS 'GASシート: 日報 (Googleフォーム連携の場合GAS残留可)';
 
