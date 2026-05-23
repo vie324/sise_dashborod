@@ -404,6 +404,19 @@ async function reportsGet(params) {
     if (page.length < PAGE) break;
   }
 
+  // staff_id から現在のスタッフ名を引いて staffName として返す。
+  // recorder(TEXT) は改名や表記揺れで現実態と乖離するため、FK 経由の
+  // 名前を権威ソースとして使うのが正しい。staff_id が無い旧データは
+  // staffName=null として返し、フロント側は recorder にフォールバックする。
+  const staffIds = [...new Set((data || []).map(r => r.staff_id).filter(Boolean))];
+  let staffMap = {};
+  if (staffIds.length > 0) {
+    const { data: staffRows, error: staffErr } = await supabase
+      .from('staff').select('id, name').in('id', staffIds);
+    if (staffErr) throw staffErr;
+    for (const s of staffRows || []) staffMap[s.id] = s.name;
+  }
+
   return {
     reports: (data || []).map(r => ({
       id: r.id, timestamp: r.timestamp, store: r.store,
@@ -413,7 +426,9 @@ async function reportsGet(params) {
       referralContract: r.referral_contract, discountContract: r.discount_contract,
       existingTreatments: r.existing_treatments,
       taskComplete: r.task_complete, prepComplete: r.prep_complete,
-      notes: r.notes, recorder: r.recorder
+      notes: r.notes, recorder: r.recorder,
+      staffId: r.staff_id || null,
+      staffName: r.staff_id ? (staffMap[r.staff_id] || null) : null,
     })),
     total: (data || []).length,
     lastUpdated: new Date().toISOString()
@@ -426,7 +441,11 @@ async function reportsPost(body, staffCtx) {
     case 'create': {
       const r = body.report || body;
       if (!r.store) return { error: '店舗が必要です' };
+      // 送信者の権威ソース: スタッフURL の staffCtx が最優先。改ざんされ得る
+      // クライアント入力 (r.staffId / r.recorder) は staffCtx が無い時の
+      // フォールバックのみ。
       const recorder = (staffCtx && staffCtx.name) || r.recorder || '';
+      const staffId = (staffCtx && staffCtx.staffId) || r.staffId || null;
       const row = {
         timestamp: r.timestamp || new Date().toISOString(), store: r.store,
         hpb_new: parseInt(r.hpbNew) || 0, meta_new: parseInt(r.metaNew) || 0,
@@ -436,7 +455,8 @@ async function reportsPost(body, staffCtx) {
         existing_treatments: parseInt(r.existingTreatments) || 0,
         task_complete: !!r.taskComplete, prep_complete: !!r.prepComplete,
         notes: r.notes || '',
-        recorder
+        recorder,
+        staff_id: staffId,
       };
 
       // 同店舗・同JST日の既存日報があれば、force指定が無い限り確認のため中断する
@@ -496,6 +516,8 @@ async function reportsPost(body, staffCtx) {
       if (r.prepComplete !== undefined) updates.prep_complete = !!r.prepComplete;
       if (r.notes !== undefined) updates.notes = r.notes || '';
       if (r.recorder !== undefined) updates.recorder = r.recorder || '';
+      // staffId は null で明示的に未割当へ戻せるよう、undefined チェックで分岐
+      if (r.staffId !== undefined) updates.staff_id = r.staffId || null;
       const { error } = await supabase.from('daily_reports').update(updates).eq('id', r.id);
       if (error) throw error;
       return { success: true, id: r.id };
@@ -523,7 +545,10 @@ async function reportsPost(body, staffCtx) {
         task_complete: !!r.taskComplete,
         prep_complete: !!r.prepComplete,
         notes: r.notes || '',
-        recorder: r.recorder || ''
+        recorder: r.recorder || '',
+        // 一括投入は管理者の過去データ移行用途。入力側に staffId があれば
+        // 尊重し、無ければ NULL のまま（後で assignStaff で割り当てる）。
+        staff_id: r.staffId || null,
       }));
       if (body.replace) {
         await supabase.from('daily_reports').delete().neq('id', 0);
@@ -533,6 +558,32 @@ async function reportsPost(body, staffCtx) {
         if (error) throw error;
       }
       return { success: true, count: rows.length };
+    }
+    case 'assignStaff': {
+      // 過去日報の送信者を後付けで紐付ける管理用アクション。
+      // 単発: { id, staffId } / バッチ: { ids: [...], staffId }
+      // staffId を null で送れば紐付け解除。スタッフURL からは禁止
+      // （改ざんで他人の実績にできてしまうため）。
+      if (staffCtx && staffCtx.valid && staffCtx.role !== 'headquarter') {
+        return { error: '権限がありません（本部または管理者のみ）' };
+      }
+      const staffIdRaw = body.staffId;
+      const newStaffId = staffIdRaw ? String(staffIdRaw) : null;
+      // 紐付け先スタッフの実在チェック（null 解除なら不要）
+      if (newStaffId) {
+        const { data: s, error: e } = await supabase
+          .from('staff').select('id, name').eq('id', newStaffId).maybeSingle();
+        if (e) throw e;
+        if (!s) return { error: '指定されたスタッフが見つかりません' };
+      }
+      const ids = Array.isArray(body.ids) && body.ids.length > 0
+        ? body.ids
+        : (body.id ? [body.id] : []);
+      if (ids.length === 0) return { error: 'id または ids が必要です' };
+      const { error } = await supabase.from('daily_reports')
+        .update({ staff_id: newStaffId }).in('id', ids);
+      if (error) throw error;
+      return { success: true, count: ids.length, staffId: newStaffId };
     }
     default: return { error: '不明なaction: ' + action };
   }

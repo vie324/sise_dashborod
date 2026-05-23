@@ -5984,6 +5984,10 @@
             }, [reportData.reports, selectedStoreName, dateRange, allowedStoreNames]);
 
             // スタッフ別実績集計（送信者ごとに媒体別の新規/契約を合算）。aggregatedDataと同じ絞り込み
+            // 集計キーの優先順位:
+            //   1. staffId (FK) — 改名・表記揺れに対して安定。スタッフURL/紐付け済み過去日報。
+            //   2. recorder (TEXT) — 旧データでスタッフ未紐付けのもの。同名スタッフは合算される。
+            //   3. それ以外 — 「未記入」バケットへ。ランキングからは除外。
             const staffStats = useMemo(() => {
                 const empty = { rows: [], ranking: [], maxContract: 0 };
                 if (!reportData || !Array.isArray(reportData.reports)) return empty;
@@ -6003,8 +6007,25 @@
                 filtered = filtered.filter(r => new Date(r.timestamp) >= start2);
                 const map = new Map();
                 for (const r of filtered) {
-                    const name = (r.recorder && String(r.recorder).trim()) || '未記入';
-                    const cur = map.get(name) || { name, hpbNew:0, hpbContract:0, metaNew:0, metaContract:0, referralNew:0, referralContract:0, discountNew:0, discountContract:0, totalNew:0, totalContract:0, count:0 };
+                    let key, name, linked;
+                    if (r.staffId) {
+                        key = 'sid:' + r.staffId;
+                        // staffName はサーバ側で staff テーブルから引いた現在の名前。
+                        // 取得失敗時（スタッフ削除など）は recorder にフォールバック。
+                        name = (r.staffName && String(r.staffName).trim())
+                            || (r.recorder && String(r.recorder).trim())
+                            || '不明';
+                        linked = true;
+                    } else if (r.recorder && String(r.recorder).trim()) {
+                        key = 'name:' + String(r.recorder).trim();
+                        name = String(r.recorder).trim();
+                        linked = false;
+                    } else {
+                        key = 'unrecorded';
+                        name = '未記入';
+                        linked = false;
+                    }
+                    const cur = map.get(key) || { key, name, linked, hpbNew:0, hpbContract:0, metaNew:0, metaContract:0, referralNew:0, referralContract:0, discountNew:0, discountContract:0, totalNew:0, totalContract:0, count:0 };
                     cur.hpbNew += r.hpbNew || 0;
                     cur.hpbContract += r.hpbContract || 0;
                     cur.metaNew += r.metaNew || 0;
@@ -6016,7 +6037,7 @@
                     cur.totalNew = cur.hpbNew + cur.metaNew + cur.referralNew + cur.discountNew;
                     cur.totalContract = cur.hpbContract + cur.metaContract + cur.referralContract + cur.discountContract;
                     cur.count += 1;
-                    map.set(name, cur);
+                    map.set(key, cur);
                 }
                 const rows = Array.from(map.values()).sort((a, b) => {
                     if (a.name === '未記入') return 1;
@@ -6407,9 +6428,11 @@
                                     <h4 className="text-xs font-semibold text-slate-500 mb-2">契約数ランキング</h4>
                                     <div className="space-y-1.5">
                                         {staffStats.ranking.slice(0, 10).map((s, i) => (
-                                            <div key={s.name} className="flex items-center gap-2">
+                                            <div key={s.key} className="flex items-center gap-2">
                                                 <div className={`w-7 text-center text-xs font-bold rounded py-0.5 ${i===0?'bg-amber-100 text-amber-700':i===1?'bg-slate-100 text-slate-600':i===2?'bg-orange-100 text-orange-700':'text-slate-400'}`}>{i+1}</div>
-                                                <div className="w-20 md:w-32 truncate text-xs md:text-sm font-medium text-slate-700">{s.name}</div>
+                                                <div className="w-20 md:w-32 truncate text-xs md:text-sm font-medium text-slate-700" title={s.linked ? '' : 'スタッフ未紐付け（recorder名で集計）'}>
+                                                    {s.name}{!s.linked && <span className="ml-1 text-amber-500" title="スタッフ未紐付け">*</span>}
+                                                </div>
                                                 <div className="flex-1 min-w-0 h-2 bg-slate-100 rounded overflow-hidden">
                                                     <div className="h-2 bg-sise-500 rounded" style={{width: `${(s.totalContract / staffStats.maxContract) * 100}%`}} />
                                                 </div>
@@ -6439,8 +6462,13 @@
                                     </thead>
                                     <tbody>
                                         {staffStats.rows.map(s => (
-                                            <tr key={s.name} className={`border-b border-slate-50 ${s.name==='未記入'?'bg-slate-50/50 text-slate-400 italic':''}`}>
-                                                <td className="p-1.5 font-medium">{s.name}</td>
+                                            <tr key={s.key} className={`border-b border-slate-50 ${s.name==='未記入'?'bg-slate-50/50 text-slate-400 italic':''}`}>
+                                                <td className="p-1.5 font-medium">
+                                                    {s.name}
+                                                    {!s.linked && s.name!=='未記入' && (
+                                                        <span className="ml-1 text-amber-500" title="スタッフ未紐付け（recorder名で集計。日報一覧から手動アサイン推奨）">*</span>
+                                                    )}
+                                                </td>
                                                 <td className="text-right p-1.5">{s.hpbNew||''}</td>
                                                 <td className="text-right p-1.5">{s.hpbContract||''}</td>
                                                 <td className="text-right p-1.5">{s.metaNew||''}</td>
@@ -6534,6 +6562,10 @@
                     prepComplete: !!form.prepComplete,
                     notes: form.notes || '',
                     recorder: currentAccess ? currentAccess.name : '',
+                    // staffId はサーバ側で staffCtx (HMAC 検証済み) から上書きされる。
+                    // ここで送るのはトークン無しの管理者ログインで日報を入力する
+                    // ケース（記入者を明示できないので null になる）の互換用。
+                    staffId: currentAccess ? currentAccess.staffId : null,
                 };
                 try {
                     let res = await dbPost('reports', { action: 'create', report: payload });
@@ -6696,6 +6728,53 @@
             const [filterStore, setFilterStore] = useState('all');
             const [sortOrder, setSortOrder] = useState('desc');
 
+            // 過去日報の送信者アサイン用: 本部・管理者のみスタッフ一覧をロードする
+            // （スタッフURL からは権限上アサインできないため、無駄なフェッチを避ける）
+            const canAssignStaff = hasFullStoreAccess();
+            const [assignableStaff, setAssignableStaff] = useState([]);
+            const [assigningId, setAssigningId] = useState(null);   // ドロップダウン展開中の report.id
+            const [savingAssign, setSavingAssign] = useState(null); // 保存中の report.id
+            useEffect(() => {
+                if (!canAssignStaff) return;
+                let cancelled = false;
+                (async () => {
+                    const r = await fetchStaffFromDb(true); // 削除済みも候補に出して履歴整合
+                    if (!cancelled && r.ok) {
+                        // active を先頭、その後に inactive。同 status 内は created 順
+                        const list = (r.staff || []).slice().sort((a, b) => {
+                            const sa = a.status === 'inactive' ? 1 : 0;
+                            const sb = b.status === 'inactive' ? 1 : 0;
+                            return sa - sb;
+                        });
+                        setAssignableStaff(list);
+                    }
+                })();
+                return () => { cancelled = true; };
+            }, [canAssignStaff]);
+
+            const assignStaffToReport = useCallback(async (reportId, staffId) => {
+                setSavingAssign(reportId);
+                try {
+                    const res = await dbPost('reports', {
+                        action: 'assignStaff',
+                        id: reportId,
+                        staffId: staffId || null,
+                    });
+                    if (!res || res.error) {
+                        showToast((res && res.error) || 'スタッフのアサインに失敗しました', 'error');
+                        return;
+                    }
+                    showToast(staffId ? '送信者を更新しました' : '送信者の紐付けを解除しました', 'success');
+                    if (refreshReportData) await refreshReportData();
+                } catch (e) {
+                    console.error('[reports] assignStaff error', e);
+                    showToast('アサイン中にエラーが発生しました', 'error');
+                } finally {
+                    setSavingAssign(null);
+                    setAssigningId(null);
+                }
+            }, [refreshReportData]);
+
             const filteredReports = useMemo(() => {
                 let reports = reportData.reports || [];
                 // 権限のある店舗のみに絞り込み
@@ -6793,6 +6872,7 @@
                                     <tr className="border-b-2 border-slate-100 bg-slate-50/50">
                                         <th className="text-left py-3 px-3 font-semibold text-slate-500 text-xs tracking-wide">日時</th>
                                         <th className="text-left py-3 px-3 font-semibold text-slate-500 text-xs tracking-wide">店舗</th>
+                                        <th className="text-left py-3 px-2 font-semibold text-slate-500 text-xs tracking-wide">送信者</th>
                                         <th className="text-center py-3 px-2 font-semibold text-slate-500 text-xs">HPB<br/><span className="font-normal text-slate-400">新規/契約</span></th>
                                         <th className="text-center py-3 px-2 font-semibold text-slate-500 text-xs">Meta<br/><span className="font-normal text-slate-400">新規/契約</span></th>
                                         <th className="text-center py-3 px-2 font-semibold text-slate-500 text-xs">紹介<br/><span className="font-normal text-slate-400">新規/契約</span></th>
@@ -6804,7 +6884,7 @@
                                 </thead>
                                 <tbody>
                                     {filteredReports.slice(0, 50).map((report) => (
-                                        <tr key={report.timestamp + '_' + report.store} className="border-b border-slate-100/40 table-row-hover">
+                                        <tr key={report.id || (report.timestamp + '_' + report.store)} className="border-b border-slate-100/40 table-row-hover">
                                             <td className="py-3 px-3 text-slate-600 text-xs">
                                                 {new Date(report.timestamp).toLocaleDateString('ja-JP', {
                                                     month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
@@ -6814,6 +6894,45 @@
                                                 <span className="px-2 py-1 bg-sise-100/80 text-sise-700 rounded-lg text-[11px] font-semibold">
                                                     {report.store}
                                                 </span>
+                                            </td>
+                                            <td className="py-3 px-2 text-xs">
+                                                {canAssignStaff && assigningId === report.id ? (
+                                                    <select
+                                                        autoFocus
+                                                        value={report.staffId || ''}
+                                                        disabled={savingAssign === report.id}
+                                                        onChange={(e) => assignStaffToReport(report.id, e.target.value)}
+                                                        onBlur={() => setAssigningId(null)}
+                                                        className="px-1.5 py-1 border border-slate-200 rounded-md text-xs bg-white">
+                                                        <option value="">（未割当）</option>
+                                                        {assignableStaff.map(s => (
+                                                            <option key={s.id} value={s.id}>
+                                                                {s.name}{s.status === 'inactive' ? ' (削除済)' : ''}
+                                                            </option>
+                                                        ))}
+                                                    </select>
+                                                ) : canAssignStaff ? (
+                                                    <button
+                                                        onClick={() => setAssigningId(report.id)}
+                                                        disabled={!report.id}
+                                                        className="text-left text-slate-700 hover:text-sise-700 hover:underline underline-offset-2"
+                                                        title="クリックして送信者を変更">
+                                                        {report.staffName ? (
+                                                            <span>{report.staffName}</span>
+                                                        ) : report.recorder ? (
+                                                            <span>
+                                                                {report.recorder}
+                                                                <span className="ml-1 text-amber-500" title="スタッフ未紐付け">*</span>
+                                                            </span>
+                                                        ) : (
+                                                            <span className="text-amber-500 italic">未記入 *</span>
+                                                        )}
+                                                    </button>
+                                                ) : (
+                                                    <span className="text-slate-600">
+                                                        {report.staffName || report.recorder || <span className="text-slate-400 italic">未記入</span>}
+                                                    </span>
+                                                )}
                                             </td>
                                             <td className="text-center py-3 px-2">
                                                 <span className="text-orange-600 font-semibold">{report.hpbNew}</span>
@@ -6874,7 +6993,7 @@
                             const totalNew = (report.hpbNew||0) + (report.metaNew||0) + (report.referralNew||0) + (report.discountNew||0);
                             const totalContract = (report.hpbContract||0) + (report.metaContract||0) + (report.referralContract||0) + (report.discountContract||0);
                             return (
-                                <Card key={report.timestamp + '_' + report.store} className="!p-3.5">
+                                <Card key={report.id || (report.timestamp + '_' + report.store)} className="!p-3.5">
                                     <div className="flex items-center justify-between mb-2.5">
                                         <div className="flex items-center gap-2">
                                             <span className="text-xs font-bold text-slate-600">
@@ -6890,6 +7009,46 @@
                                                 ? <span className="text-green-500"><Icon name="check-circle" size={18} /></span>
                                                 : <span className="text-red-400"><Icon name="x-circle" size={18} /></span>}
                                         </div>
+                                    </div>
+                                    <div className="flex items-center justify-between mb-2 text-[11px]">
+                                        <div className="text-slate-500">
+                                            送信者:
+                                            {report.staffName ? (
+                                                <span className="ml-1 font-semibold text-slate-700">{report.staffName}</span>
+                                            ) : report.recorder ? (
+                                                <span className="ml-1 font-semibold text-slate-700">
+                                                    {report.recorder}
+                                                    <span className="ml-1 text-amber-500" title="スタッフ未紐付け">*</span>
+                                                </span>
+                                            ) : (
+                                                <span className="ml-1 text-amber-500 italic">未記入</span>
+                                            )}
+                                        </div>
+                                        {canAssignStaff && (
+                                            assigningId === report.id ? (
+                                                <select
+                                                    autoFocus
+                                                    value={report.staffId || ''}
+                                                    disabled={savingAssign === report.id}
+                                                    onChange={(e) => assignStaffToReport(report.id, e.target.value)}
+                                                    onBlur={() => setAssigningId(null)}
+                                                    className="px-1.5 py-1 border border-slate-200 rounded-md text-[11px] bg-white">
+                                                    <option value="">（未割当）</option>
+                                                    {assignableStaff.map(s => (
+                                                        <option key={s.id} value={s.id}>
+                                                            {s.name}{s.status === 'inactive' ? ' (削除済)' : ''}
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                            ) : (
+                                                <button
+                                                    onClick={() => setAssigningId(report.id)}
+                                                    disabled={!report.id}
+                                                    className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 hover:bg-sise-50 hover:text-sise-700 text-[11px] font-semibold">
+                                                    {report.staffId ? '変更' : 'アサイン'}
+                                                </button>
+                                            )
+                                        )}
                                     </div>
                                     <div className="grid grid-cols-3 gap-2 text-center">
                                         <div className="bg-blue-50/60 rounded-xl py-2.5">
