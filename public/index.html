@@ -2185,7 +2185,7 @@
         };
 
         const formatPercent = (value) => {
-            return `${value.toFixed(1)}%`;
+            return `${(Number(value) || 0).toFixed(1)}%`;
         };
 
         // ========================================
@@ -3717,8 +3717,8 @@
 
             const fetchReportData = useCallback(async () => {
                 try {
-                    // 当月+先月のデータを取得（月間トレンド比較用）
-                    const data = await dbGet('reports', { months: '2' });
+                    // 全期間のデータを取得（ダッシュボードの期間切替で絞り込む）
+                    const data = await dbGet('reports', { all: 'true' });
                     if (!data) throw new Error('日報データの取得に失敗しました');
                     if (data.error) throw new Error(data.error);
 
@@ -5871,8 +5871,6 @@
             const totalExpectedRevenue = (memberData.expectedRevenue || 0) + cashActiveRevenue;
             const [dateRange, setDateRange] = useState('month');
 
-            if (!window.Recharts) return <div className="p-8 text-center">チャートを読み込み中...</div>;
-
             // 日報データの集計
             const aggregatedData = useMemo(() => {
                 if (!reportData.reports || reportData.reports.length === 0) {
@@ -5900,16 +5898,20 @@
                     case 'week': startDate.setDate(now.getDate() - 7); break;
                     case 'month': startDate.setMonth(now.getMonth() - 1); break;
                     case 'quarter': startDate.setMonth(now.getMonth() - 3); break;
+                    case 'half': startDate.setMonth(now.getMonth() - 6); break;
+                    case 'year': startDate.setFullYear(now.getFullYear() - 1); break;
+                    case 'all': startDate.setTime(0); break;
                 }
                 filtered = filtered.filter(r => new Date(r.timestamp) >= startDate);
 
-                // 本日のレポート（権限のある店舗のみ）
-                const todayStr = now.toISOString().slice(0, 10);
+                // 本日のレポート（権限のある店舗のみ）。ローカル日付で判定し、ヘッダー・推移グラフと基準を揃える
+                const ymdLocal = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+                const todayStr = ymdLocal(now);
                 let todayBase = reportData.reports;
                 if (allowedStoreNames) {
                     todayBase = todayBase.filter(r => allowedStoreNames.includes(r.store));
                 }
-                const todayReports = todayBase.filter(r => r.timestamp && r.timestamp.startsWith(todayStr));
+                const todayReports = todayBase.filter(r => r.timestamp && ymdLocal(new Date(r.timestamp)) === todayStr);
                 const todayNew = todayReports.reduce((s, r) => s + (r.hpbNew||0) + (r.metaNew||0) + (r.referralNew||0) + (r.discountNew||0), 0);
                 const todayContract = todayReports.reduce((s, r) => s + (r.hpbContract||0) + (r.metaContract||0) + (r.referralContract||0) + (r.discountContract||0), 0);
                 const todayTreatments = todayReports.reduce((s, r) => s + (r.existingTreatments||0), 0);
@@ -5940,16 +5942,25 @@
                 });
                 const byStore = Object.values(storeMap).sort((a, b) => (b.new + b.contract) - (a.new + a.contract));
 
-                // 日別推移
-                const dailyMap = {};
+                // 推移グラフ: 長期間(3ヶ月超)は月別、短期間(週・月)は日別に集計
+                const isMonthlyTrend = !(dateRange === 'week' || dateRange === 'month');
+                const trendMap = {};
                 filtered.forEach(r => {
-                    const dateKey = new Date(r.timestamp).toLocaleDateString('ja-JP', { month: 'short', day: 'numeric' });
-                    if (!dailyMap[dateKey]) dailyMap[dateKey] = { date: dateKey, new: 0, contract: 0, treatments: 0 };
-                    dailyMap[dateKey].new += (r.hpbNew||0) + (r.metaNew||0) + (r.referralNew||0) + (r.discountNew||0);
-                    dailyMap[dateKey].contract += (r.hpbContract||0) + (r.metaContract||0) + (r.referralContract||0) + (r.discountContract||0);
-                    dailyMap[dateKey].treatments += r.existingTreatments || 0;
+                    const dt = new Date(r.timestamp);
+                    const sortKey = isMonthlyTrend
+                        ? `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}`
+                        : `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+                    const label = isMonthlyTrend
+                        ? dt.toLocaleDateString('ja-JP', { year: '2-digit', month: 'short' })
+                        : dt.toLocaleDateString('ja-JP', { month: 'short', day: 'numeric' });
+                    if (!trendMap[sortKey]) trendMap[sortKey] = { _k: sortKey, date: label, new: 0, contract: 0, treatments: 0 };
+                    trendMap[sortKey].new += (r.hpbNew||0) + (r.metaNew||0) + (r.referralNew||0) + (r.discountNew||0);
+                    trendMap[sortKey].contract += (r.hpbContract||0) + (r.metaContract||0) + (r.referralContract||0) + (r.discountContract||0);
+                    trendMap[sortKey].treatments += r.existingTreatments || 0;
                 });
-                const dailyTrend = Object.values(dailyMap).slice(-14);
+                const sortedTrend = Object.values(trendMap).sort((a, b) => a._k < b._k ? -1 : (a._k > b._k ? 1 : 0));
+                // 日別は直近31点までに制限、月別は範囲内の全月を表示
+                const dailyTrend = isMonthlyTrend ? sortedTrend : sortedTrend.slice(-31);
 
                 // スパークライン用データ
                 const dailyNewTrend = dailyTrend.map(d => d.new);
@@ -5978,6 +5989,9 @@
             const chartHeight = isMobile ? 200 : 260;
             const barChartHeight = isMobile ? 190 : 240;
 
+            // Recharts未読込時は全フック実行後に早期リターン（フック呼び出し順を一定に保つ）
+            if (!window.Recharts) return <div className="p-8 text-center">チャートを読み込み中...</div>;
+
             return (
                 <div className="space-y-4 md:space-y-5">
                     {/* フィルターバー */}
@@ -5993,13 +6007,20 @@
                                     )}
                                 </select>
                             </div>
-                            <div className="flex items-center gap-1.5">
-                                {['week', 'month', 'quarter'].map(range => (
-                                    <button key={range} onClick={() => setDateRange(range)}
+                            <div className="flex flex-wrap items-center gap-1.5">
+                                {[
+                                    { id: 'week', label: '1週間' },
+                                    { id: 'month', label: '1ヶ月' },
+                                    { id: 'quarter', label: '3ヶ月' },
+                                    { id: 'half', label: '6ヶ月' },
+                                    { id: 'year', label: '1年' },
+                                    { id: 'all', label: '全期間' },
+                                ].map(({ id, label }) => (
+                                    <button key={id} onClick={() => setDateRange(id)}
                                         className={`px-3 md:px-4 py-2 rounded-xl text-xs md:text-sm font-semibold transition-all duration-300 ${
-                                            dateRange === range ? 'btn-gradient' : 'bg-slate-100/80 text-slate-500 hover:bg-slate-200/80 hover:text-slate-700'
+                                            dateRange === id ? 'btn-gradient' : 'bg-slate-100/80 text-slate-500 hover:bg-slate-200/80 hover:text-slate-700'
                                         }`}>
-                                        {range === 'week' ? '1週間' : range === 'month' ? '1ヶ月' : '3ヶ月'}
+                                        {label}
                                     </button>
                                 ))}
                             </div>
@@ -6105,8 +6126,8 @@
                         <Card>
                             <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
                                 <div>
-                                    <h3 className="text-base font-bold text-slate-800">日別推移</h3>
-                                    <p className="text-[10px] text-sise-500 tracking-widest font-semibold">DAILY TREND</p>
+                                    <h3 className="text-base font-bold text-slate-800">{(dateRange === 'week' || dateRange === 'month') ? '日別推移' : '月別推移'}</h3>
+                                    <p className="text-[10px] text-sise-500 tracking-widest font-semibold">{(dateRange === 'week' || dateRange === 'month') ? 'DAILY TREND' : 'MONTHLY TREND'}</p>
                                 </div>
                                 <ToggleLegend
                                     items={[
@@ -6403,7 +6424,13 @@
                     recorder: currentAccess ? currentAccess.name : '',
                 };
                 try {
-                    const res = await dbPost('reports', { action: 'create', report: payload });
+                    let res = await dbPost('reports', { action: 'create', report: payload });
+                    if (res && res.duplicate) {
+                        const label = res.store || form.store;
+                        const ok = window.confirm(`本日の「${label}」の日報は既に送信されています（${res.count || 1}件）。\n追加で送信しますか？`);
+                        if (!ok) { showToast('送信をキャンセルしました', 'warning'); return; }
+                        res = await dbPost('reports', { action: 'create', report: payload, force: true });
+                    }
                     if (!res || res.error) {
                         showToast((res && res.error) || '日報の送信に失敗しました', 'error');
                         return;

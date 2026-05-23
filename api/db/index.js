@@ -372,26 +372,37 @@ async function dashConfigPost(body) {
 // ============================================================
 
 async function reportsGet(params) {
-  let query = supabase.from('daily_reports').select('*')
-    .order('timestamp', { ascending: false });
+  // フィルタ済みクエリを毎回生成（ページングのたびに使い回せないため）
+  const buildQuery = () => {
+    let query = supabase.from('daily_reports').select('*')
+      .order('timestamp', { ascending: false });
+    if (params.all === 'true') {
+      // 全データ
+    } else if (params.month) {
+      const [y, m] = params.month.split('-').map(Number);
+      query = query.gte('timestamp', new Date(y, m - 1, 1).toISOString())
+                   .lte('timestamp', new Date(y, m, 0, 23, 59, 59).toISOString());
+    } else if (params.months) {
+      const n = parseInt(params.months, 10) || 1;
+      const now = new Date();
+      query = query.gte('timestamp', new Date(now.getFullYear(), now.getMonth() - (n - 1), 1).toISOString());
+    } else {
+      const now = new Date();
+      query = query.gte('timestamp', new Date(now.getFullYear(), now.getMonth(), 1).toISOString());
+    }
+    return query;
+  };
 
-  if (params.all === 'true') {
-    // 全データ
-  } else if (params.month) {
-    const [y, m] = params.month.split('-').map(Number);
-    query = query.gte('timestamp', new Date(y, m - 1, 1).toISOString())
-                 .lte('timestamp', new Date(y, m, 0, 23, 59, 59).toISOString());
-  } else if (params.months) {
-    const n = parseInt(params.months) || 1;
-    const now = new Date();
-    query = query.gte('timestamp', new Date(now.getFullYear(), now.getMonth() - (n - 1), 1).toISOString());
-  } else {
-    const now = new Date();
-    query = query.gte('timestamp', new Date(now.getFullYear(), now.getMonth(), 1).toISOString());
+  // Supabase/PostgREST は1リクエスト最大1000行のため、全件取得時はページングする
+  const PAGE = 1000;
+  let data = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data: page, error } = await buildQuery().range(from, from + PAGE - 1);
+    if (error) throw error;
+    if (!page || page.length === 0) break;
+    data = data.concat(page);
+    if (page.length < PAGE) break;
   }
-
-  const { data, error } = await query;
-  if (error) throw error;
 
   return {
     reports: (data || []).map(r => ({
@@ -401,7 +412,8 @@ async function reportsGet(params) {
       hpbContract: r.hpb_contract, metaContract: r.meta_contract,
       referralContract: r.referral_contract, discountContract: r.discount_contract,
       existingTreatments: r.existing_treatments,
-      taskComplete: r.task_complete, prepComplete: r.prep_complete
+      taskComplete: r.task_complete, prepComplete: r.prep_complete,
+      notes: r.notes
     })),
     total: (data || []).length,
     lastUpdated: new Date().toISOString()
@@ -421,8 +433,24 @@ async function reportsPost(body, staffCtx) {
         hpb_contract: parseInt(r.hpbContract) || 0, meta_contract: parseInt(r.metaContract) || 0,
         referral_contract: parseInt(r.referralContract) || 0, discount_contract: parseInt(r.discountContract) || 0,
         existing_treatments: parseInt(r.existingTreatments) || 0,
-        task_complete: !!r.taskComplete, prep_complete: !!r.prepComplete
+        task_complete: !!r.taskComplete, prep_complete: !!r.prepComplete,
+        notes: r.notes || ''
       };
+
+      // 同店舗・同JST日の既存日報があれば、force指定が無い限り確認のため中断する
+      if (!body.force) {
+        const baseUtc = Date.parse(new Date(new Date(row.timestamp).getTime() + 9 * 3600 * 1000).toISOString().slice(0, 10) + 'T00:00:00Z') - 9 * 3600 * 1000;
+        const { data: dup, error: dupErr } = await supabase.from('daily_reports')
+          .select('id')
+          .eq('store', r.store)
+          .gte('timestamp', new Date(baseUtc).toISOString())
+          .lt('timestamp', new Date(baseUtc + 24 * 3600 * 1000).toISOString());
+        if (dupErr) throw dupErr;
+        if (dup && dup.length > 0) {
+          return { duplicate: true, count: dup.length, store: r.store };
+        }
+      }
+
       const { data, error } = await supabase.from('daily_reports').insert(row).select().single();
       if (error) throw error;
 
@@ -465,6 +493,7 @@ async function reportsPost(body, staffCtx) {
       if (r.existingTreatments !== undefined) updates.existing_treatments = parseInt(r.existingTreatments) || 0;
       if (r.taskComplete !== undefined) updates.task_complete = !!r.taskComplete;
       if (r.prepComplete !== undefined) updates.prep_complete = !!r.prepComplete;
+      if (r.notes !== undefined) updates.notes = r.notes || '';
       const { error } = await supabase.from('daily_reports').update(updates).eq('id', r.id);
       if (error) throw error;
       return { success: true, id: r.id };
@@ -490,7 +519,8 @@ async function reportsPost(body, staffCtx) {
         discount_contract: parseInt(r.discountContract) || 0,
         existing_treatments: parseInt(r.existingTreatments) || 0,
         task_complete: !!r.taskComplete,
-        prep_complete: !!r.prepComplete
+        prep_complete: !!r.prepComplete,
+        notes: r.notes || ''
       }));
       if (body.replace) {
         await supabase.from('daily_reports').delete().neq('id', 0);
