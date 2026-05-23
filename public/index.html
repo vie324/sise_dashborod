@@ -10623,7 +10623,7 @@
 
             return (
                 <div className="space-y-5 md:space-y-6 animate-fade-in">
-                    <SectionHeader title="利用管理" subtitle="USAGE TRACKING" icon="clipboard-check">
+                    <SectionHeader title="利用管理" subtitle="USAGE TRACKING" icon="list-checks">
                         <div className="flex items-center gap-2">
                             <button
                                 onClick={syncFromDb}
@@ -15286,7 +15286,7 @@
             return (
                 <div className="space-y-6">
                     <SectionHeader
-                        icon="megaphone"
+                        icon="bar-chart-3"
                         title="マーケティング分析"
                         subtitle="HPB・Meta広告・TikTok広告を一元管理"
                     />
@@ -21694,7 +21694,7 @@
             { id: 'counseling', label: 'カウンセリング', icon: 'heart-handshake', description: 'お悩みヒアリング・カウンセリングシート確認' },
             { id: 'posture', label: '姿勢チェック', icon: 'scan', description: 'ビフォー撮影・姿勢分析' },
             { id: 'treatment', label: '施術', icon: 'activity', description: '施術の実施・メモ記録' },
-            { id: 'report', label: 'レポート', icon: 'file-heart', description: 'アフター撮影・施術レポート作成' },
+            { id: 'report', label: 'レポート', icon: 'activity', description: 'アフター撮影・施術レポート作成' },
             { id: 'plan', label: 'プラン説明', icon: 'presentation', description: 'プラン説明・契約手続き' },
             { id: 'complete', label: '完了', icon: 'check-circle', description: '次回予約・フォローアップ' },
         ];
@@ -22424,7 +22424,7 @@
 
                     <div className="flow-embed-placeholder">
                         <div className="flow-embed-icon">
-                            <Icon name="file-heart" size={28} className="text-sise-500" />
+                            <Icon name="activity" size={28} className="text-sise-500" />
                         </div>
                         <div>
                             <p style={{ fontSize: 15, fontWeight: 700, color: '#1e293b', marginBottom: 4 }}>施術レポートを作成</p>
@@ -23261,14 +23261,14 @@
                 { section: '顧客管理', items: [
                     { id: 'members', label: '会員管理', icon: 'users' },
                     { id: 'tickets', label: '回数券', icon: 'ticket' },
-                    { id: 'usage', label: '利用管理', icon: 'clipboard-check' },
+                    { id: 'usage', label: '利用管理', icon: 'list-checks' },
                 ]},
                 { section: '業務管理', items: [
                     { id: 'reports', label: '日報一覧', icon: 'clipboard-list' },
                     { id: 'attendance', label: '勤怠管理', icon: 'clock' },
                 ]},
                 ...(!isStaffMode || (currentAccess && currentAccess.role === 'headquarter') ? [{ section: '管理者', items: [
-                    { id: 'marketing', label: 'マーケティング', icon: 'megaphone' },
+                    { id: 'marketing', label: 'マーケティング', icon: 'bar-chart-3' },
                     ...(!isStaffMode ? [{ id: 'settings', label: '設定', icon: 'settings' }] : []),
                 ]}] : []),
             ];
@@ -23278,15 +23278,15 @@
                 { id: 'dashboard', label: 'ダッシュボード', icon: 'layout-dashboard', mobileLabel: 'ホーム' },
                 { id: 'cashbook', label: '出納帳', icon: 'book-open', mobileLabel: '出納帳' },
                 { id: 'counseling', label: 'カウンセリング', icon: 'heart-handshake', mobileLabel: '案内' },
-                { id: 'treatment-report', label: '施術レポート', icon: 'file-heart', mobileLabel: 'レポ' },
+                { id: 'treatment-report', label: '施術レポート', icon: 'activity', mobileLabel: 'レポ' },
                 { id: 'posture', label: '姿勢分析', icon: 'scan', mobileLabel: '姿勢' },
                 { id: 'line', label: 'LINEチャット', icon: 'message-circle', mobileLabel: 'LINE' },
                 { id: 'reports', label: '日報一覧', icon: 'clipboard-list', mobileLabel: '日報' },
                 { id: 'members', label: '会員管理', icon: 'users', mobileLabel: '会員' },
                 { id: 'attendance', label: '勤怠管理', icon: 'clock', mobileLabel: '勤怠' },
-                { id: 'usage', label: '利用管理', icon: 'clipboard-check', mobileLabel: '利用' },
+                { id: 'usage', label: '利用管理', icon: 'list-checks', mobileLabel: '利用' },
                 { id: 'tickets', label: '回数券', icon: 'ticket', mobileLabel: '回数券' },
-                ...(!isStaffMode || (currentAccess && currentAccess.role === 'headquarter') ? [{ id: 'marketing', label: 'マーケティング', icon: 'megaphone', mobileLabel: '広告' }] : []),
+                ...(!isStaffMode || (currentAccess && currentAccess.role === 'headquarter') ? [{ id: 'marketing', label: 'マーケティング', icon: 'bar-chart-3', mobileLabel: '広告' }] : []),
                 ...(!isStaffMode ? [{ id: 'settings', label: '設定', icon: 'settings', mobileLabel: '設定' }] : []),
             ];
 
@@ -23327,7 +23327,7 @@
                                 React.createElement('button', {
                                     onClick: () => setTreatmentSubTab('report'),
                                     className: `flex-1 flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl text-sm font-bold transition-all ${treatmentSubTab === 'report' ? 'bg-white text-sise-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`
-                                }, React.createElement(Icon, { name: 'file-heart', size: 15 }), 'レポート'),
+                                }, React.createElement(Icon, { name: 'activity', size: 15 }), 'レポート'),
                             ),
                             treatmentSubTab === 'posture'
                                 ? React.createElement(PostureAnalysisView, { lineChatHook })
