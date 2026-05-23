@@ -5983,6 +5983,51 @@
                 };
             }, [reportData.reports, selectedStoreName, dateRange, allowedStoreNames]);
 
+            // スタッフ別実績集計（送信者ごとに媒体別の新規/契約を合算）。aggregatedDataと同じ絞り込み
+            const staffStats = useMemo(() => {
+                const empty = { rows: [], ranking: [], maxContract: 0 };
+                if (!reportData || !Array.isArray(reportData.reports)) return empty;
+                let filtered = reportData.reports;
+                if (allowedStoreNames) filtered = filtered.filter(r => allowedStoreNames.includes(r.store));
+                if (selectedStoreName && selectedStoreName !== 'all') filtered = filtered.filter(r => r.store === selectedStoreName);
+                const now2 = new Date();
+                const start2 = new Date();
+                switch (dateRange) {
+                    case 'week': start2.setDate(now2.getDate() - 7); break;
+                    case 'month': start2.setMonth(now2.getMonth() - 1); break;
+                    case 'quarter': start2.setMonth(now2.getMonth() - 3); break;
+                    case 'half': start2.setMonth(now2.getMonth() - 6); break;
+                    case 'year': start2.setFullYear(now2.getFullYear() - 1); break;
+                    case 'all': start2.setTime(0); break;
+                }
+                filtered = filtered.filter(r => new Date(r.timestamp) >= start2);
+                const map = new Map();
+                for (const r of filtered) {
+                    const name = (r.recorder && String(r.recorder).trim()) || '未記入';
+                    const cur = map.get(name) || { name, hpbNew:0, hpbContract:0, metaNew:0, metaContract:0, referralNew:0, referralContract:0, discountNew:0, discountContract:0, totalNew:0, totalContract:0, count:0 };
+                    cur.hpbNew += r.hpbNew || 0;
+                    cur.hpbContract += r.hpbContract || 0;
+                    cur.metaNew += r.metaNew || 0;
+                    cur.metaContract += r.metaContract || 0;
+                    cur.referralNew += r.referralNew || 0;
+                    cur.referralContract += r.referralContract || 0;
+                    cur.discountNew += r.discountNew || 0;
+                    cur.discountContract += r.discountContract || 0;
+                    cur.totalNew = cur.hpbNew + cur.metaNew + cur.referralNew + cur.discountNew;
+                    cur.totalContract = cur.hpbContract + cur.metaContract + cur.referralContract + cur.discountContract;
+                    cur.count += 1;
+                    map.set(name, cur);
+                }
+                const rows = Array.from(map.values()).sort((a, b) => {
+                    if (a.name === '未記入') return 1;
+                    if (b.name === '未記入') return -1;
+                    return b.totalContract - a.totalContract;
+                });
+                const ranking = rows.filter(s => s.name !== '未記入');
+                const maxContract = ranking.reduce((m, s) => Math.max(m, s.totalContract), 0);
+                return { rows, ranking, maxContract };
+            }, [reportData.reports, selectedStoreName, dateRange, allowedStoreNames]);
+
             const storeColors = ['#33a065', '#3b82f6', '#f97316', '#a855f7', '#ec4899'];
             const tooltipStyle = { backgroundColor: 'rgba(255,255,255,0.95)', borderColor: '#e2e8f0', borderRadius: '16px', boxShadow: '0 12px 40px -8px rgba(0,0,0,0.1)', padding: '12px 16px' };
             const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
@@ -6346,6 +6391,73 @@
                             </div>
                         </div>
                     </div>
+
+                    {/* スタッフ別実績（スタッフURLでは非表示） */}
+                    {currentAccess?.role !== 'staff' && staffStats.rows.length > 0 && (
+                        <Card className="!p-3 md:!p-5">
+                            <div className="flex items-center justify-between mb-3">
+                                <div className="flex items-center gap-2">
+                                    <Icon name="user" size={18} className="text-sise-500" />
+                                    <h3 className="text-sm md:text-base font-semibold text-slate-800">スタッフ別実績</h3>
+                                </div>
+                                <span className="text-xs text-slate-400">対象期間内</span>
+                            </div>
+                            {staffStats.ranking.length > 0 && staffStats.maxContract > 0 && (
+                                <div className="mb-4">
+                                    <h4 className="text-xs font-semibold text-slate-500 mb-2">契約数ランキング</h4>
+                                    <div className="space-y-1.5">
+                                        {staffStats.ranking.slice(0, 10).map((s, i) => (
+                                            <div key={s.name} className="flex items-center gap-2">
+                                                <div className={`w-7 text-center text-xs font-bold rounded py-0.5 ${i===0?'bg-amber-100 text-amber-700':i===1?'bg-slate-100 text-slate-600':i===2?'bg-orange-100 text-orange-700':'text-slate-400'}`}>{i+1}</div>
+                                                <div className="w-20 md:w-32 truncate text-xs md:text-sm font-medium text-slate-700">{s.name}</div>
+                                                <div className="flex-1 min-w-0 h-2 bg-slate-100 rounded overflow-hidden">
+                                                    <div className="h-2 bg-sise-500 rounded" style={{width: `${(s.totalContract / staffStats.maxContract) * 100}%`}} />
+                                                </div>
+                                                <div className="w-12 text-right text-xs font-bold text-sise-700">{s.totalContract}件</div>
+                                                <div className="w-16 text-right text-[10px] text-slate-400 hidden md:block">新規{s.totalNew}件</div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-xs whitespace-nowrap">
+                                    <thead>
+                                        <tr className="border-b border-slate-200 text-slate-500">
+                                            <th className="text-left p-1.5 font-semibold">スタッフ</th>
+                                            <th className="text-right p-1.5 font-semibold">HPB新</th>
+                                            <th className="text-right p-1.5 font-semibold">HPB契</th>
+                                            <th className="text-right p-1.5 font-semibold">Meta新</th>
+                                            <th className="text-right p-1.5 font-semibold">Meta契</th>
+                                            <th className="text-right p-1.5 font-semibold">紹介新</th>
+                                            <th className="text-right p-1.5 font-semibold">紹介契</th>
+                                            <th className="text-right p-1.5 font-semibold">割引新</th>
+                                            <th className="text-right p-1.5 font-semibold">割引契</th>
+                                            <th className="text-right p-1.5 font-semibold">新規計</th>
+                                            <th className="text-right p-1.5 font-bold text-sise-700">契約計</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {staffStats.rows.map(s => (
+                                            <tr key={s.name} className={`border-b border-slate-50 ${s.name==='未記入'?'bg-slate-50/50 text-slate-400 italic':''}`}>
+                                                <td className="p-1.5 font-medium">{s.name}</td>
+                                                <td className="text-right p-1.5">{s.hpbNew||''}</td>
+                                                <td className="text-right p-1.5">{s.hpbContract||''}</td>
+                                                <td className="text-right p-1.5">{s.metaNew||''}</td>
+                                                <td className="text-right p-1.5">{s.metaContract||''}</td>
+                                                <td className="text-right p-1.5">{s.referralNew||''}</td>
+                                                <td className="text-right p-1.5">{s.referralContract||''}</td>
+                                                <td className="text-right p-1.5">{s.discountNew||''}</td>
+                                                <td className="text-right p-1.5">{s.discountContract||''}</td>
+                                                <td className="text-right p-1.5 font-semibold">{s.totalNew||''}</td>
+                                                <td className="text-right p-1.5 font-bold text-sise-700">{s.totalContract||''}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </Card>
+                    )}
                 </div>
             );
         };

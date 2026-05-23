@@ -413,7 +413,7 @@ async function reportsGet(params) {
       referralContract: r.referral_contract, discountContract: r.discount_contract,
       existingTreatments: r.existing_treatments,
       taskComplete: r.task_complete, prepComplete: r.prep_complete,
-      notes: r.notes
+      notes: r.notes, recorder: r.recorder
     })),
     total: (data || []).length,
     lastUpdated: new Date().toISOString()
@@ -426,6 +426,7 @@ async function reportsPost(body, staffCtx) {
     case 'create': {
       const r = body.report || body;
       if (!r.store) return { error: '店舗が必要です' };
+      const recorder = (staffCtx && staffCtx.name) || r.recorder || '';
       const row = {
         timestamp: r.timestamp || new Date().toISOString(), store: r.store,
         hpb_new: parseInt(r.hpbNew) || 0, meta_new: parseInt(r.metaNew) || 0,
@@ -434,7 +435,8 @@ async function reportsPost(body, staffCtx) {
         referral_contract: parseInt(r.referralContract) || 0, discount_contract: parseInt(r.discountContract) || 0,
         existing_treatments: parseInt(r.existingTreatments) || 0,
         task_complete: !!r.taskComplete, prep_complete: !!r.prepComplete,
-        notes: r.notes || ''
+        notes: r.notes || '',
+        recorder
       };
 
       // 同店舗・同JST日の既存日報があれば、force指定が無い限り確認のため中断する
@@ -455,10 +457,9 @@ async function reportsPost(body, staffCtx) {
       if (error) throw error;
 
       // 送信通知メール（環境変数が揃っていれば送信、無ければスキップして
-      // 日報自体の保存は成功させる）。送信者名はトークンから取得。
+      // 日報自体の保存は成功させる）。送信者名は上で算出済み。
       let mailResult = null;
       try {
-        const recorder = (staffCtx && staffCtx.name) || r.recorder || '';
         const formatted = formatDailyReportEmail({
           ...r,
           store: r.store,
@@ -494,6 +495,7 @@ async function reportsPost(body, staffCtx) {
       if (r.taskComplete !== undefined) updates.task_complete = !!r.taskComplete;
       if (r.prepComplete !== undefined) updates.prep_complete = !!r.prepComplete;
       if (r.notes !== undefined) updates.notes = r.notes || '';
+      if (r.recorder !== undefined) updates.recorder = r.recorder || '';
       const { error } = await supabase.from('daily_reports').update(updates).eq('id', r.id);
       if (error) throw error;
       return { success: true, id: r.id };
@@ -520,7 +522,8 @@ async function reportsPost(body, staffCtx) {
         existing_treatments: parseInt(r.existingTreatments) || 0,
         task_complete: !!r.taskComplete,
         prep_complete: !!r.prepComplete,
-        notes: r.notes || ''
+        notes: r.notes || '',
+        recorder: r.recorder || ''
       }));
       if (body.replace) {
         await supabase.from('daily_reports').delete().neq('id', 0);
