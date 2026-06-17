@@ -26,20 +26,31 @@
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 
     <!-- Recharts Dependencies -->
-    <script src="https://unpkg.com/prop-types/prop-types.min.js"></script>
+    <!-- バージョン固定: 未固定 CDN はメジャー更新で突然壊れるため避ける -->
+    <script src="https://unpkg.com/prop-types@15.8.1/prop-types.min.js"></script>
     <script src="https://unpkg.com/recharts@2.12.7/umd/Recharts.js"></script>
 
     <!-- Babel (for JSX) -->
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- ⚠️ バージョンを固定する。@latest にしないこと。
+         Babel 8 で @babel/preset-react の既定 JSX runtime が classic →
+         automatic に変わり、ブラウザ内変換の出力に
+         `import { jsx } from "react/jsx-runtime"` が注入される。
+         この import を通常 <script>（非 module）として実行すると
+         "Cannot use import statement outside a module" で全停止し、
+         React がマウントできず #loading-indicator のまま固まる。
+         → classic runtime のままの 7.x に固定する。 -->
+    <script src="https://unpkg.com/@babel/standalone@7.29.7/babel.min.js"></script>
 
     <!-- Lucide Icons -->
-    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- @latest は禁止: 新バージョンでアイコン名が変わり消える事故があった。固定する -->
+    <script src="https://unpkg.com/lucide@1.20.0"></script>
 
     <!-- QR Code Generator -->
     <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.0/build/qrcode.min.js"></script>
 
     <!-- Chart.js (for Treatment Report radar chart) -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- バージョン固定: 未固定だと chart.js のメジャー更新で破損しうる -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1"></script>
     <!-- html2canvas (for Treatment Report screenshot) -->
     <script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
 
