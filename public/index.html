@@ -6502,6 +6502,325 @@
         };
 
         // ========================================
+        // 月次実績ビュー（日報を暦月で集計し、店舗別・スタッフ別の契約数/契約率を表示）
+        // ========================================
+        // ダッシュボードの集計は「直近N日」のローリング窓だが、こちらは
+        // 特定の暦月（YYYY-MM, ローカル日付基準）に絞り込んで店舗ごと・
+        // スタッフごとの新規/契約/契約率を一覧する。データは reportData
+        // （全期間取得済み）をクライアント側で絞り込むため API 変更は不要。
+        const MonthlyReportView = ({ reportData, allowedStoreNames, activeStoreId, setActiveStoreId, memberData }) => {
+            // 店舗タブ(activeStoreId=店舗ID)を、日報の store（店舗名）フィルタに変換
+            const dashStores = (memberData?.stores && memberData.stores.length > 0) ? memberData.stores : (serverStores || []);
+            const selectedStoreName = (activeStoreId && activeStoreId !== 'all')
+                ? ((dashStores.find(s => s.id === activeStoreId) || {}).name || null)
+                : 'all';
+
+            // ローカル日付から YYYY-MM を作る（ヘッダー・本日判定と基準を揃える）
+            const ymOf = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+            const [month, setMonth] = useState(() => ymOf(new Date()));
+
+            // 媒体（チャネル）定義。ダッシュボードと同一。
+            const channels = [
+                { name: 'HPB',  short: 'HPB',  newKey: 'hpbNew',      contractKey: 'hpbContract',      color: '#f97316' },
+                { name: 'Meta', short: 'Meta', newKey: 'metaNew',     contractKey: 'metaContract',     color: '#3b82f6' },
+                { name: '紹介', short: '紹介', newKey: 'referralNew', contractKey: 'referralContract', color: '#22c55e' },
+                { name: '割引集客', short: '割引', newKey: 'discountNew', contractKey: 'discountContract', color: '#a855f7' },
+            ];
+
+            // データが存在する月の一覧（降順）。当月は常に含める。
+            const availableMonths = useMemo(() => {
+                const set = new Set();
+                (reportData.reports || []).forEach(r => {
+                    if (!r.timestamp) return;
+                    set.add(ymOf(new Date(r.timestamp)));
+                });
+                set.add(ymOf(new Date()));
+                return Array.from(set).sort().reverse();
+            }, [reportData.reports]);
+
+            // 選択月を±1ヶ月ずらす
+            const shiftMonth = (delta) => {
+                const [y, m] = month.split('-').map(Number);
+                const d = new Date(y, (m - 1) + delta, 1);
+                setMonth(ymOf(d));
+            };
+            const monthLabel = (() => {
+                const [y, m] = month.split('-');
+                return `${y}年${Number(m)}月`;
+            })();
+
+            // 空の集計行を作る
+            const emptyAgg = () => ({
+                hpbNew: 0, hpbContract: 0, metaNew: 0, metaContract: 0,
+                referralNew: 0, referralContract: 0, discountNew: 0, discountContract: 0,
+                treatments: 0, totalNew: 0, totalContract: 0, count: 0,
+            });
+            const addReport = (acc, r) => {
+                acc.hpbNew += r.hpbNew || 0;             acc.hpbContract += r.hpbContract || 0;
+                acc.metaNew += r.metaNew || 0;           acc.metaContract += r.metaContract || 0;
+                acc.referralNew += r.referralNew || 0;   acc.referralContract += r.referralContract || 0;
+                acc.discountNew += r.discountNew || 0;   acc.discountContract += r.discountContract || 0;
+                acc.treatments += r.existingTreatments || 0;
+                acc.totalNew = acc.hpbNew + acc.metaNew + acc.referralNew + acc.discountNew;
+                acc.totalContract = acc.hpbContract + acc.metaContract + acc.referralContract + acc.discountContract;
+                acc.count += 1;
+            };
+            const rateOf = (a) => a.totalNew > 0 ? (a.totalContract / a.totalNew * 100) : 0;
+
+            // 選択月・店舗スコープで店舗別・スタッフ別を集計
+            const data = useMemo(() => {
+                let filtered = reportData.reports || [];
+                // 権限のある店舗のみ（スタッフ・店舗管理者モード）
+                if (allowedStoreNames) filtered = filtered.filter(r => allowedStoreNames.includes(r.store));
+                if (selectedStoreName && selectedStoreName !== 'all') filtered = filtered.filter(r => r.store === selectedStoreName);
+                // 選択月（ローカル日付基準）に絞り込む
+                filtered = filtered.filter(r => r.timestamp && ymOf(new Date(r.timestamp)) === month);
+
+                // 店舗別
+                const storeMap = new Map();
+                // スタッフ別（集計キー優先: staffId → recorder → 未記入）
+                const staffMap = new Map();
+                for (const r of filtered) {
+                    // --- 店舗別 ---
+                    if (!storeMap.has(r.store)) storeMap.set(r.store, { store: r.store, ...emptyAgg() });
+                    addReport(storeMap.get(r.store), r);
+
+                    // --- スタッフ別 ---
+                    let key, name, linked;
+                    if (r.staffId) {
+                        key = 'sid:' + r.staffId;
+                        name = (r.staffName && String(r.staffName).trim())
+                            || (r.recorder && String(r.recorder).trim()) || '不明';
+                        linked = true;
+                    } else if (r.recorder && String(r.recorder).trim()) {
+                        key = 'name:' + String(r.recorder).trim();
+                        name = String(r.recorder).trim();
+                        linked = false;
+                    } else {
+                        key = 'unrecorded'; name = '未記入'; linked = false;
+                    }
+                    if (!staffMap.has(key)) staffMap.set(key, { key, name, linked, ...emptyAgg() });
+                    addReport(staffMap.get(key), r);
+                }
+
+                const byStore = Array.from(storeMap.values())
+                    .map(s => ({ ...s, rate: rateOf(s) }))
+                    .sort((a, b) => b.totalContract - a.totalContract || b.totalNew - a.totalNew);
+                const byStaff = Array.from(staffMap.values())
+                    .map(s => ({ ...s, rate: rateOf(s) }))
+                    .sort((a, b) => {
+                        if (a.name === '未記入') return 1;
+                        if (b.name === '未記入') return -1;
+                        return b.totalContract - a.totalContract || b.totalNew - a.totalNew;
+                    });
+
+                const totals = emptyAgg();
+                filtered.forEach(r => addReport(totals, r));
+                const totalRate = rateOf(totals);
+                const maxStoreContract = byStore.reduce((m, s) => Math.max(m, s.totalContract), 0);
+
+                return {
+                    byStore, byStaff, totals, totalRate, maxStoreContract,
+                    reportCount: filtered.length, storeCount: byStore.length,
+                };
+            }, [reportData.reports, month, selectedStoreName, allowedStoreNames]);
+
+            const rateColor = (rate) => rate >= 50 ? 'text-emerald-600' : rate >= 30 ? 'text-amber-600' : 'text-slate-500';
+            const canSeeStaff = currentAccess?.role !== 'staff';
+
+            // 店舗別・スタッフ別で共通の媒体別テーブル
+            const BreakdownTable = ({ rows, labelHead, showLink }) => (
+                <div className="overflow-x-auto">
+                    <table className="w-full text-xs whitespace-nowrap">
+                        <thead>
+                            <tr className="border-b border-slate-200 text-slate-500">
+                                <th className="text-left p-1.5 font-semibold sticky left-0 bg-white">{labelHead}</th>
+                                <th className="text-right p-1.5 font-semibold">HPB新</th>
+                                <th className="text-right p-1.5 font-semibold">HPB契</th>
+                                <th className="text-right p-1.5 font-semibold">Meta新</th>
+                                <th className="text-right p-1.5 font-semibold">Meta契</th>
+                                <th className="text-right p-1.5 font-semibold">紹介新</th>
+                                <th className="text-right p-1.5 font-semibold">紹介契</th>
+                                <th className="text-right p-1.5 font-semibold">割引新</th>
+                                <th className="text-right p-1.5 font-semibold">割引契</th>
+                                <th className="text-right p-1.5 font-semibold">新規計</th>
+                                <th className="text-right p-1.5 font-bold text-sise-700">契約計</th>
+                                <th className="text-right p-1.5 font-bold text-sise-700">契約率</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {rows.map(s => (
+                                <tr key={s.key || s.store} className={`border-b border-slate-50 ${s.name === '未記入' ? 'bg-slate-50/50 text-slate-400 italic' : ''}`}>
+                                    <td className="p-1.5 font-medium sticky left-0 bg-white">
+                                        {s.name || s.store}
+                                        {showLink && !s.linked && s.name !== '未記入' && (
+                                            <span className="ml-1 text-amber-500" title="スタッフ未紐付け（recorder名で集計。日報一覧から手動アサイン推奨）">*</span>
+                                        )}
+                                    </td>
+                                    <td className="text-right p-1.5">{s.hpbNew || ''}</td>
+                                    <td className="text-right p-1.5">{s.hpbContract || ''}</td>
+                                    <td className="text-right p-1.5">{s.metaNew || ''}</td>
+                                    <td className="text-right p-1.5">{s.metaContract || ''}</td>
+                                    <td className="text-right p-1.5">{s.referralNew || ''}</td>
+                                    <td className="text-right p-1.5">{s.referralContract || ''}</td>
+                                    <td className="text-right p-1.5">{s.discountNew || ''}</td>
+                                    <td className="text-right p-1.5">{s.discountContract || ''}</td>
+                                    <td className="text-right p-1.5 font-semibold">{s.totalNew || ''}</td>
+                                    <td className="text-right p-1.5 font-bold text-sise-700">{s.totalContract || ''}</td>
+                                    <td className={`text-right p-1.5 font-bold ${s.totalNew > 0 ? rateColor(s.rate) : 'text-slate-300'}`}>
+                                        {s.totalNew > 0 ? `${s.rate.toFixed(1)}%` : '—'}
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                        {rows.length > 0 && (
+                            <tfoot>
+                                <tr className="border-t-2 border-slate-200 font-bold text-slate-700">
+                                    <td className="p-1.5 sticky left-0 bg-white">合計</td>
+                                    <td className="text-right p-1.5">{data.totals.hpbNew || ''}</td>
+                                    <td className="text-right p-1.5">{data.totals.hpbContract || ''}</td>
+                                    <td className="text-right p-1.5">{data.totals.metaNew || ''}</td>
+                                    <td className="text-right p-1.5">{data.totals.metaContract || ''}</td>
+                                    <td className="text-right p-1.5">{data.totals.referralNew || ''}</td>
+                                    <td className="text-right p-1.5">{data.totals.referralContract || ''}</td>
+                                    <td className="text-right p-1.5">{data.totals.discountNew || ''}</td>
+                                    <td className="text-right p-1.5">{data.totals.discountContract || ''}</td>
+                                    <td className="text-right p-1.5">{data.totals.totalNew || ''}</td>
+                                    <td className="text-right p-1.5 text-sise-700">{data.totals.totalContract || ''}</td>
+                                    <td className={`text-right p-1.5 ${data.totals.totalNew > 0 ? rateColor(data.totalRate) : 'text-slate-300'}`}>
+                                        {data.totals.totalNew > 0 ? `${data.totalRate.toFixed(1)}%` : '—'}
+                                    </td>
+                                </tr>
+                            </tfoot>
+                        )}
+                    </table>
+                </div>
+            );
+
+            return (
+                <div className="space-y-4 md:space-y-5">
+                    {/* フィルターバー: 店舗 + 月ナビゲーション */}
+                    <Card className="!p-3 md:!p-4">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                            <div className="flex items-center gap-2">
+                                <Icon name="building-2" size={16} className="text-sise-500 hide-mobile" />
+                                <select value={activeStoreId} onChange={(e) => setActiveStoreId(e.target.value)}
+                                    className="px-3 py-2 border border-slate-200 rounded-xl text-sm focus:border-sise-500 focus:ring-2 focus:ring-sise-500/20 outline-none bg-white/80">
+                                    <option value="all">全店舗</option>
+                                    {(currentAccess ? dashStores.filter(s => currentAccess.storeIds.includes(s.id)) : dashStores).map(s =>
+                                        <option key={s.id} value={s.id}>{s.name}</option>
+                                    )}
+                                </select>
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                                <button onClick={() => shiftMonth(-1)} title="前の月"
+                                    className="w-9 h-9 flex items-center justify-center rounded-xl bg-slate-100/80 text-slate-500 hover:bg-slate-200/80 hover:text-slate-700 transition-all">
+                                    <Icon name="chevron-left" size={16} />
+                                </button>
+                                <select value={month} onChange={(e) => setMonth(e.target.value)}
+                                    className="px-3 py-2 border border-slate-200 rounded-xl text-sm font-semibold focus:border-sise-500 focus:ring-2 focus:ring-sise-500/20 outline-none bg-white/80 min-w-[7.5rem]">
+                                    {availableMonths.map(m => {
+                                        const [y, mm] = m.split('-');
+                                        return <option key={m} value={m}>{`${y}年${Number(mm)}月`}</option>;
+                                    })}
+                                </select>
+                                <button onClick={() => shiftMonth(1)} title="次の月"
+                                    className="w-9 h-9 flex items-center justify-center rounded-xl bg-slate-100/80 text-slate-500 hover:bg-slate-200/80 hover:text-slate-700 transition-all">
+                                    <Icon name="chevron-right" size={16} />
+                                </button>
+                            </div>
+                        </div>
+                    </Card>
+
+                    {/* 月次サマリー KPI */}
+                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 md:gap-4">
+                        <KpiCard index={0} title="新規来店数" value={formatNumber(data.totals.totalNew)}
+                            subValue={`${monthLabel}・全チャネル`} trend={null} icon="user-check"
+                            gradientFrom="from-orange-400" gradientTo="to-orange-600" accentColor="#f97316" loading={reportData.loading} />
+                        <KpiCard index={1} title="契約数" value={formatNumber(data.totals.totalContract)}
+                            subValue="新規契約" trend={null} icon="file-signature"
+                            gradientFrom="from-violet-400" gradientTo="to-violet-600" accentColor="#8b5cf6" loading={reportData.loading} />
+                        <KpiCard index={2} title="契約率" value={data.totals.totalNew > 0 ? formatPercent(data.totalRate) : '—'}
+                            subValue="新規 → 契約" trend={null} icon="target"
+                            gradientFrom="from-teal-400" gradientTo="to-teal-600" accentColor="#14b8a6" loading={reportData.loading} />
+                        <KpiCard index={3} title="日報件数" value={formatNumber(data.reportCount)}
+                            subValue={`${data.storeCount}店舗`} trend={null} icon="clipboard-list"
+                            gradientFrom="from-sise-400" gradientTo="to-sise-600" accentColor="#33a065" loading={reportData.loading} />
+                    </div>
+
+                    {reportData.loading && data.reportCount === 0 ? (
+                        <Card><div className="p-8 text-center text-slate-400 text-sm">読み込み中...</div></Card>
+                    ) : data.reportCount === 0 ? (
+                        <Card>
+                            <div className="p-10 text-center">
+                                <Icon name="calendar" size={40} className="text-slate-300 mx-auto mb-3" />
+                                <p className="text-sm text-slate-500">{monthLabel}の日報データはありません</p>
+                                <p className="text-xs text-slate-400 mt-1">上部の月セレクタで別の月を選択してください</p>
+                            </div>
+                        </Card>
+                    ) : (
+                        <>
+                            {/* 店舗別 契約率ランキング（バー） */}
+                            {data.byStore.length > 0 && (
+                                <Card className="!p-3 md:!p-5">
+                                    <div className="flex items-center justify-between mb-3">
+                                        <div className="flex items-center gap-2">
+                                            <Icon name="trophy" size={18} className="text-amber-500" />
+                                            <h3 className="text-sm md:text-base font-semibold text-slate-800">店舗別 契約率</h3>
+                                        </div>
+                                        <span className="text-xs text-slate-400">{monthLabel}</span>
+                                    </div>
+                                    <div className="space-y-2.5">
+                                        {data.byStore.map((s, i) => (
+                                            <div key={s.store} className="flex items-center gap-2">
+                                                <div className={`w-6 h-6 rounded-lg flex items-center justify-center text-[10px] font-bold text-white ${i === 0 ? 'bg-gradient-to-br from-amber-400 to-orange-500' : i === 1 ? 'bg-gradient-to-br from-slate-300 to-slate-400' : i === 2 ? 'bg-gradient-to-br from-amber-600 to-amber-700' : 'bg-slate-200 text-slate-500'}`}>
+                                                    {i + 1}
+                                                </div>
+                                                <div className="w-20 md:w-32 truncate text-xs md:text-sm font-medium text-slate-700">{s.store}</div>
+                                                <div className="flex-1 min-w-0 h-2.5 bg-slate-100 rounded overflow-hidden">
+                                                    <div className="h-2.5 rounded" style={{ width: `${Math.min(s.rate, 100)}%`, background: s.rate >= 50 ? 'linear-gradient(90deg,#34d399,#059669)' : s.rate >= 30 ? 'linear-gradient(90deg,#fbbf24,#d97706)' : 'linear-gradient(90deg,#cbd5e1,#94a3b8)' }} />
+                                                </div>
+                                                <div className={`w-14 text-right text-xs font-bold ${s.totalNew > 0 ? rateColor(s.rate) : 'text-slate-300'}`}>
+                                                    {s.totalNew > 0 ? `${s.rate.toFixed(1)}%` : '—'}
+                                                </div>
+                                                <div className="w-20 text-right text-[10px] text-slate-400 hidden md:block">契約{s.totalContract}/新規{s.totalNew}</div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </Card>
+                            )}
+
+                            {/* 店舗別 媒体内訳テーブル */}
+                            <Card className="!p-3 md:!p-5">
+                                <div className="flex items-center gap-2 mb-3">
+                                    <Icon name="building-2" size={18} className="text-sise-500" />
+                                    <h3 className="text-sm md:text-base font-semibold text-slate-800">店舗別実績</h3>
+                                    <span className="text-xs text-slate-400 ml-auto">{monthLabel}・媒体別</span>
+                                </div>
+                                <BreakdownTable rows={data.byStore} labelHead="店舗" showLink={false} />
+                            </Card>
+
+                            {/* スタッフ別 媒体内訳テーブル（スタッフURLでは非表示） */}
+                            {canSeeStaff && data.byStaff.length > 0 && (
+                                <Card className="!p-3 md:!p-5">
+                                    <div className="flex items-center gap-2 mb-3">
+                                        <Icon name="user" size={18} className="text-sise-500" />
+                                        <h3 className="text-sm md:text-base font-semibold text-slate-800">スタッフ別実績</h3>
+                                        <span className="text-xs text-slate-400 ml-auto">{monthLabel}・媒体別</span>
+                                    </div>
+                                    <BreakdownTable rows={data.byStaff} labelHead="スタッフ" showLink={true} />
+                                    {data.byStaff.some(s => !s.linked && s.name !== '未記入') && (
+                                        <p className="text-[10px] text-slate-400 mt-2">* スタッフ未紐付け（recorder名で集計）。日報一覧から手動アサインできます。</p>
+                                    )}
+                                </Card>
+                            )}
+                        </>
+                    )}
+                </div>
+            );
+        };
+
+        // ========================================
         // 日報一覧ビュー
         // ========================================
 
@@ -23276,6 +23595,7 @@
                 ]},
                 { section: '業務管理', items: [
                     { id: 'reports', label: '日報一覧', icon: 'clipboard-list' },
+                    { id: 'monthly', label: '月次実績', icon: 'calendar-check' },
                     { id: 'attendance', label: '勤怠管理', icon: 'clock' },
                 ]},
                 ...(!isStaffMode || (currentAccess && currentAccess.role === 'headquarter') ? [{ section: '管理者', items: [
@@ -23293,6 +23613,7 @@
                 { id: 'posture', label: '姿勢分析', icon: 'scan', mobileLabel: '姿勢' },
                 { id: 'line', label: 'LINEチャット', icon: 'message-circle', mobileLabel: 'LINE' },
                 { id: 'reports', label: '日報一覧', icon: 'clipboard-list', mobileLabel: '日報' },
+                { id: 'monthly', label: '月次実績', icon: 'calendar-check', mobileLabel: '月次' },
                 { id: 'members', label: '会員管理', icon: 'users', mobileLabel: '会員' },
                 { id: 'attendance', label: '勤怠管理', icon: 'clock', mobileLabel: '勤怠' },
                 { id: 'usage', label: '利用管理', icon: 'list-checks', mobileLabel: '利用' },
@@ -23313,6 +23634,8 @@
                             manualMembersHook={manualMembersHook}
                             onStartFlow={() => setFlowMode(true)}
                         />;
+                    case 'monthly':
+                        return <MonthlyReportView reportData={reportData} allowedStoreNames={allowedStoreNames} activeStoreId={activeStoreId} setActiveStoreId={setActiveStoreId} memberData={memberData} />;
                     case 'reports':
                         return <DailyReportListView reportData={reportData} allowedStoreNames={allowedStoreNames} memberData={memberData} refreshReportData={refreshReportData} />;
                     case 'members':
