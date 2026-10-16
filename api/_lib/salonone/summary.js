@@ -215,6 +215,24 @@ export async function buildSummary(staffCtx, { month, storeId, refresh }) {
   };
 }
 
+/**
+ * 1店舗の日別の現金売上（出納帳への取り込み用）。
+ * 権限の確認は buildSummary と同じ（見られない店舗は AccessError）。
+ * @returns {{ mode:string, asOf:string, linked:boolean, days:Object<string,number> }}
+ */
+export async function dailyCashSales(staffCtx, { storeId, months, refresh = false }) {
+  const out = { mode: null, asOf: null, linked: false, days: {} };
+  for (const month of months) {
+    const s = await buildSummary(staffCtx, { month, storeId, refresh });
+    out.mode = s.mode;
+    out.asOf = s.asOf;
+    const row = s.stores.find((x) => x.storeId === storeId);
+    out.linked = !!(row && row.linked);
+    for (const d of s.store.daily || []) out.days[d.date] = n(d.cashSales);
+  }
+  return out;
+}
+
 export async function buildTrend(staffCtx, { months: count = 6, endMonth, storeId, refresh }) {
   const { appCtx, master, mapping, scope } = await prepare(staffCtx, { refresh });
   const selectedStoreIds = resolveSelection(scope, storeId);

@@ -13,9 +13,9 @@ import { dayOfMonth } from '../../../shared/dates.js';
 
 export const INCENTIVE_META = {
   sales: { icon: 'banknote', title: '施術消化売上' },
-  retention: { icon: 'repeat', title: '継続率' },
+  retention: { icon: 'repeat', title: '継続率', short: '継続率（店舗）' },
   newContract: { icon: 'user-plus', title: '新規契約' },
-  sns: { icon: 'smartphone', title: 'Minimo・Threads・Instagram' },
+  sns: { icon: 'smartphone', title: 'Minimo・Threads・Instagram', short: 'SNS集客' },
   referral: { icon: 'users', title: '紹介' },
 };
 
@@ -378,17 +378,6 @@ export function PeriodSummary({ period, staffPeriod, className = '' }) {
           </div>
         ))}
       </div>
-    </div>
-  );
-}
-
-/** 制度開始前（2026年10月以前）の注意 */
-export function PreviewNote({ period, rules }) {
-  if (!period || !period.preview) return null;
-  return (
-    <div className="mb-4 flex items-start gap-2 rounded-xl border border-gold-200 bg-gold-50 px-3.5 py-2.5 text-[13px] text-gold-800 dark:border-gold-500/30 dark:bg-gold-500/10 dark:text-gold-100">
-      <Icon name="info" size={16} className="mt-0.5" />
-      <span>インセンティブ制度は {Number(rules.startMonth.slice(0, 4))}年{Number(rules.startMonth.slice(5))}月1日開始です。この月の金額は制度を当てはめた<strong>試算</strong>です。</span>
     </div>
   );
 }

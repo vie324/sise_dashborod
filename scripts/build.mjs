@@ -7,6 +7,7 @@
 // 1. src/ 内で使っているアイコン名（'chevron-down' など）を拾い、
 //    lucide から必要な分だけ import する src/ui/icons.generated.js を作る
 // 2. esbuild で src/main.jsx をバンドル → public/assets/app.js
+//    （施術ツールなど重い画面は開いた時に読む別ファイル public/assets/chunks/ に分ける）
 // 3. Tailwind CLI で src/styles/app.css をビルド → public/assets/app.css
 //
 // Vercel では vercel.json の buildCommand から実行される。
@@ -96,16 +97,23 @@ export function generateIcons() {
 // 2. JS
 // ------------------------------------------------------------
 const esbuildOptions = {
-  entryPoints: [path.join(srcDir, 'main.jsx')],
+  entryPoints: { app: path.join(srcDir, 'main.jsx') },
   bundle: true,
-  format: 'iife',
+  // ES モジュール + 分割: 最初に読むのはホーム・インセンティブ・目標などの共通部分だけにして、
+  // 施術ツール（画像化ライブラリ込み）・出納帳・設定は開いた時に読む
+  format: 'esm',
+  splitting: true,
   target: ['es2020', 'safari15', 'chrome90', 'firefox90'],
-  outfile: path.join(outDir, 'app.js'),
+  outdir: outDir,
+  entryNames: '[name]',
+  chunkNames: 'chunks/[name]-[hash]',
   jsx: 'automatic',
   loader: { '.js': 'jsx' },
   minify: !watch,
   sourcemap: true,
   legalComments: 'none',
+  // 日本語を \uXXXX にせずそのまま出す（サイズが小さくなる）
+  charset: 'utf8',
   define: { 'process.env.NODE_ENV': JSON.stringify(watch ? 'development' : 'production') },
   logLevel: 'info',
 };
@@ -117,6 +125,8 @@ const tailwindBin = path.join(root, 'node_modules/.bin/tailwindcss');
 const tailwindArgs = ['-c', path.join(root, 'tailwind.config.cjs'), '-i', path.join(srcDir, 'styles/app.css'), '-o', path.join(outDir, 'app.css')];
 
 fs.mkdirSync(outDir, { recursive: true });
+// 古い分割ファイルが溜まらないよう、ビルドのたびに作り直す
+fs.rmSync(path.join(outDir, 'chunks'), { recursive: true, force: true });
 const iconCount = generateIcons();
 console.log(`icons: ${iconCount}`);
 

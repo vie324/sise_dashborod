@@ -11,7 +11,7 @@
 //  - 外部オリジン（Google Fonts, MediaPipe CDN など）は扱わない
 // ==============================================
 
-const CACHE_NAME = 'sise-dash-v4';
+const CACHE_NAME = 'sise-dash-v5';
 // /manifest.json は token 込みで動的に応答するため、CORE_ASSETS から外す
 // （v2 まで間違えてキャッシュしていた古いマニフェストがあれば、CACHE_NAME
 //  バージョンアップ時の activate cleanup で削除される）。

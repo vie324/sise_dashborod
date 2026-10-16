@@ -8,8 +8,9 @@ import { yen } from '../../lib/format.js';
 import { ScopeBar, DataWarnings } from '../shared/ScopeBar.jsx';
 import StaffDetail from './StaffDetail.jsx';
 import RulesView from './RulesView.jsx';
-import { INCENTIVE_META, PreviewNote } from './parts.jsx';
+import { INCENTIVE_META } from './parts.jsx';
 import { INCENTIVE_RULES } from '../../../shared/incentive-rules.js';
+import { takeFocusIncentive, scrollToIncentive } from './focus.js';
 
 const ITEM_KEYS = ['sales', 'retention', 'newContract', 'sns', 'referral'];
 const goalOf = (goals, row) => (goals && goals.staff && row.staffId && goals.staff[row.staffId] ? goals.staff[row.staffId].consumedSales : null);
@@ -92,8 +93,16 @@ export default function IncentivesPage() {
   const data = summary.shown;
   const manager = isManagerOrAbove();
   const hasMe = !!(data && data.me);
-  const [tab, setTab] = useState(manager ? 'staff' : 'mine');
+  // ホームのミッションから来た時は「あなたの内訳」の該当カードを開く
+  const [focus, setFocus] = useState(() => takeFocusIncentive());
+  const [tab, setTab] = useState(manager && !focus ? 'staff' : 'mine');
   const [open, setOpen] = useState(null);
+
+  useEffect(() => {
+    if (!focus || tab !== 'mine' || !data || !data.me) return undefined;
+    const t = setTimeout(() => { scrollToIncentive(focus); setFocus(null); }, 80);
+    return () => clearTimeout(t);
+  }, [focus, tab, data]);
 
   useEffect(() => {
     if (tab === 'mine' && data && !data.me && manager) setTab('staff');
@@ -114,8 +123,7 @@ export default function IncentivesPage() {
       ) : (
         <>
           <ScopeBar data={data} />
-          <DataWarnings data={data} error={summary.error} />
-          {data ? <PreviewNote period={data.period} rules={data.rules} /> : null}
+          <DataWarnings data={data} error={summary.error} preview />
           {!data ? <Skeleton className="h-[360px] rounded-2xl" /> : (
             <div className={cx('transition-opacity', summary.stale || summary.loading ? 'opacity-60' : '')}>
               {tab === 'staff' ? (
@@ -124,7 +132,7 @@ export default function IncentivesPage() {
                   <StaffTable summary={data} onOpen={setOpen} />
                 </>
               ) : data.me ? (
-                <StaffDetail row={data.me} summary={data} goal={goalOf(goals.shown, data.me)} />
+                <StaffDetail row={data.me} summary={data} goal={goalOf(goals.shown, data.me)} anchors />
               ) : (
                 <Card><EmptyState icon="user-x" title="あなたの実績を表示できません" message="SalonOne のスタッフと連携されていません。管理者に連携を依頼してください。" /></Card>
               )}

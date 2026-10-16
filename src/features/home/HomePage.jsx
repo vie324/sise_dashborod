@@ -1,9 +1,9 @@
 import { useMemo, useState } from 'react';
 import { useApp } from '../../app/state.jsx';
-import { useSummary, useGoals } from '../../lib/hooks.js';
+import { useSummary, useGoals, useTrend } from '../../lib/hooks.js';
 import { currentAccess, role } from '../../lib/access.js';
 import { Card, Modal, PageHeader, Skeleton, EmptyState, Badge, cx } from '../../ui/primitives.jsx';
-import { StatTile, HeroFigure, StatusPill, Meter } from '../../ui/stats.jsx';
+import { StatTile, StatusPill, Meter } from '../../ui/stats.jsx';
 import { CumulativeChart, ChartTable } from '../../ui/charts.jsx';
 import Icon from '../../ui/Icon.jsx';
 import { yen, yenShort, num, pct, changeRate } from '../../lib/format.js';
@@ -11,10 +11,8 @@ import { forecastMonthEnd } from '../../../shared/metrics.js';
 import { dayOfMonth, formatMonthJa } from '../../../shared/dates.js';
 import { ScopeBar, DataWarnings } from '../shared/ScopeBar.jsx';
 import StaffDetail from '../incentives/StaffDetail.jsx';
-import {
-  IncentiveBreakdown, SalesTierCard, NewContractCard, SnsCard, ReferralCard, RetentionCard, PeriodSummary, PreviewNote,
-  ChartLegend, itemStatus, NextActions,
-} from '../incentives/parts.jsx';
+import { ChartLegend, itemStatus } from '../incentives/parts.jsx';
+import MyHome from './MyHome.jsx';
 import { navigate } from '../../app/router.js';
 
 function greeting() {
@@ -31,50 +29,6 @@ function LoadingBlock() {
         {[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-[112px] rounded-2xl" />)}
       </div>
       <Skeleton className="h-[320px] rounded-2xl" />
-    </div>
-  );
-}
-
-// ============================================================
-// スタッフ本人のホーム
-// ============================================================
-function MyHome({ summary, goals }) {
-  const me = summary.me;
-  if (!me) {
-    return (
-      <Card>
-        <EmptyState icon="user-x" title="あなたの実績を表示できません"
-          message="SalonOne のスタッフと連携されていないか、この店舗に所属していません。管理者に「設定 > SalonOne連携」でスタッフの対応付けを依頼してください。" />
-      </Card>
-    );
-  }
-  const goal = goals && goals.staff && goals.staff[me.staffId] ? goals.staff[me.staffId].consumedSales : null;
-  const items = Object.fromEntries(me.incentive.items.map((i) => [i.key, i]));
-  return (
-    <div className="space-y-4">
-      <Card>
-        <div className="grid gap-5 md:grid-cols-[1fr_1.15fr] md:items-start">
-          <div>
-            <HeroFigure
-              label={summary.period.preview ? '今月のインセンティブ（試算）' : '今月のインセンティブ見込み'}
-              value={yen(me.incentive.total)}
-              badge={<Badge tone="gold" icon="award">{formatMonthJa(summary.month)}</Badge>}
-            />
-            <PeriodSummary className="mt-4" period={summary.period} staffPeriod={me.period} />
-            <NextActions className="mt-4" incentive={me.incentive} rules={summary.rules} />
-          </div>
-          <IncentiveBreakdown incentive={me.incentive} />
-        </div>
-      </Card>
-      <SalesTierCard item={items.sales} daily={me.daily} progress={summary.progress} rules={summary.rules} goal={goal} />
-      <div className="grid gap-4 lg:grid-cols-2">
-        <NewContractCard item={items.newContract} rules={summary.rules} />
-        <div className="space-y-4">
-          <SnsCard item={items.sns} rules={summary.rules} />
-          <ReferralCard item={items.referral} rules={summary.rules} />
-        </div>
-      </div>
-      <RetentionCard item={items.retention} rules={summary.rules} storeName={me.storeName} />
     </div>
   );
 }
@@ -153,24 +107,91 @@ function StoreTrendCard({ summary, storeGoal }) {
   );
 }
 
-function StoreIncentiveCard({ summary }) {
-  const totalMonth = summary.staff.reduce((a, r) => a + r.incentive.total, 0);
-  const totalPeriod = summary.staff.reduce((a, r) => a + r.period.total, 0);
-  const achievers = summary.staff.filter((r) => r.incentive.items[0].achieved).length;
+/** 上位 3名はメダルの色、それ以外は番号 */
+function RankNumber({ index }) {
+  const medal = ['from-gold-300 to-gold-500 text-white', 'from-[#d9dde1] to-[#a9b1b8] text-white', 'from-[#e3b48a] to-[#b77a46] text-white'][index];
+  if (medal) {
+    return (
+      <span className={cx('flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gradient-to-br text-xs font-bold shadow-card num', medal)}
+        aria-label={`${index + 1}位`}>{index + 1}</span>
+    );
+  }
+  return <span className="flex h-7 w-7 shrink-0 items-center justify-center text-xs font-semibold text-muted num" aria-label={`${index + 1}位`}>{index + 1}</span>;
+}
+
+function RankChip({ item }) {
+  return item.tierIndex >= 0
+    ? <Badge tone="gold" icon="award">ランク{item.tierIndex + 1}</Badge>
+    : <Badge tone="neutral">ランク外</Badge>;
+}
+
+/**
+ * チームの状況: 見込み合計・ランクの分布・「あと少し」のスタッフ。
+ * 店舗責任者が声をかける相手が一目で分かるようにする。
+ */
+function TeamStatusCard({ summary, onOpen }) {
+  const rows = summary.staff;
+  const tiers = summary.rules.sales.tiers;
+  const totalMonth = rows.reduce((a, r) => a + r.incentive.total, 0);
+  const totalPeriod = rows.reduce((a, r) => a + r.period.total, 0);
+  const dist = [-1, ...tiers.map((_, i) => i)].map((ti) => ({ ti, count: rows.filter((r) => r.incentive.items[0].tierIndex === ti).length }));
+  const close = rows
+    .filter((r) => r.incentive.items[0].nextTier && r.incentive.items[0].nextTier.sessions <= 5)
+    .sort((a, b) => a.incentive.items[0].nextTier.gap - b.incentive.items[0].nextTier.gap)
+    .slice(0, 3);
   const single = summary.stores.length === 1 ? summary.stores[0] : null;
   return (
-    <Card title="インセンティブの状況" icon="award" subtitle={summary.period.preview ? '制度開始前の試算' : `支給期間 ${summary.period.label}`}>
+    <Card title="チームの状況" icon="users-round" subtitle={summary.period.preview ? '制度開始前の試算' : `支給期間 ${summary.period.label}`}
+      actions={<button type="button" onClick={() => navigate('/incentives')} className="inline-flex items-center gap-0.5 text-xs font-semibold text-brand-700 hover:underline dark:text-brand-300">内訳<Icon name="chevron-right" size={14} /></button>}>
       <div className="grid grid-cols-2 gap-3">
         <div>
           <div className="text-xs font-semibold text-ink-2">今月の見込み合計</div>
-          <div className="mt-1 text-2xl font-bold text-ink num">{yen(totalMonth)}</div>
+          <div className="mt-1 text-[22px] font-bold text-ink num">{yen(totalMonth)}</div>
         </div>
         <div>
-          <div className="text-xs font-semibold text-ink-2">期間の見込み合計</div>
-          <div className="mt-1 text-2xl font-bold text-ink num">{yen(totalPeriod)}</div>
+          <div className="text-xs font-semibold text-ink-2">支給期間の合計</div>
+          <div className="mt-1 text-[22px] font-bold text-ink num">{yen(totalPeriod)}</div>
         </div>
       </div>
-      <p className="mt-3 text-xs text-ink-2">施術消化売上のランク到達 <span className="font-semibold text-ink">{achievers}</span> / {summary.staff.length}名</p>
+
+      <div className="mt-4">
+        <div className="mb-1.5 text-xs font-semibold text-ink-2">施術消化売上のランク分布</div>
+        <div className="grid grid-cols-6 gap-1">
+          {dist.map((d) => (
+            <div key={d.ti} className={cx('rounded-lg px-1 py-1.5 text-center', d.count > 0 ? (d.ti >= 0 ? 'bg-gold-50 dark:bg-gold-500/15' : 'bg-surface-3') : 'bg-surface-2')}>
+              <div className={cx('text-[15px] font-bold leading-tight num', d.count > 0 ? 'text-ink' : 'text-muted')}>{d.count}</div>
+              <div className="text-[10px] leading-tight text-muted">{d.ti >= 0 ? `ランク${d.ti + 1}` : 'ランク外'}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="mt-4">
+        <div className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold text-ink-2">
+          <Icon name="flag" size={13} className="text-gold-600 dark:text-gold-300" />次のランクまであと少し
+        </div>
+        {close.length === 0 ? (
+          <p className="rounded-xl bg-surface-2 px-3 py-2.5 text-xs text-muted">あと 5回以内で次のランクに届くスタッフはいません</p>
+        ) : (
+          <ul className="space-y-1.5">
+            {close.map((r) => {
+              const nt = r.incentive.items[0].nextTier;
+              return (
+                <li key={r.key}>
+                  <button type="button" onClick={() => onOpen(r)} className="flex w-full items-center justify-between gap-2 rounded-xl border border-line px-3 py-2 text-left hover:bg-surface-2">
+                    <span className="min-w-0">
+                      <span className="block truncate text-[13px] font-semibold text-ink">{r.name}</span>
+                      <span className="block text-[11px] text-muted">あと{yen(nt.gap)}・約{nt.sessions}回</span>
+                    </span>
+                    <Badge tone="gold" icon="arrow-up-right">{yen(nt.amount)}へ</Badge>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+
       {single ? (
         <div className="mt-4 border-t border-line pt-3">
           <div className="mb-2 flex items-center justify-between">
@@ -193,10 +214,17 @@ function StoreIncentiveCard({ summary }) {
           </ul>
         </div>
       ) : null}
-      <button type="button" onClick={() => navigate('/incentives')} className="mt-4 inline-flex items-center gap-1 text-xs font-semibold text-brand-700 hover:underline dark:text-brand-300">
-        スタッフ別の内訳を見る<Icon name="chevron-right" size={14} />
-      </button>
     </Card>
+  );
+}
+
+function NextRankCell({ item }) {
+  if (!item.nextTier) return <Badge tone="good" icon="trophy">最上位</Badge>;
+  return (
+    <>
+      <div className="text-ink">{yen(item.nextTier.gap)}</div>
+      <div className="text-[11px] text-muted">約{item.nextTier.sessions}回で {yenShort(item.nextTier.amount)}</div>
+    </>
   );
 }
 
@@ -205,18 +233,19 @@ function StaffRanking({ summary, goals, onOpen }) {
   if (rows.length === 0) {
     return <Card title="スタッフ別" icon="users"><EmptyState compact icon="users" title="この範囲のスタッフ実績はまだありません" /></Card>;
   }
-  const maxSales = Math.max(1, ...rows.map((r) => r.metrics.consumedSales));
+  const goalOf = (r) => (goals && goals.staff && r.staffId && goals.staff[r.staffId] ? goals.staff[r.staffId].consumedSales : null);
   return (
-    <Card title="スタッフ別ランキング" icon="users" subtitle="施術消化売上の順。行をタップすると内訳を表示します" pad={false}>
-      <div className="scroll-x">
+    <Card title="スタッフ別ランキング" icon="trophy" subtitle="施術消化売上の順。選ぶとインセンティブの内訳を表示します" pad={false}>
+      {/* PC: 表 */}
+      <div className="scroll-x hidden md:block">
         <table className="data-table">
           <thead>
             <tr>
-              <th className="w-8 text-center">#</th>
+              <th className="w-12 text-center">順位</th>
               <th>スタッフ</th>
               <th className="text-right">施術消化売上</th>
-              <th className="hidden text-right md:table-cell">次のランクまで</th>
-              <th className="hidden text-right sm:table-cell">契約率（3経路）</th>
+              <th className="w-44">次のランクまで</th>
+              <th className="text-right">契約率（3経路）</th>
               <th className="text-right">今月見込み</th>
             </tr>
           </thead>
@@ -224,28 +253,27 @@ function StaffRanking({ summary, goals, onOpen }) {
             {rows.map((r, i) => {
               const sales = r.incentive.items[0];
               const nc = r.incentive.items[2];
-              const goal = goals && goals.staff && r.staffId && goals.staff[r.staffId] ? goals.staff[r.staffId].consumedSales : null;
+              const goal = goalOf(r);
               return (
                 <tr key={r.key} className="cursor-pointer hover:bg-surface-2" onClick={() => onOpen(r)}>
-                  <td className="text-center text-xs font-semibold text-muted num">{i + 1}</td>
+                  <td><div className="flex justify-center"><RankNumber index={i} /></div></td>
                   <td className="whitespace-nowrap">
                     <div className="flex items-center gap-2">
                       <span className="font-semibold text-ink">{r.name}</span>
+                      <RankChip item={sales} />
                       {!r.linked ? <Badge tone="warn" icon="link-2-off">未連携</Badge> : null}
                     </div>
-                    <div className="text-[11px] text-muted">{r.storeName}</div>
+                    <div className="text-[11px] text-muted">{r.storeName}{goal ? `・目標 ${yenShort(goal)}（${pct((r.metrics.consumedSales / goal) * 100, 0)}）` : ''}</div>
+                  </td>
+                  <td className="num-cell"><span className="font-semibold text-ink">{yen(r.metrics.consumedSales)}</span></td>
+                  <td>
+                    <Meter value={sales.current} max={sales.nextTier ? sales.nextTier.min : sales.current || 1} height={6}
+                      tone={sales.tierIndex >= 0 ? 'gold' : 'brand'} label={`${r.name}さんの次のランクまでの進み具合`} />
+                    <div className="mt-1 flex items-baseline justify-between gap-2 text-[11px] text-muted num">
+                      {sales.nextTier ? <><span>あと{yen(sales.nextTier.gap)}</span><span>約{sales.nextTier.sessions}回</span></> : <span className="text-ink-2">最上位ランク</span>}
+                    </div>
                   </td>
                   <td className="num-cell">
-                    <div className="font-semibold text-ink">{yen(r.metrics.consumedSales)}</div>
-                    <div className="ml-auto mt-1 h-1.5 w-24 overflow-hidden rounded-full bg-surface-3">
-                      <div className="h-full rounded-full bg-[var(--chart-sales)]" style={{ width: `${(r.metrics.consumedSales / maxSales) * 100}%` }} />
-                    </div>
-                    {goal ? <div className="mt-0.5 text-[10px] text-muted">目標 {yenShort(goal)}</div> : null}
-                  </td>
-                  <td className="hidden num-cell md:table-cell">
-                    {sales.nextTier ? <><div className="text-ink">{yen(sales.nextTier.gap)}</div><div className="text-[11px] text-muted">約{sales.nextTier.sessions}回</div></> : <Badge tone="good" icon="trophy">最上位</Badge>}
-                  </td>
-                  <td className="hidden num-cell sm:table-cell">
                     {nc.visits > 0 ? <><div className="text-ink">{pct(nc.ratePct)}</div><div className="text-[11px] text-muted">{nc.contracts}/{nc.visits}名</div></> : <span className="text-muted">—</span>}
                   </td>
                   <td className="num-cell"><span className="font-bold text-ink">{yen(r.incentive.total)}</span></td>
@@ -255,6 +283,37 @@ function StaffRanking({ summary, goals, onOpen }) {
           </tbody>
         </table>
       </div>
+      {/* スマホ: カード */}
+      <ul className="space-y-2 px-4 pb-4 md:hidden">
+        {rows.map((r, i) => {
+          const sales = r.incentive.items[0];
+          return (
+            <li key={r.key}>
+              <button type="button" onClick={() => onOpen(r)} className="flex w-full items-start gap-3 rounded-2xl border border-line p-3 text-left active:bg-surface-2">
+                <RankNumber index={i} />
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-center justify-between gap-2">
+                    <span className="flex min-w-0 items-center gap-1.5">
+                      <span className="truncate text-[14px] font-bold text-ink">{r.name}</span>
+                      <RankChip item={sales} />
+                    </span>
+                    <span className="shrink-0 text-[15px] font-bold text-ink num">{yen(r.incentive.total)}</span>
+                  </span>
+                  <span className="mt-0.5 flex items-center justify-between gap-2 text-[11px] text-muted">
+                    <span className="truncate">{r.storeName}{!r.linked ? '・未連携' : ''}</span>
+                    <span className="shrink-0 num">消化 {yen(r.metrics.consumedSales)}</span>
+                  </span>
+                  <Meter className="mt-2" value={sales.current} max={sales.nextTier ? sales.nextTier.min : sales.current || 1} height={6}
+                    tone={sales.tierIndex >= 0 ? 'gold' : 'brand'} label={`${r.name}さんの次のランクまでの進み具合`} />
+                  <span className="mt-1 block text-[11px] text-ink-2 num">
+                    {sales.nextTier ? `次のランクまで あと${yen(sales.nextTier.gap)}（約${sales.nextTier.sessions}回）` : '最上位ランクに到達'}
+                  </span>
+                </span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
     </Card>
   );
 }
@@ -263,7 +322,7 @@ function StoresTable({ summary }) {
   if (summary.stores.length < 2) return null;
   return (
     <Card title="店舗別" icon="store" pad={false}>
-      <div className="scroll-x">
+      <div className="scroll-x hidden md:block">
         <table className="data-table">
           <thead>
             <tr>
@@ -293,6 +352,24 @@ function StoresTable({ summary }) {
           </tbody>
         </table>
       </div>
+      <ul className="grid gap-2 px-4 pb-4 md:hidden">
+        {summary.stores.map((s) => (
+          <li key={s.storeId} className="rounded-2xl border border-line p-3">
+            <div className="flex items-center justify-between gap-2">
+              <span className="truncate text-[14px] font-bold text-ink">{s.name}{!s.linked ? <Badge tone="warn" className="ml-2">未連携</Badge> : null}</span>
+              <StatusPill {...itemStatus(s.retentionIncentive)} />
+            </div>
+            <dl className="mt-2 grid grid-cols-3 gap-2 text-[11px]">
+              <div><dt className="text-muted">消化売上</dt><dd className="font-semibold text-ink num">{yenShort(s.consumedSales)}</dd></div>
+              <div><dt className="text-muted">施術数</dt><dd className="font-semibold text-ink num">{num(s.treatmentCount)}</dd></div>
+              <div><dt className="text-muted">新規（3経路）</dt><dd className="font-semibold text-ink num">{num(s.contract3ch.visits)}</dd></div>
+              <div><dt className="text-muted">契約率</dt><dd className="font-semibold text-ink num">{s.contract3ch.ratePct != null ? pct(s.contract3ch.ratePct) : '—'}</dd></div>
+              <div><dt className="text-muted">会員数</dt><dd className="font-semibold text-ink num">{s.retention ? num(s.retention.memberCount) : '—'}</dd></div>
+              <div><dt className="text-muted">退会率</dt><dd className="font-semibold text-ink num">{s.retention && s.retention.churnRatePct != null ? pct(s.retention.churnRatePct) : '—'}</dd></div>
+            </dl>
+          </li>
+        ))}
+      </ul>
     </Card>
   );
 }
@@ -312,21 +389,26 @@ function StoreHome({ summary, goals }) {
   return (
     <div className="space-y-4">
       {me ? (
-        <button type="button" onClick={() => setOpen(me)} className="card card-pad flex w-full items-center justify-between gap-3 text-left hover:border-line-strong">
-          <span className="flex items-center gap-3">
-            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gold-50 text-gold-700 dark:bg-gold-500/15 dark:text-gold-200"><Icon name="award" size={18} /></span>
-            <span>
-              <span className="block text-xs font-semibold text-ink-2">あなたの今月のインセンティブ見込み</span>
-              <span className="block text-lg font-bold text-ink num">{yen(me.incentive.total)}</span>
-            </span>
+        <button type="button" onClick={() => setOpen(me)}
+          className="relative flex w-full items-center gap-3 overflow-hidden rounded-[18px] bg-[linear-gradient(140deg,#21633f_0%,#184b33_60%,#0d2f20_100%)] px-4 py-3.5 text-left text-white shadow-card transition-transform active:scale-[0.995]">
+          <span className="pointer-events-none absolute -right-10 -top-14 h-36 w-36 rounded-full bg-white/[0.06]" aria-hidden="true" />
+          <span className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gold-400/20 text-gold-300"><Icon name="award" size={20} /></span>
+          <span className="relative min-w-0 flex-1">
+            <span className="block text-xs font-semibold text-white/70">あなたの今月のインセンティブ{summary.period.preview ? '（試算）' : ''}</span>
+            <span className="block text-xl font-bold num">{yen(me.incentive.total)}</span>
           </span>
-          <Icon name="chevron-right" size={18} className="text-muted" />
+          {me.incentive.items[0].nextTier ? (
+            <span className="relative hidden text-right text-xs text-white/70 sm:block">
+              次のランクまで<span className="block text-[13px] font-bold text-gold-200 num">あと{yen(me.incentive.items[0].nextTier.gap)}</span>
+            </span>
+          ) : null}
+          <Icon name="chevron-right" size={18} className="relative shrink-0 text-white/60" />
         </button>
       ) : null}
       <StoreKpis summary={summary} storeGoal={storeGoal} />
       <div className="grid gap-4 lg:grid-cols-3">
         <StoreTrendCard summary={summary} storeGoal={storeGoal} />
-        <StoreIncentiveCard summary={summary} />
+        <TeamStatusCard summary={summary} onOpen={setOpen} />
       </div>
       <StaffRanking summary={summary} goals={goals} onOpen={setOpen} />
       <StoresTable summary={summary} />
@@ -346,17 +428,20 @@ export default function HomePage() {
   const goals = useGoals(month);
   const data = summary.shown;
   const isStaff = role === 'staff';
+  // 自己ベストの比較用（スタッフ本人のときだけ取得）
+  const trend = useTrend(isStaff ? month : null, storeId, 6);
   const title = currentAccess ? `${greeting()}、${currentAccess.name}さん` : 'ダッシュボード';
 
   return (
     <div>
-      <PageHeader title={title} subtitle={isStaff ? 'SalonOne の実績から、今月のインセンティブと次のランクまでの距離を表示しています' : 'SalonOne の実績から、店舗とスタッフの売上・インセンティブを表示しています'} />
+      <PageHeader title={title} subtitle={isStaff ? null : 'SalonOne の実績から、店舗とスタッフの売上・インセンティブを表示しています'} />
       <ScopeBar data={data} />
-      <DataWarnings data={data} error={summary.error} />
-      {data ? <PreviewNote period={data.period} rules={data.rules} /> : null}
+      <DataWarnings data={data} error={summary.error} preview />
       {!data ? <LoadingBlock /> : (
         <div className={cx('transition-opacity', summary.stale || summary.loading ? 'opacity-60' : '')}>
-          {isStaff ? <MyHome summary={data} goals={goals.shown} /> : <StoreHome summary={data} goals={goals.shown} />}
+          {isStaff
+            ? <MyHome summary={data} goals={goals.shown} trend={trend.shown} stale={summary.stale} />
+            : <StoreHome summary={data} goals={goals.shown} />}
         </div>
       )}
     </div>

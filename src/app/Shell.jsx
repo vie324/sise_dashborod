@@ -64,9 +64,9 @@ export default function Shell({ path, title, onRefresh, refreshing, adminSession
   const moreActive = moreItems.some((n) => isActive(n.path));
 
   return (
-    <div className="min-h-screen lg:pl-60">
+    <div className="min-h-screen lg:pl-60 print:pl-0">
       {/* サイドバー（デスクトップ） */}
-      <aside className="fixed inset-y-0 left-0 z-40 hidden w-60 flex-col border-r border-line bg-surface lg:flex">
+      <aside className="no-print fixed inset-y-0 left-0 z-40 hidden w-60 flex-col border-r border-line bg-surface lg:flex">
         <div className="px-5 pb-4 pt-5"><Logo /></div>
         <nav className="flex-1 space-y-0.5 overflow-y-auto px-3" aria-label="メインメニュー">
           {nav.map((n) => (
@@ -95,7 +95,7 @@ export default function Shell({ path, title, onRefresh, refreshing, adminSession
       </aside>
 
       {/* 上部バー（モバイル） */}
-      <header className="sticky top-0 z-30 border-b border-line bg-surface/90 backdrop-blur safe-top lg:hidden">
+      <header className="no-print sticky top-0 z-30 border-b border-line bg-surface/90 backdrop-blur safe-top lg:hidden">
         <div className="flex h-14 items-center justify-between gap-3 px-4">
           <div className="flex min-w-0 items-center gap-2.5">
             <Logo compact />
@@ -111,19 +111,27 @@ export default function Shell({ path, title, onRefresh, refreshing, adminSession
         {children}
       </main>
 
-      {/* 下部タブ（モバイル） */}
-      <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-line bg-surface/95 backdrop-blur safe-bottom lg:hidden" aria-label="メインメニュー">
+      {/* 下部タブ（モバイル）。今いる画面はアイコンの後ろの帯で示す */}
+      <nav className="no-print fixed inset-x-0 bottom-0 z-40 border-t border-line bg-surface/95 shadow-[0_-4px_16px_-8px_rgb(16_24_20/0.12)] backdrop-blur safe-bottom lg:hidden" aria-label="メインメニュー">
         <div className="mx-auto grid max-w-lg" style={{ gridTemplateColumns: `repeat(${mobileItems.length + 1}, minmax(0, 1fr))` }}>
-          {mobileItems.map((n) => (
-            <a key={n.path} href={`#${n.path}`} aria-current={isActive(n.path) ? 'page' : undefined}
-              className={cx('flex h-16 flex-col items-center justify-center gap-1 text-[10.5px] font-semibold', isActive(n.path) ? 'text-brand-700 dark:text-brand-200' : 'text-muted')}>
-              <Icon name={n.icon} size={21} strokeWidth={isActive(n.path) ? 2.1 : 1.75} />
-              {n.short || n.label}
-            </a>
-          ))}
-          <button type="button" onClick={() => setMoreOpen(true)}
-            className={cx('flex h-16 flex-col items-center justify-center gap-1 text-[10.5px] font-semibold', moreActive ? 'text-brand-700 dark:text-brand-200' : 'text-muted')}>
-            <Icon name="ellipsis" size={21} />
+          {mobileItems.map((n) => {
+            const active = isActive(n.path);
+            return (
+              <a key={n.path} href={`#${n.path}`} aria-current={active ? 'page' : undefined}
+                className={cx('flex h-16 flex-col items-center justify-center gap-1 whitespace-nowrap text-[10.5px] font-semibold tracking-tight transition-colors',
+                  active ? 'text-brand-800 dark:text-brand-100' : 'text-muted active:text-ink-2')}>
+                <span className={cx('flex h-8 w-14 items-center justify-center rounded-full transition-colors', active ? 'bg-brand-100 dark:bg-brand-500/25' : '')}>
+                  <Icon name={n.icon} size={20} strokeWidth={active ? 2.2 : 1.8} />
+                </span>
+                {n.label}
+              </a>
+            );
+          })}
+          <button type="button" onClick={() => setMoreOpen(true)} aria-haspopup="dialog"
+            className={cx('flex h-16 flex-col items-center justify-center gap-1 whitespace-nowrap text-[10.5px] font-semibold tracking-tight', moreActive ? 'text-brand-800 dark:text-brand-100' : 'text-muted')}>
+            <span className={cx('flex h-8 w-14 items-center justify-center rounded-full', moreActive ? 'bg-brand-100 dark:bg-brand-500/25' : '')}>
+              <Icon name="ellipsis" size={20} />
+            </span>
             その他
           </button>
         </div>

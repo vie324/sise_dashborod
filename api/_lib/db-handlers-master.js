@@ -165,7 +165,11 @@ export async function menuItemsGet(params) {
   };
 }
 
-export async function menuItemsPost(body) {
+export async function menuItemsPost(body, staffCtx) {
+  // メニューと価格は全店舗の記帳に使われるので、変更は店舗責任者以上に限る
+  if (staffCtx && (staffCtx.valid === false || !['manager', 'headquarter'].includes(staffCtx.role))) {
+    return { error: 'メニューを変更できるのは店舗責任者・本部・管理者のみです' };
+  }
   const action = body.action || '';
   switch (action) {
     case 'addItem': {

@@ -59,6 +59,11 @@ module.exports = {
       fontFamily: {
         sans: ['Inter', '"Noto Sans JP"', '"Hiragino Sans"', '"Hiragino Kaku Gothic ProN"', 'Meiryo', 'system-ui', 'sans-serif'],
       },
+      // ダーク時の淡い塗り（12% / 18%）に使う。既定の目盛りに無いので足しておく
+      opacity: {
+        12: '0.12',
+        18: '0.18',
+      },
       borderRadius: {
         xl: '0.875rem',
         '2xl': '1.125rem',
@@ -71,11 +76,15 @@ module.exports = {
         'fade-in': { from: { opacity: '0' }, to: { opacity: '1' } },
         'rise-in': { from: { opacity: '0', transform: 'translateY(6px)' }, to: { opacity: '1', transform: 'none' } },
         'sheet-up': { from: { transform: 'translateY(100%)' }, to: { transform: 'none' } },
+        // transform を使うと、画面の中の position:fixed（スマホの記帳ボタンなど）の基準がずれるので不透明度だけ
+        'page-in': { from: { opacity: '0' }, to: { opacity: '1' } },
       },
       animation: {
         'fade-in': 'fade-in .18s ease-out both',
         'rise-in': 'rise-in .22s cubic-bezier(.16,1,.3,1) both',
         'sheet-up': 'sheet-up .26s cubic-bezier(.16,1,.3,1) both',
+        'page-in': 'page-in .22s ease-out both',
+        'ping-slow': 'ping 1.8s cubic-bezier(0,0,.2,1) infinite',
       },
     },
   },

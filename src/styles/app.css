@@ -149,11 +149,20 @@
     @apply overflow-x-auto;
     -webkit-overflow-scrolling: touch;
   }
+  /* グリッドの子要素は中身（横に長い表など）より狭くなれるようにする。
+     既定の min-width:auto だと列が中身に合わせて広がり、スマホで横にはみ出す */
+  :where(.grid) > * {
+    min-width: 0;
+  }
   .safe-bottom {
     padding-bottom: env(safe-area-inset-bottom);
   }
   .safe-top {
     padding-top: env(safe-area-inset-top);
+  }
+  /* ホームのミッションから飛んできたカードを一瞬だけ強調する */
+  .focus-flash {
+    animation: focus-flash 1.8s ease-out;
   }
 
   /* --- 旧画面（出納帳・施術ツール）から引き継いだクラス --- */
@@ -209,6 +218,11 @@
 [data-theme='dark'] .bg-brand-50 { background-color: rgb(79 162 119 / 0.12); }
 [data-theme='dark'] .bg-purple-50,
 [data-theme='dark'] .bg-violet-50 { background-color: rgb(144 133 233 / 0.12); }
+
+@keyframes focus-flash {
+  0%, 35% { box-shadow: 0 0 0 3px rgb(201 138 20 / 0.55); }
+  100% { box-shadow: 0 0 0 3px rgb(201 138 20 / 0); }
+}
 
 @media print {
   .no-print { display: none !important; }

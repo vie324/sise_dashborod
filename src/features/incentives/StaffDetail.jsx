@@ -10,10 +10,12 @@ import {
  * @param {Object} row      summary.staff[] の 1行
  * @param {Object} summary  /api/salonone summary のレスポンス
  * @param {number} [goal]   この月の個人目標（消化売上）
+ * @param {boolean} [anchors] ホームのミッションから飛んでくる先として id を付けるか（画面に 1つだけ）
  */
-export default function StaffDetail({ row, summary, goal, compact = false }) {
+export default function StaffDetail({ row, summary, goal, compact = false, anchors = false }) {
   const { rules, period, progress } = summary;
   const items = Object.fromEntries(row.incentive.items.map((i) => [i.key, i]));
+  const anchor = (key) => (anchors ? { id: `incentive-${key}`, className: 'scroll-mt-20 rounded-2xl' } : {});
   return (
     <div className="space-y-4">
       <Card pad>
@@ -30,13 +32,20 @@ export default function StaffDetail({ row, summary, goal, compact = false }) {
           <IncentiveBreakdown incentive={row.incentive} />
         </div>
       </Card>
-      <SalesTierCard item={items.sales} daily={row.daily} progress={progress} rules={rules} goal={goal} showChart={!compact} />
-      <NewContractCard item={items.newContract} rules={rules} />
-      <div className="grid gap-4 md:grid-cols-2">
-        <SnsCard item={items.sns} rules={rules} />
-        <ReferralCard item={items.referral} rules={rules} />
+      <div {...anchor('sales')}>
+        <SalesTierCard item={items.sales} daily={row.daily} progress={progress} rules={rules} goal={goal} showChart={!compact} />
       </div>
-      <RetentionCard item={items.retention} rules={rules} storeName={row.storeName} />
+      <div {...anchor('newContract')}>
+        <NewContractCard item={items.newContract} rules={rules} />
+      </div>
+      {/* 横並びのカードの高さをそろえる */}
+      <div className="grid gap-4 md:grid-cols-2 [&>*>*]:h-full">
+        <div {...anchor('sns')}><SnsCard item={items.sns} rules={rules} /></div>
+        <div {...anchor('referral')}><ReferralCard item={items.referral} rules={rules} /></div>
+      </div>
+      <div {...anchor('retention')}>
+        <RetentionCard item={items.retention} rules={rules} storeName={row.storeName} />
+      </div>
     </div>
   );
 }

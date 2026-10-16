@@ -48,9 +48,9 @@ export function StatTile({ label, value, sub, delta, deltaSuffix = '前月比', 
       ) : (
         <div className="mt-2 text-[22px] font-bold leading-tight tracking-tight text-ink sm:text-2xl">{value}</div>
       )}
-      <div className="mt-1 flex min-h-[18px] flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted">
+      <div className="mt-1 flex min-h-[18px] flex-wrap items-center gap-x-2 gap-y-0.5 text-xs leading-snug text-muted">
         {delta !== undefined ? <Delta value={delta} goodWhenUp={goodWhenUp} suffix={deltaSuffix} /> : null}
-        {sub ? <span className="truncate">{sub}</span> : null}
+        {sub ? <span className="min-w-0">{sub}</span> : null}
       </div>
       {children}
     </Tag>

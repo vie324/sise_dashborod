@@ -1,10 +1,10 @@
-import { useEffect, useState } from 'react';
+import { Suspense, lazy, useEffect, useState } from 'react';
 import Shell from './Shell.jsx';
 import { useRoute } from './router.js';
 import { AppProvider } from './state.jsx';
 import { NAV } from './nav.js';
 import { Toaster, ConfirmHost, showToast } from '../ui/feedback.jsx';
-import { Button, Input, Banner } from '../ui/primitives.jsx';
+import { Button, Input, Banner, Skeleton } from '../ui/primitives.jsx';
 import Icon from '../ui/Icon.jsx';
 import { currentAccess } from '../lib/access.js';
 import { dbGet, dbPost, onAuthError } from '../lib/api.js';
@@ -14,9 +14,21 @@ import HomePage from '../features/home/HomePage.jsx';
 import IncentivesPage from '../features/incentives/IncentivesPage.jsx';
 import GoalsPage from '../features/goals/GoalsPage.jsx';
 import SalesPage from '../features/sales/SalesPage.jsx';
-import CashbookPage from '../features/cashbook/CashbookPage.jsx';
-import CarePage from '../features/care/CarePage.jsx';
-import SettingsPage from '../features/settings/SettingsPage.jsx';
+
+// 出納帳・施術ツール・設定は開いた時に読み込む（最初の表示を軽くする）
+const CashbookPage = lazy(() => import('../features/cashbook/CashbookPage.jsx'));
+const CarePage = lazy(() => import('../features/care/CarePage.jsx'));
+const SettingsPage = lazy(() => import('../features/settings/SettingsPage.jsx'));
+
+function PageLoading() {
+  return (
+    <div className="space-y-4" aria-busy="true" aria-label="読み込み中">
+      <Skeleton className="h-8 w-40" />
+      <Skeleton className="h-[160px] rounded-2xl" />
+      <Skeleton className="h-[260px] rounded-2xl" />
+    </div>
+  );
+}
 
 const PAGES = {
   '/': HomePage,
@@ -129,6 +141,8 @@ function Main({ adminSession }) {
     invalidate('stores:');
     invalidate('staff:');
     invalidate('goals:');
+    // 出納帳など独自に同期している画面にも知らせる
+    window.dispatchEvent(new Event('sise:refresh'));
     showToast('最新のデータを取得しています', 'info', 1800);
     setTimeout(() => setRefreshing(false), 1200);
   };
@@ -139,7 +153,12 @@ function Main({ adminSession }) {
 
   return (
     <Shell path={path} title={navItem.label} onRefresh={onRefresh} refreshing={refreshing} adminSession={adminSession}>
-      {allowed ? <Page key={path} /> : <NoAccess />}
+      {/* 画面を切り替えた時だけ、ふわっと出す */}
+      <div key={path} className="animate-page-in">
+        <Suspense fallback={<PageLoading />}>
+          {allowed ? <Page /> : <NoAccess />}
+        </Suspense>
+      </div>
     </Shell>
   );
 }

@@ -1,6 +1,9 @@
 import { useApp } from '../../app/state.jsx';
+import { navigate } from '../../app/router.js';
 import { MonthPicker, StorePicker } from '../../ui/pickers.jsx';
 import { Badge, Banner, cx } from '../../ui/primitives.jsx';
+import Icon from '../../ui/Icon.jsx';
+import { isAdminLike } from '../../lib/access.js';
 import { addMonths } from '../../../shared/dates.js';
 import { dateJa, dateTimeJa } from '../../lib/format.js';
 
@@ -11,7 +14,7 @@ import { dateJa, dateTimeJa } from '../../lib/format.js';
 export function ScopeBar({ data, maxAhead = 0, showStore = true, right, className = '' }) {
   const { month, setMonth, storeId, setStoreId, stores, canSelectAll, today } = useApp();
   return (
-    <div className={cx('mb-4 flex flex-wrap items-center gap-2 sm:mb-5', className)}>
+    <div className={cx('mb-3 flex flex-wrap items-center gap-2 sm:mb-4', className)}>
       <MonthPicker value={month} onChange={setMonth} min="2025-01" max={addMonths(today.slice(0, 7), maxAhead)} />
       {showStore ? <StorePicker value={storeId} onChange={setStoreId} stores={stores} allowAll={canSelectAll} /> : null}
       <div className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-2">
@@ -25,15 +28,31 @@ export function ScopeBar({ data, maxAhead = 0, showStore = true, right, classNam
 export function DataStamp({ data }) {
   if (!data) return null;
   return (
-    <span className="flex items-center gap-2 text-xs text-muted">
-      {data.mode === 'demo' ? <Badge tone="gold" icon="flask-conical">デモデータ</Badge> : <Badge tone="brand" icon="plug">SalonOne連携</Badge>}
+    <span className="hidden items-center gap-2 text-xs text-muted sm:flex">
+      {data.mode === 'demo' ? <Badge tone="gold" icon="flask-conical">デモ</Badge> : <Badge tone="brand" icon="plug">SalonOne</Badge>}
       <span className="hidden sm:inline">{dateJa(data.asOf)}時点・{dateTimeJa(data.generatedAt)}更新</span>
     </span>
   );
 }
 
-/** サーバーから返った注意事項（デモ・未連携など）を出す */
-export function DataWarnings({ data, error }) {
+function openSalonOneSettings() {
+  try { localStorage.setItem('sise_settings_tab', 'salonone'); } catch (_) { /* noop */ }
+  navigate('/settings');
+}
+
+const NOTE_TONES = {
+  demo: 'border-gold-200 bg-gold-50 text-gold-800 dark:border-gold-500/25 dark:bg-gold-500/10 dark:text-gold-200',
+  info: 'border-line bg-surface text-ink-2',
+  warn: 'border-[#f1d79a] bg-[#fffaeb] text-[#6d4a00] dark:border-[#fab219]/25 dark:bg-[#fab219]/10 dark:text-[#f6d68f]',
+  bad: 'border-[#efc0c0] bg-[#fdf2f2] text-[#8f2121] dark:border-[#d03b3b]/30 dark:bg-[#d03b3b]/10 dark:text-[#f2b0b0]',
+};
+
+/**
+ * サーバーから返った注意事項（デモ・未連携など）と制度開始前の「試算」の注意。
+ * 毎回目に入るものなので 1行に収め、数字の邪魔をしないようにする。
+ * @param {boolean} [preview] 制度開始前の月なら「試算」の注意も出す
+ */
+export function DataWarnings({ data, error, preview = false }) {
   if (error && !data) {
     return (
       <Banner tone="bad" title="SalonOne のデータを取得できませんでした" className="mb-4">
@@ -41,14 +60,36 @@ export function DataWarnings({ data, error }) {
       </Banner>
     );
   }
-  if (!data || !data.warnings || data.warnings.length === 0) return null;
+  if (!data) return null;
+  const admin = isAdminLike();
+  const notes = [];
+  for (const w of data.warnings || []) {
+    if (w.code === 'demo') {
+      notes.push({ key: w.code, tone: 'demo', icon: 'flask-conical', text: admin ? 'デモデータを表示中（SalonOne 未接続）' : 'デモデータを表示しています（実際の数字ではありません）', action: admin ? { label: '接続する', onClick: openSalonOneSettings } : null });
+    } else if (w.code === 'db') {
+      notes.push({ key: w.code, tone: 'bad', icon: 'circle-alert', text: w.message });
+    } else {
+      notes.push({ key: w.code, tone: 'warn', icon: 'link-2-off', text: w.message.replace(/（設定 > SalonOne連携）。?$/, ''), action: admin ? { label: '対応付ける', onClick: openSalonOneSettings } : null });
+    }
+  }
+  if (preview && data.period && data.period.preview && data.rules) {
+    const start = data.rules.startMonth;
+    notes.push({ key: 'preview', tone: 'info', icon: 'info', text: `制度開始（${Number(start.slice(0, 4))}年${Number(start.slice(5))}月）前のため、金額は試算です` });
+  }
+  if (notes.length === 0) return null;
   return (
-    <div className="mb-4 space-y-2">
-      {data.warnings.map((w) => (
-        <Banner key={w.code} tone={w.code === 'demo' ? 'demo' : w.code === 'db' ? 'bad' : 'warn'}>
-          {w.message}
-          {w.code === 'demo' ? <span className="block text-xs opacity-80">設定 &gt; SalonOne連携 の手順で APIキーを登録すると実データに切り替わります。</span> : null}
-        </Banner>
+    <div className="mb-4 flex flex-col gap-1.5 lg:flex-row lg:flex-wrap">
+      {notes.map((n) => (
+        <div key={n.key} role={n.tone === 'bad' ? 'alert' : 'status'}
+          className={cx('flex min-w-0 items-center gap-2 rounded-xl border px-3 py-2 text-xs leading-snug', NOTE_TONES[n.tone])}>
+          <Icon name={n.icon} size={14} className="shrink-0" />
+          <span className="min-w-0 flex-1">{n.text}</span>
+          {n.action ? (
+            <button type="button" onClick={n.action.onClick} className="inline-flex shrink-0 items-center gap-0.5 font-semibold underline-offset-2 hover:underline">
+              {n.action.label}<Icon name="chevron-right" size={13} />
+            </button>
+          ) : null}
+        </div>
       ))}
     </div>
   );

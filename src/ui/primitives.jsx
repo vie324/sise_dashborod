@@ -231,7 +231,8 @@ export function PageHeader({ title, subtitle, actions, children }) {
     <div className="mb-4 flex flex-col gap-3 sm:mb-5 sm:flex-row sm:items-end sm:justify-between">
       <div className="min-w-0">
         <h1 className="text-xl font-bold tracking-tight text-ink sm:text-2xl">{title}</h1>
-        {subtitle ? <p className="mt-1 text-[13px] text-muted">{subtitle}</p> : null}
+        {/* 説明文はスマホでは省く（数字を 1画面目に入れるため） */}
+        {subtitle ? <p className="mt-1 hidden text-[13px] text-muted sm:block">{subtitle}</p> : null}
         {children}
       </div>
       {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
@@ -245,18 +246,22 @@ export function PageHeader({ title, subtitle, actions, children }) {
 export function Modal({ open, onClose, title, children, footer, size = 'md' }) {
   const titleId = useId();
   const panelRef = useRef(null);
+  // onClose を毎回作り直す呼び出し元でも、入力中にフォーカスが先頭へ戻らないよう
+  // 開いた時の 1回だけ初期フォーカスを当て、閉じる処理は ref から呼ぶ
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
   useEffect(() => {
     if (!open) return undefined;
-    const onKey = (e) => { if (e.key === 'Escape') onClose && onClose(); };
+    const onKey = (e) => { if (e.key === 'Escape' && onCloseRef.current) onCloseRef.current(); };
     document.addEventListener('keydown', onKey);
     const prev = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
-    setTimeout(() => {
+    const t = setTimeout(() => {
       const el = panelRef.current && panelRef.current.querySelector('input, select, textarea, button:not([data-close])');
       if (el) el.focus();
     }, 30);
-    return () => { document.removeEventListener('keydown', onKey); document.body.style.overflow = prev; };
-  }, [open, onClose]);
+    return () => { clearTimeout(t); document.removeEventListener('keydown', onKey); document.body.style.overflow = prev; };
+  }, [open]);
   if (!open) return null;
   const width = size === 'lg' ? 'sm:max-w-3xl' : size === 'sm' ? 'sm:max-w-sm' : 'sm:max-w-lg';
   return createPortal(

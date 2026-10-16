@@ -81,7 +81,7 @@ Vercel の Environment Variables に `SISE_ADMIN_PASSWORD_HASH = <ハッシュ>`
 [Step 1] SISE_AUTH_SECRET_PREV = <現在の SISE_AUTH_SECRET>          → デプロイ
 [Step 2] SISE_AUTH_SECRET      = <openssl rand -hex 32 で新鍵>      → デプロイ
          （既存のスタッフ URL は _PREV で検証され使える。新規発行は新鍵）
-[Step 3] 設定 > スタッフ >「全員の URL を再発行」→ 各スタッフに配布
+[Step 3] 設定 > スタッフ >「URLの一括発行」の「全員分を発行」→ 各スタッフに配布
 [Step 4] 旧 URL の期限（1年）経過後に SISE_AUTH_SECRET_PREV を削除
 ```
 
@@ -115,7 +115,7 @@ Vercel の Environment Variables に `SISE_ADMIN_PASSWORD_HASH = <ハッシュ>`
 ## 7. 店舗管理（設定 > 店舗）
 
 - 追加: ID（英数）/ 名前 / 備考。追加後、設定 > SalonOne連携 で SalonOne の店舗と対応付ける
-- 重複店舗の統合: 店舗タブの「重複を統合」（`merged_into` で別名化。発行済み URL・出納帳データは壊れない）
+- 重複店舗の統合: 同じ名前の店舗があると店舗タブに「重複を統合」が出る（`merged_into` で別名化。発行済み URL・出納帳データは壊れない）
 
 ---
 
@@ -153,12 +153,24 @@ Vercel の Environment Variables に `SISE_ADMIN_PASSWORD_HASH = <ハッシュ>`
 
 ---
 
-## 10. 出納帳の日次締め
+## 10. 出納帳の日次締めと SalonOne の現金売上
 
 1. 出納帳 > 残高総覧 で店舗を選ぶ
 2. 「本日の日次締め」で金庫 / 小口現金 / レジの実残高を入力して確定
+   - SalonOne が接続済みなら、その日の SalonOne の現金売上を **レジの入金として取り込んでから締める**（既定でオン）
 3. `daily_close.locked=true` になり、その日の記録は編集・削除できない
 
+SalonOne で会計した現金売上は、店舗・日ごとに 1件の入金（カテゴリ「施術売上」・記録者「SalonOne」・ID `so_<店舗ID>_<日付>`）として取り込む。
+**SalonOne で会計した売上は出納帳に手入力しない**（手入力の現金売上がある日は二重計上を避けるため取り込まない）。
+出納帳には釣銭の補充・経費・金庫/小口への移動など、SalonOne 以外の現金の動きだけを記録する。
+
+| 操作 | 場所 |
+|---|---|
+| 取り込み忘れの確認・まとめて取り込み | 出納帳 > SalonOne突合（前日までの未取り込みは残高総覧にもお知らせが出る） |
+| SalonOne 側で金額が変わった日の取り直し | 出納帳 > SalonOne突合 の「更新」（締め前の日だけ） |
+| 取り込んだ記録の取り消し | 入出金タブで削除（操作ログに残る） |
+
+デモデータ（`SALONONE_API_KEY` 未設定）のときは取り込めない。
 締め後に修正が必要な場合は Supabase SQL Editor で `daily_close.locked` を false に戻す（慎重に）。
 
 ---
