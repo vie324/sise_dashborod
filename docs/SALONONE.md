@@ -1,81 +1,87 @@
 # SalonOne 連携ガイド
 
 ダッシュボードの売上・インセンティブ・目標は、SalonOne の **分析API**（読み取り専用）から取得したデータで計算しています。
-このページは「API の接続方法」と「SalonOne のデータをどう集計しているか」「実際の API 仕様に合わせるときにどこを直すか」をまとめたものです。
+このページは「API の接続方法」と「SalonOne のデータをどう集計しているか」をまとめたものです。
+
+API の仕様: <https://salonone.net/api-docs>（schema_version `2026-10-16` に合わせて実装）
 
 ---
 
 ## 1. 接続手順
 
-1. SalonOne 管理画面 > **ブランド管理 > 「API連携」** でアクセスキーを発行する
+1. SalonOne の **ブランド選択画面 >「API連携」** でアクセスキーを発行してもらう（運営が発行）
    - 用途がわかる名前: `社内分析ダッシュボード`
    - 有効期限: 1年（期限が来たら再発行して差し替える）
-   - **個人情報を含める: オフ**（集計に氏名・電話番号は使わない）
-   - **サロンワンのログインを必須にする: オフ**（サーバー間でキーだけを使うため）
-2. Vercel > Project > Settings > Environment Variables に登録して再デプロイ
+   - **個人情報: 含めない**（集計に氏名・電話番号は使わない）
+   - **ユーザー認証: 必須にしない**（サーバー間でキーだけを使うため。必須にすると `401 user_auth_required`）
+   - キーは発行時に一度しか表示されないので、その場で控える
+2. Vercel > Project > Settings > Environment Variables に登録して **再デプロイ**
    | 変数 | 内容 |
    |---|---|
    | `SALONONE_API_KEY` | 発行したキー（必須。未設定ならデモデータで動く） |
-   | `SALONONE_API_BASE_URL` | 既定 `https://salonone.net`。別ホストの場合だけ |
-   | `SALONONE_API_ENDPOINTS` | エンドポイントの上書き（JSON。後述） |
+   | `SALONONE_API_BASE_URL` | 既定 `https://salonone.net/api/analytics/v1`。通常は設定不要 |
+   | `SALONONE_API_ENDPOINTS` | エンドポイントのパスの上書き（JSON。通常は設定不要） |
+   | `SALONONE_RATE_LIMIT_PER_MINUTE` | 1分あたりの呼び出しの上限（既定 55）。SalonOne でキーの上限を上げてもらった時だけ |
 3. ダッシュボード > **設定 > SalonOne連携** の「接続テスト」で、各データが取得できるか確認する
 4. 同じ画面で **店舗・スタッフ・来店経由** を対応付けて保存する
 
 キーはサーバーの環境変数にだけ置き、ブラウザ・スタッフの端末には送りません。
+リクエストにはヘッダ `X-SalonOne-Api-Key: <キー>` で付けています（`Authorization: Bearer` はユーザー認証のトークン用なので使わない）。
 
 ---
 
 ## 2. 取得しているデータ
 
-| データ | 既定のエンドポイント | 使い道 |
-|---|---|---|
-| 店舗 | `GET /api/analytics/shops` | 店舗の対応付け |
-| スタッフ | `GET /api/analytics/staffs` | スタッフの対応付け・所属店舗 |
-| 来店経由 | `GET /api/analytics/visit-sources` | 来店経由 → 集客経路の対応付け（無くても可） |
-| 受付明細 | `GET /api/analytics/receptions?from=&to=&shop_id=` | 消化売上・施術数・新規・経路 |
-| 契約 | `GET /api/analytics/contracts?shop_id=&to=` | 新規契約・紹介・会員数・退会率・継続期間 |
-| 継続指標（任意） | 未設定 | API が集計済みの値を返す場合だけ使う |
+ベース URL `https://salonone.net/api/analytics/v1` からの相対パスです。
 
-ページングは `page` / `per_page` で辿ります（Laravel の `meta.last_page`・`links.next`・件数で判定）。
-認証ヘッダは `Authorization: Bearer <キー>` と `X-API-Key: <キー>` の両方を送っています。
+| データ | エンドポイント | 使い道 | 取得の単位 |
+|---|---|---|---|
+| キーの情報 | `GET /meta` | 接続テスト | — |
+| 店舗 | `GET /shops` | 店舗の対応付け（`deleted_at` のある店舗は除く） | 30分ごと |
+| スタッフ | `GET /staffs` | スタッフの対応付け・所属店舗（`deleted_at` のあるスタッフは除く） | 30分ごと |
+| 流入元 | `GET /visit-sources` | 来店経由 → 集客経路の対応付け | 30分ごと |
+| 受付履歴の明細 | `GET /marketing/reception-history?from=&to=&shop_id=` | 消化売上・施術数・新規・経路・契約・現金売上 | 店舗 × 月 |
+| 継続管理のサマリー | `GET /marketing/retention-summary?plan_kind=subscription&shop_id=` | 会員数・退会率 | 店舗ごと（当月だけ） |
+| 継続管理の顧客一覧 | `GET /marketing/retention-customers?plan_kind=subscription&shop_id=` | 平均継続期間 | 店舗ごと（当月だけ） |
 
-> ⚠ **仕様の確認が必要です。** 分析API の仕様ページ（`/api-docs`）はログインしないと見られないため、
-> 上のパス・クエリ名・項目名は SalonOne 画面の用語と CSV の項目名から推定した暫定値です。
-> 接続テストの結果（HTTP ステータスと先頭レコードの項目名）を見て、必要なら次の「3. 仕様に合わせる」で調整してください。
+- 明細（`/shops` など）は `limit=1000` と `meta.next_cursor` で最後まで辿ります
+- 受付履歴は `shop_id` が必須のため、店舗ごとに 1ヶ月ずつ取得します（予約日時がその月の予約。キャンセルも含む）
+- 日付は店舗のタイムゾーン（日本時間）の暦日です
+
+### 呼び出し回数（1分 60回・1日 20,000回の上限）
+
+- 見ている店舗の分だけ取得します（スタッフは自分の店舗だけ）
+- 当月は 5分、前月は 30分、それより前の月は 6時間、メモリにキャッシュします
+- 同時に 4本まで、1分 55回までに抑えます。上限に当たったら 1回だけ待って取り直し、それでもだめなら前回の値を表示します
+- 売上分析の推移は直近 6ヶ月（店舗数 × 6回）
+
+目安: 3店舗のブランドで、管理者がホーム → 売上分析を開くと最初の 1回は 30回ほど。以降はキャッシュから返します。
 
 ---
 
-## 3. 仕様に合わせる
+## 3. うまくつながらないとき
 
-### パス・クエリ名が違う場合（コード変更不要）
+設定 > SalonOne連携 >「接続テスト」で、各エンドポイントの結果と項目名が出ます（金額・顧客などの値は出しません）。
+「結果をコピー」で開発担当に共有できます。
 
-`SALONONE_API_ENDPOINTS` に JSON で上書きします。指定しなかった項目は既定値のまま。
-
-```json
-{
-  "receptions": "/api/v1/analytics/reservations",
-  "contracts": "/api/v1/analytics/entitlements",
-  "retention": "/api/v1/analytics/retention",
-  "query": { "from": "start_date", "to": "end_date", "shop": "shop_id", "page": "page", "perPage": "per_page" }
-}
-```
-
-### 項目名が違う場合
-
-`api/_lib/salonone/normalize.js` の候補リストに項目名を 1 つ追加します（`snake_case` / `camelCase` / `a.b` のネストに対応）。
-
-| 正規化後 | 主な候補（抜粋） |
+| 表示 | 原因と対処 |
 |---|---|
-| 来店日 | `visit_date` `reserved_at` `start_at` … |
-| 状態 | `status`（completed / cancelled / no_show / 「完了」「キャンセル」「無断」などを判定） |
-| 新規/既存 | `classification`（新規 / 継続 / 既存）、`visit_number === 1`、`is_new` |
-| 来店経由 | `visit_source.name` `visit_source_name` `media` … |
-| 消化 | `consumed_sales` `consumed_amount` `consumed` … |
-| 売上（入金） | `sales` `sales_amount` `deposit_sales` … |
-| 契約の種別 | `type` `plan_type`、またはプラン名（サブスク / 回数券 / プリペイド / 都度） |
-| 契約の開始・終了 | `started_at` `contracted_at` … / `ended_at` `cancelled_at` `leaved_at` … |
+| APIキーが無効です（401 `unauthorized`） | キーの入力ミス・失効・期限切れ。SalonOne で再発行して Vercel の `SALONONE_API_KEY` を差し替え、再デプロイ |
+| ログインを必須にする（401 `user_auth_required`） | 「ユーザー認証を必須にしない」キーを発行し直す |
+| 取得できない範囲（403 `forbidden` / `feature_disabled`） | 他ブランドの店舗を指定している、またはブランドで機能（マーケティング・継続管理）が無効 |
+| 為替レートが未登録（`exchange_rate_not_set`） | 外貨の店舗がある場合、SalonOne の為替レート設定で登録 |
+| 利用上限（429 `rate_limited`） | 1分ほど待ってから ⟳。頻繁に出る場合は SalonOne にキーの上限を相談し、`SALONONE_RATE_LIMIT_PER_MINUTE` を合わせる |
+| SalonOne 側でエラー（500 `internal_error`） | 時間をおいて再度。続く場合は表示された `error_id` を SalonOne の運営に伝える |
 
-修正後は `npm test` で正規化のテスト（`test/normalize.test.js`）も更新してください。
+エラーの詳細（顧客の情報）は SalonOne 側が返さない仕様です。問い合わせには `error_id` を使います。
+
+項目名が変わった場合は `api/_lib/salonone/normalize.js` の候補リストに追加し、`test/normalize.test.js` を更新します。
+ローカルでは疑似 SalonOne（`scripts/dev/salonone-fake.mjs`）でライブの経路を試せます:
+
+```sh
+node scripts/dev/salonone-fake.mjs --port 4100
+SALONONE_API_KEY=test-key SALONONE_API_BASE_URL=http://127.0.0.1:4100/api/analytics/v1 npm run dev:local
+```
 
 ---
 
@@ -83,20 +89,29 @@
 
 すべて `shared/metrics.js`（集計）と `shared/incentive.js`（インセンティブ）で計算しています。サーバーとブラウザで同じコードです。
 
-| 指標 | 計算方法 |
+| 指標 | 計算方法（受付履歴の項目） |
 |---|---|
-| 施術消化売上 | 会計確定（completed）の来店の「消化」を担当スタッフ別に合計 |
-| 既存顧客の消化売上 | 新規（初回来店）以外のお客様の消化売上 |
-| 新規初回来店 | その月に初めて来店し会計確定したお客様。担当は初回来店のスタッフ |
-| 新規契約 | 新規のお客様が回数券・サブスクを契約した件数。**初回来店月に計上**（SalonOne の「購入数」と同じ） |
+| 施術消化売上 | 会計完了（`status=completed`）の予約の消化額（`consumed_amount`）を、担当スタッフ（`staff_id`）別に合計。SalonOne の受付履歴の「消化額」と同じで、失効益は含まない |
+| 入金売上 | 会計完了の予約の会計金額（`amount`） |
+| 施術数 | 会計完了の予約の件数 |
+| 既存顧客の消化売上 | 区分（`classification`）が `new` 以外の予約の消化額 |
+| 新規初回来店 | 区分が `new`（その店舗で最初の予約）で、その月に会計完了したお客様。担当はその予約のスタッフ。経路は `visit_source_name` |
+| 新規契約 | 新規のお客様が、**初回来店の月のうちに** 回数券・サブスクを購入（`plans[].plan_kind`）または入会（`joined`）した件数。月が締まった後に数字が変わらないよう、翌月以降の契約は数えない |
 | 経路 | 来店経由を「ホットペッパー / Meta広告 / ホームページ / Minimo / Threads / Instagram / 紹介 / その他」に対応付け（未設定は名前から推定） |
-| 会員数 | 有効なサブスク契約を持つお客様（都度払い・回数券のみは除く） |
-| 退会率 | 月内にサブスクがすべて終了した人数 ÷ 月初（前月末）の会員数 |
-| 平均継続期間 | サブスク契約歴のある全てのお客様の継続月数の平均（継続中は基準日まで） |
-| 紹介 | 経路が「紹介」の新規のお客様がサブスク（シェアプラン除く）を契約した件数。紹介リンクのスタッフ（`referral_staff_id`）がいればその人、無ければ担当スタッフ |
+| 現金売上 | 会計完了の予約のうち現金で受け取った額。分割決済（`payment_splits`）は現金の分だけ |
+| 会員数 | 継続管理（サブスク）の 正常 + 要フォロー + 要注意 の人数（離反以外）。取得時点 |
+| 退会率 | 直近 1か月に離反へ移った人数 ÷ 1か月前の会員数（継続管理の `previous_month` との差） |
+| 平均継続期間 | 直近 1年にサブスクの支払いがあったお客様の、サブスク継続月数（`subscription_months`）の平均 |
+| 紹介 | 経路が「紹介」の新規のお客様がサブスク（シェアプラン除く）を契約した件数。担当スタッフに計上 |
 
 インセンティブ制度（金額・閾値）は `shared/incentive-rules.js` にまとまっています。
 資料の「既存顧客の施術消化売上が月間 40,0000円以上」は **400,000円** と解釈しています。
+
+### 会員数・退会率は「取得した時点」の値
+
+SalonOne の継続管理は取得した時点の状態しか返さないため、当月分を取得するたびに `dash_config` の
+`salonone.retentionSnapshots`（`{ 'YYYY-MM': { [SalonOne店舗ID]: 継続指標 } }`、24ヶ月分）に保存し、
+過去の月はその月の最後に保存した値を使います。連携より前の月は記録が無いため「—」と表示します。
 
 ---
 
@@ -104,7 +119,7 @@
 
 出納帳（Supabase）は SalonOne に書き込めない（分析API は読み取り専用）ため、SalonOne → 出納帳 の向きでつなぐ。
 
-- 受付明細の支払い方法が「現金」の入金売上を、店舗・日ごとに合計（`cashSales`）
+- 受付履歴の現金売上（上の「現金売上」）を、店舗・日ごとに合計（`cashSales`）
 - 出納帳 > SalonOne突合 / 日次締め / レジ金チェック から取り込むと、1日 1件の入金（レジ・現金・施術売上）になる
 - 記録の ID は `so_<店舗ID>_<日付>` で固定。何度取り込んでも 1件で、SalonOne の金額が変わっていれば更新する
 - 取り込まない日: SalonOne の集計日より後 / 締め済み / 手入力の現金売上がある（二重計上を避ける）
@@ -120,5 +135,7 @@
 
 ## 7. キャッシュ
 
-サーバーレス関数のメモリに、当月の受付明細は 3 分、過去月は 60 分、契約は 10 分キャッシュします。
-画面の更新ボタン（⟳）と 設定 > SalonOne連携 >「データを取り直す」で取り直せます。
+サーバーレス関数のメモリに、当月の受付履歴は 5分、前月は 30分、それより前は 6時間、店舗・スタッフは 30分、
+継続管理の人数は 30分、平均継続期間は 6時間キャッシュします。
+取り直しに失敗したときは前回の値を表示し、画面に「◯時◯分時点のデータを表示しています」と出します。
+画面の更新ボタン（⟳）と 設定 > SalonOne連携 >「データを取り直す」で取り直せます（⟳ で取り直すのは当月と前月だけ）。

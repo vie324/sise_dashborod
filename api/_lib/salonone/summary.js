@@ -18,6 +18,24 @@ import { loadAppContext, loadMaster, buildMapping, loadDataset } from './provide
 
 const n = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 
+/** ミリ秒 → JST の「M/D HH:mm」 */
+function jstStamp(ms) {
+  const iso = new Date(ms + 9 * 3600 * 1000).toISOString();
+  return `${Number(iso.slice(5, 7))}/${Number(iso.slice(8, 10))} ${iso.slice(11, 16)}`;
+}
+
+/** SalonOne の取得状況に関する注意（前回の値を表示中・継続管理を取れなかった など） */
+function dataWarnings(master, data) {
+  const out = [];
+  const stale = [...(master.stale || []), ...(data.stale || [])];
+  if (stale.length) {
+    const oldest = Math.min(...stale.map((x) => x.fetchedAt));
+    const reason = stale.find((x) => x.error);
+    out.push({ code: 'stale', message: `SalonOne から最新のデータを取得できなかったため、${jstStamp(oldest)} 時点のデータを表示しています${reason ? `（${reason.error.replace(/^SalonOne API エラー \([^)]*\): /, '')}）` : ''}` });
+  }
+  return out.concat(data.warnings || []);
+}
+
 export class AccessError extends Error {
   constructor(message, status = 403) { super(message); this.status = status; }
 }
@@ -103,7 +121,7 @@ export async function buildSummary(staffCtx, { month, storeId, refresh }) {
   const period = paymentPeriodOf(month);
   const prevMonth = addMonths(month, -1);
   const months = [...new Set([prevMonth, month, ...period.months])];
-  const data = await loadDataset(appCtx, master, { months, refresh });
+  const data = await loadDataset(appCtx, master, { months, shopIds: selectedShopIds, refresh });
   const channelMap = appCtx.config['salonone.channelMap'] || {};
 
   const computed = {};
@@ -116,6 +134,7 @@ export async function buildSummary(staffCtx, { month, storeId, refresh }) {
       asOf: data.asOf,
       channelMap,
       retentionOverrides: data.retentionOverrides[m],
+      retentionFromContracts: data.retentionFromContracts,
     });
   }
   const cur = computed[month] || computeMonth({ receptions: [], contracts: [], month, asOf: data.asOf });
@@ -151,8 +170,10 @@ export async function buildSummary(staffCtx, { month, storeId, refresh }) {
 
   // スタッフ（SalonOne スタッフ + 当月に実績のあるスタッフ）
   const s1StaffById = new Map(master.staff.map((s) => [s.id, s]));
-  for (const id of Object.keys(cur.staff)) {
-    if (!s1StaffById.has(id)) s1StaffById.set(id, { id, name: id, shopId: cur.staff[id].shopId });
+  for (const [id, sm] of Object.entries(cur.staff)) {
+    const known = s1StaffById.get(id);
+    if (!known) s1StaffById.set(id, { id, name: sm.name || id, shopId: sm.shopId });
+    else if (!known.name && sm.name) s1StaffById.set(id, { ...known, name: sm.name });
   }
   const shopSet = new Set(selectedShopIds);
   const rows = [];
@@ -196,6 +217,7 @@ export async function buildSummary(staffCtx, { month, storeId, refresh }) {
   if (appCtx.dbError) warnings.push({ code: 'db', message: `Supabase に接続できません: ${appCtx.dbError}` });
   if (selectedStoreIds.some((id) => !mapping.storeToShop.has(id))) warnings.push({ code: 'unmappedStore', message: 'SalonOne の店舗と未連携の店舗があります（設定 > SalonOne連携）。' });
   if (scope.staffId && !myS1 && scope.role !== 'headquarter') warnings.push({ code: 'unmappedMe', message: 'あなたのアカウントが SalonOne のスタッフと未連携です。管理者に連携を依頼してください。' });
+  warnings.push(...dataWarnings(master, data));
 
   return {
     mode: master.mode,
@@ -240,7 +262,7 @@ export async function buildTrend(staffCtx, { months: count = 6, endMonth, storeI
   const last = endMonth;
   const first = addMonths(last, -(Math.min(Math.max(count, 1), 24) - 1));
   const months = listMonths(first, last);
-  const data = await loadDataset(appCtx, master, { months, refresh });
+  const data = await loadDataset(appCtx, master, { months, shopIds: selectedShopIds, refresh });
   const channelMap = appCtx.config['salonone.channelMap'] || {};
   const myS1 = scope.staffId ? mapping.staffToS1.get(scope.staffId) : null;
   const shopSet = new Set(selectedShopIds);
@@ -249,7 +271,10 @@ export async function buildTrend(staffCtx, { months: count = 6, endMonth, storeI
   const staffSeries = new Map();
   for (const m of months) {
     if (monthsBetween(m, monthOf(data.asOf)) < 0) { series.push({ month: m, future: true }); continue; }
-    const c = computeMonth({ receptions: data.receptions, contracts: data.contracts, month: m, asOf: data.asOf, channelMap, retentionOverrides: data.retentionOverrides[m] });
+    const c = computeMonth({
+      receptions: data.receptions, contracts: data.contracts, month: m, asOf: data.asOf, channelMap,
+      retentionOverrides: data.retentionOverrides[m], retentionFromContracts: data.retentionFromContracts,
+    });
     const combined = combineShops(selectedShopIds.map((id) => c.shops[id]).filter(Boolean));
     const ch = contract3ch(combined);
     series.push({
@@ -270,7 +295,7 @@ export async function buildTrend(staffCtx, { months: count = 6, endMonth, storeI
       if (scope.role === 'staff' && s1Id !== myS1) continue;
       let row = staffSeries.get(s1Id);
       if (!row) {
-        const s1 = master.staff.find((s) => s.id === s1Id) || { id: s1Id, name: s1Id, shopId: sm.shopId };
+        const s1 = master.staff.find((s) => s.id === s1Id) || { id: s1Id, name: sm.name || s1Id, shopId: sm.shopId };
         row = { ...staffIdentity(s1, mapping, appCtx, master), values: {} };
         staffSeries.set(s1Id, row);
       }
@@ -282,21 +307,23 @@ export async function buildTrend(staffCtx, { months: count = 6, endMonth, storeI
     asOf: data.asOf,
     months: series,
     staff: Array.from(staffSeries.values()).sort((a, b) => a.name.localeCompare(b.name, 'ja')),
+    warnings: dataWarnings(master, data),
   };
 }
 
 export async function buildMaster(staffCtx, { refresh } = {}) {
   const { appCtx, master, mapping, scope } = await prepare(staffCtx, { refresh });
   if (!scope.all) throw new AccessError('管理者または本部のみ利用できます');
-  // 来店経由はマスタ + 直近 2ヶ月の実データから集める
-  const asOfMonth = monthOf(new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10));
-  const months = [addMonths(asOfMonth, -1), asOfMonth];
+  // 来店経由はマスタ（/visit-sources）から。取れなかったときは直近 2ヶ月の受付履歴から集める
   let seen = [];
-  try {
-    const data = await loadDataset(appCtx, master, { months, refresh });
-    seen = [...new Set(data.receptions.map((r) => r.sourceName).filter(Boolean))];
-  } catch (e) {
-    console.warn('[salonone] master: dataset load failed:', e.message);
+  if (master.sources.length === 0) {
+    const asOfMonth = monthOf(new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10));
+    try {
+      const data = await loadDataset(appCtx, master, { months: [addMonths(asOfMonth, -1), asOfMonth], refresh });
+      seen = [...new Set(data.receptions.map((r) => r.sourceName).filter(Boolean))];
+    } catch (e) {
+      console.warn('[salonone] master: dataset load failed:', e.message);
+    }
   }
   return {
     mode: master.mode,

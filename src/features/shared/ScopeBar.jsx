@@ -68,6 +68,10 @@ export function DataWarnings({ data, error, preview = false }) {
       notes.push({ key: w.code, tone: 'demo', icon: 'flask-conical', text: admin ? 'デモデータを表示中（SalonOne 未接続）' : 'デモデータを表示しています（実際の数字ではありません）', action: admin ? { label: '接続する', onClick: openSalonOneSettings } : null });
     } else if (w.code === 'db') {
       notes.push({ key: w.code, tone: 'bad', icon: 'circle-alert', text: w.message });
+    } else if (w.code === 'stale') {
+      notes.push({ key: w.code, tone: 'warn', icon: 'history', text: w.message });
+    } else if (w.code === 'retention') {
+      notes.push({ key: w.code, tone: 'warn', icon: 'circle-alert', text: w.message, action: admin ? { label: '接続テスト', onClick: openSalonOneSettings } : null });
     } else {
       notes.push({ key: w.code, tone: 'warn', icon: 'link-2-off', text: w.message.replace(/（設定 > SalonOne連携）。?$/, ''), action: admin ? { label: '対応付ける', onClick: openSalonOneSettings } : null });
     }

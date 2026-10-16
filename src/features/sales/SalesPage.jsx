@@ -172,11 +172,12 @@ function StaffTable({ data }) {
 export default function SalesPage() {
   const { month, storeId } = useApp();
   const summary = useSummary(month, storeId);
-  const trend = useTrend(month, storeId, 12);
+  // 6ヶ月（SalonOne の受付履歴は店舗・月ごとに取得するため、1分 60回の上限に収まる範囲）
+  const trend = useTrend(month, storeId, 6);
   const data = summary.shown;
   return (
     <div>
-      <PageHeader title="売上分析" subtitle="SalonOne の受付明細から、消化売上・施術数・新規と契約の動きを集計しています" />
+      <PageHeader title="売上分析" subtitle="SalonOne の受付履歴から、消化売上・施術数・新規と契約の動きを集計しています" />
       <ScopeBar data={data} />
       <DataWarnings data={data} error={summary.error} />
       {!data ? <Skeleton className="h-[480px] rounded-2xl" /> : (
@@ -195,7 +196,7 @@ export default function SalesPage() {
           ) : null}
           <p className="flex items-center gap-1.5 text-xs text-muted">
             <Icon name="info" size={13} />
-            施術消化売上 = 会計確定した来店の「消化」の合計。入金売上は会計時に受け取った金額（サブスク・回数券の購入を含む）です。
+            施術消化売上 = 会計完了した予約の「消化額」の合計（SalonOne の受付履歴と同じ）。入金売上は会計金額（サブスク・回数券の購入を含む）です。
           </p>
         </div>
       )}

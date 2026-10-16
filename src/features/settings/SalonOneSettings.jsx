@@ -5,6 +5,7 @@ import Icon from '../../ui/Icon.jsx';
 import { salonOne, salonOnePost } from '../../lib/api.js';
 import { useResource, useStores, useStaffList, saveDashConfig, refreshSalonOne, invalidate } from '../../lib/hooks.js';
 import { CHANNELS, guessChannel, channelLabel } from '../../../shared/channels.js';
+import { copyText } from './clipboard.js';
 
 // 名前の表記ゆれ（全角/半角スペース・敬称）を吸収して比較する
 const normName = (s) => String(s || '').replace(/[\s　]/g, '').replace(/(さん|先生)$/, '').toLowerCase();
@@ -26,6 +27,20 @@ function SetupSteps() {
   );
 }
 
+/** 接続テストの 1行（取得できた項目名 / エラーの説明） */
+function ProbeDetail({ r }) {
+  if (!r.ok) return <span className="text-[#8f2121] dark:text-[#f2b0b0]">{(r.error || '').replace(/^SalonOne API エラー \([^)]*\): /, '')}</span>;
+  const info = r.info ? Object.entries(r.info) : [];
+  const nested = r.nested ? Object.entries(r.nested).filter(([, keys]) => keys.length) : [];
+  return (
+    <div className="space-y-1">
+      {info.length ? <div className="text-ink">{info.map(([k, v]) => `${k}: ${v}`).join(' / ')}</div> : null}
+      <div>{r.sampleKeys && r.sampleKeys.length ? r.sampleKeys.join(', ') : '（0件のため項目名は確認できません）'}</div>
+      {nested.map(([k, keys]) => <div key={k} className="text-muted"><code>{k}</code>: {keys.join(', ')}</div>)}
+    </div>
+  );
+}
+
 function ConnectionCard({ status, master }) {
   const [probe, setProbe] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -39,6 +54,10 @@ function ConnectionCard({ status, master }) {
     } finally {
       setBusy(false);
     }
+  };
+  const copyProbe = async () => {
+    const res = await copyText(JSON.stringify({ at: new Date().toISOString(), baseUrl: probe.baseUrl, results: probe.results }, null, 2));
+    showToast(res.ok ? '接続テストの結果をコピーしました' : 'コピーできませんでした', res.ok ? 'success' : 'error');
   };
   const clearCache = async () => {
     try {
@@ -57,7 +76,7 @@ function ConnectionCard({ status, master }) {
         <div className="space-y-4">
           {live ? (
             <p className="text-[13px] text-ink-2">
-              <span className="font-semibold text-ink">{status.baseUrl}</span> の分析APIから、受付明細・契約・店舗・スタッフを読み取っています（読み取り専用）。
+              <span className="font-semibold text-ink">{status.baseUrl}</span> の分析APIから、受付履歴・継続管理・店舗・スタッフを読み取っています（読み取り専用）。
             </p>
           ) : (
             <>
@@ -73,28 +92,36 @@ function ConnectionCard({ status, master }) {
           </div>
           {probe ? (
             probe.configured === false ? <p className="text-xs text-muted">{probe.message}</p> : (
-              <div className="scroll-x rounded-xl border border-line">
-                <table className="data-table">
-                  <thead><tr><th>データ</th><th>エンドポイント</th><th>結果</th><th>項目名（先頭レコード）</th></tr></thead>
-                  <tbody>
-                    {probe.results.map((r) => (
-                      <tr key={r.name}>
-                        <td className="whitespace-nowrap font-semibold text-ink">{r.name}</td>
-                        <td className="whitespace-nowrap text-xs text-ink-2"><code>{r.path || '—'}</code></td>
-                        <td className="whitespace-nowrap">
-                          {r.skipped ? <Badge>未設定</Badge> : r.ok ? <Badge tone="good" icon="circle-check">{r.count}件</Badge> : <Badge tone="bad" icon="circle-x">{r.status || 'エラー'}</Badge>}
-                        </td>
-                        <td className="text-xs text-ink-2">{r.ok ? (r.sampleKeys.join(', ') || '（0件）') : r.error || ''}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+              <div className="space-y-2">
+                <div className="scroll-x rounded-xl border border-line">
+                  <table className="data-table">
+                    <thead><tr><th>データ</th><th>結果</th><th>項目名（先頭の1件）</th></tr></thead>
+                    <tbody>
+                      {probe.results.map((r) => (
+                        <tr key={r.name}>
+                          <td className="whitespace-nowrap">
+                            <div className="font-semibold text-ink">{r.label || r.name}</div>
+                            <code className="text-[11px] text-muted">{r.path || '—'}</code>
+                          </td>
+                          <td className="whitespace-nowrap">
+                            {r.ok ? <Badge tone="good" icon="circle-check">{r.count}件{r.more ? '〜' : ''}</Badge> : <Badge tone="bad" icon="circle-x">{r.status || 'エラー'}</Badge>}
+                          </td>
+                          <td className="min-w-[16rem] text-xs text-ink-2"><ProbeDetail r={r} /></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                  <Button variant="ghost" size="sm" icon="copy" onClick={copyProbe}>結果をコピー</Button>
+                  <span className="text-xs text-muted">値（金額・顧客）は含まれません。うまくいかない時は開発担当に共有してください。</span>
+                </div>
               </div>
             )
           ) : null}
           {probe && probe.results && probe.results.some((r) => r.ok === false) ? (
             <p className="text-xs leading-relaxed text-muted">
-              取得できないデータがある場合は、SalonOne の API 仕様（APIの使い方・仕様を見る）に合わせて環境変数 <code>SALONONE_API_ENDPOINTS</code> でパスを指定するか、開発担当に上の結果を共有してください。
+              エラーの説明に沿って SalonOne 側の設定（キー・機能・為替レート）を確認してください。<code>error_id</code> が出ている場合は、SalonOne の運営に伝えると原因を調べてもらえます。
             </p>
           ) : null}
           {master && master.mode === 'live' ? (
