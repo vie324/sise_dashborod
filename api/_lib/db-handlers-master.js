@@ -1,41 +1,59 @@
+import crypto from 'node:crypto';
 import { supabase } from './supabase.js';
-import { resolveStoreNameFromEnv } from './stores.js';
+import { isAdminOrHeadquarter } from './auth.js';
 
 // ============================================================
 // スタッフ管理 (staff)
+// ------------------------------------------------------------
+// パスワードはレスポンスに含めない（hasPassword だけ返す）。
+// 照合はサーバー側の auth.verifyPassword で行う。
+// 参照範囲: 管理者・本部 = 全員 / 店舗責任者 = 同じ店舗のスタッフ / スタッフ = 自分のみ
+// 変更: 管理者・本部のみ
 // ============================================================
 
-export async function staffGet(params) {
+export async function staffGet(params, staffCtx) {
   const includeInactive = params.includeInactive === 'true' || params.includeInactive === '1';
 
-  let query = supabase.from('staff').select('*').order('created_at');
+  let query = supabase.from('staff').select('id, name, role, status, password, created_at').order('created_at');
   if (!includeInactive) query = query.eq('status', 'active');
 
   const { data, error } = await query;
   if (error) throw error;
 
-  // staff_stores から storeIds を取得
   const staffIds = (data || []).map(s => s.id);
-  let storeMap = {};
+  const storeMap = {};
   if (staffIds.length > 0) {
-    const { data: ssData } = await supabase
+    const { data: ssData, error: ssErr } = await supabase
       .from('staff_stores').select('staff_id, store_id').in('staff_id', staffIds);
+    if (ssErr) throw ssErr;
     for (const ss of ssData || []) {
       if (!storeMap[ss.staff_id]) storeMap[ss.staff_id] = [];
       storeMap[ss.staff_id].push(ss.store_id);
     }
   }
 
-  return {
-    staff: (data || []).map(r => ({
-      id: r.id, name: r.name, role: r.role, password: r.password,
-      storeIds: storeMap[r.id] || [],
-      createdAt: r.created_at, status: r.status
-    }))
-  };
+  let rows = (data || []).map(r => ({
+    id: r.id, name: r.name, role: r.role,
+    hasPassword: !!(r.password && String(r.password).length > 0),
+    storeIds: storeMap[r.id] || [],
+    createdAt: r.created_at, status: r.status
+  }));
+
+  if (!isAdminOrHeadquarter(staffCtx)) {
+    if (staffCtx.role === 'manager') {
+      const mine = new Set(staffCtx.storeIds || []);
+      rows = rows.filter(s => s.id === staffCtx.staffId || s.storeIds.some(id => mine.has(String(id))));
+    } else {
+      rows = rows.filter(s => s.id === staffCtx.staffId);
+    }
+  }
+  return { staff: rows };
 }
 
-export async function staffPost(body) {
+export async function staffPost(body, staffCtx) {
+  if (!isAdminOrHeadquarter(staffCtx)) {
+    return { error: 'スタッフ情報を変更できるのは管理者・本部のみです' };
+  }
   const action = body.action || '';
   switch (action) {
     case 'saveStaff':    return staffSaveAll(body.staff || []);
@@ -46,58 +64,30 @@ export async function staffPost(body) {
   }
 }
 
-// staff_stores.store_id は stores(id) への FK があるため、まだ stores に無い
-// Square 由来の店舗 ID（"1" ～ "20"）を参照すると挿入が失敗する。
-// 欠けている store レコードを事前にアップサートして FK エラーを防ぐ。
-//
-// 名前は Square の環境変数 (SQUARE_STORE_{id}_NAME) から優先的に解決し、
-// 無い場合のみ "(未登録: {id})" というプレースホルダを使う。
-// 過去の "店舗 N" 形式は現在では使わず、プレースホルダ判定にのみ用いる。
-async function ensureStoresExist(storeIds) {
-  if (!storeIds || storeIds.length === 0) return;
-  const uniqIds = [...new Set(storeIds)].map(String);
+const VALID_ROLES = new Set(['staff', 'manager', 'headquarter']);
 
-  // 既存行は触らない: 一括 select して未登録 ID のみ insert する
-  const { data: existing, error: selErr } = await supabase
-    .from('stores').select('id').in('id', uniqIds);
-  if (selErr) {
-    console.warn('[staff] ensureStoresExist select error:', selErr.message);
-    return;
-  }
-  const existingSet = new Set((existing || []).map(r => String(r.id)));
-  const missing = uniqIds.filter(id => !existingSet.has(id));
-  if (missing.length === 0) return;
-
-  const rows = missing.map(id => ({
-    id,
-    name: resolveStoreNameFromEnv(id) || `(未登録: ${id})`,
-    status: 'active'
-  }));
-  const { error } = await supabase.from('stores').insert(rows);
-  if (error) {
-    console.warn('[staff] ensureStoresExist warning:', error.message);
-  }
+async function replaceStaffStores(staffId, storeIds) {
+  const { error: delErr } = await supabase.from('staff_stores').delete().eq('staff_id', staffId);
+  if (delErr) throw delErr;
+  const ids = [...new Set((storeIds || []).map(String).filter(Boolean))];
+  if (ids.length === 0) return;
+  const { error } = await supabase.from('staff_stores').insert(ids.map(sid => ({ staff_id: staffId, store_id: sid })));
+  if (error) throw error;
 }
 
 async function staffSaveAll(staffArr) {
   for (const s of staffArr) {
-    const storeIds = s.storeIds || [];
-    const { error } = await supabase.from('staff').upsert({
-      id: s.id, name: s.name || '', role: s.role || 'staff',
-      password: s.password || '', status: s.status || 'active',
+    if (!s.id || !s.name) return { error: 'スタッフID と名前が必要です' };
+    const row = {
+      id: s.id, name: s.name, role: VALID_ROLES.has(s.role) ? s.role : 'staff',
+      status: s.status || 'active',
       created_at: s.createdAt || new Date().toISOString()
-    }, { onConflict: 'id' });
+    };
+    // パスワードは明示的に渡された時だけ更新する（未指定で既存を消さない）
+    if (s.password !== undefined) row.password = s.password || '';
+    const { error } = await supabase.from('staff').upsert(row, { onConflict: 'id' });
     if (error) throw error;
-
-    // staff_stores を更新
-    await supabase.from('staff_stores').delete().eq('staff_id', s.id);
-    if (storeIds.length > 0) {
-      // FK エラー回避のため欠けている stores レコードを事前に作成
-      await ensureStoresExist(storeIds);
-      const rows = storeIds.map(sid => ({ staff_id: s.id, store_id: String(sid) }));
-      const { error: ssErr } = await supabase.from('staff_stores').insert(rows);
-      if (ssErr) throw ssErr;
-    }
+    if (s.storeIds !== undefined) await replaceStaffStores(s.id, s.storeIds);
   }
   return { success: true, count: staffArr.length };
 }
@@ -106,25 +96,18 @@ async function staffUpdate(staffId, updates) {
   if (!staffId) return { error: 'staffIdが必要です' };
   const dbUpdates = {};
   if (updates.name !== undefined) dbUpdates.name = updates.name;
-  if (updates.role !== undefined) dbUpdates.role = updates.role;
-  if (updates.password !== undefined) dbUpdates.password = updates.password;
+  if (updates.role !== undefined) {
+    if (!VALID_ROLES.has(updates.role)) return { error: '不正なロールです' };
+    dbUpdates.role = updates.role;
+  }
+  if (updates.password !== undefined) dbUpdates.password = updates.password || '';
   if (updates.status !== undefined) dbUpdates.status = updates.status;
 
   if (Object.keys(dbUpdates).length > 0) {
     const { error } = await supabase.from('staff').update(dbUpdates).eq('id', staffId);
     if (error) throw error;
   }
-
-  if (updates.storeIds !== undefined) {
-    await supabase.from('staff_stores').delete().eq('staff_id', staffId);
-    if (updates.storeIds.length > 0) {
-      // FK エラー回避のため欠けている stores レコードを事前に作成
-      await ensureStoresExist(updates.storeIds);
-      const rows = updates.storeIds.map(sid => ({ staff_id: staffId, store_id: String(sid) }));
-      const { error } = await supabase.from('staff_stores').insert(rows);
-      if (error) throw error;
-    }
-  }
+  if (updates.storeIds !== undefined) await replaceStaffStores(staffId, updates.storeIds);
   return { success: true, updated: 1 };
 }
 
@@ -135,8 +118,34 @@ async function staffSetStatus(staffId, status) {
   return { success: true };
 }
 
+// スタッフ URL のパスワード照合（auth テーブルから呼ぶ）
+const _pwFailures = new Map(); // staffId → { count, blockedUntil }
+
+export async function verifyStaffPassword(staffId, password) {
+  if (!staffId) return { ok: false, error: 'staffIdが必要です' };
+  const now = Date.now();
+  const f = _pwFailures.get(staffId);
+  if (f && f.blockedUntil > now) {
+    return { ok: false, error: `試行回数の上限を超えました。${Math.ceil((f.blockedUntil - now) / 1000)}秒後に再試行してください` };
+  }
+  const { data, error } = await supabase.from('staff').select('id, password, status').eq('id', staffId).maybeSingle();
+  if (error) throw error;
+  if (!data || data.status === 'inactive') return { ok: false, error: 'スタッフが見つかりません' };
+  const expected = String(data.password || '');
+  if (!expected) return { ok: true };
+  const a = Buffer.from(String(password || ''));
+  const b = Buffer.from(expected);
+  const ok = a.length === b.length && crypto.timingSafeEqual(a, b);
+  if (ok) { _pwFailures.delete(staffId); return { ok: true }; }
+  const entry = f && f.blockedUntil <= now ? { count: 0, blockedUntil: 0 } : (f || { count: 0, blockedUntil: 0 });
+  entry.count += 1;
+  if (entry.count >= 5) { entry.blockedUntil = now + 60 * 1000; entry.count = 0; }
+  _pwFailures.set(staffId, entry);
+  return { ok: false, error: 'パスワードが正しくありません' };
+}
+
 // ============================================================
-// メニュー (menuItems)
+// メニュー (menuItems) — 出納帳の入力補助
 // ============================================================
 
 export async function menuItemsGet(params) {
@@ -159,24 +168,12 @@ export async function menuItemsGet(params) {
 export async function menuItemsPost(body) {
   const action = body.action || '';
   switch (action) {
-    case 'saveAll': {
-      const items = (body.menuItems || []).map(i => ({
-        id: i.id || ('menu_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5)),
-        name: i.name, category: i.category || '', price: i.price || 0,
-        item_type: i.itemType || 'menu', active: i.active !== false,
-        created_at: i.createdAt || new Date().toISOString()
-      }));
-      if (items.length > 0) {
-        const { error } = await supabase.from('menu_items').upsert(items, { onConflict: 'id' });
-        if (error) throw error;
-      }
-      return { success: true, count: items.length };
-    }
     case 'addItem': {
       const item = body.item || {};
+      if (!item.name) return { error: 'メニュー名が必要です' };
       const id = item.id || ('menu_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5));
       const { error } = await supabase.from('menu_items').insert({
-        id, name: item.name, category: item.category || '', price: item.price || 0,
+        id, name: item.name, category: item.category || '', price: parseInt(item.price, 10) || 0,
         item_type: item.itemType || 'menu', active: item.active !== false
       });
       if (error) throw error;
@@ -187,7 +184,7 @@ export async function menuItemsPost(body) {
       const dbUpdates = {};
       if (updates.name !== undefined) dbUpdates.name = updates.name;
       if (updates.category !== undefined) dbUpdates.category = updates.category;
-      if (updates.price !== undefined) dbUpdates.price = updates.price;
+      if (updates.price !== undefined) dbUpdates.price = parseInt(updates.price, 10) || 0;
       if (updates.itemType !== undefined) dbUpdates.item_type = updates.itemType;
       if (updates.active !== undefined) dbUpdates.active = updates.active;
       const { error } = await supabase.from('menu_items').update(dbUpdates).eq('id', body.itemId);
@@ -196,71 +193,6 @@ export async function menuItemsPost(body) {
     }
     case 'deleteItem': {
       const { error } = await supabase.from('menu_items').update({ active: false }).eq('id', body.itemId);
-      if (error) throw error;
-      return { success: true };
-    }
-    default: return { error: '不明なaction: ' + action };
-  }
-}
-
-// ============================================================
-// HPBデータ (hpb)
-// ============================================================
-
-// HPB は headquarter（本部）専用データ。
-// スタッフ（単店舗）モードからのアクセスは一切拒否し、管理者モード
-// (staffCtx === null) または role === 'headquarter'/'admin' のみ許可する。
-function _isHpbAllowed(staffCtx) {
-  if (staffCtx === null) return true; // admin モード
-  if (!staffCtx || staffCtx.valid === false) return false;
-  const role = String(staffCtx.role || '').toLowerCase();
-  return role === 'headquarter' || role === 'admin';
-}
-
-export async function hpbGet(params, staffCtx) {
-  if (!_isHpbAllowed(staffCtx)) {
-    return { error: 'HPBデータにアクセスする権限がありません' };
-  }
-  const { data, error } = await supabase.from('hpb_data').select('*').order('year_month');
-  if (error) throw error;
-  return {
-    monthly: (data || []).map(r => ({
-      yearMonth: r.year_month, views: r.views, bookings: r.bookings,
-      cost: r.cost, clicks: r.clicks, cvr: r.cvr, memo: r.memo || ''
-    }))
-  };
-}
-
-export async function hpbPost(body, staffCtx) {
-  if (!_isHpbAllowed(staffCtx)) {
-    return { error: 'HPBデータを更新する権限がありません' };
-  }
-  const action = body.action || '';
-  switch (action) {
-    case 'saveAll': {
-      const rows = (body.monthly || []).map(e => ({
-        year_month: e.yearMonth, views: e.views || 0, bookings: e.bookings || 0,
-        cost: e.cost || 0, clicks: e.clicks || 0, cvr: e.cvr || 0, memo: e.memo || ''
-      }));
-      if (rows.length > 0) {
-        const { error } = await supabase.from('hpb_data').upsert(rows, { onConflict: 'year_month' });
-        if (error) throw error;
-      }
-      return { success: true };
-    }
-    case 'upsert': {
-      const e = body.entry || {};
-      if (!e.yearMonth) return { error: 'yearMonthが必要です' };
-      const { error } = await supabase.from('hpb_data').upsert({
-        year_month: e.yearMonth, views: e.views || 0, bookings: e.bookings || 0,
-        cost: e.cost || 0, clicks: e.clicks || 0, cvr: e.cvr || 0, memo: e.memo || ''
-      }, { onConflict: 'year_month' });
-      if (error) throw error;
-      return { success: true, yearMonth: e.yearMonth };
-    }
-    case 'delete': {
-      if (!body.yearMonth) return { error: 'yearMonthが必要です' };
-      const { error } = await supabase.from('hpb_data').delete().eq('year_month', body.yearMonth);
       if (error) throw error;
       return { success: true };
     }

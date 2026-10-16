@@ -8,3 +8,13 @@ node_modules/
 test-results/
 playwright-report/
 .playwright/
+
+# フロントエンドのビルド成果物（npm run build / Vercel のビルドで生成）
+public/assets/
+src/ui/icons.generated.js
+
+# ローカル開発サーバーの疑似 DB
+.dev-data/
+
+# Claude Code の作業用ワークツリー
+.claude/worktrees/

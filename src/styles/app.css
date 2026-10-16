@@ -1,0 +1,225 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================================
+   デザイントークン
+   ------------------------------------------------------------
+   色は役割（canvas / surface / line / ink …）で指定し、ライト・ダークは
+   ここの値だけを切り替える。<html data-theme> は index.html 先頭の
+   スクリプトが OS 設定と画面のテーマ切り替えから決める。
+   チャートの色はデータ可視化ガイドの検証済みパレット（カテゴリ 8 色・
+   ステータス 4 色）をそのまま使う。
+   ============================================================ */
+:root {
+  color-scheme: light;
+  --canvas: 245 246 243;
+  --surface: 255 255 255;
+  --surface-2: 248 249 246;
+  --surface-3: 238 241 236;
+  --line: 227 231 225;
+  --line-strong: 205 211 203;
+  --ink: 22 27 24;
+  --ink-2: 72 81 75;
+  --muted: 122 131 125;
+
+  --chart-sales: #2f8559;
+  --chart-sales-wash: rgb(47 133 89 / 0.10);
+  --chart-gold: #a76c0f;
+  --chart-target: #7a837d;
+  --chart-grid: #e9ece7;
+  --chart-axis: #cdd3cb;
+  --chart-surface: #ffffff;
+
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-4: #eda100;
+  --series-5: #e87ba4;
+  --series-6: #008300;
+  --series-7: #6250d6;
+  --series-8: #e34948;
+  --series-other: #a7ada8;
+
+  --status-good: #0ca30c;
+  --status-warn: #fab219;
+  --status-serious: #ec835a;
+  --status-critical: #d03b3b;
+  --text-good: #006300;
+  --text-bad: #b42323;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --canvas: 13 17 15;
+  --surface: 21 26 23;
+  --surface-2: 27 33 30;
+  --surface-3: 36 43 39;
+  --line: 42 50 46;
+  --line-strong: 58 68 62;
+  --ink: 236 240 237;
+  --ink-2: 182 191 185;
+  --muted: 132 142 136;
+
+  --chart-sales: #4fa277;
+  --chart-sales-wash: rgb(79 162 119 / 0.12);
+  --chart-gold: #e2a62b;
+  --chart-target: #848e88;
+  --chart-grid: #232a26;
+  --chart-axis: #3a443e;
+  --chart-surface: #151a17;
+
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #c98500;
+  --series-5: #d55181;
+  --series-6: #008300;
+  --series-7: #9085e9;
+  --series-8: #e66767;
+  --series-other: #6b736d;
+
+  --text-good: #3fcb4f;
+  --text-bad: #f08a8a;
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+  }
+  body {
+    @apply bg-canvas text-ink font-sans antialiased;
+    font-feature-settings: 'palt' 1;
+    min-height: 100vh;
+    min-height: 100dvh;
+  }
+  ::selection {
+    background: rgb(47 133 89 / 0.22);
+  }
+  :focus-visible {
+    outline: 2px solid #2f8559;
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+  input, select, textarea, button {
+    font: inherit;
+    color: inherit;
+  }
+  /* iOS で入力時に勝手にズームしないよう 16px を下限にする */
+  @media (max-width: 640px) {
+    input, select, textarea { font-size: 16px !important; }
+  }
+}
+
+@layer components {
+  .card {
+    @apply bg-surface border border-line rounded-2xl shadow-card;
+  }
+  .card-pad {
+    @apply p-4 sm:p-5;
+  }
+  .num {
+    font-variant-numeric: tabular-nums;
+  }
+  .field {
+    @apply w-full rounded-xl border border-line bg-surface px-3 py-2.5 text-sm text-ink placeholder:text-muted
+      outline-none transition-colors focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 disabled:opacity-60;
+  }
+  .field-label {
+    @apply mb-1.5 block text-xs font-semibold text-ink-2;
+  }
+  .data-table {
+    @apply w-full text-sm;
+  }
+  /* :where() で詳細度を 0 にして、text-right などのユーティリティで上書きできるようにする */
+  :where(.data-table th) {
+    @apply whitespace-nowrap border-b border-line bg-surface-2 px-3 py-2 text-left text-xs font-semibold text-ink-2;
+  }
+  :where(.data-table td) {
+    @apply border-b border-line px-3 py-2.5 align-middle;
+  }
+  :where(.data-table tr:last-child td) {
+    @apply border-b-0;
+  }
+  :where(.data-table .num-cell) {
+    @apply text-right num whitespace-nowrap;
+  }
+  .scroll-x {
+    @apply overflow-x-auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .safe-top {
+    padding-top: env(safe-area-inset-top);
+  }
+
+  /* --- 旧画面（出納帳・施術ツール）から引き継いだクラス --- */
+  .glass-card {
+    @apply card card-pad;
+  }
+  .btn-gradient {
+    @apply bg-brand-600 text-white shadow-sm transition-colors hover:bg-brand-700;
+  }
+  .animate-scale-in {
+    @apply animate-rise-in;
+  }
+}
+
+/* ============================================================
+   ダークモードの安全網
+   ------------------------------------------------------------
+   旧画面から移植した部分に残る淡色のユーティリティ（bg-white / slate / *-50）を
+   ダーク時にトークン色へ読み替える。新しいコードは最初からトークンを使う。
+   ============================================================ */
+[data-theme='dark'] .bg-white { background-color: rgb(var(--surface)); }
+[data-theme='dark'] .bg-slate-50,
+[data-theme='dark'] .bg-gray-50 { background-color: rgb(var(--surface-2)); }
+[data-theme='dark'] .bg-slate-100,
+[data-theme='dark'] .bg-gray-100 { background-color: rgb(var(--surface-3)); }
+[data-theme='dark'] .bg-slate-200 { background-color: rgb(var(--line-strong)); }
+[data-theme='dark'] .text-slate-900,
+[data-theme='dark'] .text-slate-800,
+[data-theme='dark'] .text-slate-700,
+[data-theme='dark'] .text-gray-800,
+[data-theme='dark'] .text-gray-700 { color: rgb(var(--ink)); }
+[data-theme='dark'] .text-slate-600,
+[data-theme='dark'] .text-slate-500,
+[data-theme='dark'] .text-gray-600,
+[data-theme='dark'] .text-gray-500 { color: rgb(var(--ink-2)); }
+[data-theme='dark'] .text-slate-400,
+[data-theme='dark'] .text-slate-300,
+[data-theme='dark'] .text-gray-400 { color: rgb(var(--muted)); }
+[data-theme='dark'] .border-slate-100,
+[data-theme='dark'] .border-slate-200,
+[data-theme='dark'] .border-gray-200 { border-color: rgb(var(--line)); }
+[data-theme='dark'] .border-slate-300 { border-color: rgb(var(--line-strong)); }
+[data-theme='dark'] .bg-amber-50,
+[data-theme='dark'] .bg-yellow-50 { background-color: rgb(201 138 20 / 0.12); }
+[data-theme='dark'] .bg-blue-50,
+[data-theme='dark'] .bg-indigo-50,
+[data-theme='dark'] .bg-sky-50 { background-color: rgb(57 135 229 / 0.12); }
+[data-theme='dark'] .bg-red-50,
+[data-theme='dark'] .bg-rose-50 { background-color: rgb(208 59 59 / 0.14); }
+[data-theme='dark'] .bg-green-50,
+[data-theme='dark'] .bg-emerald-50,
+[data-theme='dark'] .bg-sise-50,
+[data-theme='dark'] .bg-brand-50 { background-color: rgb(79 162 119 / 0.12); }
+[data-theme='dark'] .bg-purple-50,
+[data-theme='dark'] .bg-violet-50 { background-color: rgb(144 133 233 / 0.12); }
+
+@media print {
+  .no-print { display: none !important; }
+  body { background: #fff; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

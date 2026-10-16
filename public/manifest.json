@@ -1,13 +1,13 @@
 {
-  "name": "si'se Dashboard",
+  "name": "si'se ダッシュボード",
   "short_name": "si'se",
-  "description": "si'se 整体院経営ダッシュボード",
+  "description": "si'se 整体院ダッシュボード",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#f4f8f5",
-  "theme_color": "#33a065",
+  "background_color": "#f5f6f3",
+  "theme_color": "#236c48",
   "lang": "ja",
   "icons": [
     { "src": "/images/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },

@@ -1,5 +1,5 @@
 import { supabase } from './supabase.js';
-import { canAccessStore, allowedStoreIds } from './auth.js';
+import { canAccessStore, allowedStoreIds, isAdminOrHeadquarter } from './auth.js';
 import { resolveStoreId } from './stores.js';
 
 // ============================================================
@@ -17,7 +17,9 @@ export async function cashbookGet(params, staffCtx) {
     }
   }
 
-  let query = supabase.from('cashbook').select('*').order('date', { ascending: false });
+  // 論理削除済み（deleted=true）は返さない。以前は返していたため、削除した記録が
+  // 次の同期で復活し、現金残高の計算にも含まれていた。
+  let query = supabase.from('cashbook').select('*').eq('deleted', false).order('date', { ascending: false });
   if (params.store) query = query.eq('store_id', params.store);
   else if (scoped !== null) {
     if (scoped.length === 0) return { entries: [], dailyCloses: [], logs: [], lastUpdated: new Date().toISOString() };
@@ -86,10 +88,21 @@ export async function cashbookPost(body, staffCtx) {
     case 'updateEntry':   return cbUpdateEntry(body.entryId, body.updates || {}, body.operator || '', staffCtx);
     case 'deleteEntry':   return cbDeleteEntry(body.entryId, body.operator || '', staffCtx);
     case 'dailyClose':    return cbDailyClose(body, staffCtx);
-    case 'getDailyCloses': return cbGetDailyCloses(body.store || '', staffCtx);
-    case 'getLogs':       return cbGetLogs(body.store || '', body.limit || 100, staffCtx);
-    case 'saveCashbook':  return cbSaveAll(body.entries || [], body.operator || '', staffCtx);
-    case 'saveDailyCloses': return cbSaveDailyCloses(body.dailyCloses || [], staffCtx);
+    case 'getDailyCloses':
+      if (body.store && !canAccessStore(staffCtx, body.store)) return { error: 'この店舗にアクセスする権限がありません' };
+      if (!body.store && !isAdminOrHeadquarter(staffCtx)) return { error: '店舗を指定してください' };
+      return cbGetDailyCloses(body.store || '', staffCtx);
+    case 'getLogs':
+      if (body.store && !canAccessStore(staffCtx, body.store)) return { error: 'この店舗にアクセスする権限がありません' };
+      if (!body.store && !isAdminOrHeadquarter(staffCtx)) return { error: '店舗を指定してください' };
+      return cbGetLogs(body.store || '', body.limit || 100, staffCtx);
+    // 一括保存はデータ移行用。管理者・本部のみ
+    case 'saveCashbook':
+      if (!isAdminOrHeadquarter(staffCtx)) return { error: '権限がありません（管理者・本部のみ）' };
+      return cbSaveAll(body.entries || [], body.operator || '', staffCtx);
+    case 'saveDailyCloses':
+      if (!isAdminOrHeadquarter(staffCtx)) return { error: '権限がありません（管理者・本部のみ）' };
+      return cbSaveDailyCloses(body.dailyCloses || [], staffCtx);
     default: return { error: '不明なaction: ' + action };
   }
 }
