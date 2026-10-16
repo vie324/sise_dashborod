@@ -1,96 +1,183 @@
 // ============================================================
 // SalonOne 分析API クライアント（読み取り専用）
 // ------------------------------------------------------------
-// SalonOne 管理画面 > ブランド管理 > 「API連携」で発行したアクセスキーを
-// サーバー側の環境変数にだけ置き、ブラウザには出さない。
+// 仕様: https://salonone.net/api-docs （サロンワンにログインして閲覧）
+//   ベースURL  https://salonone.net/api/analytics/v1
+//   認証       ヘッダ X-SalonOne-Api-Key: <キー>（ブランド管理 >「API連携」で発行）
+//   制限       1分 60回 / 1日 20,000回 / 1回の取得 200件（最大 1,000件）
+//   明細の続き  meta.has_more と meta.next_cursor（cursor パラメータ）
+//   エラー     { "error": { "code": "unauthorized", "error_id": "..." } }
 //
-//   SALONONE_API_KEY        分析API アクセスキー（必須。未設定ならデモデータ）
-//   SALONONE_API_BASE_URL   API のベース URL（既定: https://salonone.net）
-//   SALONONE_API_ENDPOINTS  エンドポイントの上書き（JSON。下の DEFAULT_ENDPOINTS 参照）
-//
-// ⚠ エンドポイントのパスとクエリ名は仕様書（ログイン必須）を確認できて
-//   いないため暫定値。設定画面の「接続テスト」で実レスポンスを確認し、
-//   必要なら SALONONE_API_ENDPOINTS で上書きするか DEFAULT_ENDPOINTS を直す。
+// キーはサーバーの環境変数にだけ置き、ブラウザには出さない。
+//   SALONONE_API_KEY        アクセスキー（必須。未設定ならデモデータ）
+//   SALONONE_API_BASE_URL   ベースURL の上書き（通常は不要）
+//   SALONONE_API_ENDPOINTS  エンドポイントのパスの上書き（JSON。通常は不要）
+//   SALONONE_RATE_LIMIT_PER_MINUTE  1分あたりの呼び出しの上限（既定 55。SalonOne でキーの上限を
+//                                   上げてもらった場合だけ、その値より少し小さい値に変える）
 // ============================================================
 
 import { extractList } from './normalize.js';
 
+export const DEFAULT_BASE_URL = 'https://salonone.net/api/analytics/v1';
+
 export const DEFAULT_ENDPOINTS = {
-  shops: '/api/analytics/shops',
-  staff: '/api/analytics/staffs',
-  visitSources: '/api/analytics/visit-sources',
-  // 受付（来店）明細。期間と店舗で絞り込む
-  receptions: '/api/analytics/receptions',
-  // 回数券・サブスク等の契約
-  contracts: '/api/analytics/contracts',
-  // 店舗別の継続指標（集計済みで提供されていれば使う。無ければ契約から計算）
-  retention: '',
+  meta: '/meta',
+  shops: '/shops',
+  staff: '/staffs',
+  visitSources: '/visit-sources',
+  // 受付履歴の明細（予約 1件 1行。会計金額・消化額・支払方法・担当・媒体・区分・購入プラン）
+  receptions: '/marketing/reception-history',
+  // 継続管理（回数券・サブスク・プリペイドを持つ顧客の状態。取得時点の値）
+  retentionSummary: '/marketing/retention-summary',
+  retentionCustomers: '/marketing/retention-customers',
 };
 
-const DEFAULT_QUERY = { from: 'from', to: 'to', shop: 'shop_id', page: 'page', perPage: 'per_page' };
-const PER_PAGE = 500;
-const MAX_PAGES = 40;
-const TIMEOUT_MS = 20000;
+const RECORD_LIMIT = 1000;
+const MAX_PAGES = 50;
+const TIMEOUT_MS = 25000;
+
+/** 「https://salonone.net」だけが設定されていても分析API のパスを補う */
+function resolveBaseUrl(raw) {
+  const base = String(raw || '').trim().replace(/\/+$/, '');
+  if (!base) return DEFAULT_BASE_URL;
+  try {
+    const u = new URL(base);
+    if (u.pathname === '' || u.pathname === '/') return `${u.origin}/api/analytics/v1`;
+  } catch (_) { /* そのまま使う */ }
+  return base;
+}
 
 export function salonOneConfig() {
   const apiKey = (process.env.SALONONE_API_KEY || '').trim();
-  const baseUrl = (process.env.SALONONE_API_BASE_URL || 'https://salonone.net').replace(/\/+$/, '');
+  const baseUrl = resolveBaseUrl(process.env.SALONONE_API_BASE_URL);
   let endpoints = { ...DEFAULT_ENDPOINTS };
-  let query = { ...DEFAULT_QUERY };
   const raw = process.env.SALONONE_API_ENDPOINTS;
   if (raw) {
     try {
       const parsed = JSON.parse(raw);
       if (parsed && typeof parsed === 'object') {
-        const { query: q, ...rest } = parsed;
-        endpoints = { ...endpoints, ...rest };
-        if (q && typeof q === 'object') query = { ...query, ...q };
+        for (const [k, v] of Object.entries(parsed)) if (k in DEFAULT_ENDPOINTS && typeof v === 'string') endpoints[k] = v;
       }
     } catch (e) {
       console.warn('[salonone] SALONONE_API_ENDPOINTS の JSON が不正です:', e.message);
     }
   }
-  return { apiKey, baseUrl, endpoints, query, configured: !!apiKey };
+  return { apiKey, baseUrl, endpoints, configured: !!apiKey };
 }
 
+// 分析API のエラーコード → 画面に出す説明
+const ERROR_MESSAGES = {
+  unauthorized: 'APIキーが無効です（入力ミス・失効・期限切れ）。SalonOne で発行したキーと Vercel の SALONONE_API_KEY を確認してください',
+  user_auth_required: 'このキーは「サロンワンのログインを必須にする」で発行されています。オフにしたキーを発行し直してください',
+  invalid_token: 'ログインの有効期限が切れています',
+  forbidden: 'このキーでは取得できない範囲です（他ブランドの店舗・閲覧権限のない機能）',
+  shop_forbidden: 'アクセス権のない店舗を指定しました',
+  feature_disabled: 'ブランドでこの機能が無効になっています（SalonOne の機能設定を確認してください）',
+  invalid_request: 'パラメータが正しくありません',
+  rate_limited: 'SalonOne API の利用上限（1分 60回）に達しました。1分ほど待ってから更新してください',
+  exchange_rate_not_set: '外貨の店舗の為替レートが未登録です（SalonOne の為替レート設定で登録してください）',
+  method_not_allowed: '許可されていない呼び出し方です',
+  not_found: 'API の URL が見つかりません（SALONONE_API_BASE_URL・SALONONE_API_ENDPOINTS を設定している場合は外してください）',
+  internal_error: 'SalonOne 側でエラーが発生しました',
+};
+// error.code が無い応答（ルートが無い 404 など）は HTTP ステータスから判断する
+const STATUS_CODES = { 401: 'unauthorized', 403: 'forbidden', 404: 'not_found', 405: 'method_not_allowed', 429: 'rate_limited' };
+
 export class SalonOneError extends Error {
-  constructor(message, { status, endpoint, body } = {}) {
+  constructor(message, { status, endpoint, code, errorId, fields, body } = {}) {
     super(message);
     this.name = 'SalonOneError';
     this.status = status;
     this.endpoint = endpoint;
+    this.code = code;
+    this.errorId = errorId;
+    this.fields = fields;
     this.body = body;
   }
 }
 
-async function request(cfg, path, params = {}) {
+// ------------------------------------------------------------
+// 呼び出し回数の調整（1分 60回の制限に当たらないように）
+// ------------------------------------------------------------
+// 同時に投げるのは 4本まで。直近 1分の呼び出しが上限（既定 55回）に達したら、空くまで待つ。
+// 20秒以上待つことになる場合は待たずに「上限」として返す（関数の実行時間切れを避ける）。
+// サーバーレスのインスタンスごとの目安で、別インスタンスとは共有しない。
+const MAX_CONCURRENCY = 4;
+const perMinute = () => Math.max(1, Math.floor(Number(process.env.SALONONE_RATE_LIMIT_PER_MINUTE)) || 55);
+const MAX_WAIT_MS = 20000;
+let active = 0;
+const waiting = [];
+const recent = [];
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function acquire(path) {
+  if (active >= MAX_CONCURRENCY) await new Promise((r) => waiting.push(r));
+  active += 1;
+  const started = Date.now();
+  for (;;) {
+    const now = Date.now();
+    while (recent.length && now - recent[0] > 60000) recent.shift();
+    if (recent.length < perMinute()) { recent.push(now); return; }
+    const wait = 60000 - (now - recent[0]) + 50;
+    if (now - started + wait > MAX_WAIT_MS) {
+      release();
+      throw new SalonOneError(`SalonOne API エラー (${path}): ${ERROR_MESSAGES.rate_limited}`, { status: 429, endpoint: path, code: 'rate_limited' });
+    }
+    await sleep(Math.min(5000, wait));
+  }
+}
+
+function release() {
+  active -= 1;
+  const next = waiting.shift();
+  if (next) next();
+}
+
+async function request(cfg, path, params = {}, { retried = false } = {}) {
   const url = new URL(cfg.baseUrl + path);
   for (const [k, v] of Object.entries(params)) {
     if (v !== undefined && v !== null && v !== '') url.searchParams.set(k, String(v));
   }
+  await acquire(path);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   let resp;
+  let text = '';
   try {
     resp = await fetch(url, {
-      headers: {
-        Accept: 'application/json',
-        Authorization: `Bearer ${cfg.apiKey}`,
-        'X-API-Key': cfg.apiKey,
-      },
+      headers: { Accept: 'application/json', 'X-SalonOne-Api-Key': cfg.apiKey },
       signal: controller.signal,
     });
+    text = await resp.text();
   } catch (e) {
-    throw new SalonOneError(e.name === 'AbortError' ? 'SalonOne API がタイムアウトしました' : `SalonOne API に接続できません: ${e.message}`, { endpoint: path });
+    throw new SalonOneError(e.name === 'AbortError' ? `SalonOne API がタイムアウトしました (${path})` : `SalonOne API に接続できません (${path}): ${e.message}`, { endpoint: path });
   } finally {
     clearTimeout(timer);
+    release();
   }
-  const text = await resp.text();
   let json = null;
   try { json = text ? JSON.parse(text) : null; } catch (_) { /* 非 JSON */ }
+
   if (!resp.ok) {
-    const msg = (json && (json.message || json.error)) || `HTTP ${resp.status}`;
-    throw new SalonOneError(`SalonOne API エラー (${path}): ${msg}`, { status: resp.status, endpoint: path, body: text.slice(0, 500) });
+    const err = json && typeof json.error === 'object' && json.error ? json.error : {};
+    const code = err.code || STATUS_CODES[resp.status] || (resp.status >= 500 ? 'internal_error' : '');
+    // 上限に当たった時は 1回だけ待って取り直す
+    if (resp.status === 429 && !retried) {
+      const after = Number(resp.headers.get('retry-after'));
+      await sleep(Math.min(10000, Number.isFinite(after) && after > 0 ? after * 1000 : 3000));
+      return request(cfg, path, params, { retried: true });
+    }
+    const fields = Array.isArray(err.fields) ? err.fields : null;
+    const upstream = json && typeof json.message === 'string' ? json.message : (json && typeof json.error === 'string' ? json.error : '');
+    const base = ERROR_MESSAGES[code] || upstream || `HTTP ${resp.status}`;
+    const detail = [
+      fields ? `項目: ${fields.join(', ')}` : '',
+      !err.code && upstream && ERROR_MESSAGES[code] ? upstream : '',
+      err.error_id ? `error_id: ${err.error_id}` : '',
+    ].filter(Boolean).join(' / ');
+    throw new SalonOneError(`SalonOne API エラー (${path}): ${base}${detail ? `（${detail}）` : ''}`, {
+      status: resp.status, endpoint: path, code, errorId: err.error_id, fields, body: text.slice(0, 500),
+    });
   }
   if (json === null) {
     throw new SalonOneError(`SalonOne API が JSON 以外を返しました (${path})`, { status: resp.status, endpoint: path, body: text.slice(0, 500) });
@@ -98,78 +185,171 @@ async function request(cfg, path, params = {}) {
   return json;
 }
 
-function nextPageInfo(json, page, received) {
-  const meta = (json && (json.meta || json.pagination)) || {};
-  const last = Number(meta.last_page || meta.lastPage || meta.total_pages || meta.totalPages || 0);
-  if (last) return page < last;
-  if (json && json.links && 'next' in json.links) return !!json.links.next;
-  if (json && json.next_page_url !== undefined) return !!json.next_page_url;
-  return received >= PER_PAGE;
-}
+const nextCursor = (json) => {
+  const meta = json && json.meta;
+  if (!meta || !meta.has_more) return null;
+  return meta.next_cursor || null;
+};
 
-/** ページングを辿って全件を取得する */
-export async function fetchAll(cfg, path, params = {}) {
+/** 明細（/shops・/staffs など）を cursor で最後まで取得する */
+export async function fetchRecords(cfg, path, params = {}) {
   const out = [];
-  for (let page = 1; page <= MAX_PAGES; page++) {
-    const json = await request(cfg, path, { ...params, [cfg.query.page]: page, [cfg.query.perPage]: PER_PAGE });
-    const list = extractList(json);
-    out.push(...list);
-    if (list.length === 0 || !nextPageInfo(json, page, list.length)) break;
+  let cursor = null;
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const json = await request(cfg, path, { ...params, limit: RECORD_LIMIT, cursor: cursor || undefined });
+    out.push(...extractList(json));
+    cursor = nextCursor(json);
+    if (!cursor) break;
   }
   return out;
 }
 
-export async function fetchShops(cfg) {
-  return fetchAll(cfg, cfg.endpoints.shops);
+// limit を受け付けないマーケ集計のパス（invalid_request で fields に limit が返ったもの）
+const noLimitPaths = new Set();
+const rejectsLimit = (e) => e && e.code === 'invalid_request' && Array.isArray(e.fields) && e.fields.includes('limit');
+
+/** マーケ集計の一覧。続きがあれば cursor で辿る（limit を受け付けなければ外して取り直す） */
+export async function fetchList(cfg, path, params = {}) {
+  const out = [];
+  let cursor = null;
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const withLimit = !noLimitPaths.has(path);
+    let json;
+    try {
+      json = await request(cfg, path, { ...params, limit: withLimit ? RECORD_LIMIT : undefined, cursor: cursor || undefined });
+    } catch (e) {
+      if (!withLimit || !rejectsLimit(e)) throw e;
+      noLimitPaths.add(path);
+      json = await request(cfg, path, { ...params, cursor: cursor || undefined });
+    }
+    out.push(...extractList(json));
+    cursor = nextCursor(json);
+    if (!cursor) break;
+  }
+  return out;
 }
 
-export async function fetchStaff(cfg) {
-  return fetchAll(cfg, cfg.endpoints.staff);
+/** 1件のオブジェクトを返すエンドポイント（data の中身） */
+export async function fetchObject(cfg, path, params = {}) {
+  const json = await request(cfg, path, params);
+  return json && typeof json === 'object' && json.data && typeof json.data === 'object' ? json.data : json;
 }
 
-export async function fetchVisitSources(cfg) {
-  if (!cfg.endpoints.visitSources) return [];
-  return fetchAll(cfg, cfg.endpoints.visitSources);
+export const fetchShops = (cfg) => fetchRecords(cfg, cfg.endpoints.shops);
+export const fetchStaff = (cfg) => fetchRecords(cfg, cfg.endpoints.staff);
+export const fetchVisitSources = (cfg) => fetchRecords(cfg, cfg.endpoints.visitSources);
+
+/** 受付履歴の明細（店舗ごと・期間は店舗の暦日） */
+export function fetchReceptions(cfg, { from, to, shopId }) {
+  return fetchList(cfg, cfg.endpoints.receptions, { from, to, shop_id: shopId });
 }
 
-export async function fetchReceptions(cfg, { from, to, shopId }) {
-  return fetchAll(cfg, cfg.endpoints.receptions, { [cfg.query.from]: from, [cfg.query.to]: to, [cfg.query.shop]: shopId });
+/** 継続管理のサマリー（サブスクのみ。状態は取得時点） */
+export function fetchRetentionSummary(cfg, { from, to, shopId }) {
+  return fetchObject(cfg, cfg.endpoints.retentionSummary, { from, to, shop_id: shopId, plan_kind: 'subscription' });
 }
 
-export async function fetchContracts(cfg, { shopId, to }) {
-  return fetchAll(cfg, cfg.endpoints.contracts, { [cfg.query.shop]: shopId, [cfg.query.to]: to });
+/** 継続管理の顧客一覧（サブスクのみ。支払日が期間内の顧客） */
+export function fetchRetentionCustomers(cfg, { from, to, shopId }) {
+  return fetchList(cfg, cfg.endpoints.retentionCustomers, { from, to, shop_id: shopId, plan_kind: 'subscription' });
 }
 
-export async function fetchRetention(cfg, { month, shopId }) {
-  if (!cfg.endpoints.retention) return [];
-  return fetchAll(cfg, cfg.endpoints.retention, { month, [cfg.query.shop]: shopId });
+// ------------------------------------------------------------
+// 接続テスト（設定画面用）
+// ------------------------------------------------------------
+const PROBE_LABELS = {
+  meta: 'キーの情報',
+  shops: '店舗',
+  staff: 'スタッフ',
+  visitSources: '来店経由（媒体）',
+  receptions: '受付履歴の明細',
+  retentionSummary: '継続管理のサマリー',
+  retentionCustomers: '継続管理の顧客一覧',
+};
+
+const keysOf = (o) => (o && typeof o === 'object' && !Array.isArray(o) ? Object.keys(o).slice(0, 60) : []);
+
+/** レコードの中の配列・オブジェクト項目のキー（plans・payment_splits など）。空の配列が多いので先頭 50件から探す */
+function nestedKeys(records) {
+  const out = {};
+  for (const record of records.slice(0, 50)) {
+    if (!record || typeof record !== 'object') continue;
+    for (const [k, v] of Object.entries(record)) {
+      if (out[k]) continue;
+      if (Array.isArray(v) && v[0] && typeof v[0] === 'object') out[k] = keysOf(v[0]);
+      else if (v && typeof v === 'object' && !Array.isArray(v)) out[k] = keysOf(v);
+    }
+  }
+  return out;
+}
+
+/** キーの情報から、画面に出してよい短い値だけ（キーやトークンらしいものは出さない） */
+function safeInfo(obj) {
+  const out = {};
+  for (const [k, v] of Object.entries(obj || {})) {
+    if (/key|token|secret|password/i.test(k)) continue;
+    if (['string', 'number', 'boolean'].includes(typeof v) && String(v).length <= 80) out[k] = v;
+  }
+  return out;
 }
 
 /**
- * 接続テスト（設定画面用）。各エンドポイントを 1 ページだけ叩き、
- * HTTP ステータス・件数・先頭レコードのキーを返す（値は返さない）。
+ * 各エンドポイントを 1回ずつ呼び、HTTP ステータス・件数・項目名を返す（値は返さない）。
+ * 受付履歴・継続管理は店舗の指定が必須なので、店舗一覧の先頭の店舗で試す。
  */
 export async function probe(cfg, { from, to }) {
   const results = [];
-  for (const [name, path] of Object.entries(cfg.endpoints)) {
-    if (!path) { results.push({ name, path, skipped: true }); continue; }
-    const params = name === 'receptions'
-      ? { [cfg.query.from]: from, [cfg.query.to]: to }
-      : name === 'contracts' ? { [cfg.query.to]: to } : {};
+  const step = async (name, run) => {
+    const path = cfg.endpoints[name];
     try {
-      const json = await request(cfg, path, { ...params, [cfg.query.page]: 1, [cfg.query.perPage]: 5 });
-      const list = extractList(json);
-      results.push({
-        name,
-        path,
-        ok: true,
-        count: list.length,
-        topLevelKeys: json && typeof json === 'object' && !Array.isArray(json) ? Object.keys(json).slice(0, 20) : [],
-        sampleKeys: list[0] && typeof list[0] === 'object' ? Object.keys(list[0]).slice(0, 60) : [],
-      });
+      const r = await run(path);
+      results.push({ name, label: PROBE_LABELS[name], path, ok: true, ...r });
+      return r;
     } catch (e) {
-      results.push({ name, path, ok: false, status: e.status || null, error: e.message });
+      results.push({ name, label: PROBE_LABELS[name], path, ok: false, status: e.status || null, code: e.code || null, error: e.message });
+      return null;
     }
-  }
+  };
+  const listResult = (list, json) => ({
+    count: list.length,
+    more: !!(json && json.meta && json.meta.has_more),
+    topLevelKeys: keysOf(json),
+    sampleKeys: keysOf(list[0]),
+    nested: nestedKeys(list),
+  });
+
+  await step('meta', async (path) => {
+    const json = await request(cfg, path);
+    const data = json && json.data && typeof json.data === 'object' ? json.data : json;
+    return { count: 1, topLevelKeys: keysOf(json), sampleKeys: keysOf(data), info: safeInfo(data) };
+  });
+  const shops = await step('shops', async (path) => {
+    const json = await request(cfg, path, { limit: 5 });
+    const list = extractList(json);
+    return { ...listResult(list, json), firstId: list[0] ? list[0].id ?? list[0].shop_id : null };
+  });
+  await step('staff', async (path) => {
+    const json = await request(cfg, path, { limit: 5 });
+    return listResult(extractList(json), json);
+  });
+  await step('visitSources', async (path) => {
+    const json = await request(cfg, path, { limit: 5 });
+    return listResult(extractList(json), json);
+  });
+  const shopId = shops && shops.firstId != null ? shops.firstId : null;
+  if (shopId == null) return results;
+  await step('receptions', async (path) => {
+    const json = await request(cfg, path, { from, to, shop_id: shopId });
+    return { ...listResult(extractList(json), json), shopId };
+  });
+  await step('retentionSummary', async (path) => {
+    const json = await request(cfg, path, { from, to, shop_id: shopId, plan_kind: 'subscription' });
+    const data = json && json.data && typeof json.data === 'object' ? json.data : json;
+    return { count: 1, topLevelKeys: keysOf(json), sampleKeys: keysOf(data), nested: nestedKeys([data]), shopId };
+  });
+  await step('retentionCustomers', async (path) => {
+    const json = await request(cfg, path, { from, to, shop_id: shopId, plan_kind: 'subscription' });
+    return { ...listResult(extractList(json), json), shopId };
+  });
   return results;
 }

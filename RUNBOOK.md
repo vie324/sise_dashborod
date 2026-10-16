@@ -19,8 +19,9 @@
 | 変数 | 用途 | 既定挙動 |
 |---|---|---|
 | `SALONONE_API_KEY` | SalonOne 分析API のアクセスキー | 未設定ならデモデータで表示（画面に「デモデータ」と出る） |
-| `SALONONE_API_BASE_URL` | API のベース URL | `https://salonone.net` |
-| `SALONONE_API_ENDPOINTS` | エンドポイント・クエリ名の上書き（JSON） | 既定のパスを使う。詳細は [docs/SALONONE.md](docs/SALONONE.md) |
+| `SALONONE_API_BASE_URL` | API のベース URL | `https://salonone.net/api/analytics/v1` |
+| `SALONONE_API_ENDPOINTS` | エンドポイントのパスの上書き（JSON） | 既定のパスを使う。詳細は [docs/SALONONE.md](docs/SALONONE.md) |
+| `SALONONE_RATE_LIMIT_PER_MINUTE` | 1分あたりの呼び出しの上限 | `55`（SalonOne の既定の上限 60 より少し小さく） |
 
 ### 推奨（設定しないと機能縮退）
 
@@ -123,7 +124,7 @@ Vercel の Environment Variables に `SISE_ADMIN_PASSWORD_HASH = <ハッシュ>`
 
 手順の詳細は [docs/SALONONE.md](docs/SALONONE.md)。
 
-1. SalonOne > ブランド管理 >「API連携」でキー発行（個人情報: オフ / ログイン必須: オフ / 有効期限 1年）
+1. SalonOne のブランド選択画面 >「API連携」でキーを発行してもらう（個人情報: 含めない / ユーザー認証: 必須にしない / 有効期限 1年）
 2. Vercel に `SALONONE_API_KEY` を設定して再デプロイ
 3. 設定 > SalonOne連携 で「接続テスト」→ 店舗・スタッフ・来店経由を対応付けて保存
 
@@ -132,8 +133,12 @@ Vercel の Environment Variables に `SISE_ADMIN_PASSWORD_HASH = <ハッシュ>`
 | 症状 | 確認すること |
 |---|---|
 | 画面に「デモデータ」と出る | `SALONONE_API_KEY` が本番環境に設定されているか、再デプロイしたか |
-| 接続テストで 401 | キーの期限切れ・失効。SalonOne で再発行して差し替え |
-| 接続テストで 404 / 項目が空 | API のパス・項目名が仕様と違う → `SALONONE_API_ENDPOINTS` か `normalize.js` を調整（docs/SALONONE.md §3） |
+| 接続テストで 401「APIキーが無効です」 | キーの入力ミス・期限切れ・失効。SalonOne で再発行して差し替え、再デプロイ |
+| 接続テストで 401「ログインを必須にする」 | ユーザー認証を必須にしないキーを発行し直す |
+| 接続テストで 403 | ブランドで機能（マーケティング・継続管理）が無効、または他ブランドの店舗 |
+| 「利用上限（1分 60回）」 | 1分待って ⟳。続くなら docs/SALONONE.md §2 の呼び出し回数を参照 |
+| 「◯時◯分時点のデータを表示しています」 | SalonOne から取り直せず前回の値を表示中。時間をおいて ⟳ |
+| 会員数・退会率が「—」 | 連携より前の月は記録が無い（当月分から毎月残る）。当月が「—」なら接続テストで継続管理を確認 |
 | 「SalonOne の店舗と未連携の店舗があります」 | 店舗の対応付けを保存 |
 | スタッフの数字が 0 / 「未連携」バッジ | スタッフの対応付けを保存。SalonOne 側の担当スタッフ設定も確認 |
 | 新規契約・SNS・紹介の数が合わない | 来店経由 → 集客経路の対応付け（自動判定が違う媒体名を明示指定） |

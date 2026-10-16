@@ -38,7 +38,7 @@ test('消化売上・既存顧客売上・施術数は会計確定の来店だ�
   assert.equal(m.shops.A.daily.length, 3);
 });
 
-test('新規の契約は初回来店月に計上し、紹介はサブスク（シェアプラン除く）のみ', () => {
+test('新規の契約は初回来店の月のうちの契約だけを数え、紹介はサブスク（シェアプラン除く）のみ', () => {
   const receptions = [
     R({ date: '2026-11-03', customerId: 'n1', customerClass: 'new', sourceName: 'ホットペッパー' }),
     R({ date: '2026-11-20', customerId: 'n1', customerClass: 'new', sourceName: 'ホットペッパー' }), // 2回目は新規数に数えない
@@ -46,27 +46,57 @@ test('新規の契約は初回来店月に計上し、紹介はサブスク（�
     R({ date: '2026-11-05', customerId: 'n3', customerClass: 'new', sourceName: '紹介', staffId: 's2' }),
     R({ date: '2026-11-06', customerId: 'n4', customerClass: 'new', sourceName: '紹介', referralStaffId: 's3' }),
     R({ date: '2026-11-07', customerId: 'n5', customerClass: 'new', sourceName: '紹介' }),
+    R({ date: '2026-11-08', customerId: 'n6', customerClass: 'new', sourceName: 'ホームページ' }),
   ];
   const contracts = [
-    { customerId: 'n1', shopId: 'A', type: 'subscription', startDate: '2026-12-02' }, // 翌月契約 → 11月に計上
-    { customerId: 'n2', shopId: 'A', type: 'ticket', startDate: '2026-11-04' },
+    { customerId: 'n1', shopId: 'A', type: 'subscription', startDate: '2026-11-20' }, // 2回目の来店で契約 → 数える
+    { customerId: 'n2', shopId: 'A', type: 'ticket', startDate: '2026-12-02' }, // 翌月の契約 → 数えない
     { customerId: 'n3', shopId: 'A', type: 'subscription', startDate: '2026-11-05' },
     { customerId: 'n4', shopId: 'A', type: 'subscription', startDate: '2026-11-06' },
     { customerId: 'n5', shopId: 'A', type: 'subscription', startDate: '2026-11-07', isSharePlan: true },
+    { customerId: 'n6', shopId: 'A', type: 'member', startDate: '2026-11-08' }, // プランの種別が無い入会も契約
   ];
   const m = computeMonth({ receptions, contracts, month: '2026-11', asOf: '2026-12-10' });
   assert.equal(m.staff.s1.newVisits.hotpepper, 1);
   assert.equal(m.staff.s1.newContracts.hotpepper, 1);
-  assert.equal(m.staff.s1.newContracts.meta, 1);
-  assert.equal(m.shops.A.newVisitTotal, 5);
+  assert.equal(m.staff.s1.newContracts.meta, 0);
+  assert.equal(m.staff.s1.newContracts.homepage, 1);
+  assert.equal(m.shops.A.newVisitTotal, 6);
   assert.equal(m.staff.s2.referralSubscriptions, 1);
   assert.equal(m.staff.s3.referralSubscriptions, 1); // 紹介リンクのスタッフに付ける
   assert.equal(m.staff.s1.referralSubscriptions, 0); // n5 はシェアプラン
   assert.equal(m.shops.A.referralSubscriptions, 2);
 
   // 基準日より後の契約はまだ数えない
-  const early = computeMonth({ receptions, contracts, month: '2026-11', asOf: '2026-11-30' });
+  const early = computeMonth({ receptions, contracts, month: '2026-11', asOf: '2026-11-10' });
   assert.equal(early.staff.s1.newContracts.hotpepper, 0);
+});
+
+test('現金は分割決済の内訳（cashAmount）を優先する', () => {
+  const receptions = [
+    R({ id: 1, date: '2026-11-02', customerId: 'c1', salesAmount: 53000, cashAmount: 3000, paymentMethod: '現金 / クレジットカード' }),
+    R({ id: 2, date: '2026-11-02', customerId: 'c2', salesAmount: 8000, paymentMethod: '現金' }),
+    R({ id: 3, date: '2026-11-03', customerId: 'c3', salesAmount: 8000, cashAmount: 0, paymentMethod: 'PayPay' }),
+  ];
+  const m = computeMonth({ receptions, contracts: [], month: '2026-11', asOf: '2026-11-30' });
+  assert.equal(m.shops.A.cashSales, 11000);
+  assert.equal(m.shops.A.daily[0].cashSales, 11000);
+  assert.equal(m.shops.A.daily[1].cashSales, 0);
+});
+
+test('ライブでは継続指標を契約から計算せず、API の値だけを使う', () => {
+  const receptions = [R({ date: '2026-11-02', customerId: 'c1' })];
+  const contracts = [{ customerId: 'c1', shopId: 'A', type: 'subscription', startDate: '2026-11-02' }];
+  const live = computeMonth({ receptions, contracts, month: '2026-11', asOf: '2026-11-30', retentionFromContracts: false });
+  assert.equal(live.shops.A.retention, null);
+  const withApi = computeMonth({
+    receptions, contracts, month: '2026-11', asOf: '2026-11-30', retentionFromContracts: false,
+    retentionOverrides: { A: { memberCount: 50, churnRatePct: 6, avgTenureMonths: 4 }, B: { memberCount: 12 } },
+  });
+  assert.equal(withApi.shops.A.retention.memberCount, 50);
+  assert.equal(withApi.shops.A.retention.basis, 'api');
+  assert.equal(withApi.shops.B.retention.memberCount, 12); // 受付が無い店舗も継続指標は出す
+  assert.equal(combineShops([live.shops.A]).retention.memberCount, null);
 });
 
 test('継続指標: 会員数・退会率・平均継続期間', () => {

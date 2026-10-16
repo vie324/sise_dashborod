@@ -3,23 +3,24 @@
 // ------------------------------------------------------------
 // SalonOne から取得して正規化したレコードを、月次の店舗・スタッフ実績へ集計する。
 //
-// 受付（来店）レコード reception:
-//   { id, shopId, staffId, customerId, date:'YYYY-MM-DD',
+// 受付（来店）レコード reception（SalonOne の受付履歴 1行）:
+//   { id, shopId, staffId, staffName?, customerId, date:'YYYY-MM-DD',
 //     status:'completed'|'reserved'|'checked_in'|'cancelled'|'no_show',
 //     customerClass:'new'|'repeat'|'existing', sourceName,
-//     consumedAmount,   // 消化（施術消化売上）
-//     salesAmount,      // 売上（入金）
+//     consumedAmount,   // 消化額（施術消化売上）
+//     salesAmount,      // 会計金額（入金）
+//     cashAmount?,      // そのうち現金（分割決済の内訳から。無ければ paymentMethod で判定）
 //     paymentMethod, referralStaffId? }
 //
-// 契約レコード contract（サブスク・回数券など）:
-//   { id, customerId, shopId, staffId?, type:'subscription'|'ticket'|'prepaid'|'payPerVisit',
+// 契約レコード contract（サブスク・回数券・入会）:
+//   { id, customerId, shopId, staffId?, type:'subscription'|'ticket'|'member'|'prepaid'|'payPerVisit',
 //     planName, isSharePlan, startDate, endDate|null }
 //
-// 集計ルール（SalonOne の定義に合わせる）
-//   - 売上・施術数は会計確定（completed）の来店のみ
-//   - 新規 = その月に初回来店（completed）した新規客。担当は初回来店のスタッフ
-//   - 契約 = 新規客が回数券・サブスクを契約しているか（初回来店月に計上。
-//            SalonOne の「購入数（生涯基準）」と同じ考え方）
+// 集計ルール
+//   - 売上・施術数は会計完了（completed）の予約のみ
+//   - 新規 = その店舗で最初の予約が、その月に会計完了したお客様。担当はその予約のスタッフ
+//   - 契約 = 新規のお客様が、初回来店の月のうちに回数券・サブスクを購入（または入会）したか
+//            （月が締まった後に数字が変わらないよう、翌月以降の契約は数えない）
 //   - 紹介 = 紹介経路の新規客がサブスク（シェアプラン除く）を契約した件数
 // ============================================================
 
@@ -46,6 +47,7 @@ function newStaffBucket(staffId, shopId) {
     referralSubscriptions: 0,
     daily: new Map(),
     shopVotes: new Map(),
+    name: '',
   };
 }
 
@@ -75,7 +77,8 @@ function dayBucket(map, date) {
 }
 
 const isCash = (method) => /現金|cash/i.test(String(method || ''));
-const isContractType = (t) => t === 'subscription' || t === 'ticket';
+const cashOf = (r) => (r.cashAmount != null ? n(r.cashAmount) : (isCash(r.paymentMethod) ? n(r.salesAmount) : 0));
+const isContractType = (t) => t === 'subscription' || t === 'ticket' || t === 'member';
 
 /**
  * 契約一覧から customerId → 契約[] の索引を作る
@@ -150,8 +153,11 @@ export function computeRetention(contracts, shopId, month, asOf) {
  * @param {string} [input.asOf]      データ基準日（当月はその日まで）
  * @param {Object} [input.channelMap] 媒体名 → 経路キー
  * @param {Object} [input.retentionOverrides] shopId → API 提供の継続指標
+ * @param {boolean} [input.retentionFromContracts=true]
+ *   継続指標が API に無い店舗を契約データから計算するか。
+ *   受付履歴から作った契約（期間内の購入だけ）では会員数を出せないので、ライブでは false
  */
-export function computeMonth({ receptions, contracts, month, asOf, channelMap, retentionOverrides }) {
+export function computeMonth({ receptions, contracts, month, asOf, channelMap, retentionOverrides, retentionFromContracts = true }) {
   const today = asOf || todayJst();
   const contractsByCustomer = indexContracts(contracts);
   const shops = new Map();
@@ -183,12 +189,13 @@ export function computeMonth({ receptions, contracts, month, asOf, channelMap, r
     shop.treatmentCount += 1;
     if (existing) shop.existingConsumedSales += consumed;
     if (r.customerId) shop.customerIds.add(r.customerId);
-    if (isCash(r.paymentMethod)) shop.cashSales += sales;
+    const cash = cashOf(r);
+    shop.cashSales += cash;
     const sd = dayBucket(shop.daily, r.date);
     sd.consumedSales += consumed;
     sd.depositSales += sales;
     sd.treatmentCount += 1;
-    if (isCash(r.paymentMethod)) sd.cashSales += sales;
+    sd.cashSales += cash;
 
     if (r.staffId) {
       const st = getStaff(r.staffId, r.shopId);
@@ -197,6 +204,7 @@ export function computeMonth({ receptions, contracts, month, asOf, channelMap, r
       st.treatmentCount += 1;
       if (existing) st.existingConsumedSales += consumed;
       if (r.customerId) st.customerIds.add(r.customerId);
+      if (r.staffName) st.name = r.staffName;
       st.shopVotes.set(r.shopId, (st.shopVotes.get(r.shopId) || 0) + 1);
       const dd = dayBucket(st.daily, r.date);
       dd.consumedSales += consumed;
@@ -209,12 +217,13 @@ export function computeMonth({ receptions, contracts, month, asOf, channelMap, r
     }
   }
 
-  // 新規客（初回来店）の経路・契約
-  const { from } = monthRange(month);
+  // 新規客（初回来店）の経路・契約（初回来店の月のうち、基準日までの契約）
+  const { from, to } = monthRange(month);
+  const until = today < to ? today : to;
   for (const [customerId, r] of firstVisits) {
     const channel = resolveChannel(r.sourceName, channelMap);
     const list = contractsByCustomer.get(customerId) || [];
-    const relevant = list.filter((c) => c.startDate && c.startDate >= from && c.startDate <= today);
+    const relevant = list.filter((c) => c.startDate && c.startDate >= from && c.startDate <= until);
     const contracted = relevant.some((c) => isContractType(c.type));
     const subscribed = relevant.some((c) => c.type === 'subscription' && !c.isSharePlan);
 
@@ -244,9 +253,13 @@ export function computeMonth({ receptions, contracts, month, asOf, channelMap, r
 
   const finishDaily = (map) => Array.from(map.values()).sort((a, b) => (a.date < b.date ? -1 : 1));
 
+  const retentionOf = (shopId) => {
+    const override = retentionOverrides && retentionOverrides[shopId];
+    if (override) return { ...override, basis: 'api' };
+    return retentionFromContracts ? computeRetention(contracts, shopId, month, today) : null;
+  };
   const shopOut = {};
   for (const s of shops.values()) {
-    const override = retentionOverrides && retentionOverrides[s.shopId];
     shopOut[s.shopId] = {
       shopId: s.shopId,
       consumedSales: s.consumedSales,
@@ -261,21 +274,23 @@ export function computeMonth({ receptions, contracts, month, asOf, channelMap, r
       newContractTotal: sumValues(s.newContracts),
       referralSubscriptions: s.referralSubscriptions,
       daily: finishDaily(s.daily),
-      retention: override ? { ...override, basis: 'api' } : computeRetention(contracts, s.shopId, month, today),
+      retention: retentionOf(s.shopId),
     };
   }
-  // 受付が 1件も無い店舗でも、契約データがあれば継続指標だけは出す
-  const contractShops = new Set((contracts || []).map((c) => c.shopId).filter(Boolean));
-  for (const shopId of contractShops) {
+  // 受付が 1件も無い店舗でも、契約データ・継続指標があれば継続指標だけは出す
+  const retentionShops = new Set([
+    ...(retentionFromContracts ? (contracts || []).map((c) => c.shopId) : []),
+    ...Object.keys(retentionOverrides || {}),
+  ].filter(Boolean));
+  for (const shopId of retentionShops) {
     if (shopOut[shopId]) continue;
     const empty = newShopBucket(shopId);
-    const override = retentionOverrides && retentionOverrides[shopId];
     shopOut[shopId] = {
       shopId,
       consumedSales: 0, existingConsumedSales: 0, depositSales: 0, treatmentCount: 0, customerCount: 0, cashSales: 0,
       newVisits: empty.newVisits, newContracts: empty.newContracts, newVisitTotal: 0, newContractTotal: 0,
       referralSubscriptions: 0, daily: [],
-      retention: override ? { ...override, basis: 'api' } : computeRetention(contracts, shopId, month, today),
+      retention: retentionOf(shopId),
     };
   }
 
@@ -287,6 +302,7 @@ export function computeMonth({ receptions, contracts, month, asOf, channelMap, r
     staffOut[s.staffId] = {
       staffId: s.staffId,
       shopId: primaryShop,
+      name: s.name,
       consumedSales: s.consumedSales,
       existingConsumedSales: s.existingConsumedSales,
       depositSales: s.depositSales,
@@ -321,6 +337,8 @@ export function combineShops(shopList) {
   const daily = new Map();
   let tenureWeighted = 0;
   let tenureWeight = 0;
+  let retentionShops = 0;
+  let churnKnown = true;
   for (const s of shopList || []) {
     if (!s) continue;
     for (const k of ['consumedSales', 'existingConsumedSales', 'depositSales', 'treatmentCount', 'customerCount', 'cashSales', 'newVisitTotal', 'newContractTotal', 'referralSubscriptions']) {
@@ -340,6 +358,8 @@ export function combineShops(shopList) {
     }
     const r = s.retention;
     if (r) {
+      retentionShops += 1;
+      if (r.membersAtStart == null || r.churnCount == null) churnKnown = false;
       out.retention.memberCount += n(r.memberCount);
       out.retention.membersAtStart += n(r.membersAtStart);
       out.retention.churnCount += n(r.churnCount);
@@ -351,7 +371,13 @@ export function combineShops(shopList) {
   }
   out.daily = Array.from(daily.values()).sort((a, b) => (a.date < b.date ? -1 : 1));
   const rr = out.retention;
-  rr.churnRatePct = rr.membersAtStart > 0 ? (rr.churnCount / rr.membersAtStart) * 100 : null;
+  if (!retentionShops) {
+    // 継続指標が 1店舗も無い（ライブで過去の月の記録が無いなど）
+    rr.memberCount = null;
+    rr.membersAtStart = null;
+    rr.churnCount = null;
+  }
+  rr.churnRatePct = retentionShops && churnKnown && rr.membersAtStart > 0 ? (rr.churnCount / rr.membersAtStart) * 100 : null;
   rr.avgTenureMonths = tenureWeight > 0 ? tenureWeighted / tenureWeight : null;
   return out;
 }

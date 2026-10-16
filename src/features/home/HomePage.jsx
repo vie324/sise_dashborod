@@ -72,7 +72,10 @@ function StoreKpis({ summary, storeGoal }) {
       <StatTile label="新規来店（3経路）" icon="user-plus" value={`${num(s.contract3ch.visits)}名`}
         sub={s.contract3ch.ratePct != null ? `契約率 ${pct(s.contract3ch.ratePct)}（${s.contract3ch.contracts}件）` : '契約率 —'} />
       <StatTile label="会員数（サブスク）" icon="id-card" value={ret.memberCount != null ? `${num(ret.memberCount)}名` : '—'}
-        sub={ret.churnRatePct != null ? `退会率 ${pct(ret.churnRatePct)}・平均継続 ${num(ret.avgTenureMonths, 1)}ヶ月` : '退会率 —'} />
+        sub={[
+          `退会率 ${pct(ret.churnRatePct)}`,
+          ret.avgTenureMonths != null ? `平均継続 ${num(ret.avgTenureMonths, 1)}ヶ月` : null,
+        ].filter(Boolean).join('・')} />
     </div>
   );
 }

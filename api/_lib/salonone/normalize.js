@@ -1,10 +1,12 @@
 // ============================================================
-// SalonOne API レスポンスの正規化
+// SalonOne 分析API レスポンスの正規化
 // ------------------------------------------------------------
-// 分析API の仕様（https://salonone.net/api-docs）はログインしないと
-// 閲覧できないため、フィールド名は SalonOne 画面の用語・CSV 項目名から
-// 推定したものを複数候補で受け付ける（snake_case / camelCase / ネスト）。
-// 実際の仕様に合わせる時は、ここの候補リストに 1 つ追加するだけでよい。
+// 仕様: https://salonone.net/api-docs（schema_version 2026-10-16）
+//   /shops /staffs /visit-sources        明細（id・deleted_at など。項目の一覧は非公開）
+//   /marketing/reception-history         受付履歴の明細（予約 1件 1行）
+//   /marketing/retention-summary         継続管理のサマリー
+//   /marketing/retention-customers       継続管理の顧客一覧
+// 明細（/shops など）の項目名は仕様に載っていないため、候補を複数受け付ける。
 // 正規化後の形は shared/metrics.js 冒頭のコメントを参照。
 // ============================================================
 
@@ -30,35 +32,62 @@ const toNum = (v) => {
   const n = Number(String(v).replace(/[,¥円\s]/g, ''));
   return Number.isFinite(n) ? n : 0;
 };
+const toNumOrNull = (v) => (v == null || v === '' ? null : toNum(v));
 const toId = (v) => (v == null || v === '' ? '' : String(v));
 const toBool = (v) => v === true || v === 1 || v === '1' || v === 'true';
 
-/** API が { data: [...] } / { data: { data: [...] } } / [...] のどれで返しても配列を取り出す */
+/**
+ * 一覧を取り出す。{ data: [...] }（明細）/ { data: { rows: [...] } }（マーケ集計）/ [...] のどれでも配列にする
+ */
 export function extractList(json) {
   if (Array.isArray(json)) return json;
   if (!json || typeof json !== 'object') return [];
   for (const key of ['data', 'items', 'results', 'records', 'rows']) {
     const v = json[key];
     if (Array.isArray(v)) return v;
-    if (v && typeof v === 'object' && Array.isArray(v.data)) return v.data;
+    if (v && typeof v === 'object') {
+      for (const inner of ['rows', 'items', 'data', 'customers', 'records']) {
+        if (Array.isArray(v[inner])) return v[inner];
+      }
+    }
   }
   return [];
 }
+
+/** 削除済み（deleted_at に値がある・deleted フラグ） */
+const isDeleted = (raw) => !!pick(raw, ['deleted_at', 'deletedAt']) || toBool(pick(raw, ['deleted', 'is_deleted', 'isDeleted'], false));
 
 export function normalizeShop(raw) {
   return {
     id: toId(pick(raw, ['id', 'shop_id', 'shopId'])),
     name: String(pick(raw, ['name', 'shop_name', 'shopName', 'display_name'], '')),
+    active: !isDeleted(raw),
   };
 }
 
+function staffName(raw) {
+  const name = pick(raw, ['name', 'staff_name', 'staffName', 'display_name', 'full_name', 'nickname']);
+  if (name) return String(name);
+  const last = pick(raw, ['last_name', 'family_name', 'sei'], '');
+  const first = pick(raw, ['first_name', 'given_name', 'mei'], '');
+  return `${last}${last && first ? ' ' : ''}${first}`.trim();
+}
+
 export function normalizeStaff(raw) {
+  const retired = isDeleted(raw)
+    || toBool(pick(raw, ['retired', 'is_retired', 'resigned', 'is_resigned'], false))
+    || !!pick(raw, ['retired_at', 'resigned_at', 'retirement_date']);
   return {
     id: toId(pick(raw, ['id', 'staff_id', 'staffId'])),
-    name: String(pick(raw, ['name', 'staff_name', 'staffName', 'display_name', 'full_name'], '')),
-    shopId: toId(pick(raw, ['shop_id', 'shopId', 'shop.id', 'shops.0.id', 'main_shop_id'])),
-    active: !toBool(pick(raw, ['deleted', 'is_deleted', 'retired'], false)),
+    name: staffName(raw),
+    shopId: toId(pick(raw, ['shop_id', 'shopId', 'main_shop_id', 'shop.id', 'shops.0.id', 'shop_ids.0'])),
+    active: !retired,
   };
+}
+
+/** 流入元（来店経由）の名前 */
+export function normalizeVisitSourceName(raw) {
+  return String(pick(raw, ['name', 'visit_source_name', 'label', 'title'], ''));
 }
 
 const STATUS_MAP = [
@@ -76,41 +105,75 @@ export function normalizeStatus(value) {
   return s.toLowerCase();
 }
 
+/** 区分: new（その店舗で最初の予約）/ continuing（継続）/ existing */
 export function normalizeCustomerClass(raw) {
-  const v = String(pick(raw, ['classification', 'customer_class', 'customerClass', 'visit_type', 'visitType', 'class'], '')).trim();
+  const v = String(pick(raw, ['classification', 'customer_class', 'customerClass', 'visit_type', 'visitType'], '')).trim();
   if (/^new$|新規|first/i.test(v)) return 'new';
   if (/continu|repeat|継続|リピート/i.test(v)) return 'repeat';
   if (v) return 'existing';
-  const visitNumber = toNum(pick(raw, ['visit_number', 'visitNumber', 'visit_count', 'visitCount'], 0));
-  if (visitNumber === 1) return 'new';
-  if (toBool(pick(raw, ['is_new', 'isNew', 'is_first_visit', 'first_visit'], false))) return 'new';
+  if (toNum(pick(raw, ['visit_number', 'visitNumber'], 0)) === 1) return 'new';
+  if (toBool(pick(raw, ['is_new', 'isNew', 'is_first_visit'], false))) return 'new';
   return 'existing';
 }
 
+const CASH = /現金|cash/i;
+
+/**
+ * 現金で受け取った額。分割決済なら内訳のうち現金の分、そうでなければ決済方法が現金なら会計金額。
+ * 決済方法の情報が無いときは null（呼び出し側で決済方法の名前から判定する）。
+ */
+export function cashPortion(raw, amount) {
+  const splits = pick(raw, ['payment_splits', 'paymentSplits']);
+  if (Array.isArray(splits) && splits.length > 0) {
+    return splits.reduce((s, sp) => s + (CASH.test(String(pick(sp, ['payment_method_name', 'name', 'method'], ''))) ? toNum(pick(sp, ['amount'], 0)) : 0), 0);
+  }
+  const method = pick(raw, ['payment_method_name', 'paymentMethodName', 'payment_method.name', 'payment_method']);
+  if (method == null) return null;
+  return CASH.test(String(method)) ? amount : 0;
+}
+
+/** この予約で購入したプラン */
+function normalizePlans(raw) {
+  const plans = pick(raw, ['plans']);
+  if (!Array.isArray(plans)) return [];
+  return plans.map((p) => ({
+    name: String(pick(p, ['plan_name', 'name'], '')),
+    kind: String(pick(p, ['plan_kind', 'kind', 'type'], '')).toLowerCase(),
+    amount: toNum(pick(p, ['amount'], 0)),
+  }));
+}
+
+/**
+ * 受付履歴の明細 1行 → 受付レコード
+ * 日時は店舗のタイムゾーン（オフセット付き）なので、そのまま JST の日付にする。
+ */
 export function normalizeReception(raw) {
-  const date = toJstDate(pick(raw, [
-    'visit_date', 'visited_at', 'reserved_at', 'reservation_datetime', 'start_at', 'starts_at', 'date', 'appointment_date',
-    'visitDate', 'visitedAt', 'reservedAt', 'reservationDatetime', 'startAt', 'startsAt', 'appointmentDate',
-  ]));
+  const status = pick(raw, ['cancel_type']) === 'no_show' ? 'no_show' : normalizeStatus(pick(raw, ['status', 'state']));
+  const salesAmount = toNum(pick(raw, ['amount', 'sales', 'sales_amount', 'total_amount'], 0));
+  const sourceName = pick(raw, ['visit_source_name', 'visit_source.name', 'visitSourceName', 'source_name']);
   return {
-    id: toId(pick(raw, ['id', 'reception_id', 'appointment_id', 'reservation_id'])),
+    id: toId(pick(raw, ['appointment_id', 'id', 'reception_id', 'reservation_id'])),
     shopId: toId(pick(raw, ['shop_id', 'shopId', 'shop.id'])),
-    staffId: toId(pick(raw, ['staff_id', 'staffId', 'staff.id', 'assigned_staff_id', 'main_staff_id'])),
-    customerId: toId(pick(raw, ['customer_id', 'customerId', 'customer.id', 'karte_id'])),
-    date,
-    status: normalizeStatus(pick(raw, ['status', 'state', 'reception_status'])),
+    staffId: toId(pick(raw, ['staff_id', 'staffId', 'staff.id'])),
+    staffName: String(pick(raw, ['staff_name', 'staff.name'], '')),
+    customerId: toId(pick(raw, ['customer_id', 'customerId', 'customer.id'])),
+    date: toJstDate(pick(raw, ['reserved_at', 'reservedAt', 'start_at', 'visit_date', 'date'])),
+    status,
     customerClass: normalizeCustomerClass(raw),
-    sourceName: String(pick(raw, ['visit_source.name', 'visit_source_name', 'visitSourceName', 'source_name', 'source', 'media.name', 'media_name', 'media', 'channel'], '')),
-    consumedAmount: toNum(pick(raw, ['consumed_sales', 'consumedSales', 'consumed_amount', 'consumedAmount', 'consumed', 'consumption_amount'], 0)),
-    salesAmount: toNum(pick(raw, ['sales', 'sales_amount', 'salesAmount', 'deposit_sales', 'digest_sales', 'total_amount', 'amount', 'total'], 0)),
-    paymentMethod: String(pick(raw, ['payment_method.name', 'payment_method_name', 'paymentMethodName', 'payment_method', 'paymentMethod'], '')),
-    referralStaffId: toId(pick(raw, ['referral_staff_id', 'referralStaffId', 'introducer_staff_id', 'forced_link.staff_id'])),
+    sourceName: sourceName == null ? '' : String(sourceName),
+    consumedAmount: toNum(pick(raw, ['consumed_amount', 'consumedAmount', 'consumed', 'consumed_sales'], 0)),
+    salesAmount,
+    cashAmount: cashPortion(raw, salesAmount),
+    paymentMethod: String(pick(raw, ['payment_method_name', 'paymentMethodName', 'payment_method.name', 'payment_method'], '')),
+    joined: toBool(pick(raw, ['joined'], false)),
+    plans: normalizePlans(raw),
+    referralStaffId: toId(pick(raw, ['referral_staff_id', 'referralStaffId'])),
   };
 }
 
 const TYPE_MAP = [
   [/subsc|サブスク|月額|monthly/i, 'subscription'],
-  [/ticket|回数券|coupon_book/i, 'ticket'],
+  [/ticket|回数券/i, 'ticket'],
   [/prepaid|プリペイド/i, 'prepaid'],
   [/per.?visit|都度/i, 'payPerVisit'],
 ];
@@ -118,48 +181,74 @@ const TYPE_MAP = [
 export function normalizeContractType(value, planName) {
   const s = `${value || ''} ${planName || ''}`;
   for (const [re, key] of TYPE_MAP) if (re.test(s)) return key;
-  return String(value || 'subscription');
+  return String(value || 'other');
 }
 
 /**
- * @param {Object} raw
+ * 受付明細の「この予約で購入したプラン」「入会」から契約レコードを作る。
+ *   plan_kind = subscription / ticket → その種別の契約
+ *   プランの種別が無い入会（joined）   → member（入会）
+ *   プラン名が「都度」払いのキーワードに当たるものは payPerVisit（契約に数えない）
+ * @param {Array} receptions 正規化済みの受付レコード
  * @param {{ sharePlanPattern?: RegExp, payPerVisitPattern?: RegExp }} [opts]
  */
-export function normalizeContract(raw, opts = {}) {
-  const planName = String(pick(raw, ['plan.name', 'plan_name', 'planName', 'menu_name', 'name'], ''));
-  let type = normalizeContractType(pick(raw, ['type', 'plan_type', 'planType', 'kind', 'plan.type']), planName);
-  if (opts.payPerVisitPattern && opts.payPerVisitPattern.test(planName)) type = 'payPerVisit';
-  const isSharePlan = toBool(pick(raw, ['is_share_plan', 'isSharePlan', 'share', 'plan.is_share'], false))
-    || (opts.sharePlanPattern ? opts.sharePlanPattern.test(planName) : false);
-  const end = pick(raw, [
-    'ended_at', 'end_date', 'cancelled_at', 'canceled_at', 'leaved_at', 'withdraw_date', 'expired_at',
-    'endedAt', 'endDate', 'cancelledAt', 'canceledAt', 'leavedAt', 'withdrawDate', 'expiredAt',
-  ]);
-  return {
-    id: toId(pick(raw, ['id', 'contract_id', 'subscription_id', 'entitlement_id'])),
-    customerId: toId(pick(raw, ['customer_id', 'customerId', 'customer.id'])),
-    shopId: toId(pick(raw, ['shop_id', 'shopId', 'shop.id'])),
-    staffId: toId(pick(raw, ['staff_id', 'staffId', 'staff.id', 'sold_by_staff_id'])),
-    type,
-    planName,
-    isSharePlan,
-    startDate: toJstDate(pick(raw, [
-      'started_at', 'start_date', 'contracted_at', 'purchased_at', 'joined_at', 'created_at',
-      'startedAt', 'startDate', 'contractedAt', 'purchasedAt', 'joinedAt', 'createdAt',
-    ])),
-    endDate: end ? toJstDate(end) : null,
-  };
+export function contractsFromReceptions(receptions, opts = {}) {
+  const out = [];
+  for (const r of receptions || []) {
+    if (!r || r.status !== 'completed' || !r.customerId || !r.date) continue;
+    let contracted = false;
+    (r.plans || []).forEach((p, i) => {
+      let type = p.kind === 'subscription' || p.kind === 'ticket' ? p.kind : '';
+      if (!type) return;
+      if (opts.payPerVisitPattern && opts.payPerVisitPattern.test(p.name)) type = 'payPerVisit';
+      else contracted = true;
+      out.push({
+        id: `${r.id}:${i}`,
+        customerId: r.customerId,
+        shopId: r.shopId,
+        staffId: r.staffId,
+        type,
+        planName: p.name,
+        isSharePlan: opts.sharePlanPattern ? opts.sharePlanPattern.test(p.name) : false,
+        startDate: r.date,
+        endDate: null,
+      });
+    });
+    if (r.joined && !contracted) {
+      out.push({
+        id: `${r.id}:join`, customerId: r.customerId, shopId: r.shopId, staffId: r.staffId,
+        type: 'member', planName: '', isSharePlan: false, startDate: r.date, endDate: null,
+      });
+    }
+  }
+  return out;
 }
 
-/** API が継続指標を集計済みで返す場合（任意） */
-export function normalizeRetention(raw) {
-  const churn = pick(raw, ['churn_rate', 'churnRate', 'withdrawal_rate', 'cancel_rate']);
-  const churnNum = churn == null ? null : toNum(churn);
+const countOf = (obj, key) => toNum(pick(obj, [`${key}_count`, key], 0));
+
+/**
+ * 継続管理（サブスク）のサマリー + 顧客一覧 → 店舗の継続指標
+ *   会員数        取得時点の 正常 + 要フォロー + 要注意（離反以外）
+ *   退会率        直近 1か月に離反へ移った人数 ÷ 1か月前の会員数
+ *   平均継続期間  顧客一覧のサブスク継続月数の平均
+ * @param {Object} summary   /marketing/retention-summary の data
+ * @param {Array}  customers /marketing/retention-customers の一覧
+ */
+export function normalizeRetention(summary, customers = []) {
+  const members = (o) => countOf(o, 'continuing') + countOf(o, 'follow') + countOf(o, 'attention');
+  const memberCount = members(summary);
+  const prev = pick(summary, ['previous_month', 'previousMonth']);
+  const membersAtStart = prev ? members(prev) : null;
+  const churnCount = prev ? Math.max(0, countOf(summary, 'churned') - countOf(prev, 'churned')) : null;
+  const months = (customers || [])
+    .map((c) => toNumOrNull(pick(c, ['subscription_months', 'subscriptionMonths'])))
+    .filter((v) => v != null);
   return {
-    shopId: toId(pick(raw, ['shop_id', 'shopId'])),
-    memberCount: toNum(pick(raw, ['member_count', 'memberCount', 'members', 'active_members'], 0)),
-    // 0〜1 の比率で返ってきた場合は % に直す
-    churnRatePct: churnNum == null ? null : (churnNum <= 1 ? churnNum * 100 : churnNum),
-    avgTenureMonths: pick(raw, ['average_tenure_months', 'avg_tenure_months', 'avgTenureMonths', 'average_continuation_months']) ?? null,
+    memberCount,
+    membersAtStart,
+    churnCount,
+    churnRatePct: membersAtStart ? (churnCount / membersAtStart) * 100 : null,
+    avgTenureMonths: months.length ? months.reduce((s, v) => s + v, 0) / months.length : null,
+    tenureSample: months.length,
   };
 }
