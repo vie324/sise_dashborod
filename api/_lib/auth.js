@@ -152,7 +152,7 @@ export async function extractStaffContext(req) {
  *   - storeId が空          : ハンドラ側で別途「店舗必須」をチェックする前提。
  *                            ここでは true を返してはならず、false 扱いで防御的にする
  *                            （空 storeId でスルーされると cross-store 取得が漏れる）
- *   - headquarter ロール    : 全店舗アクセス可（出納帳・勤怠など本部管轄業務）
+ *   - headquarter ロール    : 全店舗アクセス可（出納帳など本部管轄業務）
  *   - manager / staff       : staffCtx.storeIds で判定
  */
 export function canAccessStore(staffCtx, storeId) {
@@ -165,7 +165,7 @@ export function canAccessStore(staffCtx, storeId) {
 
 /**
  * 「現在のスタッフが見ていい店舗 IDs」を返す（null なら全店舗）。
- * attendanceGet / cashbookGet 等で自動フィルタ掛けに使う。
+ * cashbookGet 等で自動フィルタ掛けに使う。
  * headquarter ロールは本部管轄として全店舗（null）扱い。
  */
 export function allowedStoreIds(staffCtx) {
@@ -173,6 +173,31 @@ export function allowedStoreIds(staffCtx) {
   if (!staffCtx || staffCtx.valid === false) return [];
   if (staffCtx.role === 'headquarter') return null; // 本部: 全店舗
   return Array.isArray(staffCtx.storeIds) ? staffCtx.storeIds : [];
+}
+
+/**
+ * /api/db 以外のエンドポイント用の共通ゲート。
+ *   - スタッフトークンが不正 → 401
+ *   - トークン無し（管理者モード）で REQUIRE_ADMIN_AUTH=true かつ未ログイン → 401
+ * 戻り値: { ok: true, staffCtx } | { ok: false, status, error, requiresAdminLogin? }
+ */
+export async function authorizeRequest(req) {
+  const staffCtx = await extractStaffContext(req);
+  if (staffCtx && staffCtx.valid === false) {
+    return { ok: false, status: 401, error: '認証エラー: ' + (staffCtx.reason || 'invalid') };
+  }
+  if (staffCtx === null && REQUIRE_ADMIN_AUTH) {
+    const session = verifyAdminSession(req);
+    if (!session.authenticated) {
+      return { ok: false, status: 401, error: '管理者ログインが必要です', requiresAdminLogin: true };
+    }
+  }
+  return { ok: true, staffCtx };
+}
+
+/** 管理者モード（トークン無し）または本部ロールか */
+export function isAdminOrHeadquarter(staffCtx) {
+  return staffCtx === null || (!!staffCtx && staffCtx.valid !== false && staffCtx.role === 'headquarter');
 }
 
 // ============================================================

@@ -1,24 +1,26 @@
 // Claude API Proxy - 姿勢分析アドバイス生成
 // Vercel Serverless Function
+// ダッシュボードの利用者（スタッフURL / 管理者）だけが呼べるよう /api/db と同じ認証を掛ける。
+
+import { cors } from '../_lib/cors.js';
+import { authorizeRequest } from '../_lib/auth.js';
 
 export default async function handler(req, res) {
-  if (req.method === 'OPTIONS') {
-    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-    return res.status(200).end();
-  }
+  if (cors(req, res)) return;
 
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  const auth = await authorizeRequest(req);
+  if (!auth.ok) {
+    return res.status(auth.status).json({ error: auth.error, requiresAdminLogin: auth.requiresAdminLogin || undefined });
   }
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
     return res.status(500).json({ error: 'ANTHROPIC_API_KEY not configured' });
   }
-
-  const allowed = process.env.ALLOWED_ORIGIN || '*';
-  res.setHeader('Access-Control-Allow-Origin', allowed);
 
   try {
     const { analysisData, viewMode, customerName } = req.body;

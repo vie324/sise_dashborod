@@ -1,6 +1,10 @@
 import { supabase } from './supabase.js';
-import { canAccessStore, allowedStoreIds } from './auth.js';
+import { canAccessStore, allowedStoreIds, isAdminOrHeadquarter } from './auth.js';
 import { resolveStoreId } from './stores.js';
+import { dailyCashSales, AccessError } from './salonone/summary.js';
+import { SalonOneError } from './salonone/client.js';
+import { SALES_CATEGORIES, SALONONE_CASH_CATEGORY, salonOneCashEntryId, isSalonOneCashEntry } from '../../shared/cashbook.js';
+import { isDate, monthOf, todayJst } from '../../shared/dates.js';
 
 // ============================================================
 // 出納帳 (cashbook) + 出納帳ログ + 日次締め
@@ -17,7 +21,9 @@ export async function cashbookGet(params, staffCtx) {
     }
   }
 
-  let query = supabase.from('cashbook').select('*').order('date', { ascending: false });
+  // 論理削除済み（deleted=true）は返さない。以前は返していたため、削除した記録が
+  // 次の同期で復活し、現金残高の計算にも含まれていた。
+  let query = supabase.from('cashbook').select('*').eq('deleted', false).order('date', { ascending: false });
   if (params.store) query = query.eq('store_id', params.store);
   else if (scoped !== null) {
     if (scoped.length === 0) return { entries: [], dailyCloses: [], logs: [], lastUpdated: new Date().toISOString() };
@@ -86,10 +92,22 @@ export async function cashbookPost(body, staffCtx) {
     case 'updateEntry':   return cbUpdateEntry(body.entryId, body.updates || {}, body.operator || '', staffCtx);
     case 'deleteEntry':   return cbDeleteEntry(body.entryId, body.operator || '', staffCtx);
     case 'dailyClose':    return cbDailyClose(body, staffCtx);
-    case 'getDailyCloses': return cbGetDailyCloses(body.store || '', staffCtx);
-    case 'getLogs':       return cbGetLogs(body.store || '', body.limit || 100, staffCtx);
-    case 'saveCashbook':  return cbSaveAll(body.entries || [], body.operator || '', staffCtx);
-    case 'saveDailyCloses': return cbSaveDailyCloses(body.dailyCloses || [], staffCtx);
+    case 'importSalonOneCash': return cbImportSalonOneCash(body, staffCtx);
+    case 'getDailyCloses':
+      if (body.store && !canAccessStore(staffCtx, body.store)) return { error: 'この店舗にアクセスする権限がありません' };
+      if (!body.store && !isAdminOrHeadquarter(staffCtx)) return { error: '店舗を指定してください' };
+      return cbGetDailyCloses(body.store || '', staffCtx);
+    case 'getLogs':
+      if (body.store && !canAccessStore(staffCtx, body.store)) return { error: 'この店舗にアクセスする権限がありません' };
+      if (!body.store && !isAdminOrHeadquarter(staffCtx)) return { error: '店舗を指定してください' };
+      return cbGetLogs(body.store || '', body.limit || 100, staffCtx);
+    // 一括保存はデータ移行用。管理者・本部のみ
+    case 'saveCashbook':
+      if (!isAdminOrHeadquarter(staffCtx)) return { error: '権限がありません（管理者・本部のみ）' };
+      return cbSaveAll(body.entries || [], body.operator || '', staffCtx);
+    case 'saveDailyCloses':
+      if (!isAdminOrHeadquarter(staffCtx)) return { error: '権限がありません（管理者・本部のみ）' };
+      return cbSaveDailyCloses(body.dailyCloses || [], staffCtx);
     default: return { error: '不明なaction: ' + action };
   }
 }
@@ -236,16 +254,112 @@ async function cbDailyClose(body, staffCtx) {
     .select('locked').eq('date', date).eq('store_id', canonicalStoreId).maybeSingle();
   if (existing && existing.locked) return { error: 'この日は既に締め済みです', closed: true };
 
-  const { error } = await supabase.from('daily_close').upsert({
+  const closeRow = {
     date, store_id: canonicalStoreId,
     safe_balance: safeBalance || 0, petty_balance: pettyCashBalance || 0,
     register_balance: registerBalance || 0,
     closed_by: closedBy || '', closed_at: new Date().toISOString(),
     notes: notes || '', locked: true
-  }, { onConflict: 'date,store_id' });
+  };
+  const { error } = await supabase.from('daily_close').upsert(closeRow, { onConflict: 'date,store_id' });
   if (error) throw error;
 
+  await cbLog('dailyClose', `close_${canonicalStoreId}_${date}`, canonicalStoreId, closedBy || '', null, closeRow);
   return { success: true };
+}
+
+// ------------------------------------------------------------
+// SalonOne の現金売上を出納帳へ取り込む
+// ------------------------------------------------------------
+// 店舗・日ごとに 1件の入金（レジ・現金・施術売上）として記録する。ID は店舗と日付から
+// 決まるので、同じ日を何度取り込んでも 1件にまとまり、SalonOne 側の金額が変われば更新する。
+// 次の日は取り込まない（記録はそのまま残し、理由を返す）:
+//   - SalonOne の集計日より後 / 締め済み
+//   - 手入力の現金売上がある（二重計上になるため。手入力を消してから取り込み直す）
+const MAX_IMPORT_DAYS = 62;
+
+async function cbImportSalonOneCash(body, staffCtx) {
+  const storeId = body.storeId ? String(body.storeId) : '';
+  const dates = Array.isArray(body.dates) ? [...new Set(body.dates.map(String))] : [];
+  const operator = body.operator || '';
+  if (!storeId || dates.length === 0) return { error: '店舗と日付が必要です' };
+  if (dates.length > MAX_IMPORT_DAYS) return { error: `一度に取り込めるのは ${MAX_IMPORT_DAYS}日分までです` };
+  if (!dates.every(isDate)) return { error: '日付の形式が正しくありません' };
+  if (!canAccessStore(staffCtx, storeId)) return { error: 'この店舗への記帳権限がありません' };
+
+  let cash;
+  try {
+    // 当日分は締めの直前に取り込むことが多いので、キャッシュを使わず SalonOne から読み直す
+    const refresh = dates.includes(todayJst());
+    cash = await dailyCashSales(staffCtx, { storeId, months: [...new Set(dates.map(monthOf))].sort(), refresh });
+  } catch (e) {
+    if (e instanceof AccessError) return { error: e.message };
+    if (e instanceof SalonOneError) return { error: `SalonOne のデータを取得できませんでした: ${e.message}` };
+    throw e;
+  }
+  // デモデータを実際の出納帳へ書き込まない
+  if (cash.mode !== 'live') return { error: 'SalonOne が未接続のため取り込めません（デモデータは取り込みません）', demo: true };
+  if (!cash.linked) return { error: 'この店舗は SalonOne の店舗と対応付けされていません（設定 > SalonOne連携）' };
+
+  const canonical = await resolveStoreId(storeId);
+  const results = [];
+  for (const date of dates.sort()) {
+    const amount = Math.max(0, Math.round(cash.days[date] || 0));
+    if (date > cash.asOf) { results.push({ date, status: 'pending' }); continue; }
+
+    const { data: dc } = await supabase.from('daily_close')
+      .select('locked').eq('date', date).eq('store_id', canonical).maybeSingle();
+    if (dc && dc.locked) { results.push({ date, status: 'closed' }); continue; }
+
+    const { data: sameDay, error: dayErr } = await supabase.from('cashbook')
+      .select('id, type, category, payment_method, amount')
+      .eq('store_id', canonical).eq('date', date).eq('deleted', false);
+    if (dayErr) throw dayErr;
+    const manual = (sameDay || []).filter((r) => r.type === 'income' && (r.payment_method || 'CASH') === 'CASH'
+      && SALES_CATEGORIES.includes(r.category) && !isSalonOneCashEntry(r));
+    const manualAmount = manual.reduce((a, r) => a + (parseInt(r.amount) || 0), 0);
+    if (manual.length > 0) { results.push({ date, status: 'manual', amount, manualAmount }); continue; }
+
+    const id = salonOneCashEntryId(canonical, date);
+    const { data: existing } = await supabase.from('cashbook').select('*').eq('id', id).maybeSingle();
+    if (existing && !existing.deleted && (parseInt(existing.amount) || 0) === amount) {
+      results.push({ date, status: 'unchanged', amount });
+      continue;
+    }
+    if (amount === 0) {
+      // SalonOne 側で現金の会計が取り消された日は、取り込んだ記録も外す
+      if (existing && !existing.deleted) {
+        const { error } = await supabase.from('cashbook').update({ deleted: true, updated_by: operator }).eq('id', id);
+        if (error) throw error;
+        await cbLog('delete', id, canonical, operator, existing, null);
+        results.push({ date, status: 'removed', amount: 0 });
+      } else {
+        results.push({ date, status: 'zero', amount: 0 });
+      }
+      continue;
+    }
+    const fields = {
+      date, type: 'income', category: SALONONE_CASH_CATEGORY,
+      description: 'SalonOne 現金売上（自動取り込み）', amount,
+      customer_name: '', treatment_count: 0,
+      payment_method: 'CASH', cash_type: 'register', member_id: '', store_id: canonical,
+      recorder: 'SalonOne', notes: '', updated_by: operator, deleted: false,
+    };
+    if (existing) {
+      const { error } = await supabase.from('cashbook').update(fields).eq('id', id);
+      if (error) throw error;
+      await cbLog('update', id, canonical, operator, existing, fields);
+      results.push({ date, status: existing.deleted ? 'imported' : 'updated', amount, previous: existing.deleted ? null : parseInt(existing.amount) || 0 });
+    } else {
+      const { error } = await supabase.from('cashbook').insert({ id, ...fields });
+      // 同じ日を同時に取り込んだ（締めの二度押しなど）時は、先に入った方を正とする
+      if (error && error.code === '23505') { results.push({ date, status: 'unchanged', amount }); continue; }
+      if (error) throw error;
+      await cbLog('create', id, canonical, operator, null, { id, ...fields });
+      results.push({ date, status: 'imported', amount });
+    }
+  }
+  return { success: true, asOf: cash.asOf, results };
 }
 
 async function cbGetDailyCloses(store) {

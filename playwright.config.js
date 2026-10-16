@@ -21,6 +21,8 @@ export default defineConfig({
   use: {
     baseURL: process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:3000',
     trace: 'on-first-retry',
+    // ブラウザを別途インストール済みの環境（CI イメージ等）では実行ファイルを指定できる
+    launchOptions: process.env.PLAYWRIGHT_CHROMIUM_PATH ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_PATH } : {},
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
   },

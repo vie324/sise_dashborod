@@ -6,56 +6,30 @@ import {
   signAdminSession,
   setAdminSessionCookie,
   clearAdminSessionCookie,
+  isAdminOrHeadquarter,
   REQUIRE_ADMIN_AUTH,
 } from '../_lib/auth.js';
 import { signToken } from '../_lib/sign.js';
 import bcrypt from 'bcryptjs';
-import { staffGet, staffPost, menuItemsGet, menuItemsPost, hpbGet, hpbPost } from '../_lib/db-handlers-master.js';
+import { staffGet, staffPost, menuItemsGet, menuItemsPost, verifyStaffPassword } from '../_lib/db-handlers-master.js';
 import { cashbookGet, cashbookPost } from '../_lib/db-handlers-cashbook.js';
-import {
-  lineMessagesGet, lineMessagesPost, lineProfilesGet, lineProfilesPost,
-  lineBroadcastsGet, lineBroadcastsPost, lineTemplatesGet, lineTemplatesPost,
-  lineAutoRepliesGet, lineAutoRepliesPost, lineTagsGet, lineTagsPost,
-  lineUserTagsGet, lineUserTagsPost, lineAnalyticsGet
-} from '../_lib/db-handlers-line.js';
-import {
-  usageGet, usagePost, ticketGet, ticketPost,
-  membersGet, membersPost, attendanceGet, attendancePost,
-  qrTokenGet, qrTokenPost
-} from '../_lib/db-handlers-misc.js';
-import { sendEmail, formatDailyReportEmail } from '../_lib/email.js';
-import { resolveStoreNameFromEnv, listSquareEnvStores, isPlaceholderStoreName } from '../_lib/stores.js';
+import { goalsGet, goalsPost } from '../_lib/db-handlers-goals.js';
 
 // ============================================================
 // 統合DBエンドポイント
-// Vercel Hobby プランの12ファンクション上限対策として1ファイルに集約
 // 使い方: /api/db?table=stores
+// SalonOne の実績データは /api/salonone（読み取り専用）から取得する。
 // ============================================================
 
 const HANDLERS = {
-  stores:          { get: storesGet,         post: storesPost },
-  dashConfig:      { get: dashConfigGet,     post: dashConfigPost },
-  reports:         { get: reportsGet,        post: reportsPost },
-  staff:           { get: staffGet,          post: staffPost },
-  menuItems:       { get: menuItemsGet,      post: menuItemsPost },
-  hpb:             { get: hpbGet,            post: hpbPost },
-  cashbook:        { get: cashbookGet,       post: cashbookPost },
-  usage:           { get: usageGet,          post: usagePost },
-  ticket:          { get: ticketGet,         post: ticketPost },
-  members:         { get: membersGet,        post: membersPost },
-  attendance:      { get: attendanceGet,     post: attendancePost },
-  qrToken:         { get: qrTokenGet,        post: qrTokenPost },
-  lineMessages:    { get: lineMessagesGet,   post: lineMessagesPost },
-  lineProfiles:    { get: lineProfilesGet,   post: lineProfilesPost },
-  lineBroadcasts:  { get: lineBroadcastsGet, post: lineBroadcastsPost },
-  lineTemplates:   { get: lineTemplatesGet,  post: lineTemplatesPost },
-  lineAutoReplies: { get: lineAutoRepliesGet, post: lineAutoRepliesPost },
-  lineTags:        { get: lineTagsGet,       post: lineTagsPost },
-  lineUserTags:    { get: lineUserTagsGet,   post: lineUserTagsPost },
-  lineAnalytics:   { get: lineAnalyticsGet,  post: async () => ({ error: 'lineAnalyticsはGET専用です' }) },
-  // 認証（スタッフトークン発行 + 管理者ログイン）
-  // Vercel Hobby の 12 ファンクション上限対策で /api/db に相乗り
-  auth:            { get: authGet, post: authPost },
+  stores:     { get: storesGet,     post: storesPost },
+  dashConfig: { get: dashConfigGet, post: dashConfigPost },
+  staff:      { get: staffGet,      post: staffPost },
+  menuItems:  { get: menuItemsGet,  post: menuItemsPost },
+  cashbook:   { get: cashbookGet,   post: cashbookPost },
+  goals:      { get: goalsGet,      post: goalsPost },
+  // 認証（スタッフURL発行 + 管理者ログイン + スタッフパスワード照合）
+  auth:       { get: authGet,       post: authPost },
 };
 
 export default async function handler(req, res) {
@@ -74,19 +48,15 @@ export default async function handler(req, res) {
   }
 
   // ---- スタッフ権限コンテキスト抽出 ----
-  // 返り値:
-  //   null        : token 無し（admin モード）→ 既存挙動と同等の全店舗許可
-  //   { valid:false, reason } : token 不正 / staff 無効 → 401 で拒否
-  //   { valid:true, staffId, role, storeIds } : 通常のスタッフアクセス
+  //   null        : token 無し（admin モード）
+  //   { valid:false, reason } : token 不正 / staff 無効 → 401
+  //   { valid:true, staffId, role, storeIds } : スタッフアクセス
   const staffCtx = await extractStaffContext(req);
   if (staffCtx && staffCtx.valid === false) {
     return res.status(401).json({ error: '認証エラー: ' + (staffCtx.reason || 'invalid') });
   }
 
   // ---- 管理者セッション判定 + REQUIRE_ADMIN_AUTH 強制 ----
-  // admin モード (staffCtx === null) かつ REQUIRE_ADMIN_AUTH=true の場合、
-  // HttpOnly cookie 経由の管理者セッションを必須化する。
-  // ただし auth テーブル (login/logout/session) は認証フロー自体のため例外。
   const adminSession = (staffCtx === null) ? verifyAdminSession(req) : null;
   if (staffCtx === null && REQUIRE_ADMIN_AUTH && table !== 'auth') {
     if (!adminSession || !adminSession.authenticated) {
@@ -99,7 +69,7 @@ export default async function handler(req, res) {
 
   try {
     const body = req.method === 'POST'
-      ? (typeof req.body === 'string' ? JSON.parse(req.body) : req.body)
+      ? (typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {}))
       : null;
 
     // auth テーブルのみ特殊扱い: cookie 操作のため req/res を渡す
@@ -111,8 +81,6 @@ export default async function handler(req, res) {
       return res.json(result);
     }
 
-    // 各ハンドラには第2引数として staffCtx を渡す。
-    // 第2引数を受け取らない既存ハンドラは単に無視するため後方互換。
     const result = req.method === 'GET' ? await h.get(params, staffCtx) : await h.post(body, staffCtx);
     return res.json(result);
   } catch (e) {
@@ -122,63 +90,31 @@ export default async function handler(req, res) {
 }
 
 // ============================================================
-// 店舗管理 (stores) - インラインで保持
+// 店舗管理 (stores)
 // ============================================================
 
 async function storesGet(params) {
   const includeInactive = params.includeInactive === 'true' || params.includeInactive === '1';
   // includeMerged=true で別名行 (merged_into NOT NULL) も含める。
-  // デフォルトでは結合済みの正規行のみを返し、UI で重複を見えなくする。
   const includeMerged = params.includeMerged === 'true' || params.includeMerged === '1';
   let query = supabase.from('stores').select('*').order('created_at');
   if (!includeInactive) query = query.eq('status', 'active');
   const { data, error } = await query;
   if (error) throw error;
 
-  // 自動ヒーリング: 過去に "店舗 N" や "(未登録: X)" として保存された行が
-  // あり、いま env var に実名がある場合は名前を更新して返す。
-  // 書き込みは fire-and-forget（GET をブロックしない）。
-  const heals = [];
-  const rows = (data || []).map(r => {
-    const id = String(r.id);
-    let displayName = r.name;
-    if (isPlaceholderStoreName(r.name, id)) {
-      const real = resolveStoreNameFromEnv(id);
-      if (real && real !== r.name) {
-        displayName = real;
-        heals.push({ id, name: real });
-      }
-    }
-    return {
-      id: r.id, name: displayName, status: r.status,
-      createdAt: r.created_at, memo: r.memo || '',
-      lat: r.lat, lng: r.lng,
-      mergedInto: r.merged_into || null,
-    };
-  });
-  if (heals.length > 0) {
-    Promise.all(heals.map(h =>
-      supabase.from('stores').update({ name: h.name }).eq('id', h.id)
-    )).catch(e => console.warn('[stores] auto-heal failed:', e && e.message));
-  }
-  // includeMerged=false なら別名行を除外する（既定）
-  const filtered = includeMerged ? rows : rows.filter(r => !r.mergedInto);
-  return { stores: filtered };
+  const rows = (data || []).map(r => ({
+    id: r.id, name: r.name, status: r.status,
+    createdAt: r.created_at, memo: r.memo || '',
+    mergedInto: r.merged_into || null,
+  }));
+  return { stores: includeMerged ? rows : rows.filter(r => !r.mergedInto) };
 }
 
 async function storesPost(body, staffCtx) {
-  const action = body.action || '';
-  // スタッフモードでは店舗マスタ (作成/更新/削除/復元/座標変更/一括保存) を
-  // 一切変更できないようにする。UI でも admin/manager/headquarter のみに
-  // ボタンを出しているが、devtools 経由でも守るため server 側でも遮断する。
-  // role === 'manager' / 'headquarter' はスタッフモードでも店舗管理可にしたい
-  // 場合、ここを緩めればよい。現行は「role='staff' は全アクション拒否」。
-  if (staffCtx !== null) {
-    const role = String(staffCtx.role || '').toLowerCase();
-    if (role === 'staff') {
-      return { error: 'スタッフは店舗管理を変更できません' };
-    }
+  if (!isAdminOrHeadquarter(staffCtx)) {
+    return { error: '店舗マスタを変更できるのは管理者・本部のみです' };
   }
+  const action = body.action || '';
   switch (action) {
     case 'addStore': {
       const store = body.store || {};
@@ -195,41 +131,12 @@ async function storesPost(body, staffCtx) {
       const updates = {};
       if (store.name !== undefined) updates.name = store.name;
       if (store.memo !== undefined) updates.memo = store.memo;
-      if (store.lat !== undefined) updates.lat = store.lat;
-      if (store.lng !== undefined) updates.lng = store.lng;
       const { error } = await supabase.from('stores').update(updates).eq('id', store.id);
       if (error) throw error;
       return { success: true, storeId: store.id };
     }
-    case 'updateCoordinates': {
-      if (!body.storeId) return { error: 'storeIdが必要です' };
-      // .select() を付けて影響行を取り、0 件なら明示エラー。
-      // 付けない update は対象 0 行でも error=null が返り、UI が成功と
-      // 誤認するため。設定画面で店舗を Supabase に登録していないケース
-      // (Square config だけで運用されている場合) を検知する。
-      const { data, error } = await supabase.from('stores')
-        .update({ lat: body.lat, lng: body.lng })
-        .eq('id', body.storeId)
-        .select('id, lat, lng');
-      if (error) throw error;
-      if (!data || data.length === 0) {
-        return { error: `店舗が Supabase に登録されていません (storeId=${body.storeId})。設定 → 店舗管理から先に追加してください` };
-      }
-      return { success: true, storeId: body.storeId, lat: data[0].lat, lng: data[0].lng };
-    }
     case 'deleteStore':  return setStoreStatus(body.storeId, 'inactive');
     case 'restoreStore': return setStoreStatus(body.storeId, 'active');
-    case 'saveStores': {
-      const rows = (body.stores || []).map(s => ({
-        id: s.id || '', name: s.name || '', status: s.status || 'active',
-        created_at: s.createdAt || new Date().toISOString(), memo: s.memo || ''
-      }));
-      if (rows.length > 0) {
-        const { error } = await supabase.from('stores').upsert(rows, { onConflict: 'id' });
-        if (error) throw error;
-      }
-      return { success: true, count: rows.length };
-    }
     case 'mergeStore': {
       // duplicate を canonical へ「別名」として統合する。
       // duplicate 行は status=inactive + merged_into=canonical となり、
@@ -238,7 +145,6 @@ async function storesPost(body, staffCtx) {
       const canonical = String(body.canonicalId || '').trim();
       if (!dup || !canonical) return { error: 'duplicateId と canonicalId が必要です' };
       if (dup === canonical) return { error: '同じIDをマージできません' };
-      // 両方の存在確認
       const { data: rows, error: selErr } = await supabase
         .from('stores').select('id, merged_into').in('id', [dup, canonical]);
       if (selErr) throw selErr;
@@ -256,65 +162,18 @@ async function storesPost(body, staffCtx) {
         .update({ merged_into: finalCanonical, status: 'inactive' })
         .eq('id', dup);
       if (updErr) throw updErr;
-
-      // dup を merged_into に持つ別名行が既存だった場合、新しい canonical へ
-      // 付け替えてチェーンを 1 段に保つ
+      // dup を merged_into に持つ別名行は新しい canonical へ付け替えてチェーンを 1 段に保つ
       await supabase.from('stores').update({ merged_into: finalCanonical }).eq('merged_into', dup);
-
       return { success: true, duplicateId: dup, canonicalId: finalCanonical };
     }
     case 'unmergeStore': {
-      // 別名 (merged_into) を解除し、独立した店舗に戻す。
-      // status は呼び出し元判断で active に戻す（既定で戻す）。
       const id = String(body.storeId || '').trim();
       if (!id) return { error: 'storeIdが必要です' };
-      const restoreActive = body.restoreActive !== false;
       const update = { merged_into: null };
-      if (restoreActive) update.status = 'active';
+      if (body.restoreActive !== false) update.status = 'active';
       const { error } = await supabase.from('stores').update(update).eq('id', id);
       if (error) throw error;
       return { success: true, storeId: id };
-    }
-    case 'syncSquareNames': {
-      // 環境変数に定義された Square 店舗を Supabase へ同期する。
-      // - 未登録の Square 店舗を name 込みで insert
-      // - 既存行の name が "店舗 N" / "(未登録: X)" などプレースホルダ
-      //   だった場合のみ env の実名で update（手動編集は尊重）
-      const envStores = listSquareEnvStores();
-      if (envStores.length === 0) {
-        return { success: true, inserted: 0, updated: 0, message: 'Square 店舗が env に定義されていません' };
-      }
-      const ids = envStores.map(s => s.id);
-      const { data: existing, error: selErr } = await supabase
-        .from('stores').select('id, name').in('id', ids);
-      if (selErr) throw selErr;
-      const existingMap = new Map((existing || []).map(r => [String(r.id), r]));
-
-      const toInsert = [];
-      const toUpdate = [];
-      for (const s of envStores) {
-        const cur = existingMap.get(s.id);
-        if (!cur) {
-          toInsert.push({ id: s.id, name: s.name, status: 'active' });
-        } else if (isPlaceholderStoreName(cur.name, s.id) && cur.name !== s.name) {
-          toUpdate.push({ id: s.id, name: s.name });
-        }
-      }
-
-      if (toInsert.length > 0) {
-        const { error } = await supabase.from('stores').insert(toInsert);
-        if (error) throw error;
-      }
-      for (const u of toUpdate) {
-        const { error } = await supabase.from('stores').update({ name: u.name }).eq('id', u.id);
-        if (error) throw error;
-      }
-      return {
-        success: true,
-        inserted: toInsert.length,
-        updated: toUpdate.length,
-        envStores: envStores.length,
-      };
     }
     default: return { error: '不明なaction: ' + action };
   }
@@ -328,11 +187,17 @@ async function setStoreStatus(storeId, status) {
 }
 
 // ============================================================
-// ダッシュボード設定 (dashConfig) - インラインで保持
+// ダッシュボード設定 (dashConfig) — KV ストア
+// ------------------------------------------------------------
+// 'goals.*' は目標データ（goals テーブル扱い）なので、ここからは読み書きしない。
+// 書き込みは管理者・本部のみ（SalonOne 連携の対応付けなど）。
 // ============================================================
+
+const isReservedKey = (key) => String(key || '').startsWith('goals.');
 
 async function dashConfigGet(params) {
   if (params.key) {
+    if (isReservedKey(params.key)) return { error: 'このキーは goals から取得してください' };
     const { data, error } = await supabase
       .from('dash_config').select('*').eq('key', params.key).maybeSingle();
     if (error) throw error;
@@ -341,22 +206,28 @@ async function dashConfigGet(params) {
   const { data, error } = await supabase.from('dash_config').select('*');
   if (error) throw error;
   const config = {};
-  for (const row of data || []) config[row.key] = row.value;
+  for (const row of data || []) if (!isReservedKey(row.key)) config[row.key] = row.value;
   return { config };
 }
 
-async function dashConfigPost(body) {
+async function dashConfigPost(body, staffCtx) {
+  if (!isAdminOrHeadquarter(staffCtx)) {
+    return { error: '設定を変更できるのは管理者・本部のみです' };
+  }
   const action = body.action || '';
   switch (action) {
     case 'set': {
       if (!body.key) return { error: 'keyが必要です' };
+      if (isReservedKey(body.key)) return { error: 'このキーは goals から設定してください' };
       const { error } = await supabase.from('dash_config')
         .upsert({ key: body.key, value: body.value }, { onConflict: 'key' });
       if (error) throw error;
       return { success: true, key: body.key };
     }
     case 'setBulk': {
-      const rows = Object.entries(body.entries || {}).map(([k, v]) => ({ key: k, value: v }));
+      const rows = Object.entries(body.entries || {})
+        .filter(([k]) => !isReservedKey(k))
+        .map(([k, v]) => ({ key: k, value: v }));
       if (rows.length > 0) {
         const { error } = await supabase.from('dash_config').upsert(rows, { onConflict: 'key' });
         if (error) throw error;
@@ -368,272 +239,41 @@ async function dashConfigPost(body) {
 }
 
 // ============================================================
-// 日報 (reports) - インラインで保持
-// ============================================================
-
-async function reportsGet(params) {
-  // フィルタ済みクエリを毎回生成（ページングのたびに使い回せないため）
-  const buildQuery = () => {
-    let query = supabase.from('daily_reports').select('*')
-      .order('timestamp', { ascending: false });
-    if (params.all === 'true') {
-      // 全データ
-    } else if (params.month) {
-      const [y, m] = params.month.split('-').map(Number);
-      query = query.gte('timestamp', new Date(y, m - 1, 1).toISOString())
-                   .lte('timestamp', new Date(y, m, 0, 23, 59, 59).toISOString());
-    } else if (params.months) {
-      const n = parseInt(params.months, 10) || 1;
-      const now = new Date();
-      query = query.gte('timestamp', new Date(now.getFullYear(), now.getMonth() - (n - 1), 1).toISOString());
-    } else {
-      const now = new Date();
-      query = query.gte('timestamp', new Date(now.getFullYear(), now.getMonth(), 1).toISOString());
-    }
-    return query;
-  };
-
-  // Supabase/PostgREST は1リクエスト最大1000行のため、全件取得時はページングする
-  const PAGE = 1000;
-  let data = [];
-  for (let from = 0; ; from += PAGE) {
-    const { data: page, error } = await buildQuery().range(from, from + PAGE - 1);
-    if (error) throw error;
-    if (!page || page.length === 0) break;
-    data = data.concat(page);
-    if (page.length < PAGE) break;
-  }
-
-  // staff_id から現在のスタッフ名を引いて staffName として返す。
-  // recorder(TEXT) は改名や表記揺れで現実態と乖離するため、FK 経由の
-  // 名前を権威ソースとして使うのが正しい。staff_id が無い旧データは
-  // staffName=null として返し、フロント側は recorder にフォールバックする。
-  const staffIds = [...new Set((data || []).map(r => r.staff_id).filter(Boolean))];
-  let staffMap = {};
-  if (staffIds.length > 0) {
-    const { data: staffRows, error: staffErr } = await supabase
-      .from('staff').select('id, name').in('id', staffIds);
-    if (staffErr) throw staffErr;
-    for (const s of staffRows || []) staffMap[s.id] = s.name;
-  }
-
-  return {
-    reports: (data || []).map(r => ({
-      id: r.id, timestamp: r.timestamp, store: r.store,
-      hpbNew: r.hpb_new, metaNew: r.meta_new,
-      referralNew: r.referral_new, discountNew: r.discount_new,
-      hpbContract: r.hpb_contract, metaContract: r.meta_contract,
-      referralContract: r.referral_contract, discountContract: r.discount_contract,
-      existingTreatments: r.existing_treatments,
-      taskComplete: r.task_complete, prepComplete: r.prep_complete,
-      notes: r.notes, recorder: r.recorder,
-      staffId: r.staff_id || null,
-      staffName: r.staff_id ? (staffMap[r.staff_id] || null) : null,
-    })),
-    total: (data || []).length,
-    lastUpdated: new Date().toISOString()
-  };
-}
-
-async function reportsPost(body, staffCtx) {
-  const action = body.action || 'create';
-  switch (action) {
-    case 'create': {
-      const r = body.report || body;
-      if (!r.store) return { error: '店舗が必要です' };
-      // 送信者の権威ソース: スタッフURL の staffCtx が最優先。改ざんされ得る
-      // クライアント入力 (r.staffId / r.recorder) は staffCtx が無い時の
-      // フォールバックのみ。
-      const recorder = (staffCtx && staffCtx.name) || r.recorder || '';
-      const staffId = (staffCtx && staffCtx.staffId) || r.staffId || null;
-      const row = {
-        timestamp: r.timestamp || new Date().toISOString(), store: r.store,
-        hpb_new: parseInt(r.hpbNew) || 0, meta_new: parseInt(r.metaNew) || 0,
-        referral_new: parseInt(r.referralNew) || 0, discount_new: parseInt(r.discountNew) || 0,
-        hpb_contract: parseInt(r.hpbContract) || 0, meta_contract: parseInt(r.metaContract) || 0,
-        referral_contract: parseInt(r.referralContract) || 0, discount_contract: parseInt(r.discountContract) || 0,
-        existing_treatments: parseInt(r.existingTreatments) || 0,
-        task_complete: !!r.taskComplete, prep_complete: !!r.prepComplete,
-        notes: r.notes || '',
-        recorder,
-        staff_id: staffId,
-      };
-
-      // 同店舗・同JST日の既存日報があれば、force指定が無い限り確認のため中断する
-      if (!body.force) {
-        const baseUtc = Date.parse(new Date(new Date(row.timestamp).getTime() + 9 * 3600 * 1000).toISOString().slice(0, 10) + 'T00:00:00Z') - 9 * 3600 * 1000;
-        const { data: dup, error: dupErr } = await supabase.from('daily_reports')
-          .select('id')
-          .eq('store', r.store)
-          .gte('timestamp', new Date(baseUtc).toISOString())
-          .lt('timestamp', new Date(baseUtc + 24 * 3600 * 1000).toISOString());
-        if (dupErr) throw dupErr;
-        if (dup && dup.length > 0) {
-          return { duplicate: true, count: dup.length, store: r.store };
-        }
-      }
-
-      const { data, error } = await supabase.from('daily_reports').insert(row).select().single();
-      if (error) throw error;
-
-      // 送信通知メール（環境変数が揃っていれば送信、無ければスキップして
-      // 日報自体の保存は成功させる）。送信者名は上で算出済み。
-      let mailResult = null;
-      try {
-        const formatted = formatDailyReportEmail({
-          ...r,
-          store: r.store,
-          recorder,
-          timestamp: row.timestamp,
-        });
-        mailResult = await sendEmail({
-          subject: formatted.subject,
-          html: formatted.html,
-          text: formatted.text,
-        });
-      } catch (mailErr) {
-        console.error('[reports] メール送信例外:', mailErr);
-        mailResult = { error: 'send_exception' };
-      }
-
-      return { success: true, report: data, mail: mailResult };
-    }
-    case 'update': {
-      const r = body.report || body;
-      if (!r.id) return { error: 'idが必要です' };
-      const updates = {};
-      if (r.store !== undefined) updates.store = r.store;
-      if (r.hpbNew !== undefined) updates.hpb_new = parseInt(r.hpbNew) || 0;
-      if (r.metaNew !== undefined) updates.meta_new = parseInt(r.metaNew) || 0;
-      if (r.referralNew !== undefined) updates.referral_new = parseInt(r.referralNew) || 0;
-      if (r.discountNew !== undefined) updates.discount_new = parseInt(r.discountNew) || 0;
-      if (r.hpbContract !== undefined) updates.hpb_contract = parseInt(r.hpbContract) || 0;
-      if (r.metaContract !== undefined) updates.meta_contract = parseInt(r.metaContract) || 0;
-      if (r.referralContract !== undefined) updates.referral_contract = parseInt(r.referralContract) || 0;
-      if (r.discountContract !== undefined) updates.discount_contract = parseInt(r.discountContract) || 0;
-      if (r.existingTreatments !== undefined) updates.existing_treatments = parseInt(r.existingTreatments) || 0;
-      if (r.taskComplete !== undefined) updates.task_complete = !!r.taskComplete;
-      if (r.prepComplete !== undefined) updates.prep_complete = !!r.prepComplete;
-      if (r.notes !== undefined) updates.notes = r.notes || '';
-      if (r.recorder !== undefined) updates.recorder = r.recorder || '';
-      // staffId は null で明示的に未割当へ戻せるよう、undefined チェックで分岐
-      if (r.staffId !== undefined) updates.staff_id = r.staffId || null;
-      const { error } = await supabase.from('daily_reports').update(updates).eq('id', r.id);
-      if (error) throw error;
-      return { success: true, id: r.id };
-    }
-    case 'delete': {
-      if (!body.id) return { error: 'idが必要です' };
-      const { error } = await supabase.from('daily_reports').delete().eq('id', body.id);
-      if (error) throw error;
-      return { success: true, id: body.id };
-    }
-    case 'saveAll': {
-      const reports = body.reports || [];
-      const rows = reports.map(r => ({
-        timestamp: r.timestamp || new Date().toISOString(),
-        store: r.store || '',
-        hpb_new: parseInt(r.hpbNew) || 0,
-        meta_new: parseInt(r.metaNew) || 0,
-        referral_new: parseInt(r.referralNew) || 0,
-        discount_new: parseInt(r.discountNew) || 0,
-        hpb_contract: parseInt(r.hpbContract) || 0,
-        meta_contract: parseInt(r.metaContract) || 0,
-        referral_contract: parseInt(r.referralContract) || 0,
-        discount_contract: parseInt(r.discountContract) || 0,
-        existing_treatments: parseInt(r.existingTreatments) || 0,
-        task_complete: !!r.taskComplete,
-        prep_complete: !!r.prepComplete,
-        notes: r.notes || '',
-        recorder: r.recorder || '',
-        // 一括投入は管理者の過去データ移行用途。入力側に staffId があれば
-        // 尊重し、無ければ NULL のまま（後で assignStaff で割り当てる）。
-        staff_id: r.staffId || null,
-      }));
-      if (body.replace) {
-        await supabase.from('daily_reports').delete().neq('id', 0);
-      }
-      if (rows.length > 0) {
-        const { error } = await supabase.from('daily_reports').insert(rows);
-        if (error) throw error;
-      }
-      return { success: true, count: rows.length };
-    }
-    case 'assignStaff': {
-      // 過去日報の送信者を後付けで紐付ける管理用アクション。
-      // 単発: { id, staffId } / バッチ: { ids: [...], staffId }
-      // staffId を null で送れば紐付け解除。スタッフURL からは禁止
-      // （改ざんで他人の実績にできてしまうため）。
-      if (staffCtx && staffCtx.valid && staffCtx.role !== 'headquarter') {
-        return { error: '権限がありません（本部または管理者のみ）' };
-      }
-      const staffIdRaw = body.staffId;
-      const newStaffId = staffIdRaw ? String(staffIdRaw) : null;
-      // 紐付け先スタッフの実在チェック（null 解除なら不要）
-      if (newStaffId) {
-        const { data: s, error: e } = await supabase
-          .from('staff').select('id, name').eq('id', newStaffId).maybeSingle();
-        if (e) throw e;
-        if (!s) return { error: '指定されたスタッフが見つかりません' };
-      }
-      const ids = Array.isArray(body.ids) && body.ids.length > 0
-        ? body.ids
-        : (body.id ? [body.id] : []);
-      if (ids.length === 0) return { error: 'id または ids が必要です' };
-      const { error } = await supabase.from('daily_reports')
-        .update({ staff_id: newStaffId }).in('id', ids);
-      if (error) throw error;
-      return { success: true, count: ids.length, staffId: newStaffId };
-    }
-    default: return { error: '不明なaction: ' + action };
-  }
-}
-
-// ============================================================
 // 認証 (auth) — スタッフURL発行 + 管理者ログイン/ログアウト/セッション取得
 // ============================================================
 // POST /api/db?table=auth
-//   action: 'issueToken'  { staffId, ttlSeconds? }  → 署名付きURLトークン
-//           'login'       { password }              → HttpOnly cookie 発行
-//           'logout'                                → cookie 失効
-//           'session'                               → (GET 相当) 現在の認証状態
-//           'changePassword' { currentPassword, newPassword } → 将来用
+//   action: 'issueToken'     { staffId, ttlSeconds? }  → 署名付きURLトークン（管理者のみ）
+//           'login'          { password }              → HttpOnly cookie 発行
+//           'logout'                                   → cookie 失効
+//           'session'                                  → 現在の認証状態
+//           'verifyPassword' { password }              → スタッフURLのパスワード照合
 //
 // GET /api/db?table=auth
 //   → { requiresAuth: bool, authenticated: bool, username? }
-//
-// 独立エンドポイントにせずここに相乗りしているのは Vercel Hobby の
-// 12 ファンクション上限対策。
 // ============================================================
 
 const AUTH_TOKEN_DEFAULT_TTL = 365 * 24 * 60 * 60; // 1 year
 
 // 失敗カウンタ（in-memory）: admin パスワード総当たり対策。
-// serverless インスタンス毎なので完全ではないが、UX 品質レベルのガード。
-// key = 'admin' 固定（将来ユーザー多様化時に拡張）
 const _loginFailures = new Map(); // key → { count, blockedUntil }
 function loginRateLimit() {
-  const key = 'admin';
   const now = Date.now();
-  const entry = _loginFailures.get(key);
+  const entry = _loginFailures.get('admin');
   if (entry && entry.blockedUntil > now) {
     return { blocked: true, retryAfter: Math.ceil((entry.blockedUntil - now) / 1000) };
   }
   return { blocked: false };
 }
 function loginRecordFailure() {
-  const key = 'admin';
   const now = Date.now();
-  const entry = _loginFailures.get(key) || { count: 0, blockedUntil: 0 };
+  const entry = _loginFailures.get('admin') || { count: 0, blockedUntil: 0 };
   entry.count = (entry.blockedUntil > now ? entry.count : 0) + 1;
   if (entry.count >= 5) { entry.blockedUntil = now + 60 * 1000; entry.count = 0; }
-  _loginFailures.set(key, entry);
+  _loginFailures.set('admin', entry);
 }
 function loginResetFailure() { _loginFailures.delete('admin'); }
 
-async function authGet(params, { adminSession }) {
-  // セッション状態を返す。クライアントが boot 時に叩いて
-  // ログイン画面を出すべきかを判定する。
+function sessionState(adminSession) {
   return {
     requiresAuth: !!REQUIRE_ADMIN_AUTH,
     authenticated: !!(adminSession && adminSession.authenticated),
@@ -641,20 +281,18 @@ async function authGet(params, { adminSession }) {
   };
 }
 
+async function authGet(params, { adminSession }) {
+  return sessionState(adminSession);
+}
+
 async function authPost(body, ctx) {
-  const { req, res, staffCtx, adminSession } = ctx;
+  const { res, staffCtx, adminSession } = ctx;
   const action = body.action || '';
   switch (action) {
-    // ------------------------------------------------------------
-    // スタッフURL発行（既存機能）
-    // ------------------------------------------------------------
     case 'issueToken': {
-      // 管理者モード必須
       if (staffCtx !== null) {
         return { error: 'このアクションは管理者のみ呼び出せます' };
       }
-      // REQUIRE_ADMIN_AUTH=true の場合はセッションも必須
-      // （router で一般ケースは弾いているが、防御的に再チェック）
       if (REQUIRE_ADMIN_AUTH && (!adminSession || !adminSession.authenticated)) {
         return { error: '管理者ログインが必要です', requiresAdminLogin: true };
       }
@@ -672,33 +310,22 @@ async function authPost(body, ctx) {
       if (ssErr) throw ssErr;
       const storeIds = (ssRows || []).map(r => r.store_id).filter(Boolean);
 
-      const payload = {
-        id: staffRow.id,
-        n:  staffRow.name,
-        r:  staffRow.role || 'staff',
-        sid: storeIds,
-      };
-      // パスワード設定済みなら pw フラグを立てる。クライアントは
-      // hasPassword をこのフラグから判定してロック画面を表示する。
-      // 平文パスワード自体はトークンに含めず、サーバ側で照合する。
-      if (staffRow.password && String(staffRow.password).length > 0) {
-        payload.pw = 1;
-      }
+      const payload = { id: staffRow.id, n: staffRow.name, r: staffRow.role || 'staff', sid: storeIds };
+      // パスワード設定済みなら pw フラグを立てる（平文はトークンに含めない）
+      if (staffRow.password && String(staffRow.password).length > 0) payload.pw = 1;
       const ttl = Math.min(Number(body.ttlSeconds) || AUTH_TOKEN_DEFAULT_TTL, AUTH_TOKEN_DEFAULT_TTL);
       const token = signToken(payload, ttl);
       const expiresAt = new Date((Math.floor(Date.now() / 1000) + ttl) * 1000).toISOString();
-
-      return {
-        success: true,
-        token,
-        expiresAt,
-        relativeUrl: `?v=${encodeURIComponent(token)}`,
-      };
+      return { success: true, token, expiresAt, relativeUrl: `?v=${encodeURIComponent(token)}` };
     }
 
-    // ------------------------------------------------------------
-    // 管理者ログイン: bcrypt + env var 照合 → HttpOnly cookie 発行
-    // ------------------------------------------------------------
+    case 'verifyPassword': {
+      // スタッフURL + パスワード設定済みのロック解除。照合はサーバー側だけで行う。
+      if (!staffCtx || staffCtx.valid === false) return { error: 'スタッフURLからのみ利用できます' };
+      const result = await verifyStaffPassword(staffCtx.staffId, body.password || '');
+      return result.ok ? { success: true } : { error: result.error };
+    }
+
     case 'login': {
       const hash = process.env.SISE_ADMIN_PASSWORD_HASH || '';
       if (!hash) {
@@ -721,29 +348,17 @@ async function authPost(body, ctx) {
         return { error: 'パスワードが正しくありません' };
       }
       loginResetFailure();
-      const token = signAdminSession('admin');
-      setAdminSessionCookie(res, token);
+      setAdminSessionCookie(res, signAdminSession('admin'));
       return { success: true, authenticated: true, username: 'admin' };
     }
 
-    // ------------------------------------------------------------
-    // 管理者ログアウト: cookie 失効
-    // ------------------------------------------------------------
     case 'logout': {
       clearAdminSessionCookie(res);
       return { success: true, authenticated: false };
     }
 
-    // ------------------------------------------------------------
-    // セッション状態確認（GET と同じ）
-    // ------------------------------------------------------------
-    case 'session': {
-      return {
-        requiresAuth: !!REQUIRE_ADMIN_AUTH,
-        authenticated: !!(adminSession && adminSession.authenticated),
-        username: adminSession && adminSession.authenticated ? adminSession.username : undefined,
-      };
-    }
+    case 'session':
+      return sessionState(adminSession);
 
     default: return { error: '不明なaction: ' + action };
   }

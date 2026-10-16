@@ -1,24 +1,24 @@
 // Service Worker (si'se dashboard)
 // ==============================================
 // ストラテジ:
-//  - /api/* は常にネットワーク優先（キャッシュしない、認証とデータ鮮度最優先）
-//  - /manifest.json はリクエスト元 client (page) の URL から ?v=<token> を
-//    読み取り、token 入り start_url のマニフェストを動的に返す。
-//    （iOS / Android の「ホーム画面に追加」がスタッフ個別の URL で起動するように）
-//  - 同一オリジンの静的アセット (index.html / 画像 / CDN 以外) は
-//    stale-while-revalidate: キャッシュ即時応答 + バックグラウンドで最新化
-//  - HTML (navigate) は network-first: 新しい版を優先、オフライン時のみ
-//    キャッシュ版にフォールバック
-//  - 同一オリジン以外（unpkg, googleapis, cdn.jsdelivr, html2canvas CDN 等）は
-//    キャッシュしない（バージョン管理外、SW の責務外）
+//  - /api/* は常にネットワーク（認証とデータ鮮度最優先、キャッシュしない）
+//  - /manifest.json はリクエスト元 page の ?v=<token> を読み取り、token 入り
+//    start_url のマニフェストを動的に返す（スタッフ個別 URL で PWA 起動するため）
+//  - HTML (navigate) と /assets/*（ビルド成果物の JS/CSS）は network-first:
+//    デプロイ直後に古い JS と新しい HTML が混ざらないよう常に最新を取りに行き、
+//    オフライン時だけキャッシュを使う
+//  - その他の同一オリジン静的ファイル（画像など）は stale-while-revalidate
+//  - 外部オリジン（Google Fonts, MediaPipe CDN など）は扱わない
 // ==============================================
 
-const CACHE_NAME = 'sise-dash-v3';
+const CACHE_NAME = 'sise-dash-v5';
 // /manifest.json は token 込みで動的に応答するため、CORE_ASSETS から外す
 // （v2 まで間違えてキャッシュしていた古いマニフェストがあれば、CACHE_NAME
 //  バージョンアップ時の activate cleanup で削除される）。
 const CORE_ASSETS = [
   '/',
+  '/assets/app.js',
+  '/assets/app.css',
   '/images/logo.png',
 ];
 
@@ -81,15 +81,15 @@ function decodeStaffName(token) {
 // マニフェスト JSON を生成（token あれば start_url にトークン付与）。
 function buildManifest(token, staffName) {
   const m = {
-    name: staffName ? `si'se - ${staffName}` : "si'se Dashboard",
+    name: staffName ? `si'se - ${staffName}` : "si'se ダッシュボード",
     short_name: staffName ? (staffName.length > 12 ? staffName.slice(0, 12) : staffName) : "si'se",
-    description: "si'se 整体院経営ダッシュボード",
+    description: "si'se 整体院ダッシュボード",
     start_url: token ? `/?v=${encodeURIComponent(token)}` : "/",
     scope: "/",
     display: "standalone",
     orientation: "portrait",
-    background_color: "#f4f8f5",
-    theme_color: "#33a065",
+    background_color: "#f5f6f3",
+    theme_color: "#236c48",
     lang: "ja",
     icons: [
       { src: "/images/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
@@ -130,14 +130,14 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // navigate (HTML): network-first
-  if (req.mode === 'navigate' || (req.headers.get('accept') || '').includes('text/html')) {
+  // navigate (HTML) とビルド成果物: network-first
+  if (req.mode === 'navigate' || (req.headers.get('accept') || '').includes('text/html') || url.pathname.startsWith('/assets/')) {
     event.respondWith(
       fetch(req).then((resp) => {
         const clone = resp.clone();
         caches.open(CACHE_NAME).then((c) => c.put(req, clone).catch(() => {}));
         return resp;
-      }).catch(() => caches.match(req).then((cached) => cached || caches.match('/')))
+      }).catch(() => caches.match(req).then((cached) => cached || (req.mode === 'navigate' ? caches.match('/') : undefined)))
     );
     return;
   }

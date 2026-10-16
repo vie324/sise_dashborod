@@ -12,12 +12,17 @@ test.describe('基本起動', () => {
     await page.goto('/');
     // アプリタイトルが head に入っているはず
     await expect(page).toHaveTitle(/si'se/i);
-    // React がマウントして root の中身が描画されるまで待機
-    // (ログイン画面 or ダッシュボードのどちらかが出るまで)
-    await page.waitForFunction(() => {
-      const root = document.getElementById('root');
-      return root && root.children.length > 0;
-    }, { timeout: 15000 });
+    // React がマウントして起動画面 (#boot) が消えるまで待機
+    // (ログイン画面 or ダッシュボードのどちらかが出る)
+    await page.waitForFunction(() => !document.getElementById('boot'), { timeout: 15000 });
+    await expect(page.locator('h1').first()).toBeVisible();
+  });
+
+  test('ビルド成果物 (JS / CSS) が配信される', async ({ request }) => {
+    const js = await request.get('/assets/app.js');
+    expect(js.status()).toBe(200);
+    const css = await request.get('/assets/app.css');
+    expect(css.status()).toBe(200);
   });
 
   test('manifest.json が返される', async ({ request }) => {
@@ -74,6 +79,32 @@ test.describe('静的アセット', () => {
     expect(r192.headers()['content-type']).toContain('image/png');
     const r512 = await request.get('/images/icon-512.png');
     expect(r512.status()).toBe(200);
+  });
+});
+
+test.describe('SalonOne 連携 API', () => {
+  test('GET /api/salonone?action=status は live / demo を返す', async ({ request }) => {
+    const resp = await request.get('/api/salonone?action=status');
+    // REQUIRE_ADMIN_AUTH=true の環境では 401 になる
+    if (resp.status() === 401) return;
+    expect(resp.status()).toBe(200);
+    const data = await resp.json();
+    expect(['live', 'demo']).toContain(data.mode);
+    expect(data.rules.startMonth).toBe('2026-11');
+  });
+
+  test('不明な action は 400', async ({ request }) => {
+    const resp = await request.get('/api/salonone?action=NO_SUCH_ACTION');
+    if (resp.status() === 401) return;
+    expect(resp.status()).toBe(400);
+  });
+
+  test('不正な staff token は 401', async ({ request }) => {
+    const fakeToken = btoa(JSON.stringify({ id: 's1', n: 'fake', r: 'staff', sid: ['x'] })) + '.invalidsig';
+    const resp = await request.get('/api/salonone?action=summary', {
+      headers: { 'X-Staff-Token': fakeToken, 'X-Staff-Id': 's1' },
+    });
+    expect(resp.status()).toBe(401);
   });
 });
 
