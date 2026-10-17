@@ -38,7 +38,7 @@ test('消化売上・既存顧客売上・施術数は会計確定の来店だ�
   assert.equal(m.shops.A.daily.length, 3);
 });
 
-test('新規の契約は初回来店の月のうちの契約だけを数え、紹介はサブスク（シェアプラン除く）のみ', () => {
+test('新規の契約は初回来店月に計上し（生涯基準）、紹介はサブスク（シェアプラン除く）のみ', () => {
   const receptions = [
     R({ date: '2026-11-03', customerId: 'n1', customerClass: 'new', sourceName: 'ホットペッパー' }),
     R({ date: '2026-11-20', customerId: 'n1', customerClass: 'new', sourceName: 'ホットペッパー' }), // 2回目は新規数に数えない
@@ -49,8 +49,8 @@ test('新規の契約は初回来店の月のうちの契約だけを数え、�
     R({ date: '2026-11-08', customerId: 'n6', customerClass: 'new', sourceName: 'ホームページ' }),
   ];
   const contracts = [
-    { customerId: 'n1', shopId: 'A', type: 'subscription', startDate: '2026-11-20' }, // 2回目の来店で契約 → 数える
-    { customerId: 'n2', shopId: 'A', type: 'ticket', startDate: '2026-12-02' }, // 翌月の契約 → 数えない
+    { customerId: 'n1', shopId: 'A', type: 'subscription', startDate: '2026-11-20' }, // 2回目の来店で契約
+    { customerId: 'n2', shopId: 'A', type: 'ticket', startDate: '2026-12-02' }, // 翌月の契約も初回来店月に計上（SalonOne の購入数と同じ）
     { customerId: 'n3', shopId: 'A', type: 'subscription', startDate: '2026-11-05' },
     { customerId: 'n4', shopId: 'A', type: 'subscription', startDate: '2026-11-06' },
     { customerId: 'n5', shopId: 'A', type: 'subscription', startDate: '2026-11-07', isSharePlan: true },
@@ -59,9 +59,12 @@ test('新規の契約は初回来店の月のうちの契約だけを数え、�
   const m = computeMonth({ receptions, contracts, month: '2026-11', asOf: '2026-12-10' });
   assert.equal(m.staff.s1.newVisits.hotpepper, 1);
   assert.equal(m.staff.s1.newContracts.hotpepper, 1);
-  assert.equal(m.staff.s1.newContracts.meta, 0);
+  assert.equal(m.staff.s1.newContracts.meta, 1);
   assert.equal(m.staff.s1.newContracts.homepage, 1);
   assert.equal(m.shops.A.newVisitTotal, 6);
+  assert.equal(m.shops.A.newCount, 6);
+  assert.equal(m.shops.A.purchaseCount, 6);
+  assert.equal(m.shops.A.repeatCount, 1); // n1 の 2回目
   assert.equal(m.staff.s2.referralSubscriptions, 1);
   assert.equal(m.staff.s3.referralSubscriptions, 1); // 紹介リンクのスタッフに付ける
   assert.equal(m.staff.s1.referralSubscriptions, 0); // n5 はシェアプラン
@@ -70,6 +73,78 @@ test('新規の契約は初回来店の月のうちの契約だけを数え、�
   // 基準日より後の契約はまだ数えない
   const early = computeMonth({ receptions, contracts, month: '2026-11', asOf: '2026-11-10' });
   assert.equal(early.staff.s1.newContracts.hotpepper, 0);
+  assert.equal(early.staff.s1.newContracts.meta, 0);
+});
+
+test('最初の予約をキャンセルして後日来店したお客様も新規（その来店の担当・最初の予約の媒体）', () => {
+  const receptions = [
+    R({ date: '2026-10-28', customerId: 'c1', customerClass: 'new', status: 'cancelled', sourceName: 'ホットペッパー', staffId: 's2' }),
+    R({ date: '2026-11-04', customerId: 'c1', customerClass: 'existing', sourceName: '', staffId: 's1', consumedAmount: 3000 }),
+    R({ date: '2026-11-10', customerId: 'c1', customerClass: 'existing', staffId: 's1', consumedAmount: 6000 }),
+    R({ date: '2026-11-05', customerId: 'c2', customerClass: 'new', status: 'reserved', sourceName: 'Meta広告' }), // 未会計のまま
+    R({ date: '2026-11-12', customerId: 'c2', customerClass: 'existing', sourceName: 'Meta広告', consumedAmount: 3000 }),
+    R({ date: '2026-11-06', customerId: 'c3', customerClass: 'existing', consumedAmount: 8000 }), // 以前からのお客様
+  ];
+  const m = computeMonth({ receptions, contracts: [], month: '2026-11', asOf: '2026-11-30' });
+  assert.equal(m.staff.s1.newVisits.hotpepper, 1);
+  assert.equal(m.staff.s1.newVisits.meta, 1);
+  assert.equal(m.shops.A.newCount, 2);
+  assert.equal(m.shops.A.repeatCount, 2); // c1 の 2回目・c3
+  assert.equal(m.staff.s1.firstVisitConsumed, 6000);
+  assert.equal(m.staff.s1.existingConsumedSales, 14000);
+  assert.equal(m.staff.s2, undefined); // キャンセルした予約の担当には付けない
+});
+
+test('SalonOne の売上分析の数字（売上サマリ）があればそちらを使う', () => {
+  const receptions = [
+    R({ date: '2026-11-02', customerId: 'c1', consumedAmount: 8000, salesAmount: 8000, cashAmount: 8000 }),
+    R({ date: '2026-11-03', customerId: 'n1', customerClass: 'new', sourceName: 'ホットペッパー', consumedAmount: 3000, salesAmount: 3000, cashAmount: 3000 }),
+    R({ date: '2026-11-04', customerId: 'c2', staffId: 's2', consumedAmount: 6000 }),
+  ];
+  const salesSummaries = {
+    A: {
+      consumedSales: 21000, depositSales: 15000, newCount: 1, repeatCount: 3, treatmentCount: 4, customerCount: 3, purchaseCount: 1,
+      daily: [
+        { date: '2026-11-02', consumedSales: 8000, depositSales: 8000, newCount: 0, treatmentCount: 1 },
+        { date: '2026-11-03', consumedSales: 3000, depositSales: 3000, newCount: 1, treatmentCount: 1 },
+        { date: '2026-11-04', consumedSales: 6000, depositSales: 0, newCount: 0, treatmentCount: 1 },
+        { date: '2026-11-15', consumedSales: 4000, depositSales: 4000, newCount: 0, treatmentCount: 1 }, // 失効益など
+      ],
+      staff: [
+        { staffId: 's1', name: '佐藤', consumedSales: 15000, depositSales: 15000, newCount: 1, repeatCount: 2, treatmentCount: 3, customerCount: 2, purchaseCount: 1 },
+        { staffId: 's2', name: '鈴木', consumedSales: 6000, depositSales: 0, newCount: 0, repeatCount: 1, treatmentCount: 1, customerCount: 1, purchaseCount: null },
+        { staffId: 's9', name: '受付履歴に無い人', consumedSales: 1000, depositSales: 0, newCount: 0, repeatCount: 0, treatmentCount: 0, customerCount: 0, purchaseCount: 0 },
+      ],
+    },
+  };
+  const m = computeMonth({ receptions, contracts: [], month: '2026-11', asOf: '2026-11-30', salesSummaries });
+  const shop = m.shops.A;
+  assert.equal(shop.basis, 'salonone');
+  assert.equal(shop.consumedSales, 21000);
+  assert.equal(shop.depositSales, 15000);
+  assert.equal(shop.newCount, 1);
+  assert.equal(shop.repeatCount, 3);
+  assert.equal(shop.treatmentCount, 4);
+  assert.equal(shop.purchaseCount, 1);
+  assert.equal(shop.existingConsumedSales, 18000); // 21,000 − 初回来店の 3,000
+  assert.equal(shop.cashSales, 11000); // 現金は受付履歴から
+  assert.deepEqual(shop.daily.map((d) => [d.date, d.consumedSales, d.newVisits, d.cashSales]), [
+    ['2026-11-02', 8000, 0, 8000], ['2026-11-03', 3000, 1, 3000], ['2026-11-04', 6000, 0, 0], ['2026-11-15', 4000, 0, 0],
+  ]);
+  assert.equal(shop.newVisits.hotpepper, 1); // 経路別は受付履歴から
+
+  const sato = m.staff.s1;
+  assert.equal(sato.consumedSales, 15000);
+  assert.equal(sato.existingConsumedSales, 12000);
+  assert.equal(sato.purchaseCount, 1);
+  // スタッフの日別は受付履歴の形のまま、合計を売上分析に合わせる
+  assert.equal(sato.daily.reduce((a, d) => a + d.consumedSales, 0), 15000);
+  assert.deepEqual(sato.daily.map((d) => d.consumedSales), [10909, 4091]);
+  assert.equal(m.staff.s2.purchaseCount, 0); // 売上分析に無い項目は受付履歴のまま
+  assert.equal(m.staff.s9.consumedSales, 1000);
+  assert.equal(m.staff.s9.name, '受付履歴に無い人');
+  assert.equal(m.staff.s9.shopId, 'A');
+  assert.equal(combineShops([shop]).newCount, 1);
 });
 
 test('現金は分割決済の内訳（cashAmount）を優先する', () => {

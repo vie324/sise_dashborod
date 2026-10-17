@@ -7,7 +7,7 @@
 //   { id, shopId, staffId, staffName?, customerId, date:'YYYY-MM-DD',
 //     status:'completed'|'reserved'|'checked_in'|'cancelled'|'no_show',
 //     customerClass:'new'|'repeat'|'existing', sourceName,
-//     consumedAmount,   // 消化額（施術消化売上）
+//     consumedAmount,   // 消化額
 //     salesAmount,      // 会計金額（入金）
 //     cashAmount?,      // そのうち現金（分割決済の内訳から。無ければ paymentMethod で判定）
 //     paymentMethod, referralStaffId? }
@@ -16,11 +16,20 @@
 //   { id, customerId, shopId, staffId?, type:'subscription'|'ticket'|'member'|'prepaid'|'payPerVisit',
 //     planName, isSharePlan, startDate, endDate|null }
 //
+// 売上サマリ salesSummary（SalonOne の「売上分析」と同じ数字。店舗ごと）:
+//   { consumedSales, depositSales, newCount, repeatCount, treatmentCount, customerCount, purchaseCount,
+//     daily:[{ date, ...同じ項目 }] | null, staff:[{ staffId, name, ...同じ項目 }] | null }
+//   null の項目は受付履歴からの集計のまま。
+//
 // 集計ルール
-//   - 売上・施術数は会計完了（completed）の予約のみ
-//   - 新規 = その店舗で最初の予約が、その月に会計完了したお客様。担当はその予約のスタッフ
-//   - 契約 = 新規のお客様が、初回来店の月のうちに回数券・サブスクを購入（または入会）したか
-//            （月が締まった後に数字が変わらないよう、翌月以降の契約は数えない）
+//   - 消化売上・入金売上・新規数・既存数（2回目以降の来店）・施術数・顧客数・契約数（購入数）は、
+//     売上サマリがあればその値を使う（SalonOne の売上分析と同じ数字にする）。
+//     無いとき（デモ・取得失敗）は受付履歴の会計完了（completed）の予約から集計する
+//   - 新規 = その店舗で初めての来店（会計完了）。最初の予約をキャンセルして後日来店した場合も含む。
+//            担当はその来店のスタッフ。経路はその来店の媒体（無ければ最初の予約の媒体）
+//   - 契約 = 新規のお客様が回数券・サブスクを購入（または入会）したか。初回来店の月に計上し、
+//            基準日までの契約を数える（SalonOne の「購入数」と同じ生涯基準。後の月の契約で増えることがある）
+//   - 経路別の新規・契約（インセンティブの 3経路・SNS・紹介）は受付履歴から集計する
 //   - 紹介 = 紹介経路の新規客がサブスク（シェアプラン除く）を契約した件数
 // ============================================================
 
@@ -39,6 +48,7 @@ function newStaffBucket(staffId, shopId) {
     shopId,
     consumedSales: 0,
     existingConsumedSales: 0,
+    firstVisitConsumed: 0,
     depositSales: 0,
     treatmentCount: 0,
     customerIds: new Set(),
@@ -56,6 +66,7 @@ function newShopBucket(shopId) {
     shopId,
     consumedSales: 0,
     existingConsumedSales: 0,
+    firstVisitConsumed: 0,
     depositSales: 0,
     treatmentCount: 0,
     cashSales: 0,
@@ -144,10 +155,109 @@ export function computeRetention(contracts, shopId, month, asOf) {
   };
 }
 
+const byDate = (a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
+
+/**
+ * 店舗ごとの「初めての来店」を探す。
+ *   区分 new（その店舗で最初の予約）が会計完了した来店。
+ *   最初の予約がキャンセル・無断だったお客様は、その後の最初の会計完了の来店（SalonOne の売上分析と同じく来店で数える）。
+ * @returns {Map<string, { r:Object, sourceName:string }>} `${shopId}|${customerId}` → その月の初回来店
+ */
+function findFirstVisits(receptions, month) {
+  const byKey = new Map();
+  for (const r of receptions) {
+    if (!r.customerId || !r.date) continue;
+    const key = `${r.shopId}|${r.customerId}`;
+    const list = byKey.get(key) || [];
+    list.push(r);
+    byKey.set(key, list);
+  }
+  const out = new Map();
+  for (const [key, list] of byKey) {
+    list.sort(byDate);
+    const i = list.findIndex((r) => r.customerClass === 'new');
+    if (i < 0) continue;
+    const firstBooking = list[i];
+    // 最初の予約より前に会計完了の来店があるなら、その店舗の初回ではない
+    if (list.slice(0, i).some((r) => r.status === 'completed' && r.date < firstBooking.date)) continue;
+    const firstVisit = firstBooking.status === 'completed' ? firstBooking : list.slice(i + 1).find((r) => r.status === 'completed');
+    if (!firstVisit || monthOf(firstVisit.date) !== month) continue;
+    out.set(key, { r: firstVisit, sourceName: firstVisit.sourceName || firstBooking.sourceName || '' });
+  }
+  return out;
+}
+
+/**
+ * 合計を保ったまま日別の値を比例で配分し直す（整数。端数は大きい順に 1円ずつ）。
+ * スタッフ別は SalonOne から日別の値が取れないため、受付履歴の日別の形で売上分析の合計に合わせる。
+ */
+function rescaleDaily(daily, key, total, fallbackDate) {
+  const sum = daily.reduce((a, d) => a + n(d[key]), 0);
+  if (total == null || sum === total) return daily;
+  if (sum <= 0) {
+    if (!total) return daily.map((d) => ({ ...d, [key]: 0 }));
+    const out = daily.map((d) => ({ ...d, [key]: 0 }));
+    const last = out.find((d) => d.date === fallbackDate) || { date: fallbackDate, consumedSales: 0, depositSales: 0, treatmentCount: 0, newVisits: 0 };
+    last[key] = total;
+    if (!out.includes(last)) out.push(last);
+    return out.sort(byDate);
+  }
+  const raw = daily.map((d) => (n(d[key]) * total) / sum);
+  const floors = raw.map(Math.floor);
+  let rest = Math.round(total - floors.reduce((a, v) => a + v, 0));
+  const order = raw.map((v, i) => [v - Math.floor(v), i]).sort((a, b) => b[0] - a[0]);
+  for (let k = 0; rest > 0 && k < order.length; k++, rest--) floors[order[k][1]] += 1;
+  return daily.map((d, i) => ({ ...d, [key]: floors[i] }));
+}
+
+const OFFICIAL_KEYS = ['consumedSales', 'depositSales', 'treatmentCount', 'customerCount', 'newCount', 'repeatCount', 'purchaseCount'];
+const DAILY_KEYS = { consumedSales: 'consumedSales', depositSales: 'depositSales', treatmentCount: 'treatmentCount', newCount: 'newVisits' };
+
+/** 売上サマリ（SalonOne の売上分析）の値で、店舗・日別・スタッフ別の数字を置き換える */
+function applySalesSummaries(summaries, shopOut, staffOut, { emptyShop, emptyStaff, lastDate }) {
+  const official = new Map(); // staffId → 全店舗の合計
+  for (const [shopId, sum] of Object.entries(summaries || {})) {
+    if (!sum) continue;
+    const shop = shopOut[shopId] || (shopOut[shopId] = emptyShop(shopId));
+    for (const k of OFFICIAL_KEYS) if (sum[k] != null) shop[k] = sum[k];
+    if (sum.consumedSales != null) shop.existingConsumedSales = Math.max(0, sum.consumedSales - shop.firstVisitConsumed);
+    if (sum.daily) {
+      // 売上分析にある項目だけ日別を置き換える（現金売上は受付履歴のまま）
+      const keys = Object.keys(DAILY_KEYS).filter((k) => sum.daily.some((d) => d[k] != null));
+      const map = new Map(shop.daily.map((d) => [d.date, { ...d }]));
+      for (const d of map.values()) for (const k of keys) d[DAILY_KEYS[k]] = 0;
+      for (const d of sum.daily) {
+        const b = map.get(d.date) || { date: d.date, consumedSales: 0, depositSales: 0, treatmentCount: 0, newVisits: 0, cashSales: 0 };
+        for (const k of keys) if (d[k] != null) b[DAILY_KEYS[k]] = d[k];
+        map.set(d.date, b);
+      }
+      shop.daily = Array.from(map.values()).filter((d) => d.consumedSales || d.depositSales || d.treatmentCount || d.newVisits || d.cashSales).sort(byDate);
+    }
+    shop.basis = 'salonone';
+    for (const row of sum.staff || []) {
+      const acc = official.get(row.staffId) || { shopId, name: row.name, best: -Infinity };
+      for (const k of OFFICIAL_KEYS) if (row[k] != null) acc[k] = n(acc[k]) + row[k];
+      if (n(row.consumedSales) > acc.best) { acc.best = n(row.consumedSales); acc.shopId = shopId; }
+      if (!acc.name && row.name) acc.name = row.name;
+      official.set(row.staffId, acc);
+    }
+  }
+  for (const [staffId, acc] of official) {
+    const st = staffOut[staffId] || (staffOut[staffId] = emptyStaff(staffId, acc.shopId));
+    if (!st.name && acc.name) st.name = acc.name;
+    for (const k of OFFICIAL_KEYS) if (acc[k] != null) st[k] = acc[k];
+    if (acc.consumedSales != null) {
+      st.existingConsumedSales = Math.max(0, acc.consumedSales - st.firstVisitConsumed);
+      st.daily = rescaleDaily(st.daily, 'consumedSales', acc.consumedSales, lastDate);
+    }
+    st.basis = 'salonone';
+  }
+}
+
 /**
  * 1ヶ月分の集計。
  * @param {Object} input
- * @param {Array} input.receptions   その月を含む受付レコード（月外は無視）
+ * @param {Array} input.receptions   その月を含む受付レコード（初回来店の判定に前の月も使う）
  * @param {Array} input.contracts    契約レコード（全期間）
  * @param {string} input.month       'YYYY-MM'
  * @param {string} [input.asOf]      データ基準日（当月はその日まで）
@@ -156,14 +266,17 @@ export function computeRetention(contracts, shopId, month, asOf) {
  * @param {boolean} [input.retentionFromContracts=true]
  *   継続指標が API に無い店舗を契約データから計算するか。
  *   受付履歴から作った契約（期間内の購入だけ）では会員数を出せないので、ライブでは false
+ * @param {Object} [input.salesSummaries] shopId → 売上サマリ（SalonOne の売上分析）
+ * @param {boolean} [input.countsFromReceptions=true]
+ *   受付履歴を取っていない（推移）ときは false。新規数・既存数・契約数は売上サマリに無ければ null にする
  */
-export function computeMonth({ receptions, contracts, month, asOf, channelMap, retentionOverrides, retentionFromContracts = true }) {
+export function computeMonth({ receptions, contracts, month, asOf, channelMap, retentionOverrides, retentionFromContracts = true, salesSummaries, countsFromReceptions = true }) {
   const today = asOf || todayJst();
+  const { from, to } = monthRange(month);
   const contractsByCustomer = indexContracts(contracts);
   const shops = new Map();
   const staff = new Map();
   const sources = new Map();
-  const firstVisits = new Map(); // customerId → 最初の新規来店 reception
 
   const getShop = (id) => {
     let s = shops.get(id);
@@ -176,18 +289,21 @@ export function computeMonth({ receptions, contracts, month, asOf, channelMap, r
     return s;
   };
 
-  const inMonth = (receptions || []).filter((r) => r && r.date && monthOf(r.date) === month && r.status === 'completed');
-  inMonth.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  const all = (receptions || []).filter((r) => r && r.date);
+  const firstVisits = findFirstVisits(all, month);
+  const firstVisitSet = new Set([...firstVisits.values()].map((v) => v.r));
+  const inMonth = all.filter((r) => monthOf(r.date) === month && r.status === 'completed').sort(byDate);
 
   for (const r of inMonth) {
     const shop = getShop(r.shopId);
     const consumed = n(r.consumedAmount);
     const sales = n(r.salesAmount);
-    const existing = r.customerClass !== 'new';
+    const first = firstVisitSet.has(r);
     shop.consumedSales += consumed;
     shop.depositSales += sales;
     shop.treatmentCount += 1;
-    if (existing) shop.existingConsumedSales += consumed;
+    if (first) shop.firstVisitConsumed += consumed;
+    else shop.existingConsumedSales += consumed;
     if (r.customerId) shop.customerIds.add(r.customerId);
     const cash = cashOf(r);
     shop.cashSales += cash;
@@ -202,7 +318,8 @@ export function computeMonth({ receptions, contracts, month, asOf, channelMap, r
       st.consumedSales += consumed;
       st.depositSales += sales;
       st.treatmentCount += 1;
-      if (existing) st.existingConsumedSales += consumed;
+      if (first) st.firstVisitConsumed += consumed;
+      else st.existingConsumedSales += consumed;
       if (r.customerId) st.customerIds.add(r.customerId);
       if (r.staffName) st.name = r.staffName;
       st.shopVotes.set(r.shopId, (st.shopVotes.get(r.shopId) || 0) + 1);
@@ -211,19 +328,14 @@ export function computeMonth({ receptions, contracts, month, asOf, channelMap, r
       dd.depositSales += sales;
       dd.treatmentCount += 1;
     }
-
-    if (r.customerClass === 'new' && r.customerId && !firstVisits.has(r.customerId)) {
-      firstVisits.set(r.customerId, r);
-    }
   }
 
-  // 新規客（初回来店）の経路・契約（初回来店の月のうち、基準日までの契約）
-  const { from, to } = monthRange(month);
-  const until = today < to ? today : to;
-  for (const [customerId, r] of firstVisits) {
-    const channel = resolveChannel(r.sourceName, channelMap);
-    const list = contractsByCustomer.get(customerId) || [];
-    const relevant = list.filter((c) => c.startDate && c.startDate >= from && c.startDate <= until);
+  // 新規客（初回来店）の経路・契約。契約は月初から基準日まで（生涯基準）
+  for (const { r, sourceName } of firstVisits.values()) {
+    const channel = resolveChannel(sourceName, channelMap);
+    const list = contractsByCustomer.get(r.customerId) || [];
+    const relevant = list.filter((c) => c.startDate && c.startDate >= from && c.startDate <= today
+      && (!c.shopId || !r.shopId || c.shopId === r.shopId));
     const contracted = relevant.some((c) => isContractType(c.type));
     const subscribed = relevant.some((c) => c.type === 'subscription' && !c.isSharePlan);
 
@@ -244,36 +356,72 @@ export function computeMonth({ receptions, contracts, month, asOf, channelMap, r
       if (credited) getStaff(credited, r.shopId).referralSubscriptions += 1;
     }
 
-    const name = String(r.sourceName || '（未設定）');
+    const name = String(sourceName || '（未設定）');
     const src = sources.get(name) || { name, channel, newVisits: 0, contracts: 0 };
     src.newVisits += 1;
     if (contracted) src.contracts += 1;
     sources.set(name, src);
   }
 
-  const finishDaily = (map) => Array.from(map.values()).sort((a, b) => (a.date < b.date ? -1 : 1));
+  const finishDaily = (map) => Array.from(map.values()).sort(byDate);
 
   const retentionOf = (shopId) => {
     const override = retentionOverrides && retentionOverrides[shopId];
     if (override) return { ...override, basis: 'api' };
     return retentionFromContracts ? computeRetention(contracts, shopId, month, today) : null;
   };
+  // 受付履歴からの数字。新規数・既存数・契約数は経路別の合計から（売上サマリがあれば後で置き換える）
+  const counts = (b, treatmentCount) => {
+    if (!countsFromReceptions) {
+      return { newVisits: b.newVisits, newContracts: b.newContracts, newVisitTotal: null, newContractTotal: null, newCount: null, repeatCount: null, purchaseCount: null };
+    }
+    const newVisitTotal = sumValues(b.newVisits);
+    const newContractTotal = sumValues(b.newContracts);
+    return {
+      newVisits: b.newVisits,
+      newContracts: b.newContracts,
+      newVisitTotal,
+      newContractTotal,
+      newCount: newVisitTotal,
+      repeatCount: Math.max(0, treatmentCount - newVisitTotal),
+      purchaseCount: newContractTotal,
+    };
+  };
+  const emptyShop = (shopId) => {
+    const empty = newShopBucket(shopId);
+    return {
+      shopId,
+      consumedSales: 0, existingConsumedSales: 0, firstVisitConsumed: 0, depositSales: 0, treatmentCount: 0, customerCount: 0, cashSales: 0,
+      ...counts(empty, 0),
+      referralSubscriptions: 0, daily: [], basis: 'receptions',
+      retention: retentionOf(shopId),
+    };
+  };
+  const emptyStaff = (staffId, shopId) => {
+    const empty = newStaffBucket(staffId, shopId);
+    return {
+      staffId, shopId, name: '',
+      consumedSales: 0, existingConsumedSales: 0, firstVisitConsumed: 0, depositSales: 0, treatmentCount: 0, customerCount: 0,
+      ...counts(empty, 0),
+      referralSubscriptions: 0, daily: [], basis: 'receptions',
+    };
+  };
+
   const shopOut = {};
   for (const s of shops.values()) {
     shopOut[s.shopId] = {
       shopId: s.shopId,
       consumedSales: s.consumedSales,
       existingConsumedSales: s.existingConsumedSales,
+      firstVisitConsumed: s.firstVisitConsumed,
       depositSales: s.depositSales,
       treatmentCount: s.treatmentCount,
       customerCount: s.customerIds.size,
       cashSales: s.cashSales,
-      newVisits: s.newVisits,
-      newContracts: s.newContracts,
-      newVisitTotal: sumValues(s.newVisits),
-      newContractTotal: sumValues(s.newContracts),
+      ...counts(s, s.treatmentCount),
       referralSubscriptions: s.referralSubscriptions,
       daily: finishDaily(s.daily),
+      basis: 'receptions',
       retention: retentionOf(s.shopId),
     };
   }
@@ -283,15 +431,7 @@ export function computeMonth({ receptions, contracts, month, asOf, channelMap, r
     ...Object.keys(retentionOverrides || {}),
   ].filter(Boolean));
   for (const shopId of retentionShops) {
-    if (shopOut[shopId]) continue;
-    const empty = newShopBucket(shopId);
-    shopOut[shopId] = {
-      shopId,
-      consumedSales: 0, existingConsumedSales: 0, depositSales: 0, treatmentCount: 0, customerCount: 0, cashSales: 0,
-      newVisits: empty.newVisits, newContracts: empty.newContracts, newVisitTotal: 0, newContractTotal: 0,
-      referralSubscriptions: 0, daily: [],
-      retention: retentionOf(shopId),
-    };
+    if (!shopOut[shopId]) shopOut[shopId] = emptyShop(shopId);
   }
 
   const staffOut = {};
@@ -305,21 +445,23 @@ export function computeMonth({ receptions, contracts, month, asOf, channelMap, r
       name: s.name,
       consumedSales: s.consumedSales,
       existingConsumedSales: s.existingConsumedSales,
+      firstVisitConsumed: s.firstVisitConsumed,
       depositSales: s.depositSales,
       treatmentCount: s.treatmentCount,
       customerCount: s.customerIds.size,
-      newVisits: s.newVisits,
-      newContracts: s.newContracts,
-      newVisitTotal: sumValues(s.newVisits),
-      newContractTotal: sumValues(s.newContracts),
+      ...counts(s, s.treatmentCount),
       referralSubscriptions: s.referralSubscriptions,
       daily: finishDaily(s.daily),
+      basis: 'receptions',
     };
   }
 
+  const lastDate = today < to ? today : to;
+  if (salesSummaries) applySalesSummaries(salesSummaries, shopOut, staffOut, { emptyShop, emptyStaff, lastDate });
+
   return {
     month,
-    asOf: monthsBetween(month, monthOf(today)) > 0 ? monthRange(month).to : today,
+    asOf: monthsBetween(month, monthOf(today)) > 0 ? to : today,
     shops: shopOut,
     staff: staffOut,
     sources: Array.from(sources.values()).sort((a, b) => b.newVisits - a.newVisits),
@@ -331,6 +473,7 @@ export function combineShops(shopList) {
   const out = {
     consumedSales: 0, existingConsumedSales: 0, depositSales: 0, treatmentCount: 0, customerCount: 0, cashSales: 0,
     newVisits: emptyChannelMap(), newContracts: emptyChannelMap(), newVisitTotal: 0, newContractTotal: 0,
+    newCount: 0, repeatCount: 0, purchaseCount: 0,
     referralSubscriptions: 0, daily: [],
     retention: { memberCount: 0, membersAtStart: 0, churnCount: 0, churnRatePct: null, avgTenureMonths: null, basis: 'combined' },
   };
@@ -343,6 +486,10 @@ export function combineShops(shopList) {
     if (!s) continue;
     for (const k of ['consumedSales', 'existingConsumedSales', 'depositSales', 'treatmentCount', 'customerCount', 'cashSales', 'newVisitTotal', 'newContractTotal', 'referralSubscriptions']) {
       out[k] += n(s[k]);
+    }
+    // 新規数・既存数・契約数は、わからない店舗が 1つでもあれば合計もわからない（null）
+    for (const k of ['newCount', 'repeatCount', 'purchaseCount']) {
+      out[k] = out[k] == null || s[k] == null ? null : out[k] + n(s[k]);
     }
     for (const k of CHANNEL_KEYS) {
       out.newVisits[k] += n(s.newVisits && s.newVisits[k]);

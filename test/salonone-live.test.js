@@ -1,5 +1,5 @@
 // SalonOne とつないだ状態（ライブ）の集計を、疑似 SalonOne と疑似 DB で通しで確かめる。
-// 期待値は scripts/dev/salonone-fake.mjs の受付履歴（中央店 101 / 駅前店 102）から。
+// 期待値は scripts/dev/salonone-fake.mjs の売上サマリ・受付履歴（中央店 101 / 駅前店 102）から。
 import { test, before, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import os from 'node:os';
@@ -40,35 +40,78 @@ beforeEach(() => {
   provider.clearSalonOneCache();
 });
 
-test('締まった月: 消化売上・施術数・新規・契約・現金を受付履歴から集計する', async () => {
+test('締まった月: 消化売上・入金・施術数・新規数・既存数・契約数は SalonOne の売上分析の数字', async () => {
   const s = await summary.buildSummary(null, { month: PREV, storeId: 'all' });
   assert.equal(s.mode, 'live');
   assert.deepEqual(s.warnings.filter((w) => w.code !== 'retention'), []);
-  assert.equal(s.store.consumedSales, 43000);
-  assert.equal(s.store.cashSales, 24000);
+  assert.equal(s.store.consumedSales, 48000); // 受付履歴の消化額（43,000）ではなく売上分析の消化売上
+  assert.equal(s.store.newCount, 2);
+  assert.equal(s.store.repeatCount, 6);
+  assert.equal(s.store.purchaseCount, 1);
+  assert.equal(s.store.cashSales, 24000); // 現金は受付履歴から
 
   const central = s.stores.find((x) => x.storeId === 'store-1');
-  assert.equal(central.consumedSales, 29000);
-  assert.equal(central.depositSales, 103000);
+  assert.equal(central.basis, 'salonone');
+  assert.equal(central.consumedSales, 34000);
+  assert.equal(central.depositSales, 98000);
   assert.equal(central.treatmentCount, 6);
+  assert.equal(central.newCount, 2);
+  assert.equal(central.repeatCount, 4);
+  assert.equal(central.purchaseCount, 1);
+  // 経路別（インセンティブ用）は受付履歴から
   assert.equal(central.newVisitTotal, 3);
   assert.equal(central.newContractTotal, 2); // HPB のサブスク + 紹介の入会
   assert.deepEqual(central.contract3ch, { visits: 1, contracts: 1, ratePct: 100 });
   assert.equal(central.retention, null); // 過去の月は保存した継続指標が無ければ出さない
+  const day20 = s.store.daily.find((d) => d.date === `${PREV}-20`);
+  assert.equal(day20.consumedSales, 5000); // 失効益の日も売上分析どおり
 
   const byName = Object.fromEntries(s.staff.map((r) => [r.name, r]));
   assert.deepEqual(Object.keys(byName).sort(), ['佐藤 美咲', '田中 大輔', '鈴木 健太']); // 退職者は出さない
   const sato = byName['佐藤 美咲'];
   assert.equal(sato.staffId, 'st-sato');
-  assert.equal(sato.metrics.consumedSales, 20000);
-  assert.equal(sato.metrics.existingConsumedSales, 14000);
+  assert.equal(sato.metrics.consumedSales, 25000);
+  assert.equal(sato.metrics.existingConsumedSales, 19000); // 25,000 − 新規 2名の初回来店 6,000
   assert.equal(sato.metrics.treatmentCount, 4);
+  assert.equal(sato.metrics.newCount, 1);
+  assert.equal(sato.metrics.repeatCount, 3);
+  assert.equal(sato.metrics.purchaseCount, 1);
   assert.equal(sato.metrics.newVisitTotal, 2);
-  assert.equal(sato.metrics.newContractTotal, 2);
   assert.equal(sato.metrics.referralSubscriptions, 0); // 紹介は入会のみでサブスクではない
+  assert.equal(sato.daily.reduce((a, d) => a + d.consumedSales, 0), 25000); // 日別の合計も売上分析に合わせる
+  assert.equal(sato.incentive.items[0].current, 25000);
   assert.equal(byName['鈴木 健太'].metrics.consumedSales, 9000);
-  assert.equal(byName['鈴木 健太'].metrics.newContractTotal, 0);
+  assert.equal(byName['鈴木 健太'].metrics.purchaseCount, 0);
   assert.equal(byName['田中 大輔'].storeId, 'store-2');
+});
+
+test('推移は売上分析だけで出す（受付履歴は取らない）', async () => {
+  const t = await summary.buildTrend(null, { months: 3, endMonth: CURRENT, storeId: 'all' });
+  const prev = t.months.find((m) => m.month === PREV);
+  assert.equal(prev.consumedSales, 48000);
+  assert.equal(prev.newCount, 2);
+  assert.equal(prev.repeatCount, 6);
+  assert.equal(prev.purchaseCount, 1);
+  assert.equal(prev.contractRatePct, 50);
+  assert.ok(!calls.some((u) => u.pathname.endsWith('/marketing/reception-history')));
+  const sato = t.staff.find((r) => r.name === '佐藤 美咲');
+  assert.equal(sato.values[PREV], 25000);
+});
+
+test('売上分析を取れないときは受付履歴から集計し、その旨を知らせる', async () => {
+  const base = fakeFetch(calls);
+  globalThis.fetch = async (input, init) => {
+    if (String(input).includes('/sales/summary')) return new Response(JSON.stringify({ error: { code: 'feature_disabled', error_id: 'f1' } }), { status: 403 });
+    return base(input, init);
+  };
+  const s = await summary.buildSummary(null, { month: PREV, storeId: 'store-1' });
+  const w = s.warnings.find((x) => x.code === 'salesSummary');
+  assert.ok(w, JSON.stringify(s.warnings));
+  assert.match(w.message, /機能が無効/);
+  assert.equal(s.stores[0].consumedSales, 29000);
+  assert.equal(s.stores[0].newCount, 3);
+  const t = await summary.buildTrend(null, { months: 2, endMonth: PREV, storeId: 'store-1' });
+  assert.equal(t.months.find((m) => m.month === PREV).consumedSales, 29000);
 });
 
 test('当月: 継続管理から会員数・退会率・平均継続期間を出し、月ごとの記録を残す', async () => {
@@ -89,7 +132,7 @@ test('当月: 継続管理から会員数・退会率・平均継続期間を出
 test('スタッフは自分の店舗の分だけ取得し、自分の行だけ見える', async () => {
   const s = await summary.buildSummary(SATO, { month: PREV, storeId: 'all' });
   assert.equal(s.staff.length, 1);
-  assert.equal(s.me.metrics.consumedSales, 20000);
+  assert.equal(s.me.metrics.consumedSales, 25000);
   const shopsRequested = new Set(calls.map((u) => u.searchParams.get('shop_id')).filter(Boolean));
   assert.deepEqual([...shopsRequested], ['101']);
 });

@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   normalizeReception, normalizeStaff, normalizeShop, normalizeRetention, extractList, normalizeStatus,
-  contractsFromReceptions, cashPortion,
+  contractsFromReceptions, cashPortion, normalizeSalesSummary,
 } from '../api/_lib/salonone/normalize.js';
 import { toJstDate } from '../shared/dates.js';
 
@@ -110,4 +110,27 @@ test('継続管理: 会員数・退会率（直近1か月）・平均継続期�
   assert.equal(noPrev.memberCount, 5);
   assert.equal(noPrev.churnRatePct, null);
   assert.equal(noPrev.avgTenureMonths, null);
+});
+
+test('売上サマリ（売上分析）: 全体・日別・スタッフ別。未割当の行は外し、無い項目は null', () => {
+  const s = normalizeSalesSummary({
+    consumed_sales: 34000, digest_sales: 98000, new_visit_count: 2, repeat_visit_count: 4, customer_count: 6, treatment_count: 6, purchase_count: 1,
+    by_day: [{ date: '2026-10-03', consumed_sales: 3000, digest_sales: 53000, new_visit_count: 1, repeat_visit_count: 0 }],
+    by_staff: [
+      { staff_id: 25, staff_name: '佐藤 美咲', consumed_sales: 25000, new_visit_count: 1, repeat_visit_count: 3 },
+      { staff_id: null, staff_name: '未割当', consumed_sales: 0 },
+    ],
+  });
+  assert.equal(s.consumedSales, 34000);
+  assert.equal(s.depositSales, 98000);
+  assert.equal(s.newCount, 2);
+  assert.equal(s.repeatCount, 4);
+  assert.equal(s.treatmentCount, 6);
+  assert.equal(s.purchaseCount, 1);
+  assert.deepEqual(s.daily[0], { date: '2026-10-03', consumedSales: 3000, depositSales: 53000, newCount: 1, repeatCount: 0, treatmentCount: 1, customerCount: null, purchaseCount: null });
+  assert.equal(s.staff.length, 1);
+  assert.equal(s.staff[0].staffId, '25');
+  assert.equal(s.staff[0].treatmentCount, 4); // 施術数が無ければ 新規 + リピート
+  assert.equal(s.staff[0].purchaseCount, null);
+  assert.equal(normalizeSalesSummary({ consumed_sales: 1 }).daily, null); // 店舗を指定しない取得には日別が無い
 });

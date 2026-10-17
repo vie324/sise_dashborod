@@ -69,8 +69,11 @@ function StoreKpis({ summary, storeGoal }) {
         delta={changeRate(isCurrent ? forecastMonthEnd(s.treatmentCount, p.elapsed, p.total) : s.treatmentCount, s.prev ? s.prev.treatmentCount : null)}
         deltaSuffix={isCurrent ? '前月比(予測)' : '前月比'}
         sub={unit ? `1回あたり ${yen(unit)}` : null} />
-      <StatTile label="新規来店（3経路）" icon="user-plus" value={`${num(s.contract3ch.visits)}名`}
-        sub={s.contract3ch.ratePct != null ? `契約率 ${pct(s.contract3ch.ratePct)}（${s.contract3ch.contracts}件）` : '契約率 —'} />
+      <StatTile label="新規数" icon="user-plus" value={`${num(s.newCount)}名`}
+        sub={[
+          s.purchaseCount != null ? `契約 ${num(s.purchaseCount)}件${s.newCount ? `（${pct((s.purchaseCount / s.newCount) * 100, 0)}）` : ''}` : null,
+          `3経路 ${num(s.contract3ch.visits)}名`,
+        ].filter(Boolean).join('・')} />
       <StatTile label="会員数（サブスク）" icon="id-card" value={ret.memberCount != null ? `${num(ret.memberCount)}名` : '—'}
         sub={[
           `退会率 ${pct(ret.churnRatePct)}`,

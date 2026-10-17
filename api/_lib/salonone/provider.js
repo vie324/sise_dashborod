@@ -15,12 +15,12 @@
 
 import { supabase } from '../supabase.js';
 import {
-  salonOneConfig, fetchShops, fetchStaff, fetchVisitSources, fetchReceptions,
+  salonOneConfig, fetchShops, fetchStaff, fetchVisitSources, fetchReceptions, fetchSalesSummary,
   fetchRetentionSummary, fetchRetentionCustomers,
 } from './client.js';
 import {
   normalizeShop, normalizeStaff, normalizeVisitSourceName, normalizeReception, normalizeRetention,
-  contractsFromReceptions,
+  normalizeSalesSummary, contractsFromReceptions,
 } from './normalize.js';
 import { demoMaster, simulateDemo, DEMO_SOURCES } from './demo.js';
 import { monthRange, monthOf, monthsBetween, todayJst, addDays } from '../../../shared/dates.js';
@@ -190,6 +190,14 @@ function planPatterns(appCtx) {
   };
 }
 
+/** 1店舗・1ヶ月分の売上サマリ（SalonOne の売上分析と同じ数字。日別・スタッフ別つき） */
+function shopMonthSummary(cfg, shopId, month, asOf, refresh) {
+  const { from, to } = monthRange(month);
+  return cached(`sum:${shopId}:${month}`, ttlFor(month, asOf), async () => (
+    normalizeSalesSummary(await fetchSalesSummary(cfg, { from, to, shopId }))
+  ), refresh);
+}
+
 /** 1店舗・1ヶ月分の受付履歴（予約日時がその月の予約。キャンセルを含む） */
 function shopMonthReceptions(cfg, shopId, month, asOf, refresh) {
   const { from, to } = monthRange(month);
@@ -234,19 +242,24 @@ async function saveRetentionSnapshots(month, byShop) {
 
 /**
  * 指定月のデータ一式
- * @param {{ months:string[], shopIds?:string[], refresh?:boolean }} opts
- *   shopIds: 取得する SalonOne 店舗（省略時は全店舗）。権限による絞り込みは呼び出し側で行う
- * @returns {Promise<{ mode, receptions, contracts, retentionOverrides, retentionFromContracts, asOf, stale, warnings }>}
+ * @param {Object} opts
+ * @param {string[]} opts.months 集計する月（売上サマリ + 受付履歴）
+ * @param {string[]} [opts.receptionMonths] 受付履歴だけ要る月（後の月の契約・前の月のキャンセルを見るため）
+ * @param {boolean} [opts.receptions=true] 受付履歴を取るか（推移は売上サマリだけで足りるので false）
+ * @param {string[]} [opts.shopIds] 取得する SalonOne 店舗（省略時は全店舗）。権限による絞り込みは呼び出し側で行う
+ * @returns {Promise<{ mode, receptions, contracts, salesSummaries, retentionOverrides, retentionFromContracts, receptionsLoaded, asOf, stale, warnings }>}
  */
-export async function loadDataset(appCtx, master, { months, shopIds, refresh } = {}) {
+export async function loadDataset(appCtx, master, { months, receptionMonths = [], receptions: withReceptions = true, shopIds, refresh } = {}) {
   const asOf = todayJst();
   const current = monthOf(asOf);
-  const wanted = [...new Set(months)].filter((m) => monthsBetween(m, current) >= 0);
+  const notFuture = (m) => monthsBetween(m, current) >= 0;
+  const wanted = [...new Set(months)].filter(notFuture);
   if (master.mode === 'demo') {
-    const sim = simulateDemo({ shops: master.shops, staff: master.staff, months: wanted, asOf });
+    const all = [...new Set([...wanted, ...receptionMonths])].filter(notFuture);
+    const sim = simulateDemo({ shops: master.shops, staff: master.staff, months: all, asOf });
     return {
-      mode: 'demo', receptions: sim.receptions, contracts: sim.contracts, retentionOverrides: {},
-      retentionFromContracts: true, asOf, stale: [], warnings: [],
+      mode: 'demo', receptions: sim.receptions, contracts: sim.contracts, salesSummaries: {}, retentionOverrides: {},
+      retentionFromContracts: true, receptionsLoaded: true, asOf, stale: [], warnings: [],
     };
   }
 
@@ -255,17 +268,38 @@ export async function loadDataset(appCtx, master, { months, shopIds, refresh } =
   const startedAt = Date.now();
   // 更新ボタンで取り直すのは当月と前月だけ（締まった月は長めのキャッシュのまま）
   const recent = (m) => monthsBetween(m, current) <= 1;
+  const recMonths = withReceptions ? [...new Set([...wanted, ...receptionMonths])].filter(notFuture) : [];
+  const recJob = (m, shopId) => shopMonthReceptions(cfg, shopId, m, asOf, refresh && recent(m));
+  const sumJobs = [];
+  for (const m of wanted) {
+    for (const shopId of targets) {
+      sumJobs.push(shopMonthSummary(cfg, shopId, m, asOf, refresh && recent(m)).then((r) => ({ m, shopId, ...r }), (e) => ({ m, shopId, failed: e })));
+    }
+  }
   const recJobs = [];
-  for (const m of wanted) for (const shopId of targets) recJobs.push(shopMonthReceptions(cfg, shopId, m, asOf, refresh && recent(m)));
+  for (const m of recMonths) for (const shopId of targets) recJobs.push(recJob(m, shopId));
   const retJobs = wanted.includes(current)
     ? targets.map((shopId) => shopRetention(cfg, shopId, asOf, refresh).then((r) => ({ shopId, ...r }), (e) => ({ shopId, failed: e })))
     : [];
-  const [recResults, retResults] = await Promise.all([Promise.all(recJobs), Promise.all(retJobs)]);
+  const [sumResults, recResults, retResults] = await Promise.all([Promise.all(sumJobs), Promise.all(recJobs), Promise.all(retJobs)]);
+
+  const warnings = [];
+  const salesSummaries = Object.fromEntries(wanted.map((m) => [m, {}]));
+  const failedSummaries = sumResults.filter((r) => r.failed);
+  for (const r of sumResults) if (!r.failed) salesSummaries[r.m][r.shopId] = r.value;
+  // 売上サマリが取れなかった店舗・月は受付履歴から集計する（推移で受付履歴を取っていない場合は取りに行く）
+  if (failedSummaries.length) {
+    const first = failedSummaries[0].failed;
+    if (failedSummaries.every((r) => r.failed && r.failed.code === 'unauthorized')) throw first;
+    warnings.push({ code: 'salesSummary', message: `SalonOne の売上分析を取得できなかったため、受付履歴から集計しています（SalonOne の画面と数字が少しずれます）: ${first.message.replace(/^SalonOne API エラー \([^)]*\): /, '')}` });
+    if (!withReceptions) {
+      recResults.push(...await Promise.all(failedSummaries.map((r) => recJob(r.m, r.shopId))));
+    }
+  }
 
   const receptions = recResults.flatMap((r) => r.value);
   const contracts = contractsFromReceptions(receptions, planPatterns(appCtx));
-  const stale = recResults.filter((r) => r.stale).map((r) => ({ fetchedAt: r.fetchedAt, error: r.error }));
-  const warnings = [];
+  const stale = [...sumResults, ...recResults].filter((r) => r.stale).map((r) => ({ fetchedAt: r.fetchedAt, error: r.error }));
 
   // 継続指標: 過去の月は保存した値、当月は取得した値
   const snapshots = appCtx.config[RETENTION_KEY] || {};
@@ -288,7 +322,10 @@ export async function loadDataset(appCtx, master, { months, shopIds, refresh } =
       console.warn('[salonone] retention snapshot save failed:', e.message);
     }
   }
-  return { mode: 'live', receptions, contracts, retentionOverrides, retentionFromContracts: false, asOf, stale, warnings };
+  return {
+    mode: 'live', receptions, contracts, salesSummaries, retentionOverrides, retentionFromContracts: false,
+    receptionsLoaded: withReceptions || failedSummaries.length > 0, asOf, stale, warnings,
+  };
 }
 
 export function clearSalonOneCache() {

@@ -25,6 +25,8 @@ export const DEFAULT_ENDPOINTS = {
   shops: '/shops',
   staff: '/staffs',
   visitSources: '/visit-sources',
+  // 売上サマリ（管理画面の「売上分析」と同じ計算。店舗を指定すると日別・スタッフ別も返る）
+  salesSummary: '/sales/summary',
   // 受付履歴の明細（予約 1件 1行。会計金額・消化額・支払方法・担当・媒体・区分・購入プラン）
   receptions: '/marketing/reception-history',
   // 継続管理（回数券・サブスク・プリペイドを持つ顧客の状態。取得時点の値）
@@ -239,6 +241,11 @@ export const fetchShops = (cfg) => fetchRecords(cfg, cfg.endpoints.shops);
 export const fetchStaff = (cfg) => fetchRecords(cfg, cfg.endpoints.staff);
 export const fetchVisitSources = (cfg) => fetchRecords(cfg, cfg.endpoints.visitSources);
 
+/** 売上サマリ（店舗ごと。by_day・by_staff を含む） */
+export function fetchSalesSummary(cfg, { from, to, shopId }) {
+  return fetchObject(cfg, cfg.endpoints.salesSummary, { from, to, shop_id: shopId });
+}
+
 /** 受付履歴の明細（店舗ごと・期間は店舗の暦日） */
 export function fetchReceptions(cfg, { from, to, shopId }) {
   return fetchList(cfg, cfg.endpoints.receptions, { from, to, shop_id: shopId });
@@ -262,6 +269,7 @@ const PROBE_LABELS = {
   shops: '店舗',
   staff: 'スタッフ',
   visitSources: '来店経由（媒体）',
+  salesSummary: '売上サマリ（売上分析）',
   receptions: '受付履歴の明細',
   retentionSummary: '継続管理のサマリー',
   retentionCustomers: '継続管理の顧客一覧',
@@ -338,6 +346,14 @@ export async function probe(cfg, { from, to }) {
   });
   const shopId = shops && shops.firstId != null ? shops.firstId : null;
   if (shopId == null) return results;
+  await step('salesSummary', async (path) => {
+    const json = await request(cfg, path, { from, to, shop_id: shopId });
+    const data = json && json.data && typeof json.data === 'object' ? json.data : json;
+    // by_day・by_staff は先頭の行の項目名を出す（スタッフ別に購入数などがあるかの確認用）
+    const nested = nestedKeys([data]);
+    for (const k of ['by_day', 'by_staff']) if (Array.isArray(data && data[k])) nested[k] = keysOf(data[k][0]);
+    return { count: 1, topLevelKeys: keysOf(json), sampleKeys: keysOf(data), nested, shopId };
+  });
   await step('receptions', async (path) => {
     const json = await request(cfg, path, { from, to, shop_id: shopId });
     return { ...listResult(extractList(json), json), shopId };
