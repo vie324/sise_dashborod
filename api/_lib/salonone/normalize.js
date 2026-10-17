@@ -224,6 +224,48 @@ export function contractsFromReceptions(receptions, opts = {}) {
   return out;
 }
 
+/**
+ * 売上サマリ（管理画面「売上分析」と同じ計算）の 1行（全体・日別・スタッフ別に共通）
+ *   消化売上 consumed_sales（会計金額＋回数券・サブスクの消化分と失効分−前受の購入額）
+ *   入金売上 digest_sales / 新規数 new_visit_count（店舗ごとの初回来店）/ リピート数 repeat_visit_count（2回目以降）
+ *   施術数 treatment_count / 顧客数 customer_count / 購入数 purchase_count（新規のうち回数券・サブスクの契約。生涯基準）
+ * 項目が無いものは null（呼び出し側で受付履歴からの集計を使う）
+ */
+function normalizeSalesRow(raw) {
+  const numOrNull = (paths) => toNumOrNull(pick(raw, paths));
+  const newCount = numOrNull(['new_visit_count', 'new_count', 'new_visits']);
+  const repeatCount = numOrNull(['repeat_visit_count', 'repeat_count', 'repeat_visits']);
+  const visits = numOrNull(['visit_count', 'visits']) ?? (newCount != null || repeatCount != null ? (newCount || 0) + (repeatCount || 0) : null);
+  return {
+    consumedSales: numOrNull(['consumed_sales']),
+    depositSales: numOrNull(['digest_sales']),
+    newCount,
+    repeatCount,
+    treatmentCount: numOrNull(['treatment_count', 'treatments']) ?? visits,
+    customerCount: numOrNull(['customer_count']),
+    purchaseCount: numOrNull(['purchase_count']),
+  };
+}
+
+/** 売上サマリ（店舗を指定した取得）→ 全体・日別・スタッフ別。「未割当」の行はスタッフ別から外す */
+export function normalizeSalesSummary(raw) {
+  const days = pick(raw, ['by_day']);
+  const staff = pick(raw, ['by_staff']);
+  return {
+    ...normalizeSalesRow(raw),
+    daily: Array.isArray(days)
+      ? days.map((d) => ({ date: toJstDate(pick(d, ['date', 'day', 'business_date'])), ...normalizeSalesRow(d) })).filter((d) => d.date)
+      : null,
+    staff: Array.isArray(staff)
+      ? staff.map((r) => ({
+        staffId: toId(pick(r, ['staff_id', 'id'])),
+        name: String(pick(r, ['staff_name', 'name'], '')),
+        ...normalizeSalesRow(r),
+      })).filter((r) => r.staffId)
+      : null,
+  };
+}
+
 const countOf = (obj, key) => toNum(pick(obj, [`${key}_count`, key], 0));
 
 /**

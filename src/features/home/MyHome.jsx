@@ -384,7 +384,7 @@ function MonthHighlights({ summary, me, trend }) {
     <Card title="今月の実績" icon="sparkles">
       <div className="grid grid-cols-2 gap-2.5">
         <Highlight icon="hand-heart" label="施術数" value={`${num(m.treatmentCount)}回`} sub={`お客様 ${num(m.customerCount)}名`} />
-        <Highlight icon="user-plus" label="新規 / 契約" value={`${num(m.newVisitTotal)}名 / ${num(m.newContractTotal)}件`} sub="すべての経路" />
+        <Highlight icon="user-plus" label="新規数 / 契約数" value={`${num(m.newCount)}名 / ${num(m.purchaseCount)}件`} sub="SalonOne と同じ数え方" />
         <Highlight icon="store" label="店舗内シェア" value={share == null ? '—' : pct(share, 0)} sub={`${me.storeName || '店舗'}の消化売上のうち`} />
         {bestTile}
       </div>

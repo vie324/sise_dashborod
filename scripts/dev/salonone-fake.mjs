@@ -63,22 +63,23 @@ function receptionRows(shopId, month) {
   });
   if (shopId === 101) {
     const p = `${month.replace('-', '')}`;
+    const nc = (n) => Number(`9${p.slice(2)}${n}`); // 新規客はその月だけの顧客ID
     return [
       row({ id: Number(`${p}01`), customer: 9001, day: 2, staff: 201, consumed: 8000, amount: 8000, method: '現金' }),
       row({
-        id: Number(`${p}02`), customer: 9101, day: 3, staff: 201, cls: 'new', source: 'ホットペッパー', sourceId: 1,
+        id: Number(`${p}02`), customer: nc(1), day: 3, staff: 201, cls: 'new', source: 'ホットペッパー', sourceId: 1,
         consumed: 3000, amount: 53000, joined: true, method: '現金 / クレジットカード',
         plans: [{ plan_name: '月2回プラン', plan_kind: 'subscription', amount: 50000, total_sessions: null }],
         splits: [{ payment_method_name: '現金', amount: 3000 }, { payment_method_name: 'クレジットカード', amount: 50000 }],
       }),
-      row({ id: Number(`${p}03`), customer: 9102, day: 4, staff: 202, cls: 'new', source: 'Instagram', sourceId: 2, consumed: 3000, amount: 3000, method: '現金' }),
-      row({ id: Number(`${p}04`), customer: 9103, day: 5, staff: 202, cls: 'new', source: 'ホットペッパー', sourceId: 1, status: 'cancelled', cancelType: 'same_day' }),
+      row({ id: Number(`${p}03`), customer: nc(2), day: 4, staff: 202, cls: 'new', source: 'Instagram', sourceId: 2, consumed: 3000, amount: 3000, method: '現金' }),
+      row({ id: Number(`${p}04`), customer: nc(3), day: 5, staff: 202, cls: 'new', source: 'ホットペッパー', sourceId: 1, status: 'cancelled', cancelType: 'same_day' }),
       row({ id: Number(`${p}05`), customer: 9002, day: 6, staff: 202, consumed: 6000, amount: 0 }),
       row({
         id: Number(`${p}06`), customer: 9003, day: 7, staff: 201, cls: 'continuing', consumed: 6000, amount: 36000, method: 'クレジットカード',
         plans: [{ plan_name: '回数券 6回', plan_kind: 'ticket', amount: 30000, total_sessions: 6 }],
       }),
-      row({ id: Number(`${p}07`), customer: 9104, day: 8, staff: 201, cls: 'new', source: '紹介', sourceId: 3, consumed: 3000, amount: 3000, joined: true, method: '現金' }),
+      row({ id: Number(`${p}07`), customer: nc(4), day: 8, staff: 201, cls: 'new', source: '紹介', sourceId: 3, consumed: 3000, amount: 3000, joined: true, method: '現金' }),
       row({ id: Number(`${p}08`), customer: 9004, day: 27, hm: '18:00', staff: 201, status: 'booked' }),
     ];
   }
@@ -90,6 +91,51 @@ function receptionRows(shopId, month) {
     ];
   }
   return [];
+}
+
+/**
+ * 売上サマリ（売上分析）。受付履歴とわざと違う数字にしてある（SalonOne の数字が優先されることの確認用）:
+ *   中央店: 失効益 5,000円（20日・佐藤）を含む消化売上 34,000 / 入金 98,000（返金 5,000 を差し引き）
+ *           新規数 2（紹介で来た 4人目の新規客は SalonOne で「既存顧客として扱う」）/ リピート 4 / 購入数 1
+ */
+function salesSummary(shopId, month) {
+  const d = (day) => `${month}-${String(day).padStart(2, '0')}`;
+  const row = (o) => ({
+    gross_sales: o.gross ?? o.digest ?? 0, consumed_sales: o.consumed ?? 0, digest_sales: o.digest ?? 0,
+    cancellation_fee_amount: 0, refund_amount: o.refund ?? 0, non_sales_refund_amount: 0,
+    new_visit_count: o.newCount ?? 0, repeat_visit_count: o.repeat ?? 0, customer_count: o.customers ?? 0,
+    cancel_count: o.cancel ?? 0, no_show_count: 0, treatment_count: o.treatments ?? 0, purchase_count: o.purchase ?? 0,
+  });
+  if (shopId === 101) {
+    return {
+      ...row({ consumed: 34000, digest: 98000, refund: 5000, newCount: 2, repeat: 4, customers: 6, cancel: 1, treatments: 6, purchase: 1 }),
+      by_day: [
+        { date: d(2), ...row({ consumed: 8000, digest: 8000, repeat: 1, customers: 1, treatments: 1 }) },
+        { date: d(3), ...row({ consumed: 3000, digest: 53000, newCount: 1, customers: 1, treatments: 1, purchase: 1 }) },
+        { date: d(4), ...row({ consumed: 3000, digest: 3000, newCount: 1, customers: 1, treatments: 1 }) },
+        { date: d(6), ...row({ consumed: 6000, digest: 0, repeat: 1, customers: 1, treatments: 1 }) },
+        { date: d(7), ...row({ consumed: 6000, digest: 36000, repeat: 1, customers: 1, treatments: 1 }) },
+        { date: d(8), ...row({ consumed: 3000, digest: 3000, repeat: 1, customers: 1, treatments: 1 }) },
+        { date: d(20), ...row({ consumed: 5000, digest: -5000, refund: 5000 }) },
+      ],
+      by_staff: [
+        { staff_id: 201, staff_name: '佐藤 美咲', ...row({ consumed: 25000, digest: 94000, newCount: 1, repeat: 3, customers: 4, treatments: 4, purchase: 1 }) },
+        { staff_id: 202, staff_name: '鈴木 健太', ...row({ consumed: 9000, digest: 3000, newCount: 1, repeat: 1, customers: 2, treatments: 2 }) },
+        { staff_id: null, staff_name: '未割当', ...row({ refund: 0 }) },
+      ],
+    };
+  }
+  if (shopId === 102) {
+    return {
+      ...row({ consumed: 14000, digest: 14000, repeat: 2, customers: 2, treatments: 2 }),
+      by_day: [
+        { date: d(2), ...row({ consumed: 7000, digest: 7000, repeat: 1, customers: 1, treatments: 1 }) },
+        { date: d(9), ...row({ consumed: 7000, digest: 7000, repeat: 1, customers: 1, treatments: 1 }) },
+      ],
+      by_staff: [{ staff_id: 203, staff_name: '田中 大輔', ...row({ consumed: 14000, digest: 14000, repeat: 2, customers: 2, treatments: 2 }) }],
+    };
+  }
+  return { ...row({}), by_day: [], by_staff: [] };
 }
 
 const RETENTION = {
@@ -146,6 +192,13 @@ export function fakeSalonOne(url, headers = {}) {
       return paginate(STAFFS, url, 2);
     case '/visit-sources':
       return paginate(VISIT_SOURCES, url, 2);
+    case '/sales/summary': {
+      const from = url.searchParams.get('from') || '';
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(from)) return error(400, 'invalid_request', { fields: ['from'] });
+      const shopId = Number(url.searchParams.get('shop_id'));
+      if (url.searchParams.has('shop_id') && !SHOPS.some((s) => s.id === shopId)) return error(403, 'forbidden');
+      return json(200, { data: salesSummary(shopId, from.slice(0, 7)) });
+    }
     case '/marketing/reception-history': {
       const shopId = requireShop(url);
       if (!shopId) return error(400, 'invalid_request', { fields: ['shop_id'] });

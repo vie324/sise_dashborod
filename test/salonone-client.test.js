@@ -118,7 +118,11 @@ test('429 は 1回だけ待って取り直す', async () => {
 
 test('接続テスト: 各エンドポイントの件数と項目名（値は返さない）', async () => {
   const results = await probe(salonOneConfig(), { from: '2026-09-01', to: '2026-09-30' });
-  assert.deepEqual(results.map((r) => r.name), ['meta', 'shops', 'staff', 'visitSources', 'receptions', 'retentionSummary', 'retentionCustomers']);
+  assert.deepEqual(results.map((r) => r.name), ['meta', 'shops', 'staff', 'visitSources', 'salesSummary', 'receptions', 'retentionSummary', 'retentionCustomers']);
+  const sales = results.find((r) => r.name === 'salesSummary');
+  assert.ok(sales.sampleKeys.includes('consumed_sales'));
+  assert.ok(sales.nested.by_staff.includes('purchase_count'));
+  assert.ok(sales.nested.by_day.includes('new_visit_count'));
   assert.ok(results.every((r) => r.ok), JSON.stringify(results.filter((r) => !r.ok)));
   const rec = results.find((r) => r.name === 'receptions');
   assert.equal(rec.shopId, 101);

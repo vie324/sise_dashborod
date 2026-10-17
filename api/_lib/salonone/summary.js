@@ -17,6 +17,7 @@ import { addMonths, monthProgress, monthsBetween, monthOf, listMonths } from '..
 import { loadAppContext, loadMaster, buildMapping, loadDataset } from './provider.js';
 
 const n = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+const nOrNull = (v) => (v == null || !Number.isFinite(Number(v)) ? null : Number(v));
 
 /** ミリ秒 → JST の「M/D HH:mm」 */
 function jstStamp(ms) {
@@ -70,7 +71,12 @@ function pickMetrics(s) {
     newContracts: s.newContracts,
     newVisitTotal: n(s.newVisitTotal),
     newContractTotal: n(s.newContractTotal),
+    // SalonOne の売上分析の 新規数・リピート（既存）数・購入（契約）数
+    newCount: nOrNull(s.newCount),
+    repeatCount: nOrNull(s.repeatCount),
+    purchaseCount: nOrNull(s.purchaseCount),
     referralSubscriptions: n(s.referralSubscriptions),
+    basis: s.basis || null,
   };
 }
 
@@ -120,8 +126,14 @@ export async function buildSummary(staffCtx, { month, storeId, refresh }) {
 
   const period = paymentPeriodOf(month);
   const prevMonth = addMonths(month, -1);
-  const months = [...new Set([prevMonth, month, ...period.months])];
-  const data = await loadDataset(appCtx, master, { months, shopIds: selectedShopIds, refresh });
+  const months = [...new Set([prevMonth, month, ...period.months])].sort();
+  const data = await loadDataset(appCtx, master, {
+    months,
+    // 契約は生涯基準なので、後の 2ヶ月の受付履歴も見る（当月を見ているときは不要）
+    receptionMonths: listMonths(addMonths(months[months.length - 1], 1), addMonths(months[months.length - 1], 2)),
+    shopIds: selectedShopIds,
+    refresh,
+  });
   const channelMap = appCtx.config['salonone.channelMap'] || {};
 
   const computed = {};
@@ -135,6 +147,7 @@ export async function buildSummary(staffCtx, { month, storeId, refresh }) {
       channelMap,
       retentionOverrides: data.retentionOverrides[m],
       retentionFromContracts: data.retentionFromContracts,
+      salesSummaries: data.salesSummaries[m],
     });
   }
   const cur = computed[month] || computeMonth({ receptions: [], contracts: [], month, asOf: data.asOf });
@@ -262,7 +275,8 @@ export async function buildTrend(staffCtx, { months: count = 6, endMonth, storeI
   const last = endMonth;
   const first = addMonths(last, -(Math.min(Math.max(count, 1), 24) - 1));
   const months = listMonths(first, last);
-  const data = await loadDataset(appCtx, master, { months, shopIds: selectedShopIds, refresh });
+  // 推移は SalonOne の売上分析（売上サマリ）だけで出す（受付履歴は取らない＝呼び出し回数を抑える）
+  const data = await loadDataset(appCtx, master, { months, receptions: false, shopIds: selectedShopIds, refresh });
   const channelMap = appCtx.config['salonone.channelMap'] || {};
   const myS1 = scope.staffId ? mapping.staffToS1.get(scope.staffId) : null;
   const shopSet = new Set(selectedShopIds);
@@ -274,19 +288,18 @@ export async function buildTrend(staffCtx, { months: count = 6, endMonth, storeI
     const c = computeMonth({
       receptions: data.receptions, contracts: data.contracts, month: m, asOf: data.asOf, channelMap,
       retentionOverrides: data.retentionOverrides[m], retentionFromContracts: data.retentionFromContracts,
+      salesSummaries: data.salesSummaries[m], countsFromReceptions: data.receptionsLoaded,
     });
     const combined = combineShops(selectedShopIds.map((id) => c.shops[id]).filter(Boolean));
-    const ch = contract3ch(combined);
     series.push({
       month: m,
       consumedSales: combined.consumedSales,
       depositSales: combined.depositSales,
       treatmentCount: combined.treatmentCount,
-      newVisitTotal: combined.newVisitTotal,
-      newContractTotal: combined.newContractTotal,
-      newVisits: combined.newVisits,
-      contractRatePct: combined.newVisitTotal > 0 ? (combined.newContractTotal / combined.newVisitTotal) * 100 : null,
-      contract3chRatePct: ch.ratePct,
+      newCount: combined.newCount,
+      repeatCount: combined.repeatCount,
+      purchaseCount: combined.purchaseCount,
+      contractRatePct: combined.newCount > 0 && combined.purchaseCount != null ? (combined.purchaseCount / combined.newCount) * 100 : null,
       memberCount: combined.retention.memberCount,
       churnRatePct: combined.retention.churnRatePct,
     });
