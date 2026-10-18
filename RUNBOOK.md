@@ -23,6 +23,15 @@
 | `SALONONE_API_ENDPOINTS` | エンドポイントのパスの上書き（JSON） | 既定のパスを使う。詳細は [docs/SALONONE.md](docs/SALONONE.md) |
 | `SALONONE_RATE_LIMIT_PER_MINUTE` | 1分あたりの呼び出しの上限 | `55`（SalonOne の既定の上限 60 より少し小さく） |
 
+### カウンセリング（Google フォーム / GAS）
+
+| 変数 | 用途 | 既定挙動 |
+|---|---|---|
+| `COUNSELING_GAS_URL` | カウンセリングの回答を返す GAS のウェブアプリ URL | 未設定なら 設定 > カウンセリング で保存した値。どちらも無ければ連携なし（チェック・プラン提案は手で使える） |
+| `COUNSELING_GAS_TOKEN` | GAS の合言葉（スクリプト プロパティ `DASHBOARD_TOKEN` と同じ） | 未設定なら 設定 > カウンセリング の値 |
+
+手順は [docs/COUNSELING.md](docs/COUNSELING.md)。
+
 ### 推奨（設定しないと機能縮退）
 
 | 変数 | 用途 | 既定挙動 |
@@ -159,6 +168,17 @@ Vercel の Environment Variables に `SISE_ADMIN_PASSWORD_HASH = <ハッシュ>`
 
 ---
 
+## 8.5 カウンセリング（Google フォーム）
+
+施術ツール →「カウンセリング」に、新規のお客様が来店時に答えた Google フォームの回答を表示する。手順の詳細は [docs/COUNSELING.md](docs/COUNSELING.md)。
+
+1. スプレッドシートの Apps Script に `gas/counseling.gs` を貼り付け、スクリプト プロパティ `DASHBOARD_TOKEN`（合言葉）を設定
+2. ウェブアプリとしてデプロイ（実行: 自分 / アクセス: 全員）
+3. 設定 > カウンセリング に URL と合言葉を保存 →「接続テスト」→ 名前の違う店舗は対応付け
+4. 古いデプロイ（以前のダッシュボードに埋め込まれていた URL）はアーカイブして止める
+
+---
+
 ## 9. インセンティブ制度の変更
 
 金額・閾値・条件は `shared/incentive-rules.js` だけで管理している（計算・画面・制度の説明が連動）。
@@ -237,7 +257,7 @@ FROM staff s LEFT JOIN staff_stores ss ON ss.staff_id = s.id
 GROUP BY s.id ORDER BY s.role, s.name;
 
 -- 目標・SalonOne の対応付け（dash_config に JSON で保存）
-SELECT key, value FROM dash_config WHERE key LIKE 'goals.%' OR key LIKE 'salonone.%' ORDER BY key;
+SELECT key, value FROM dash_config WHERE key LIKE 'goals.%' OR key LIKE 'salonone.%' OR key LIKE 'counseling.%' ORDER BY key;
 ```
 
 ### 使わなくなったテーブル

@@ -14,6 +14,7 @@ import bcrypt from 'bcryptjs';
 import { staffGet, staffPost, menuItemsGet, menuItemsPost, verifyStaffPassword } from '../_lib/db-handlers-master.js';
 import { cashbookGet, cashbookPost } from '../_lib/db-handlers-cashbook.js';
 import { goalsGet, goalsPost } from '../_lib/db-handlers-goals.js';
+import { counselingGet, counselingPost } from '../_lib/counseling.js';
 
 // ============================================================
 // 統合DBエンドポイント
@@ -28,6 +29,8 @@ const HANDLERS = {
   menuItems:  { get: menuItemsGet,  post: menuItemsPost },
   cashbook:   { get: cashbookGet,   post: cashbookPost },
   goals:      { get: goalsGet,      post: goalsPost },
+  // カウンセリングシート（Google フォームの回答を GAS 経由で読み取る）
+  counseling: { get: counselingGet, post: counselingPost },
   // 認証（スタッフURL発行 + 管理者ログイン + スタッフパスワード照合）
   auth:       { get: authGet,       post: authPost },
 };
@@ -189,15 +192,18 @@ async function setStoreStatus(storeId, status) {
 // ============================================================
 // ダッシュボード設定 (dashConfig) — KV ストア
 // ------------------------------------------------------------
-// 'goals.*' は目標データ（goals テーブル扱い）なので、ここからは読み書きしない。
-// 書き込みは管理者・本部のみ（SalonOne 連携の対応付けなど）。
+// 'goals.*' は目標データ（goals テーブル扱い）、'counseling.*' はカウンセリングの GAS の URL・合言葉
+// （スタッフに見せない）なので、ここからは読み書きしない。それぞれの table から扱う。
+// 書き込みは管理者・オーナーのみ（SalonOne 連携の対応付けなど）。
 // ============================================================
 
-const isReservedKey = (key) => String(key || '').startsWith('goals.');
+const RESERVED_PREFIXES = ['goals.', 'counseling.'];
+const isReservedKey = (key) => RESERVED_PREFIXES.some((p) => String(key || '').startsWith(p));
+const reservedError = (key) => ({ error: `このキーは ${String(key).split('.')[0]} から扱ってください` });
 
 async function dashConfigGet(params) {
   if (params.key) {
-    if (isReservedKey(params.key)) return { error: 'このキーは goals から取得してください' };
+    if (isReservedKey(params.key)) return reservedError(params.key);
     const { data, error } = await supabase
       .from('dash_config').select('*').eq('key', params.key).maybeSingle();
     if (error) throw error;
@@ -218,7 +224,7 @@ async function dashConfigPost(body, staffCtx) {
   switch (action) {
     case 'set': {
       if (!body.key) return { error: 'keyが必要です' };
-      if (isReservedKey(body.key)) return { error: 'このキーは goals から設定してください' };
+      if (isReservedKey(body.key)) return reservedError(body.key);
       const { error } = await supabase.from('dash_config')
         .upsert({ key: body.key, value: body.value }, { onConflict: 'key' });
       if (error) throw error;

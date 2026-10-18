@@ -4,7 +4,8 @@
   "buildCommand": "npm run build",
   "outputDirectory": "public",
   "functions": {
-    "api/salonone/index.js": { "maxDuration": 60 }
+    "api/salonone/index.js": { "maxDuration": 60 },
+    "api/db/index.js": { "maxDuration": 30 }
   },
   "rewrites": [
     { "source": "/api/db", "destination": "/api/db" },

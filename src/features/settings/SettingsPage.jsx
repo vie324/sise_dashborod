@@ -4,6 +4,7 @@ import Icon from '../../ui/Icon.jsx';
 import { useApp } from '../../app/state.jsx';
 import { INCENTIVE_RULES } from '../../../shared/incentive-rules.js';
 import SalonOneSettings from './SalonOneSettings.jsx';
+import CounselingSettings from './CounselingSettings.jsx';
 import StaffSection from './StaffSection.jsx';
 import StoreSection from './StoreSection.jsx';
 import RulesView from '../incentives/RulesView.jsx';
@@ -44,7 +45,7 @@ export default function SettingsPage() {
   };
   return (
     <div>
-      <PageHeader title="設定" subtitle="SalonOne 連携・スタッフと URL・店舗・インセンティブ制度・表示" />
+      <PageHeader title="設定" subtitle="SalonOne 連携・カウンセリングフォーム・スタッフと URL・店舗・インセンティブ制度・表示" />
       <Segmented
         className="mb-4"
         value={tab}
@@ -52,6 +53,7 @@ export default function SettingsPage() {
         ariaLabel="設定の項目"
         options={[
           { value: 'salonone', label: 'SalonOne連携', icon: 'plug' },
+          { value: 'counseling', label: 'カウンセリング', icon: 'clipboard-check' },
           { value: 'staff', label: 'スタッフ', icon: 'users' },
           { value: 'stores', label: '店舗', icon: 'store' },
           { value: 'rules', label: 'インセンティブ制度', icon: 'award' },
@@ -59,6 +61,7 @@ export default function SettingsPage() {
         ]}
       />
       {tab === 'salonone' ? <SalonOneSettings /> : null}
+      {tab === 'counseling' ? <CounselingSettings /> : null}
       {tab === 'staff' ? <StaffSection /> : null}
       {tab === 'stores' ? <StoreSection /> : null}
       {tab === 'rules' ? (
