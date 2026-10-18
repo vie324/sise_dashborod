@@ -108,6 +108,25 @@ test.describe('SalonOne 連携 API', () => {
   });
 });
 
+test.describe('カウンセリング（Google フォーム）API', () => {
+  test('GET /api/db?table=counseling&action=stores は連携状態を返し、GAS の URL は返さない', async ({ request }) => {
+    const resp = await request.get('/api/db?table=counseling&action=stores');
+    if (resp.status() === 401) return;
+    expect(resp.status()).toBe(200);
+    const data = await resp.json();
+    expect(typeof data.configured).toBe('boolean');
+    expect(Array.isArray(data.stores)).toBe(true);
+    expect(JSON.stringify(data)).not.toContain('script.google.com');
+  });
+
+  test('一般の設定（dashConfig）からカウンセリングの設定は読めない', async ({ request }) => {
+    const resp = await request.get('/api/db?table=dashConfig&key=counseling.config');
+    if (resp.status() === 401) return;
+    const data = await resp.json();
+    expect(data.error).toBeTruthy();
+  });
+});
+
 test.describe('認証・権限', () => {
   test('不正な staff token は 401', async ({ request }) => {
     // 偽造された signed token (payload.signature 不一致)

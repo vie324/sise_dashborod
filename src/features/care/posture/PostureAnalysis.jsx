@@ -16,7 +16,7 @@ import ComparisonViewer from './ComparisonViewer.jsx';
 import OutputActions from '../shared/OutputActions.jsx';
 import PrintPortal from '../shared/PrintPortal.jsx';
 import { downloadJson, fileNamePart } from '../shared/exportImage.js';
-import { initialCustomerName, initialStaffName } from '../shared/prefill.js';
+import { initialCustomerName, initialStaffName, useSharedCustomerName } from '../shared/prefill.js';
 
 // ============================================================
 // 姿勢分析
@@ -98,6 +98,7 @@ export default function PostureAnalysis({ active = true }) {
   const { stop: stopCam } = cam;
 
   const [customerName, setCustomerName] = useState(initialCustomerName);
+  useSharedCustomerName(setCustomerName);
   const [staffName, setStaffName] = useState(initialStaffName);
   const [visitDate, setVisitDate] = useState(() => todayJst());
 

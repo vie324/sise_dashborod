@@ -1,7 +1,7 @@
 # si'se ダッシュボード
 
 整体院（si'se 系列）の経営ダッシュボード。**SalonOne** の実績データから、売上・インセンティブ（2026年11月〜の制度）・目標を管理する。
-あわせて、SalonOne に無い **出納帳（現金・小口・経費・日次締め）** と **施術ツール（AI 姿勢分析・施術レポート）** を提供する。
+あわせて、SalonOne に無い **出納帳（現金・小口・経費・日次締め）** と **施術ツール（新規のカウンセリング・AI 姿勢分析・施術レポート）** を提供する。
 
 | | |
 |---|---|
@@ -20,8 +20,8 @@
 | 目標 | 店舗・スタッフの月間目標、達成率とペース、1日あたり必要額。インセンティブのランクから選べる | 全員（設定は権限に応じて） |
 | 売上分析 | 月別推移・日別・経路別の新規と契約・スタッフ別 | 店長・マネージャー・オーナー |
 | 出納帳 | レジ・金庫・小口現金の残高、入出金、日次締め、操作ログ。SalonOne の現金売上を日ごとに取り込み・突合 | 全員（所属店舗） |
-| 施術ツール | AI 姿勢分析（MediaPipe + Claude）・施術レポート（画像保存/共有/印刷） | 全員 |
-| 設定 | SalonOne 連携（接続テスト・対応付け）・スタッフと URL 発行・店舗・制度・表示 | 管理者・オーナー |
+| 施術ツール | カウンセリング（Google フォームの回答を自動で反映 → お悩みチェック・おすすめプラン・改善シミュレーション・料金表）・AI 姿勢分析（MediaPipe + Claude）・施術レポート（画像保存/共有/印刷） | 全員（カウンセリングは所属店舗のシートのみ） |
+| 設定 | SalonOne 連携（接続テスト・対応付け）・カウンセリングフォーム（GAS）・スタッフと URL 発行・店舗・制度・表示 | 管理者・オーナー |
 
 役割（設定 > スタッフ で選ぶ）: **スタッフ**（自分の数字と所属店舗の合計）/ **店長**（所属店舗の全体とスタッフ全員）/
 **マネージャー**（管轄する複数店舗の店長と同じ）/ **オーナー**（全店舗・全スタッフ・設定）。詳しくは RUNBOOK §6。
@@ -38,6 +38,13 @@
 
 集計方法と SalonOne API の仕様合わせは **[docs/SALONONE.md](docs/SALONONE.md)** を参照。
 
+## カウンセリング（新規のお客様）
+
+お客様が来店時に答える Google フォームの回答を、スプレッドシートの GAS（`gas/counseling.gs`）経由でサーバーから読み取り、
+施術ツール →「カウンセリング」に表示する（30秒ごとに自動で確認）。選んだお客様のお悩みはチェックに反映され、
+施術後の評価と合わせておすすめプランを出す。項目・判定・金額は `shared/counseling.js`。
+GAS の URL と合言葉はサーバーにだけ保存する。準備の手順は **[docs/COUNSELING.md](docs/COUNSELING.md)**。
+
 ## SalonOne へ移った機能（このリポジトリから削除）
 
 SalonOne を正として、重複していた機能は削除した（Supabase の旧テーブルは消さずに残している）。
@@ -48,7 +55,6 @@ SalonOne を正として、重複していた機能は削除した（Supabase �
 | 会員管理（Square サブスク・QR/現金会員）・利用管理・回数券 | 顧客管理・回数券/サブスク・Square連携 |
 | 勤怠（GPS/QR 打刻） | 打刻・勤怠管理 |
 | LINE チャット・一斉配信・自動応答・タグ | LINEチャット・再来店促進・LINE連携 |
-| カウンセリング（Google フォーム / GAS） | 問診票 |
 | マーケティング（Meta / TikTok / HPB） | マーケティング（広告API連携・媒体別分析） |
 | 来店フロー・顧客360・クイック検索 | 予約表・受付・顧客カルテ |
 | 写真アップロード（Vercel Blob） | 顧客カルテの写真・動画（レポート画像は保存して SalonOne へ） |
@@ -82,14 +88,16 @@ sise_dashborod/
 │   ├── incentive.js          # インセンティブ計算
 │   ├── metrics.js            # SalonOne データの集計
 │   ├── channels.js           # 来店経由 → 集客経路
+│   ├── counseling.js         # カウンセリングのチェック項目・おすすめプラン・料金表
 │   └── dates.js              # 日付（JST）
 ├── api/
-│   ├── db/index.js           # Supabase: 店舗・スタッフ・出納帳・メニュー・目標・設定・認証
+│   ├── db/index.js           # Supabase: 店舗・スタッフ・出納帳・メニュー・目標・設定・認証・カウンセリング（GAS 経由）
 │   ├── salonone/index.js     # SalonOne 連携（実績・インセンティブ・推移・接続テスト）
 │   ├── claude/advice.js      # 姿勢分析の AI アドバイス
-│   └── _lib/                 # 認証・Supabase・SalonOne クライアント/正規化/デモ/集計
+│   └── _lib/                 # 認証・Supabase・SalonOne クライアント/正規化/デモ/集計・カウンセリング
+├── gas/counseling.gs         # カウンセリングの Google フォームの回答を返す GAS（スプレッドシートに貼る）
 ├── public/                   # index.html・manifest・Service Worker・画像（assets/ はビルド成果物）
-├── scripts/                  # build.mjs・dev-server.mjs・管理者パスワードハッシュ生成
+├── scripts/                  # build.mjs・dev-server.mjs・管理者パスワードハッシュ生成・疑似 SalonOne / GAS
 ├── test/                     # 単体テスト (node --test)
 ├── e2e/                      # Playwright スモークテスト
 └── supabase/migrations/      # DB スキーマ
@@ -102,8 +110,9 @@ URL に ?v=<署名付きトークン> が付いているか?
   No  → 管理者モード（REQUIRE_ADMIN_AUTH=true なら HttpOnly cookie のログイン必須）
   Yes → スタッフモード（HMAC 検証 → DB の staff / staff_stores で権限を確定）
         staff        自分の実績 + 所属店舗の合計
-        manager      所属店舗のスタッフ全員
-        headquarter  全店舗
+        manager      所属店舗の全体とスタッフ全員
+        area_manager 管轄する複数店舗（店長と同じ範囲）
+        owner        全店舗・設定（旧 headquarter もオーナー扱い）
 ```
 
 詳細な運用手順は **[RUNBOOK.md](RUNBOOK.md)**、環境変数は `.env.example` を参照。

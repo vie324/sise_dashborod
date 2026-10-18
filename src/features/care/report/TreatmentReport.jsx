@@ -8,7 +8,7 @@ import { ScorePill } from '../posture/ScoreBits.jsx';
 import OutputActions from '../shared/OutputActions.jsx';
 import PrintPortal from '../shared/PrintPortal.jsx';
 import { fileNamePart } from '../shared/exportImage.js';
-import { initialCustomerName, initialStaffName } from '../shared/prefill.js';
+import { initialCustomerName, initialStaffName, useSharedCustomerName } from '../shared/prefill.js';
 import { dotDate, honorific } from '../shared/labels.js';
 import ReportPreviewCard from './ReportPreviewCard.jsx';
 import PostureCameraModal from './PostureCameraModal.jsx';
@@ -47,6 +47,7 @@ function couponExpiryOf(visitDate) {
 
 export default function TreatmentReport({ active = true }) {
   const [customerName, setCustomerName] = useState(initialCustomerName);
+  useSharedCustomerName(setCustomerName);
   const [staffName, setStaffName] = useState(initialStaffName);
   const [visitDate, setVisitDate] = useState(() => todayJst());
   const [menuChecks, setMenuChecks] = useState(DEFAULT_MENU_CHECKS);
