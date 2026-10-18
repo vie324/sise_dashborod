@@ -3,11 +3,16 @@
 // ------------------------------------------------------------
 // トークンの中身はサーバーで HMAC 検証される。ここでの解析は画面の出し分け
 // （名前・ロール・所属店舗）にだけ使い、権限の最終判断は常にサーバーが行う。
-//   トークン無し          … 管理者モード
-//   role = headquarter    … 本部（全店舗）
-//   role = manager        … 店舗責任者（所属店舗のスタッフ全員）
-//   role = staff          … スタッフ（自分の実績）
+// 起動時にサーバーから今の権限（DB の値）を受け取り applyServerAccess で上書きするので、
+// 設定でロールや所属店舗を変えても URL を発行し直さずに反映される。
+//   トークン無し        … 管理者モード
+//   owner               … オーナー（全店舗）
+//   area_manager        … マネージャー（管轄店舗の店長と同じ）
+//   manager             … 店長（所属店舗の全体とスタッフ全員）
+//   staff               … スタッフ（自分の数字と所属店舗の合計）
 // ============================================================
+
+import { ROLES, normalizeRole, isOwnerRole, isStoreManagerRole } from '../../shared/roles.js';
 
 function decodeTokenPayload(token) {
   const part = token.includes('.') ? token.split('.')[0] : token;
@@ -36,7 +41,7 @@ function parseAccess() {
       token,
       staffId: String(p.id || ''),
       name: p.n || 'スタッフ',
-      role: p.r || 'staff',
+      role: normalizeRole(p.r),
       storeIds: Array.isArray(p.sid) ? p.sid.map(String) : [],
       hasPassword: !!p.pw,
     };
@@ -52,19 +57,29 @@ export const isStaffMode = !!currentAccess;
 
 export const ROLE_LABELS = {
   admin: '管理者',
-  headquarter: '本部',
-  manager: '店舗責任者',
-  staff: 'スタッフ',
+  ...Object.fromEntries(ROLES.map((r) => [r.value, r.label])),
 };
 
-export const role = currentAccess ? currentAccess.role : 'admin';
+/** 今のロール（管理者モードは 'admin'） */
+export const currentRole = () => (currentAccess ? currentAccess.role : 'admin');
 
-/** 管理者（トークン無し）または本部 */
-export const isAdminLike = () => !currentAccess || currentAccess.role === 'headquarter';
+/**
+ * サーバーが返した今の権限（GET /api/db?table=auth の staff）で上書きする。
+ * トークンを発行した後にロール・所属店舗・名前が変わっていても、画面はサーバーの値に合わせる。
+ */
+export function applyServerAccess(info) {
+  if (!currentAccess || !info) return;
+  currentAccess.role = normalizeRole(info.role);
+  if (info.name) currentAccess.name = info.name;
+  if (Array.isArray(info.storeIds)) currentAccess.storeIds = info.storeIds.map(String);
+}
+
+/** 管理者（トークン無し）またはオーナー */
+export const isAdminLike = () => !currentAccess || isOwnerRole(currentAccess.role);
 /** 管理者モード（トークン無し）。スタッフURLの発行はこのモードだけ */
 export const isAdmin = () => !currentAccess;
-/** 店舗責任者以上（スタッフ一覧・店舗の目標設定ができる） */
-export const isManagerOrAbove = () => !currentAccess || currentAccess.role === 'headquarter' || currentAccess.role === 'manager';
+/** 店長以上（店長・マネージャー・オーナー・管理者）。スタッフ一覧・店舗の目標設定・売上分析 */
+export const isManagerOrAbove = () => !currentAccess || isOwnerRole(currentAccess.role) || isStoreManagerRole(currentAccess.role);
 
 export const hasFullStoreAccess = isAdminLike;
 

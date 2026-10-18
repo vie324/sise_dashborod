@@ -12,15 +12,20 @@ const AppContext = createContext(null);
 const STORE_KEY = 'sise_selected_store';
 const THEME_KEY = 'sise_theme';
 
+// 担当店舗が 2つ以上（マネージャーなど）なら「担当の全店舗」をまとめて見られる
+const hasManyStores = () => !!currentAccess && currentAccess.storeIds.length > 1;
+
 function initialStore() {
   try {
     const saved = localStorage.getItem(STORE_KEY);
     if (saved) {
-      if (saved === 'all' && hasFullStoreAccess()) return 'all';
+      if (saved === 'all' && (hasFullStoreAccess() || hasManyStores())) return 'all';
       if (saved !== 'all' && (hasFullStoreAccess() || (currentAccess && currentAccess.storeIds.includes(saved)))) return saved;
     }
   } catch (_) { /* noop */ }
-  if (currentAccess && !hasFullStoreAccess() && currentAccess.storeIds.length > 0) return currentAccess.storeIds[0];
+  if (currentAccess && !hasFullStoreAccess() && currentAccess.storeIds.length > 0) {
+    return hasManyStores() ? 'all' : currentAccess.storeIds[0];
+  }
   return 'all';
 }
 
@@ -33,7 +38,7 @@ export function AppProvider({ children }) {
   });
   const storesRes = useStores();
 
-  // 見られる店舗（スタッフ・店舗責任者は所属店舗だけ）
+  // 見られる店舗（スタッフ・店長・マネージャーは所属・管轄店舗だけ）
   const stores = useMemo(() => {
     const all = storesRes.shown || [];
     if (hasFullStoreAccess()) return all;
@@ -41,13 +46,14 @@ export function AppProvider({ children }) {
     return all.filter((s) => mine.has(String(s.id)));
   }, [storesRes.shown]);
 
-  // 保存されていた店舗が無くなっていたら先頭に戻す
+  const canSelectAll = hasFullStoreAccess() || stores.length > 1;
+
+  // 保存されていた店舗が無くなっていたら先頭に戻す（担当が 1店舗なら「全店舗」もその店舗にする）
   useEffect(() => {
-    if (!storesRes.data || storeId === 'all') return;
-    if (!stores.some((s) => String(s.id) === storeId)) {
-      setStoreIdState(hasFullStoreAccess() ? 'all' : (stores[0] ? String(stores[0].id) : 'all'));
-    }
-  }, [storesRes.data, stores, storeId]);
+    if (!storesRes.data) return;
+    if (storeId === 'all' ? canSelectAll : stores.some((s) => String(s.id) === storeId)) return;
+    setStoreIdState(canSelectAll ? 'all' : (stores[0] ? String(stores[0].id) : 'all'));
+  }, [storesRes.data, stores, storeId, canSelectAll]);
 
   const setStoreId = useCallback((id) => {
     setStoreIdState(id);
@@ -61,7 +67,7 @@ export function AppProvider({ children }) {
   }, []);
 
   const storeName = useCallback((id) => {
-    if (!id || id === 'all') return '全店舗';
+    if (!id || id === 'all') return hasFullStoreAccess() ? '全店舗' : '担当の全店舗';
     const s = (storesRes.shown || []).find((x) => String(x.id) === String(id));
     return s ? s.name : id;
   }, [storesRes.shown]);
@@ -75,10 +81,12 @@ export function AppProvider({ children }) {
     stores,
     storesLoading: storesRes.loading && !storesRes.shown,
     storeName,
-    canSelectAll: hasFullStoreAccess(),
+    canSelectAll,
+    // オーナー・管理者は「全店舗」、それ以外は担当店舗をまとめた「担当の全店舗」
+    allStoresLabel: hasFullStoreAccess() ? '全店舗' : '担当の全店舗',
     theme,
     setTheme,
-  }), [today, month, storeId, setStoreId, stores, storesRes.loading, storesRes.shown, storeName, theme, setTheme]);
+  }), [today, month, storeId, setStoreId, stores, storesRes.loading, storesRes.shown, storeName, canSelectAll, theme, setTheme]);
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }

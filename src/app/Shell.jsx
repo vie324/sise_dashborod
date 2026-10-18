@@ -5,7 +5,7 @@ import { confirmDialog } from '../ui/feedback.jsx';
 import { visibleNav } from './nav.js';
 import { navigate } from './router.js';
 import { useApp } from './state.jsx';
-import { currentAccess, ROLE_LABELS, role, displayName } from '../lib/access.js';
+import { currentAccess, ROLE_LABELS, currentRole, displayName } from '../lib/access.js';
 import { dbPost } from '../lib/api.js';
 
 // ロゴ画像は正方形の中央にワードマークがあるので、上下を切り取って横長に見せる。
@@ -22,7 +22,7 @@ function Logo({ compact = false }) {
 }
 
 function UserChip() {
-  const r = role;
+  const r = currentRole();
   return (
     <div className="flex min-w-0 items-center gap-2.5">
       <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand-100 text-[13px] font-bold text-brand-800 dark:bg-brand-500/20 dark:text-brand-100">

@@ -1,5 +1,5 @@
 import { supabase } from './supabase.js';
-import { canAccessStore, allowedStoreIds, isAdminOrHeadquarter } from './auth.js';
+import { canAccessStore, allowedStoreIds, isAdminOrOwner } from './auth.js';
 import { resolveStoreId } from './stores.js';
 import { dailyCashSales, AccessError } from './salonone/summary.js';
 import { SalonOneError } from './salonone/client.js';
@@ -95,18 +95,18 @@ export async function cashbookPost(body, staffCtx) {
     case 'importSalonOneCash': return cbImportSalonOneCash(body, staffCtx);
     case 'getDailyCloses':
       if (body.store && !canAccessStore(staffCtx, body.store)) return { error: 'この店舗にアクセスする権限がありません' };
-      if (!body.store && !isAdminOrHeadquarter(staffCtx)) return { error: '店舗を指定してください' };
+      if (!body.store && !isAdminOrOwner(staffCtx)) return { error: '店舗を指定してください' };
       return cbGetDailyCloses(body.store || '', staffCtx);
     case 'getLogs':
       if (body.store && !canAccessStore(staffCtx, body.store)) return { error: 'この店舗にアクセスする権限がありません' };
-      if (!body.store && !isAdminOrHeadquarter(staffCtx)) return { error: '店舗を指定してください' };
+      if (!body.store && !isAdminOrOwner(staffCtx)) return { error: '店舗を指定してください' };
       return cbGetLogs(body.store || '', body.limit || 100, staffCtx);
     // 一括保存はデータ移行用。管理者・本部のみ
     case 'saveCashbook':
-      if (!isAdminOrHeadquarter(staffCtx)) return { error: '権限がありません（管理者・本部のみ）' };
+      if (!isAdminOrOwner(staffCtx)) return { error: '権限がありません（管理者・オーナーのみ）' };
       return cbSaveAll(body.entries || [], body.operator || '', staffCtx);
     case 'saveDailyCloses':
-      if (!isAdminOrHeadquarter(staffCtx)) return { error: '権限がありません（管理者・本部のみ）' };
+      if (!isAdminOrOwner(staffCtx)) return { error: '権限がありません（管理者・オーナーのみ）' };
       return cbSaveDailyCloses(body.dailyCloses || [], staffCtx);
     default: return { error: '不明なaction: ' + action };
   }

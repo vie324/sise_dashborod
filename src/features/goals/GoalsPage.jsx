@@ -217,7 +217,7 @@ export default function GoalsPage() {
                     {goal.memo ? <p className="pt-3 text-xs leading-relaxed text-ink-2"><Icon name="sticky-note" size={13} className="mr-1 inline text-muted" />{goal.memo}</p> : null}
                   </div>
                 ) : (
-                  <EmptyState compact icon="target" title="目標が未設定です" message={canEditStore(s.storeId) ? '施術消化売上・新規来店・契約率・会員数の目標を設定できます' : '店舗責任者または本部が設定します'} />
+                  <EmptyState compact icon="target" title="目標が未設定です" message={canEditStore(s.storeId) ? '施術消化売上・新規来店・契約率・会員数の目標を設定できます' : '店長・マネージャー・オーナーが設定します'} />
                 )}
               </Card>
             );

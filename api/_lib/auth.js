@@ -21,6 +21,7 @@
 import { supabase } from './supabase.js';
 import { signToken, verifyToken, looksSigned } from './sign.js';
 import { expandStoreIdsWithAliases } from './stores.js';
+import { normalizeRole, isOwnerRole } from '../../shared/roles.js';
 
 // 未署名トークンを受理するかどうか。
 // ----------------------------------------------------------------------------
@@ -136,7 +137,8 @@ export async function extractStaffContext(req) {
       signed: tokenSigned,
       staffId: staffRow.id,
       name: staffRow.name,
-      role: staffRow.role || 'staff',
+      // ロールは常に DB の値（4つのロールにそろえる。旧「本部」はオーナー）
+      role: normalizeRole(staffRow.role),
       storeIds,
     };
   } catch (e) {
@@ -152,26 +154,26 @@ export async function extractStaffContext(req) {
  *   - storeId が空          : ハンドラ側で別途「店舗必須」をチェックする前提。
  *                            ここでは true を返してはならず、false 扱いで防御的にする
  *                            （空 storeId でスルーされると cross-store 取得が漏れる）
- *   - headquarter ロール    : 全店舗アクセス可（出納帳など本部管轄業務）
- *   - manager / staff       : staffCtx.storeIds で判定
+ *   - オーナー              : 全店舗アクセス可
+ *   - 店長・マネージャー・スタッフ : staffCtx.storeIds（所属・管轄店舗）で判定
  */
 export function canAccessStore(staffCtx, storeId) {
   if (staffCtx === null) return true; // admin mode
   if (!staffCtx || staffCtx.valid === false) return false;
   if (!storeId) return false;
-  if (staffCtx.role === 'headquarter') return true; // 本部は全店舗
+  if (isOwnerRole(staffCtx.role)) return true; // オーナーは全店舗
   return (staffCtx.storeIds || []).includes(storeId);
 }
 
 /**
  * 「現在のスタッフが見ていい店舗 IDs」を返す（null なら全店舗）。
  * cashbookGet 等で自動フィルタ掛けに使う。
- * headquarter ロールは本部管轄として全店舗（null）扱い。
+ * オーナーは全店舗（null）扱い。
  */
 export function allowedStoreIds(staffCtx) {
   if (staffCtx === null) return null; // admin: no filter
   if (!staffCtx || staffCtx.valid === false) return [];
-  if (staffCtx.role === 'headquarter') return null; // 本部: 全店舗
+  if (isOwnerRole(staffCtx.role)) return null; // オーナー: 全店舗
   return Array.isArray(staffCtx.storeIds) ? staffCtx.storeIds : [];
 }
 
@@ -195,9 +197,9 @@ export async function authorizeRequest(req) {
   return { ok: true, staffCtx };
 }
 
-/** 管理者モード（トークン無し）または本部ロールか */
-export function isAdminOrHeadquarter(staffCtx) {
-  return staffCtx === null || (!!staffCtx && staffCtx.valid !== false && staffCtx.role === 'headquarter');
+/** 管理者モード（トークン無し）またはオーナーか */
+export function isAdminOrOwner(staffCtx) {
+  return staffCtx === null || (!!staffCtx && staffCtx.valid !== false && isOwnerRole(staffCtx.role));
 }
 
 // ============================================================

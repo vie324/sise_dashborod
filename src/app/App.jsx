@@ -6,7 +6,7 @@ import { NAV } from './nav.js';
 import { Toaster, ConfirmHost, showToast } from '../ui/feedback.jsx';
 import { Button, Input, Banner, Skeleton } from '../ui/primitives.jsx';
 import Icon from '../ui/Icon.jsx';
-import { currentAccess } from '../lib/access.js';
+import { currentAccess, applyServerAccess } from '../lib/access.js';
 import { dbGet, dbPost, onAuthError } from '../lib/api.js';
 import { refreshSalonOne, invalidate } from '../lib/hooks.js';
 
@@ -109,10 +109,35 @@ function StaffPasswordLock({ onUnlock }) {
   );
 }
 
+// サーバーが返す理由（api/_lib/auth.js）→ 画面の説明
+const INVALID_REASONS = {
+  staff_id_missing: '以前のダッシュボードで発行されたURLです。今のダッシュボードでは使えません。',
+  legacy_token_disabled: '以前の形式のURLです。今は使えなくなっています。',
+  token_invalid: 'URLが正しくありません。途中で切れていないか確認してください。',
+  signed_bad_signature: 'URLが正しくありません。途中で切れていないか確認してください。',
+  signed_malformed: 'URLが正しくありません。途中で切れていないか確認してください。',
+  signed_invalid_payload: 'URLが正しくありません。',
+  staff_id_mismatch: 'URLが正しくありません。',
+  signed_expired: 'URLの有効期限（発行から1年）が切れています。',
+  staff_not_found: 'このURLのスタッフが登録されていません（削除された可能性があります）。',
+  staff_inactive: 'このスタッフは無効になっています。',
+};
+
 function InvalidAccess({ reason }) {
+  if (reason === 'db_error') {
+    return (
+      <GateLayout icon="wifi-off" title="開けませんでした" subtitle="サーバーに接続できませんでした">
+        <Banner tone="warn">時間をおいて、もう一度開いてください。</Banner>
+      </GateLayout>
+    );
+  }
   return (
-    <GateLayout icon="link-2-off" title="このURLは使えません" subtitle="スタッフURLが無効か、期限切れです">
-      <Banner tone="warn">管理者に新しいURLの発行を依頼してください。{reason ? <span className="mt-1 block text-xs opacity-80">理由: {reason}</span> : null}</Banner>
+    <GateLayout icon="link-2-off" title="このURLは使えません" subtitle={INVALID_REASONS[reason] || 'スタッフURLが無効か、期限切れです'}>
+      <Banner tone="warn">
+        オーナー（管理者）に新しいURLの発行を依頼してください。
+        <span className="mt-1 block text-xs opacity-80">発行は 設定 → スタッフ →「URLをコピー」でできます。</span>
+        {reason ? <span className="mt-1 block text-[11px] opacity-60">理由: {reason}</span> : null}
+      </Banner>
     </GateLayout>
   );
 }
@@ -170,6 +195,19 @@ export default function App() {
     try { return sessionStorage.getItem('sise_pw_verified') === currentAccess.staffId; } catch (_) { return false; }
   });
   const [invalidReason, setInvalidReason] = useState(currentAccess && currentAccess.invalid ? 'token_invalid' : '');
+  // スタッフURL: サーバーに今の権限を聞いてから表示する（無効な URL はここで 401 になり案内を出す）
+  const [checkingStaff, setCheckingStaff] = useState(() => !!currentAccess && !currentAccess.invalid);
+
+  useEffect(() => {
+    if (!currentAccess || currentAccess.invalid) return undefined;
+    let cancelled = false;
+    dbGet('auth').then((r) => {
+      if (cancelled) return;
+      if (r && r.staff) applyServerAccess(r.staff);
+      setCheckingStaff(false);
+    });
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     if (currentAccess) return undefined;
@@ -189,6 +227,7 @@ export default function App() {
 
   let content;
   if (invalidReason) content = <InvalidAccess reason={invalidReason} />;
+  else if (checkingStaff) content = <div className="flex min-h-screen items-center justify-center text-sm text-muted">読み込み中…</div>;
   else if (currentAccess && !unlocked) content = <StaffPasswordLock onUnlock={() => setUnlocked(true)} />;
   else if (!currentAccess && auth.loading) content = <div className="flex min-h-screen items-center justify-center text-sm text-muted">読み込み中…</div>;
   else if (!currentAccess && auth.requiresAuth && !auth.authenticated) content = <AdminLogin onSuccess={() => setAuth((a) => ({ ...a, authenticated: true }))} />;

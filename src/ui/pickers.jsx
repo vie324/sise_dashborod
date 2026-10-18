@@ -20,7 +20,7 @@ export function MonthPicker({ value, onChange, min, max, className = '' }) {
   );
 }
 
-export function StorePicker({ value, onChange, stores, allowAll, className = '' }) {
+export function StorePicker({ value, onChange, stores, allowAll, allLabel = '全店舗', className = '' }) {
   if (!stores || (stores.length <= 1 && !allowAll)) {
     const only = stores && stores[0];
     return only ? (
@@ -33,7 +33,7 @@ export function StorePicker({ value, onChange, stores, allowAll, className = '' 
     <div className={cx('relative', className)}>
       <Icon name="store" size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
       <Select value={value} onChange={(e) => onChange(e.target.value)} className="h-10 !py-0 pl-9 font-semibold shadow-card" aria-label="店舗">
-        {allowAll ? <option value="all">全店舗</option> : null}
+        {allowAll ? <option value="all">{allLabel}</option> : null}
         {stores.map((s) => <option key={s.id} value={String(s.id)}>{s.name}</option>)}
       </Select>
     </div>

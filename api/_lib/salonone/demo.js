@@ -8,6 +8,7 @@
 // ============================================================
 
 import { addMonths, daysInMonth, addDays, monthsBetween, weekdayOf, monthOf } from '../../../shared/dates.js';
+import { isOwnerRole } from '../../../shared/roles.js';
 
 const BASE_MONTH = '2025-09'; // シミュレーション開始月（以降を順に積み上げる）
 
@@ -83,7 +84,7 @@ export function demoMaster(dbStores, dbStaff) {
   const shopIds = new Set(shops.map((s) => s.id));
   const staff = [];
   for (const st of dbStaff || []) {
-    if (!st || st.status === 'inactive' || st.role === 'headquarter') continue;
+    if (!st || st.status === 'inactive' || isOwnerRole(st.role)) continue;
     const shopId = (st.storeIds || []).map(String).find((id) => shopIds.has(id));
     if (shopId) staff.push({ id: String(st.id), name: st.name || String(st.id), shopId });
   }

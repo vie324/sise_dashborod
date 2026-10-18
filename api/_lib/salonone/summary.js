@@ -4,10 +4,10 @@
 //   buildSummary : 1ヶ月分（KPI・日別推移・スタッフ別・インセンティブ・支給期間）
 //   buildTrend   : 複数月の推移
 //   buildMaster  : 設定画面の対応付け用マスタ
-// 権限:
-//   管理者 / 本部        … 全店舗・全スタッフ
-//   店舗責任者(manager)  … 所属店舗のスタッフ全員
-//   スタッフ(staff)      … 所属店舗の合計 + 自分の行だけ
+// 権限（shared/roles.js）:
+//   管理者 / オーナー           … 全店舗・全スタッフ
+//   店長・マネージャー          … 所属（管轄）店舗の全体とスタッフ全員
+//   スタッフ                    … 所属店舗の合計 + 自分の行だけ
 // ============================================================
 
 import { computeMonth, combineShops } from '../../../shared/metrics.js';
@@ -15,6 +15,7 @@ import { computeStaffIncentive, computeRetentionIncentive, paymentPeriodOf, sumP
 import { INCENTIVE_RULES } from '../../../shared/incentive-rules.js';
 import { addMonths, monthProgress, monthsBetween, monthOf, listMonths } from '../../../shared/dates.js';
 import { loadAppContext, loadMaster, buildMapping, loadDataset } from './provider.js';
+import { normalizeRole, isOwnerRole } from '../../../shared/roles.js';
 
 const n = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 const nOrNull = (v) => (v == null || !Number.isFinite(Number(v)) ? null : Number(v));
@@ -43,12 +44,12 @@ export class AccessError extends Error {
 
 /** staffCtx → 見られる店舗（ダッシュボード側 ID）。null = 全店舗 */
 export function accessScope(staffCtx, appCtx) {
-  if (staffCtx === null || (staffCtx && staffCtx.role === 'headquarter')) {
-    return { all: true, storeIds: appCtx.stores.map((s) => s.id), role: staffCtx ? 'headquarter' : 'admin', staffId: staffCtx ? staffCtx.staffId : null };
+  if (staffCtx === null || (staffCtx && isOwnerRole(staffCtx.role))) {
+    return { all: true, storeIds: appCtx.stores.map((s) => s.id), role: staffCtx ? 'owner' : 'admin', staffId: staffCtx ? staffCtx.staffId : null };
   }
   const known = new Set(appCtx.stores.map((s) => s.id));
   const storeIds = (staffCtx.storeIds || []).map(String).filter((id) => known.has(id));
-  return { all: false, storeIds, role: staffCtx.role || 'staff', staffId: staffCtx.staffId };
+  return { all: false, storeIds, role: normalizeRole(staffCtx.role), staffId: staffCtx.staffId };
 }
 
 function resolveSelection(scope, storeId) {
@@ -229,7 +230,8 @@ export async function buildSummary(staffCtx, { month, storeId, refresh }) {
   if (master.mode === 'demo') warnings.push({ code: 'demo', message: 'SalonOne の APIキーが未設定のため、デモデータを表示しています。' });
   if (appCtx.dbError) warnings.push({ code: 'db', message: `Supabase に接続できません: ${appCtx.dbError}` });
   if (selectedStoreIds.some((id) => !mapping.storeToShop.has(id))) warnings.push({ code: 'unmappedStore', message: 'SalonOne の店舗と未連携の店舗があります（設定 > SalonOne連携）。' });
-  if (scope.staffId && !myS1 && scope.role !== 'headquarter') warnings.push({ code: 'unmappedMe', message: 'あなたのアカウントが SalonOne のスタッフと未連携です。管理者に連携を依頼してください。' });
+  // オーナー・マネージャーは施術しないこともあるので、未連携の注意は出さない
+  if (scope.staffId && !myS1 && (scope.role === 'staff' || scope.role === 'manager')) warnings.push({ code: 'unmappedMe', message: 'あなたのアカウントが SalonOne のスタッフと未連携です。管理者に連携を依頼してください。' });
   warnings.push(...dataWarnings(master, data));
 
   return {
@@ -326,7 +328,7 @@ export async function buildTrend(staffCtx, { months: count = 6, endMonth, storeI
 
 export async function buildMaster(staffCtx, { refresh } = {}) {
   const { appCtx, master, mapping, scope } = await prepare(staffCtx, { refresh });
-  if (!scope.all) throw new AccessError('管理者または本部のみ利用できます');
+  if (!scope.all) throw new AccessError('管理者またはオーナーのみ利用できます');
   // 来店経由はマスタ（/visit-sources）から。取れなかったときは直近 2ヶ月の受付履歴から集める
   let seen = [];
   if (master.sources.length === 0) {

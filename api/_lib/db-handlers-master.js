@@ -1,14 +1,16 @@
 import crypto from 'node:crypto';
 import { supabase } from './supabase.js';
-import { isAdminOrHeadquarter } from './auth.js';
+import { isAdminOrOwner } from './auth.js';
+import { normalizeRole, isKnownRole, isOwnerRole, isStoreManagerRole } from '../../shared/roles.js';
 
 // ============================================================
 // スタッフ管理 (staff)
 // ------------------------------------------------------------
 // パスワードはレスポンスに含めない（hasPassword だけ返す）。
 // 照合はサーバー側の auth.verifyPassword で行う。
-// 参照範囲: 管理者・本部 = 全員 / 店舗責任者 = 同じ店舗のスタッフ / スタッフ = 自分のみ
-// 変更: 管理者・本部のみ
+// 参照範囲: 管理者・オーナー = 全員 / 店長・マネージャー = 同じ店舗のスタッフ / スタッフ = 自分のみ
+// 変更: 管理者・オーナーのみ
+// ロールは shared/roles.js の 4つ（旧「本部 headquarter」はオーナーとして返す）
 // ============================================================
 
 export async function staffGet(params, staffCtx) {
@@ -33,14 +35,14 @@ export async function staffGet(params, staffCtx) {
   }
 
   let rows = (data || []).map(r => ({
-    id: r.id, name: r.name, role: r.role,
+    id: r.id, name: r.name, role: normalizeRole(r.role),
     hasPassword: !!(r.password && String(r.password).length > 0),
     storeIds: storeMap[r.id] || [],
     createdAt: r.created_at, status: r.status
   }));
 
-  if (!isAdminOrHeadquarter(staffCtx)) {
-    if (staffCtx.role === 'manager') {
+  if (!isAdminOrOwner(staffCtx)) {
+    if (isStoreManagerRole(staffCtx.role)) {
       const mine = new Set(staffCtx.storeIds || []);
       rows = rows.filter(s => s.id === staffCtx.staffId || s.storeIds.some(id => mine.has(String(id))));
     } else {
@@ -51,8 +53,8 @@ export async function staffGet(params, staffCtx) {
 }
 
 export async function staffPost(body, staffCtx) {
-  if (!isAdminOrHeadquarter(staffCtx)) {
-    return { error: 'スタッフ情報を変更できるのは管理者・本部のみです' };
+  if (!isAdminOrOwner(staffCtx)) {
+    return { error: 'スタッフ情報を変更できるのは管理者・オーナーのみです' };
   }
   const action = body.action || '';
   switch (action) {
@@ -64,7 +66,6 @@ export async function staffPost(body, staffCtx) {
   }
 }
 
-const VALID_ROLES = new Set(['staff', 'manager', 'headquarter']);
 
 async function replaceStaffStores(staffId, storeIds) {
   const { error: delErr } = await supabase.from('staff_stores').delete().eq('staff_id', staffId);
@@ -79,7 +80,7 @@ async function staffSaveAll(staffArr) {
   for (const s of staffArr) {
     if (!s.id || !s.name) return { error: 'スタッフID と名前が必要です' };
     const row = {
-      id: s.id, name: s.name, role: VALID_ROLES.has(s.role) ? s.role : 'staff',
+      id: s.id, name: s.name, role: isKnownRole(s.role) ? normalizeRole(s.role) : 'staff',
       status: s.status || 'active',
       created_at: s.createdAt || new Date().toISOString()
     };
@@ -97,8 +98,8 @@ async function staffUpdate(staffId, updates) {
   const dbUpdates = {};
   if (updates.name !== undefined) dbUpdates.name = updates.name;
   if (updates.role !== undefined) {
-    if (!VALID_ROLES.has(updates.role)) return { error: '不正なロールです' };
-    dbUpdates.role = updates.role;
+    if (!isKnownRole(updates.role)) return { error: '不正なロールです' };
+    dbUpdates.role = normalizeRole(updates.role);
   }
   if (updates.password !== undefined) dbUpdates.password = updates.password || '';
   if (updates.status !== undefined) dbUpdates.status = updates.status;
@@ -167,7 +168,7 @@ export async function menuItemsGet(params) {
 
 export async function menuItemsPost(body, staffCtx) {
   // メニューと価格は全店舗の記帳に使われるので、変更は店舗責任者以上に限る
-  if (staffCtx && (staffCtx.valid === false || !['manager', 'headquarter'].includes(staffCtx.role))) {
+  if (staffCtx && (staffCtx.valid === false || !(isStoreManagerRole(staffCtx.role) || isOwnerRole(staffCtx.role)))) {
     return { error: 'メニューを変更できるのは店舗責任者・本部・管理者のみです' };
   }
   const action = body.action || '';

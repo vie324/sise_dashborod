@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useApp } from '../../app/state.jsx';
 import { useSummary, useGoals, useTrend } from '../../lib/hooks.js';
-import { currentAccess, role } from '../../lib/access.js';
+import { currentAccess, currentRole } from '../../lib/access.js';
 import { Card, Modal, PageHeader, Skeleton, EmptyState, Badge, cx } from '../../ui/primitives.jsx';
 import { StatTile, StatusPill, Meter } from '../../ui/stats.jsx';
 import { CumulativeChart, ChartTable } from '../../ui/charts.jsx';
@@ -133,7 +133,7 @@ function RankChip({ item }) {
 
 /**
  * チームの状況: 見込み合計・ランクの分布・「あと少し」のスタッフ。
- * 店舗責任者が声をかける相手が一目で分かるようにする。
+ * 店長・マネージャーが声をかける相手が一目で分かるようにする。
  */
 function TeamStatusCard({ summary, onOpen }) {
   const rows = summary.staff;
@@ -402,6 +402,7 @@ function StoreHome({ summary, goals }) {
           <span className="relative min-w-0 flex-1">
             <span className="block text-xs font-semibold text-white/70">あなたの今月のインセンティブ{summary.period.preview ? '（試算）' : ''}</span>
             <span className="block text-xl font-bold num">{yen(me.incentive.total)}</span>
+            <span className="block text-[11px] text-white/70 num">施術消化売上 {yen(me.metrics.consumedSales)}・施術 {num(me.metrics.treatmentCount)}回</span>
           </span>
           {me.incentive.items[0].nextTier ? (
             <span className="relative hidden text-right text-xs text-white/70 sm:block">
@@ -433,7 +434,7 @@ export default function HomePage() {
   const summary = useSummary(month, storeId);
   const goals = useGoals(month);
   const data = summary.shown;
-  const isStaff = role === 'staff';
+  const isStaff = currentRole() === 'staff';
   // 自己ベストの比較用（スタッフ本人のときだけ取得）
   const trend = useTrend(isStaff ? month : null, storeId, 6);
   const title = currentAccess ? `${greeting()}、${currentAccess.name}さん` : 'ダッシュボード';

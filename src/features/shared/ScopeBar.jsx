@@ -12,11 +12,11 @@ import { dateJa, dateTimeJa } from '../../lib/format.js';
  * @param {number} [maxAhead] 当月から何ヶ月先まで選べるか（目標設定用）
  */
 export function ScopeBar({ data, maxAhead = 0, showStore = true, right, className = '' }) {
-  const { month, setMonth, storeId, setStoreId, stores, canSelectAll, today } = useApp();
+  const { month, setMonth, storeId, setStoreId, stores, canSelectAll, allStoresLabel, today } = useApp();
   return (
     <div className={cx('mb-3 flex flex-wrap items-center gap-2 sm:mb-4', className)}>
       <MonthPicker value={month} onChange={setMonth} min="2025-01" max={addMonths(today.slice(0, 7), maxAhead)} />
-      {showStore ? <StorePicker value={storeId} onChange={setStoreId} stores={stores} allowAll={canSelectAll} /> : null}
+      {showStore ? <StorePicker value={storeId} onChange={setStoreId} stores={stores} allowAll={canSelectAll} allLabel={allStoresLabel} /> : null}
       <div className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-2">
         {data ? <DataStamp data={data} /> : null}
         {right}

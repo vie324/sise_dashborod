@@ -4,6 +4,7 @@ import { Badge, Banner, Button, Card, EmptyState, Field, Input, Modal, Spinner, 
 import { confirmDialog, showToast } from '../../ui/feedback.jsx';
 import { ROLE_LABELS, isAdmin } from '../../lib/access.js';
 import { useStaffList } from '../../lib/hooks.js';
+import { ROLES as ROLE_DEFS, isOwnerRole, normalizeRole } from '../../../shared/roles.js';
 import { issueStaffUrl, postChange, useAllStores } from './settingsData.js';
 import { copyText } from './clipboard.js';
 import { FoldHeader, Initial, LoadError, RowsSkeleton } from './parts.jsx';
@@ -13,18 +14,21 @@ import { FoldHeader, Initial, LoadError, RowsSkeleton } from './parts.jsx';
 // ------------------------------------------------------------
 //   ・スタッフの追加・編集（役割・所属店舗・パスワード）・無効化・復元
 //   ・スタッフURL（?v=<署名付きトークン>）の発行とコピー、全員分の一括発行
-// 変更は管理者・本部ができるが、URL の発行はサーバーが管理者モードでしか受け付けない
-// ので、本部で開いているときは発行の操作を出さない。
+// 変更は管理者・オーナーができるが、URL の発行はサーバーが管理者モードでしか受け付けない
+// ので、オーナーのスタッフURLで開いているときは発行の操作を出さない。
+// ロールを変えても発行済みの URL はそのまま使える（開いた時にサーバーの今の権限で表示する）。
 // パスワードはサーバーから返らない（hasPassword だけ）ので、入力欄は書き込み専用。
 // ============================================================
 
-// 役割の説明はサーバー側の参照範囲（api/_lib/db-handlers-master.js の staffGet）と揃える
-const ROLES = [
-  { value: 'staff', icon: 'user', tone: 'brand', desc: '自分の実績を閲覧' },
-  { value: 'manager', icon: 'users', tone: 'info', desc: '所属店舗のスタッフ全員を閲覧' },
-  { value: 'headquarter', icon: 'building-2', tone: 'gold', desc: '全店舗を閲覧・設定を変更' },
-];
-const roleMeta = (role) => ROLES.find((r) => r.value === role) || ROLES[0];
+// 役割の名前と説明は shared/roles.js（サーバーの見える範囲と同じ定義）
+const ROLE_LOOK = {
+  staff: { icon: 'user', tone: 'brand' },
+  manager: { icon: 'store', tone: 'info' },
+  area_manager: { icon: 'network', tone: 'info' },
+  owner: { icon: 'crown', tone: 'gold' },
+};
+const ROLES = ROLE_DEFS.map((r) => ({ ...r, ...ROLE_LOOK[r.value] }));
+const roleMeta = (role) => ROLES.find((r) => r.value === normalizeRole(role)) || ROLES[0];
 
 function RoleBadge({ role }) {
   const m = roleMeta(role);
@@ -79,8 +83,8 @@ export default function StaffSection() {
   }, []);
 
   const storeText = (staff) => {
-    // 本部は所属に関係なく全店舗を見られるので、見える範囲として「全店舗」と出す
-    if (staff.role === 'headquarter') return '全店舗';
+    // オーナーは所属に関係なく全店舗を見られるので、見える範囲として「全店舗」と出す
+    if (isOwnerRole(staff.role)) return '全店舗';
     if (!stores) return '…';
     const list = (staff.storeIds || []).map(String);
     if (list.length === 0) return '所属店舗なし';
@@ -377,8 +381,8 @@ function StaffFormModal({ initial, activeStores, storeById, canIssueUrl, reload,
 
   const changeRole = (next) => {
     setRole(next);
-    // 本部は所属に関係なく全店舗を見られる。旧画面と同じく、選んだ時点で全店舗を所属にする
-    if (next === 'headquarter') setStoreIds(activeStores.map((s) => String(s.id)));
+    // オーナーは所属に関係なく全店舗を見られる。旧画面と同じく、選んだ時点で全店舗を所属にする
+    if (next === 'owner') setStoreIds(activeStores.map((s) => String(s.id)));
     setErrors((e) => ({ ...e, stores: undefined }));
   };
 
@@ -395,7 +399,7 @@ function StaffFormModal({ initial, activeStores, storeById, canIssueUrl, reload,
     const pw = password.trim();
     const errs = {};
     if (!trimmed) errs.name = '名前を入力してください';
-    if (role !== 'headquarter' && storeIds.length === 0) errs.stores = '所属店舗を1つ以上選んでください';
+    if (role !== 'owner' && storeIds.length === 0) errs.stores = role === 'area_manager' ? '管轄する店舗を1つ以上選んでください' : '所属店舗を1つ以上選んでください';
     setErrors(errs);
     if (Object.keys(errs).length > 0) return;
 
@@ -490,7 +494,7 @@ function StaffFormModal({ initial, activeStores, storeById, canIssueUrl, reload,
 
         <fieldset>
           <legend className="field-label">役割</legend>
-          <div className="grid gap-2 sm:grid-cols-3">
+          <div className="grid gap-2 sm:grid-cols-2">
             {ROLES.map((r) => {
               const checked = role === r.value;
               return (
@@ -512,7 +516,7 @@ function StaffFormModal({ initial, activeStores, storeById, canIssueUrl, reload,
                   <span className="min-w-0">
                     <span className="flex items-center gap-1.5 text-[13px] font-semibold text-ink">
                       <Icon name={r.icon} size={14} className={checked ? 'text-brand-600 dark:text-brand-300' : 'text-muted'} />
-                      {ROLE_LABELS[r.value]}
+                      {r.label}
                     </span>
                     <span className="mt-0.5 block text-[11px] leading-snug text-muted">{r.desc}</span>
                   </span>
@@ -524,14 +528,15 @@ function StaffFormModal({ initial, activeStores, storeById, canIssueUrl, reload,
 
         <fieldset>
           <legend className="field-label">
-            所属店舗
-            {role !== 'headquarter' ? <span className="ml-0.5 text-[#c43434]" aria-hidden="true">*</span> : null}
+            {role === 'area_manager' ? '管轄店舗' : '所属店舗'}
+            {role !== 'owner' ? <span className="ml-0.5 text-[#c43434]" aria-hidden="true">*</span> : null}
           </legend>
-          {role === 'headquarter' ? (
-            <p className="mb-2 text-xs text-muted">本部は所属店舗に関係なく、全店舗を閲覧できます。</p>
-          ) : role === 'manager' ? (
-            <p className="mb-2 text-xs text-muted">選んだ店舗のスタッフ全員の実績を閲覧できます。複数選べます。</p>
-          ) : null}
+          <p className="mb-2 text-xs text-muted">
+            {role === 'owner' ? 'オーナーは所属店舗に関係なく、全店舗・全スタッフを見られます。'
+              : role === 'area_manager' ? '選んだ店舗の全体と、スタッフ全員の数字を見られます（各店舗の店長と同じ）。複数選べます。'
+                : role === 'manager' ? '選んだ店舗の全体と、所属スタッフ全員の数字を見られます。'
+                  : '自分の数字と、選んだ店舗の合計を見られます。'}
+          </p>
           {options.length > 0 ? (
             <div className="grid gap-2 sm:grid-cols-2">
               {options.map((o) => {
