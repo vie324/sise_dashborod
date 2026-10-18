@@ -12,7 +12,7 @@
 // ============================================================
 
 import { cors } from '../_lib/cors.js';
-import { authorizeRequest, isAdminOrHeadquarter } from '../_lib/auth.js';
+import { authorizeRequest, isAdminOrOwner } from '../_lib/auth.js';
 import { buildSummary, buildTrend, buildMaster, AccessError } from '../_lib/salonone/summary.js';
 import { salonOneConfig, probe } from '../_lib/salonone/client.js';
 import { clearSalonOneCache } from '../_lib/salonone/provider.js';
@@ -45,8 +45,8 @@ export default async function handler(req, res) {
           mode: cfg.configured ? 'live' : 'demo',
           configured: cfg.configured,
           // URL やキーの値そのものは管理者にだけ見せる
-          baseUrl: isAdminOrHeadquarter(staffCtx) ? cfg.baseUrl : undefined,
-          endpoints: isAdminOrHeadquarter(staffCtx) ? cfg.endpoints : undefined,
+          baseUrl: isAdminOrOwner(staffCtx) ? cfg.baseUrl : undefined,
+          endpoints: isAdminOrOwner(staffCtx) ? cfg.endpoints : undefined,
           today,
           rules: INCENTIVE_RULES,
         });
@@ -60,7 +60,7 @@ export default async function handler(req, res) {
       case 'master':
         return res.json(await buildMaster(staffCtx, { refresh }));
       case 'probe': {
-        if (!isAdminOrHeadquarter(staffCtx)) return res.status(403).json({ error: '管理者または本部のみ利用できます' });
+        if (!isAdminOrOwner(staffCtx)) return res.status(403).json({ error: '管理者またはオーナーのみ利用できます' });
         const cfg = salonOneConfig();
         if (!cfg.configured) {
           return res.json({ configured: false, results: [], message: 'SALONONE_API_KEY が未設定です（デモデータで動作中）' });
@@ -71,7 +71,7 @@ export default async function handler(req, res) {
       }
       case 'clearCache': {
         if (req.method !== 'POST') return res.status(405).json({ error: 'POST で呼び出してください' });
-        if (!isAdminOrHeadquarter(staffCtx)) return res.status(403).json({ error: '管理者または本部のみ利用できます' });
+        if (!isAdminOrOwner(staffCtx)) return res.status(403).json({ error: '管理者またはオーナーのみ利用できます' });
         clearSalonOneCache();
         return res.json({ success: true });
       }

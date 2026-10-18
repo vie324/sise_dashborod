@@ -6,6 +6,7 @@ import { salonOne, salonOnePost } from '../../lib/api.js';
 import { useResource, useStores, useStaffList, saveDashConfig, refreshSalonOne, invalidate } from '../../lib/hooks.js';
 import { CHANNELS, guessChannel, channelLabel } from '../../../shared/channels.js';
 import { copyText } from './clipboard.js';
+import { roleLabel, isOwnerRole } from '../../../shared/roles.js';
 
 // 名前の表記ゆれ（全角/半角スペース・敬称）を吸収して比較する
 const normName = (s) => String(s || '').replace(/[\s　]/g, '').replace(/(さん|先生)$/, '').toLowerCase();
@@ -236,7 +237,7 @@ export default function SalonOneSettings() {
           />
           <MappingSection
             title="スタッフの対応付け" icon="users" subtitle="スタッフURLでログインした人が、SalonOne のどのスタッフの実績を見るか"
-            rows={staff.map((s) => ({ id: String(s.id), label: s.name, sub: s.role === 'headquarter' ? '本部' : s.role === 'manager' ? '店舗責任者' : 'スタッフ', placeholder: s.role === 'headquarter' ? '対応なし（本部）' : '未連携' }))}
+            rows={staff.map((s) => ({ id: String(s.id), label: s.name, sub: roleLabel(s.role), placeholder: isOwnerRole(s.role) ? '対応なし（施術しない場合）' : '未連携' }))}
             options={master.staff.map((s) => ({ value: s.id, label: `${s.name}${s.shopId ? `（${(master.shops.find((x) => x.id === s.shopId) || {}).name || s.shopId}）` : ''}` }))}
             value={staffMap} onChange={(id, v) => setStaffMap((m) => ({ ...m, [id]: v }))}
             onAuto={() => autoMatch(staff.map((s) => ({ id: String(s.id), name: s.name })), master.staff, staffMap, setStaffMap)}

@@ -1,5 +1,6 @@
 import { supabase } from './supabase.js';
-import { isAdminOrHeadquarter } from './auth.js';
+import { isAdminOrOwner } from './auth.js';
+import { isStoreManagerRole } from '../../shared/roles.js';
 
 // ============================================================
 // 目標 (goals)
@@ -58,11 +59,11 @@ function sanitizeGoal(values) {
 
 /** 閲覧できる範囲に絞る */
 async function filterForViewer(doc, staffCtx) {
-  if (isAdminOrHeadquarter(staffCtx)) return doc;
+  if (isAdminOrOwner(staffCtx)) return doc;
   const myStores = new Set((staffCtx.storeIds || []).map(String));
   const stores = Object.fromEntries(Object.entries(doc.stores).filter(([id]) => myStores.has(id)));
   let staff = {};
-  if (staffCtx.role === 'manager') {
+  if (isStoreManagerRole(staffCtx.role)) {
     const ids = Object.keys(doc.staff);
     const map = await staffStoreIds(ids);
     staff = Object.fromEntries(Object.entries(doc.staff).filter(([id]) =>
@@ -74,12 +75,12 @@ async function filterForViewer(doc, staffCtx) {
 }
 
 async function canEdit(staffCtx, scope, targetId) {
-  if (isAdminOrHeadquarter(staffCtx)) return true;
+  if (isAdminOrOwner(staffCtx)) return true;
   const myStores = new Set((staffCtx.storeIds || []).map(String));
-  if (scope === 'store') return staffCtx.role === 'manager' && myStores.has(String(targetId));
+  if (scope === 'store') return isStoreManagerRole(staffCtx.role) && myStores.has(String(targetId));
   if (scope === 'staff') {
     if (targetId === staffCtx.staffId) return true;
-    if (staffCtx.role !== 'manager') return false;
+    if (!isStoreManagerRole(staffCtx.role)) return false;
     const map = await staffStoreIds([targetId]);
     return (map.get(targetId) || []).some((s) => myStores.has(s));
   }

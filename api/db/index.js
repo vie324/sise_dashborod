@@ -6,7 +6,7 @@ import {
   signAdminSession,
   setAdminSessionCookie,
   clearAdminSessionCookie,
-  isAdminOrHeadquarter,
+  isAdminOrOwner,
   REQUIRE_ADMIN_AUTH,
 } from '../_lib/auth.js';
 import { signToken } from '../_lib/sign.js';
@@ -111,8 +111,8 @@ async function storesGet(params) {
 }
 
 async function storesPost(body, staffCtx) {
-  if (!isAdminOrHeadquarter(staffCtx)) {
-    return { error: '店舗マスタを変更できるのは管理者・本部のみです' };
+  if (!isAdminOrOwner(staffCtx)) {
+    return { error: '店舗マスタを変更できるのは管理者・オーナーのみです' };
   }
   const action = body.action || '';
   switch (action) {
@@ -211,8 +211,8 @@ async function dashConfigGet(params) {
 }
 
 async function dashConfigPost(body, staffCtx) {
-  if (!isAdminOrHeadquarter(staffCtx)) {
-    return { error: '設定を変更できるのは管理者・本部のみです' };
+  if (!isAdminOrOwner(staffCtx)) {
+    return { error: '設定を変更できるのは管理者・オーナーのみです' };
   }
   const action = body.action || '';
   switch (action) {
@@ -250,6 +250,8 @@ async function dashConfigPost(body, staffCtx) {
 //
 // GET /api/db?table=auth
 //   → { requiresAuth: bool, authenticated: bool, username? }
+//   スタッフURL（X-Staff-Token）のとき → { staff: { id, name, role, storeIds } }（今の DB の権限）
+//   画面はトークンの中身ではなくこの値で出し分けるので、ロールを変えても URL の再発行は不要
 // ============================================================
 
 const AUTH_TOKEN_DEFAULT_TTL = 365 * 24 * 60 * 60; // 1 year
@@ -281,7 +283,10 @@ function sessionState(adminSession) {
   };
 }
 
-async function authGet(params, { adminSession }) {
+async function authGet(params, { staffCtx, adminSession }) {
+  if (staffCtx && staffCtx.valid) {
+    return { staff: { id: staffCtx.staffId, name: staffCtx.name, role: staffCtx.role, storeIds: staffCtx.storeIds || [] } };
+  }
   return sessionState(adminSession);
 }
 

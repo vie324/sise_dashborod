@@ -61,7 +61,7 @@ const TABS = [
 ];
 
 export default function CashbookPage() {
-  const { month, setMonth, storeId, setStoreId, stores, storesLoading, storeName, canSelectAll } = useApp();
+  const { month, setMonth, storeId, setStoreId, stores, storesLoading, storeName, canSelectAll, allStoresLabel } = useApp();
   const cb = useCashbook();
   const menu = useMenuItems();
   const [tab, setTab] = useState('overview');
@@ -69,7 +69,7 @@ export default function CashbookPage() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [cashCheck, setCashCheck] = useState(null); // { key, storeId }
   const [dailyClose, setDailyClose] = useState(null); // { key, storeId }
-  // メニューと価格の変更は店舗責任者以上（サーバーでも確認している）
+  // メニューと価格の変更は店長以上（サーバーでも確認している）
   const canManageMenu = isManagerOrAbove();
   const openMenu = canManageMenu ? () => setMenuOpen(true) : null;
 
@@ -215,7 +215,7 @@ export default function CashbookPage() {
 
       <div className="mb-4 flex flex-wrap items-center gap-2 sm:mb-5">
         {tab !== 'audit' ? <MonthPicker value={month} onChange={setMonth} max={thisMonth} /> : null}
-        <StorePicker value={storeId} onChange={setStoreId} stores={stores} allowAll={canSelectAll} />
+        <StorePicker value={storeId} onChange={setStoreId} stores={stores} allowAll={canSelectAll} allLabel={allStoresLabel} />
         <SyncStatus
           className="ml-auto"
           lastSynced={cb.lastSynced}
