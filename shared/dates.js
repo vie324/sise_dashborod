@@ -130,3 +130,38 @@ export function monthProgress(ym, today) {
   else elapsed = dayOfMonth(today);
   return { total, elapsed, remaining: total - elapsed, ratio: total ? elapsed / total : 0 };
 }
+
+// ------------------------------------------------------------
+// 3ヶ月ごとの区切り（1〜3月・4〜6月・7〜9月・10〜12月）
+// 期は「最初の月 'YYYY-MM'」で表す。区切りを変える時はここだけを直す。
+// ------------------------------------------------------------
+
+/** その月を含む 3ヶ月の期の最初の月 */
+export function quarterStart(ym) {
+  const [y, m] = ym.split('-').map(Number);
+  return `${y}-${pad2(Math.floor((m - 1) / 3) * 3 + 1)}`;
+}
+
+export function isQuarterStart(ym) {
+  return isMonth(ym) && quarterStart(ym) === ym;
+}
+
+/** 期の 3ヶ月 */
+export function quarterMonths(start) {
+  return [start, addMonths(start, 1), addMonths(start, 2)];
+}
+
+/** '2026-10' → '2026年10〜12月' */
+export function formatQuarterJa(start) {
+  if (!isMonth(start)) return start || '';
+  const [y, m] = start.split('-').map(Number);
+  return `${y}年${m}〜${m + 2}月`;
+}
+
+/** 期の進捗（3ヶ月分の monthProgress の合計） */
+export function quarterProgress(start, today) {
+  const ps = quarterMonths(start).map((m) => monthProgress(m, today));
+  const total = ps.reduce((s, p) => s + p.total, 0);
+  const elapsed = ps.reduce((s, p) => s + p.elapsed, 0);
+  return { total, elapsed, remaining: total - elapsed, ratio: total ? elapsed / total : 0 };
+}

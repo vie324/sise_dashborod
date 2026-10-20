@@ -13,6 +13,7 @@ import { ScopeBar, DataWarnings } from '../shared/ScopeBar.jsx';
 import StaffDetail from '../incentives/StaffDetail.jsx';
 import { ChartLegend, itemStatus } from '../incentives/parts.jsx';
 import MyHome from './MyHome.jsx';
+import SpecialGoalStrip from '../goals/SpecialGoalStrip.jsx';
 import { navigate } from '../../app/router.js';
 
 function greeting() {
@@ -446,6 +447,7 @@ export default function HomePage() {
       <DataWarnings data={data} error={summary.error} preview />
       {!data ? <LoadingBlock /> : (
         <div className={cx('transition-opacity', summary.stale || summary.loading ? 'opacity-60' : '')}>
+          <SpecialGoalStrip summary={data} />
           {isStaff
             ? <MyHome summary={data} goals={goals.shown} trend={trend.shown} stale={summary.stale} />
             : <StoreHome summary={data} goals={goals.shown} />}
