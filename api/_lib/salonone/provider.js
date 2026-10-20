@@ -20,7 +20,7 @@ import {
 } from './client.js';
 import {
   normalizeShop, normalizeStaff, normalizeVisitSourceName, normalizeReception, normalizeRetention,
-  normalizeSalesSummary, contractsFromReceptions,
+  normalizeSalesSummary, contractsFromReceptions, normalizeVisit,
 } from './normalize.js';
 import { demoMaster, simulateDemo, DEMO_SOURCES } from './demo.js';
 import { monthRange, monthOf, monthsBetween, todayJst, addDays } from '../../../shared/dates.js';
@@ -68,6 +68,9 @@ const TTL_OLDER = 6 * 60 * 60 * 1000;
 const TTL_MASTER = 30 * 60 * 1000;
 const TTL_RETENTION = 30 * 60 * 1000;
 const TTL_TENURE = 6 * 60 * 60 * 1000;
+// 施術ツールの「本日のお客様」。受付で予約が入る・来店になるのを早めに映すため短め
+// （画面は 1分ごとに読み直す。同じ店舗を何台で開いていても SalonOne を呼ぶのは 50秒に 1回）
+const TTL_DAY = 50 * 1000;
 
 function ttlFor(month, asOf) {
   const diff = monthsBetween(month, monthOf(asOf));
@@ -227,6 +230,21 @@ async function shopRetention(cfg, shopId, asOf, refresh) {
     stale: summary.stale || customers.stale,
     error: summary.error || customers.error,
   };
+}
+
+/**
+ * 1店舗・1日分の予約（受付履歴。キャンセルを含む）→ 施術ツールの「本日のお客様」用の行
+ * @returns {Promise<{ value:Array, fetchedAt:number, stale:boolean, error?:string }>}
+ */
+export function loadDayVisits(shopId, date, { refresh } = {}) {
+  const cfg = salonOneConfig();
+  return cached(`day:${shopId}:${date}`, TTL_DAY, async () => {
+    const rows = await fetchReceptions(cfg, { from: date, to: date, shopId });
+    return rows
+      .map(normalizeVisit)
+      .map((v) => (v.shopId ? v : { ...v, shopId: String(shopId) }))
+      .filter((v) => v.id && v.date === date);
+  }, refresh);
 }
 
 /** 当月の継続指標を dash_config に残す（同じ月は店舗ごとに上書き。24ヶ月分） */

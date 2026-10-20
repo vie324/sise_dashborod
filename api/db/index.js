@@ -14,7 +14,6 @@ import bcrypt from 'bcryptjs';
 import { staffGet, staffPost, menuItemsGet, menuItemsPost, verifyStaffPassword } from '../_lib/db-handlers-master.js';
 import { cashbookGet, cashbookPost } from '../_lib/db-handlers-cashbook.js';
 import { goalsGet, goalsPost } from '../_lib/db-handlers-goals.js';
-import { counselingGet, counselingPost } from '../_lib/counseling.js';
 
 // ============================================================
 // 統合DBエンドポイント
@@ -29,8 +28,6 @@ const HANDLERS = {
   menuItems:  { get: menuItemsGet,  post: menuItemsPost },
   cashbook:   { get: cashbookGet,   post: cashbookPost },
   goals:      { get: goalsGet,      post: goalsPost },
-  // カウンセリングシート（Google フォームの回答を GAS 経由で読み取る）
-  counseling: { get: counselingGet, post: counselingPost },
   // 認証（スタッフURL発行 + 管理者ログイン + スタッフパスワード照合）
   auth:       { get: authGet,       post: authPost },
 };
@@ -192,14 +189,17 @@ async function setStoreStatus(storeId, status) {
 // ============================================================
 // ダッシュボード設定 (dashConfig) — KV ストア
 // ------------------------------------------------------------
-// 'goals.*' は目標データ（goals テーブル扱い）、'counseling.*' はカウンセリングの GAS の URL・合言葉
-// （スタッフに見せない）なので、ここからは読み書きしない。それぞれの table から扱う。
+// 'goals.*' は目標データ（goals テーブル扱い）なので、ここからは読み書きしない（goals から扱う）。
+// 'counseling.*' は以前の Google フォーム連携（GAS）の URL・合言葉が残っている場合があるため、
+// 連携をやめた後も読み書きさせない（スタッフの端末に出さない）。
 // 書き込みは管理者・オーナーのみ（SalonOne 連携の対応付けなど）。
 // ============================================================
 
 const RESERVED_PREFIXES = ['goals.', 'counseling.'];
 const isReservedKey = (key) => RESERVED_PREFIXES.some((p) => String(key || '').startsWith(p));
-const reservedError = (key) => ({ error: `このキーは ${String(key).split('.')[0]} から扱ってください` });
+const reservedError = (key) => ({
+  error: String(key).startsWith('counseling.') ? 'このキーは読み書きできません' : `このキーは ${String(key).split('.')[0]} から扱ってください`,
+});
 
 async function dashConfigGet(params) {
   if (params.key) {

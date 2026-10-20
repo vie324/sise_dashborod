@@ -1,30 +1,31 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Badge, Banner, Button, Card, Select, cx } from '../../../ui/primitives.jsx';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Badge, Button, Card, cx } from '../../../ui/primitives.jsx';
 import Icon from '../../../ui/Icon.jsx';
-import { showToast } from '../../../ui/feedback.jsx';
 import { useApp } from '../../../app/state.jsx';
+import { yen } from '../../../lib/format.js';
 import { monthOf } from '../../../../shared/dates.js';
-import { mapFormConcerns, recommendPlans, PLAN_CATALOG } from '../../../../shared/counseling.js';
-import { shareCustomerName } from '../shared/prefill.js';
-import { useCounselingStores, useRecentSheets, fetchSheet, searchSheets } from './useCounseling.js';
-import { SheetList, CustomerSheet, NotConnected, sheetKey } from './SheetPanel.jsx';
+import { recommendPlans, planByKey, planPricing } from '../../../../shared/counseling.js';
+import { shareCustomerName, initialStaffName } from '../shared/prefill.js';
+import { useTodayVisits } from './useCounseling.js';
+import { VisitList, GuestCard, StorePicker, familyName } from './VisitPanel.jsx';
 import Hearing from './Hearing.jsx';
-import Simulation, { primaryLineFor } from './Simulation.jsx';
-import { ConceptPanel, PlanPrices, MemberBenefits, TodayOffers, PlanTips } from './PlanGuide.jsx';
+import { primaryLineFor } from './Simulation.jsx';
+import Presentation, { CHAPTERS, chapterStart } from './present/Presentation.jsx';
 
 // ============================================================
-// カウンセリング（新規のお客様）
+// カウンセリング（新規のお客様）— スタッフの画面
 // ------------------------------------------------------------
-// お客様が来店時に答えた Google フォームのカウンセリングシートを一覧に出し、
-// 選ぶとお悩みがチェックに反映される（新しい回答は 30秒ごとに自動で届く）。
-// ヒアリング → 改善シミュレーション → プラン選択 の順にお客様と一緒に見ていく。
-// 途中で画面が再読み込みされても戻れるよう、選択とチェックはこの端末のタブの間だけ残す。
+// 1. 本日のお客様: SalonOne の今日の予約から選ぶ（予約に無いお客様は手入力でも始められる）
+// 2. ヒアリング＆プラン診断: お悩みと施術後の評価 → 3つのおすすめプラン
+// 3. お客様に説明する: 全画面のご説明（コンセプト・改善のイメージ・プラン・特典・まとめ）を
+//    お客様に向けて見せる。章を選んで途中から始めることもできる
+// 途中で画面が再読み込みされても戻れるよう、選んだお客様とチェックはこの端末のタブの間だけ残す。
 // ============================================================
 
 const STORE_KEY = 'sise_counseling_store';
-const STATE_KEY = 'sise_counseling_state_v1';
-// 改善シミュレーションで最初に見せる線（おすすめの「月4回 → 月2回に切替」）
-const DEFAULT_LINES = { l2: true };
+const STATE_KEY = 'sise_counseling_state_v2';
+// 改善のイメージで最初に見せる線（おすすめの「月4回 → 月2回に切替」と「施術1回のみ」）
+const DEFAULT_LINES = { l2: true, l6: true };
 
 function readState() {
   try {
@@ -35,43 +36,41 @@ function readState() {
   }
 }
 
-const STEPS = [
-  { no: 1, label: 'ヒアリング', target: 'cs-hearing' },
-  { no: 2, label: 'シミュレーション', target: 'cs-simulation' },
-  { no: 3, label: 'プラン選択', target: 'cs-plans' },
-];
+const CHAPTER_HINTS = {
+  intro: 'ごあいさつ・お悩みの確認',
+  concept: 'なぜ繰り返すのか・si\'se のアプローチ',
+  future: '通い方ごとの改善のイメージ',
+  plan: 'おすすめプラン・料金プラン',
+  offer: '会員のポイント・本日の特典',
+  summary: 'お選びいただいたプラン',
+};
 
-function StepBar({ done, onReset }) {
-  const go = (id) => {
-    const el = document.getElementById(id);
-    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  };
+/** 章を選んでご説明を始める */
+function Launcher({ onOpen, ready }) {
   return (
-    <div className="flex items-center gap-2">
-      <ol className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto rounded-2xl border border-line bg-surface p-1.5 shadow-card">
-        {STEPS.map((s, i) => {
-          const state = done ? (s.no < 3 ? 'done' : 'active') : (s.no === 1 ? 'active' : 'todo');
-          return (
-            // スマホでは今のステップだけ名前を出す（3つとも出すと切れて読めない）
-            <li key={s.no} className={cx('flex min-w-0 items-center gap-1', state === 'active' ? 'flex-1' : 'sm:flex-1')}>
-              {i > 0 ? <span className={cx('h-px w-3 shrink-0 sm:w-6', done ? 'bg-brand-400' : 'bg-line')} aria-hidden="true" /> : null}
-              <button type="button" onClick={() => go(s.target)} aria-current={state === 'active' ? 'step' : undefined} aria-label={`${s.no} ${s.label}`}
-                className={cx('flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-xl px-2 py-1.5 text-xs font-semibold transition-colors',
-                  state === 'active' ? 'bg-brand-600 text-white' : state === 'done' ? 'text-brand-700 hover:bg-brand-50 dark:text-brand-300 dark:hover:bg-brand-500/15' : 'text-muted hover:bg-surface-2')}>
-                <span className={cx('flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] font-bold',
-                  state === 'active' ? 'bg-white/25' : state === 'done' ? 'bg-brand-100 dark:bg-brand-500/25' : 'bg-surface-3')}>
-                  {state === 'done' ? <Icon name="check" size={12} strokeWidth={3} /> : s.no}
-                </span>
-                <span className={cx('truncate', state !== 'active' && 'hidden sm:inline')}>{s.label}</span>
-              </button>
-            </li>
-          );
-        })}
-      </ol>
-      <Button variant="ghost" size="sm" icon="rotate-ccw" onClick={onReset} className="shrink-0" aria-label="最初から">
-        <span className="hidden sm:inline">最初から</span>
-      </Button>
-    </div>
+    <Card title="お客様へのご説明" icon="presentation"
+      subtitle="タブレットやスマホをお客様に向けて、大きな画面でご説明できます。章を選ぶと途中から始められます">
+      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+        {CHAPTERS.map((c, i) => (
+          <button key={c.id} type="button" onClick={() => onOpen(chapterStart(c.id))}
+            className="group flex items-center gap-3 rounded-xl border border-line bg-surface px-3 py-3 text-left transition-colors hover:border-brand-300 hover:bg-brand-50/50 dark:hover:bg-brand-500/10">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-brand-700 transition-colors group-hover:bg-brand-600 group-hover:text-white dark:bg-brand-500/15 dark:text-brand-200">
+              <Icon name={c.icon} size={19} />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-sm font-bold text-ink"><span className="num mr-1 text-muted">{i + 1}</span>{c.label}</span>
+              <span className="block truncate text-xs text-muted">{CHAPTER_HINTS[c.id]}</span>
+            </span>
+            <Icon name="circle-play" size={18} className="shrink-0 text-muted transition-colors group-hover:text-brand-600" />
+          </button>
+        ))}
+      </div>
+      {!ready ? (
+        <p className="mt-3 flex items-center gap-2 rounded-xl bg-surface-2 px-3 py-2.5 text-xs text-muted">
+          <Icon name="info" size={14} />お悩みを選ぶと、ご説明の「プラン」「まとめ」がお客様に合わせた内容になります（ご説明の画面でお客様にタップしていただくこともできます）
+        </p>
+      ) : null}
+    </Card>
   );
 }
 
@@ -80,237 +79,169 @@ function StepBar({ done, onReset }) {
  * @param {(tool:string)=>void} [onOpenTool] 姿勢分析・施術レポートへ切り替える
  */
 export default function Counseling({ active = true, onOpenTool }) {
-  const { storeId: appStoreId, today } = useApp();
+  const { storeId: appStoreId, stores, today } = useApp();
   const saved = useMemo(readState, []);
-  const storesRes = useCounselingStores();
-  const info = storesRes.shown;
-  const linked = useMemo(() => (info ? info.stores.filter((s) => s.linked) : []), [info]);
 
   const [storeId, setStoreIdState] = useState(() => {
     try { return saved.storeId || localStorage.getItem(STORE_KEY) || ''; } catch (_) { return saved.storeId || ''; }
   });
-  const [selected, setSelected] = useState(saved.selected || null); // { index, name }
-  const [sheet, setSheet] = useState(null);
-  const [sheetLoading, setSheetLoading] = useState(false);
-  const [sheetError, setSheetError] = useState(null);
+  const [guest, setGuest] = useState(saved.guest || null);
+  const [callName, setCallName] = useState(saved.callName || '');
   const [concerns, setConcerns] = useState(saved.concerns || {});
   const [feedbacks, setFeedbacks] = useState(saved.feedbacks || {});
-  const [fromForm, setFromForm] = useState(saved.fromForm || {});
   const [overrideKey, setOverrideKey] = useState(saved.overrideKey || '');
   const [activeLines, setActiveLines] = useState(saved.activeLines || DEFAULT_LINES);
-  const [showConcept, setShowConcept] = useState(false);
-  const [search, setSearch] = useState(null); // { q, rows }
-  const [searching, setSearching] = useState(false);
-  const [arrived, setArrived] = useState(() => new Set());
+  const [presentAt, setPresentAt] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
 
   // 見られない店舗が保存されていたら、ヘッダーで選んでいる店舗か最初の店舗にする
   useEffect(() => {
-    if (!info || linked.some((s) => s.id === storeId)) return;
-    const next = linked.find((s) => s.id === appStoreId) || linked[0];
-    setStoreIdState(next ? next.id : '');
-  }, [info, linked, storeId, appStoreId]);
+    if (!stores.length || stores.some((s) => String(s.id) === storeId)) return;
+    const next = stores.find((s) => String(s.id) === appStoreId) || stores[0];
+    setStoreIdState(String(next.id));
+  }, [stores, storeId, appStoreId]);
 
-  const ready = !!(info && info.configured && linked.some((s) => s.id === storeId));
-  const recent = useRecentSheets(ready ? storeId : null, active);
-  const rows = recent.data ? recent.data.customers : null;
+  const ready = stores.some((s) => String(s.id) === storeId);
+  const visits = useTodayVisits(ready ? storeId : null, active);
 
-  // 選択・チェックをこのタブの間だけ残す
+  // 選んだお客様とチェックをこのタブの間だけ残す
   useEffect(() => {
     try {
-      sessionStorage.setItem(STATE_KEY, JSON.stringify({ storeId, selected, concerns, feedbacks, fromForm, overrideKey, activeLines }));
+      sessionStorage.setItem(STATE_KEY, JSON.stringify({ storeId, guest, callName, concerns, feedbacks, overrideKey, activeLines }));
     } catch (_) { /* noop */ }
-  }, [storeId, selected, concerns, feedbacks, fromForm, overrideKey, activeLines]);
+  }, [storeId, guest, callName, concerns, feedbacks, overrideKey, activeLines]);
 
-  // ---- 選択 ----
-  const requestRef = useRef(0);
-  const loadSheet = useCallback(async (row, { keepChecks = false } = {}) => {
-    const req = ++requestRef.current;
-    setSelected({ index: row.index, name: row.name });
-    setSheetError(null);
-    setSheetLoading(true);
-    if (!keepChecks) setSheet(null);
-    try {
-      const r = await fetchSheet(storeId, row);
-      if (req !== requestRef.current) return;
-      const { checked } = mapFormConcerns(r.customer.concerns);
-      setSheet(r.customer);
-      setFromForm(checked);
-      if (!keepChecks) {
-        // フォームのお悩みをチェックに反映（施術後の評価とプランの選び直しは消す）
-        setConcerns(checked);
-        setFeedbacks({});
-        setOverrideKey('');
-      }
-      shareCustomerName(r.customer.name);
-    } catch (e) {
-      if (req === requestRef.current) setSheetError(e);
-    } finally {
-      if (req === requestRef.current) setSheetLoading(false);
+  // ---- お客様 ----
+  const startWith = (g) => {
+    const name = g.customerName || '';
+    setGuest(g);
+    setCallName(familyName(name));
+    // 別のお客様に替えた時はチェックを消す
+    if (!guest || guest.id !== g.id) {
+      setConcerns({});
+      setFeedbacks({});
+      setOverrideKey('');
+      setActiveLines(DEFAULT_LINES);
     }
-  }, [storeId]);
-
-  const clearSelection = () => {
-    requestRef.current += 1;
-    setSelected(null);
-    setSheet(null);
-    setSheetError(null);
-    setSheetLoading(false);
+    shareCustomerName(name);
   };
-
-  const resetAll = () => {
-    clearSelection();
+  // SalonOne からお名前が来ないお客様は、手で入れたお名前を姿勢分析・施術レポートにも渡す
+  const changeCallName = (v) => {
+    setCallName(v);
+    if (guest && !guest.customerName) shareCustomerName(v.trim());
+  };
+  const selectVisit = (v) => startWith({ ...v, manual: false });
+  const startManual = (name) => startWith({ id: `manual-${Date.now()}`, manual: true, customerName: name || null, isNew: true });
+  const resetGuest = () => {
+    setGuest(null);
+    setCallName('');
     setConcerns({});
     setFeedbacks({});
-    setFromForm({});
     setOverrideKey('');
     setActiveLines(DEFAULT_LINES);
-    setSearch(null);
     shareCustomerName('');
   };
 
-  // 再読み込みの後: 選んでいたお客様を取り直す（チェックは残っているものを使う）
-  const restored = useRef(false);
-  useEffect(() => {
-    if (restored.current || !ready) return;
-    restored.current = true;
-    if (!selected) return;
-    if (saved.storeId === storeId) loadSheet(selected, { keepChecks: true });
-    else clearSelection();
-  }, [ready]); // eslint-disable-line react-hooks/exhaustive-deps
+  // SalonOne の最新の状態（来店中・会計済み・ご契約）を選んだお客様にも映す
+  const latest = guest && !guest.manual && visits.data && visits.data.visits
+    ? visits.data.visits.find((v) => v.id === guest.id) : null;
+  const shownGuest = latest ? { ...guest, ...latest, manual: false } : guest;
 
   const changeStore = (id) => {
-    resetAll();
-    setArrived(new Set());
+    resetGuest();
     setStoreIdState(id);
     try { localStorage.setItem(STORE_KEY, id); } catch (_) { /* noop */ }
   };
 
-  // ---- 新しい回答が届いたら知らせる ----
-  const seenRef = useRef({ storeId: null, keys: null });
-  useEffect(() => {
-    if (!rows) return;
-    if (seenRef.current.storeId !== storeId || !seenRef.current.keys) {
-      seenRef.current = { storeId, keys: new Set(rows.map(sheetKey)) };
-      return;
-    }
-    const fresh = rows.filter((r) => !seenRef.current.keys.has(sheetKey(r)));
-    if (fresh.length === 0) return;
-    for (const r of fresh) seenRef.current.keys.add(sheetKey(r));
-    setArrived((prev) => new Set([...prev, ...fresh.map(sheetKey)]));
-    showToast(fresh.length === 1 ? `新しいカウンセリングシートが届きました（${fresh[0].name} 様）` : `新しいカウンセリングシートが${fresh.length}件届きました`, 'success', 6000);
-  }, [rows, storeId]);
-
-  // ---- 検索・読み直し ----
-  const runSearch = async (q) => {
-    setSearching(true);
-    try {
-      const r = await searchSheets(storeId, q);
-      setSearch({ q, rows: r.customers });
-    } catch (e) {
-      showToast(e.message, 'error');
-    } finally {
-      setSearching(false);
-    }
-  };
-
-  const { refreshNow } = recent;
+  const { refreshNow } = visits;
   const refresh = useCallback(async () => {
     setRefreshing(true);
     try { await refreshNow(); } finally { setRefreshing(false); }
   }, [refreshNow]);
 
   // 画面右上の ⟳（全体の更新）でも取り直す
-  const { reload: reloadStores } = storesRes;
   useEffect(() => {
-    const on = () => { reloadStores(); if (ready) refresh(); };
+    const on = () => { if (ready) refresh(); };
     window.addEventListener('sise:refresh', on);
     return () => window.removeEventListener('sise:refresh', on);
-  }, [ready, refresh, reloadStores]);
+  }, [ready, refresh]);
 
   // ---- 診断 ----
   const recommendation = useMemo(() => recommendPlans(concerns, feedbacks), [concerns, feedbacks]);
-  useEffect(() => { if (!recommendation && overrideKey) setOverrideKey(''); }, [recommendation, overrideKey]);
+  // 料金表から無くなったプランが残っていたら（以前の保存など）おすすめに戻す
+  useEffect(() => { if (overrideKey && !planByKey(overrideKey)) setOverrideKey(''); }, [overrideKey]);
   const selectedKey = overrideKey || (recommendation ? recommendation.take.key : '');
-  const selectedPlan = PLAN_CATALOG.find((p) => p.key === selectedKey) || null;
-  const recFreq = selectedPlan ? selectedPlan.freq : 0;
+  const selectedPlan = planByKey(selectedKey);
+  const primaryLine = primaryLineFor(selectedPlan ? selectedPlan.freq : 0) || 'l2';
 
   // 選んだプランの通い方の線を表示する
   useEffect(() => {
-    const id = primaryLineFor(recFreq);
-    if (id) setActiveLines((prev) => (prev[id] ? prev : { ...prev, [id]: true }));
-  }, [recFreq]);
+    if (primaryLine) setActiveLines((prev) => (prev[primaryLine] ? prev : { ...prev, [primaryLine]: true }));
+  }, [primaryLine]);
 
   const toggle = (setter) => (id) => setter((prev) => ({ ...prev, [id]: !prev[id] }));
+  // おすすめと同じプランを選んだら「自動」に戻す（お悩みを変えた時におすすめに付いていく）
+  const selectPlan = (key) => setOverrideKey(recommendation && recommendation.take.key === key ? '' : key);
 
-  // ---- 表示 ----
-  const errorCode = recent.error && recent.error.code;
-  const storeName = (linked.find((s) => s.id === storeId) || {}).name;
-  let sheetBody;
-  if (!info) {
-    sheetBody = storesRes.error ? <Banner tone="bad" title="読み込めませんでした">{storesRes.error.message}</Banner> : <div className="h-24 animate-pulse rounded-xl bg-surface-3" />;
-  } else if (!info.configured) {
-    sheetBody = <NotConnected canConfigure={info.canConfigure} />;
-  } else if (linked.length === 0 || errorCode === 'not_linked') {
-    sheetBody = <NotConnected canConfigure={info.canConfigure} reason="not_linked" />;
-  } else if (selected) {
-    sheetBody = (
-      <>
-        {sheetError ? (
-          <Banner tone="bad" title="シートを開けませんでした" className="mb-3"
-            action={<Button size="sm" icon="refresh-cw" onClick={() => loadSheet(selected, { keepChecks: true })}>もう一度</Button>}>
-            {sheetError.message}
-          </Banner>
-        ) : null}
-        <CustomerSheet sheet={sheet} loading={sheetLoading} onChange={clearSelection} onOpenTool={onOpenTool} />
-        {!sheet && sheetError ? <Button size="sm" variant="ghost" icon="arrow-left" onClick={clearSelection}>一覧に戻る</Button> : null}
-      </>
-    );
-  } else {
-    sheetBody = (
-      <SheetList rows={rows} loading={recent.loading} error={recent.error} arrived={arrived}
-        onSelect={(row) => loadSheet(row)} onSearch={runSearch} searching={searching} searchResult={search} onClearSearch={() => setSearch(null)}
-        fetchedAt={recent.data ? recent.data.fetchedAt : null} onRefresh={refresh} refreshing={refreshing} />
-    );
-  }
+  const name = callName.trim();
+  const ctx = {
+    guestName: name,
+    honor: name ? `${name} 様` : 'お客様',
+    staffName: (shownGuest && shownGuest.staffName) || initialStaffName(),
+    date: today,
+    startMonth: monthOf(today),
+    concerns,
+    onToggleConcern: toggle(setConcerns),
+    recommendation,
+    selectedKey,
+    selectedPlan,
+    onSelectPlan: selectPlan,
+    activeLines,
+    onToggleLine: toggle(setActiveLines),
+    primaryLine,
+  };
+  const pricing = planPricing(selectedPlan);
 
   return (
     <div className="space-y-4">
-      <Card title="カウンセリングシート" icon="clipboard-check"
-        subtitle={selected ? null : 'お客様が Google フォームで答えた内容が届きます。選ぶとお悩みがチェックに反映されます'}
-        actions={linked.length > 1 ? (
-          <Select value={storeId} onChange={(e) => changeStore(e.target.value)} aria-label="店舗" className="h-9 w-auto max-w-[11rem] py-1 text-[13px]">
-            {linked.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-          </Select>
-        ) : storeName ? <Badge tone="brand" icon="store">{storeName}</Badge> : null}>
-        {sheetBody}
+      <Card title="本日のお客様" icon="calendar-check"
+        subtitle={guest ? null : 'SalonOne の今日の予約から、ご説明するお客様を選びます'}
+        actions={(
+          <>
+            {visits.shown && visits.shown.mode === 'demo' ? <Badge tone="gold" icon="flask-conical">デモ</Badge> : null}
+            <StorePicker stores={stores.map((s) => ({ id: String(s.id), name: s.name }))} value={storeId} onChange={changeStore} />
+          </>
+        )}>
+        {guest ? (
+          <GuestCard guest={shownGuest} callName={callName} onCallName={changeCallName} onChange={resetGuest} onOpenTool={onOpenTool} />
+        ) : (
+          <VisitList res={visits} onSelect={selectVisit} onManual={startManual} onRefresh={refresh} refreshing={refreshing} />
+        )}
       </Card>
 
-      <StepBar done={!!recommendation} onReset={resetAll} />
+      <Hearing concerns={concerns} feedbacks={feedbacks}
+        onToggleConcern={toggle(setConcerns)} onToggleFeedback={toggle(setFeedbacks)}
+        recommendation={recommendation} selectedKey={selectedKey} overrideKey={overrideKey} onSelectPlan={selectPlan} />
 
-      <div id="cs-hearing" className="scroll-mt-20">
-        <Hearing concerns={concerns} feedbacks={feedbacks} fromForm={fromForm}
-          onToggleConcern={toggle(setConcerns)} onToggleFeedback={toggle(setFeedbacks)}
-          recommendation={recommendation} selectedKey={selectedKey} overrideKey={overrideKey} onSelectPlan={setOverrideKey} />
+      <Launcher onOpen={setPresentAt} ready={!!recommendation} />
+
+      {/* いつでもご説明を始められるよう、画面の下に固定する（スマホは下のメニューの上） */}
+      <div className="no-print sticky bottom-[calc(76px_+_env(safe-area-inset-bottom))] z-30 lg:bottom-4">
+        <div className="flex items-center gap-2 rounded-2xl border border-line bg-surface/95 p-2 pl-3 shadow-pop backdrop-blur sm:gap-3 sm:pl-4">
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-[13px] font-bold text-ink">{ctx.honor}{shownGuest && shownGuest.time ? <span className="ml-1.5 text-xs font-medium text-muted">{shownGuest.time}</span> : null}</div>
+            <div className={cx('truncate text-xs', selectedPlan ? 'text-brand-700 dark:text-brand-300' : 'text-muted')}>
+              {selectedPlan ? `${overrideKey ? '選択' : 'おすすめ'}: ${selectedPlan.name} ${selectedPlan.freqLabel}　${yen(pricing.price)}/月` : 'お悩みを選ぶとおすすめプランが出ます'}
+            </div>
+          </div>
+          <Button variant="secondary" icon="tags" onClick={() => setPresentAt('plans')} className="hidden sm:inline-flex">プランから</Button>
+          <Button variant="primary" size="lg" icon="presentation" onClick={() => setPresentAt('cover')} className="px-4">
+            <span className="sm:hidden">説明する</span><span className="hidden sm:inline">お客様に説明する</span>
+          </Button>
+        </div>
       </div>
 
-      <div className="flex justify-end">
-        <Button variant={showConcept ? 'subtle' : 'ghost'} size="sm" icon="circle-help" onClick={() => setShowConcept((v) => !v)} aria-expanded={showConcept}>
-          コンセプト説明
-        </Button>
-      </div>
-      {showConcept ? <ConceptPanel /> : null}
-
-      <div id="cs-simulation" className="scroll-mt-20">
-        <Simulation active={activeLines} onToggle={toggle(setActiveLines)} recFreq={recFreq} startMonth={monthOf(today)} />
-      </div>
-
-      <div id="cs-plans" className="scroll-mt-20">
-        <PlanPrices recommended={selectedPlan ? { id: selectedPlan.id, freq: selectedPlan.freq } : null} />
-      </div>
-      <MemberBenefits />
-      <TodayOffers />
-      <PlanTips />
+      {presentAt ? <Presentation startAt={presentAt} ctx={ctx} onClose={() => setPresentAt(null)} /> : null}
     </div>
   );
 }

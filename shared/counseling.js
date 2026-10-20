@@ -1,41 +1,42 @@
 // ============================================================
 // カウンセリング（新規のお客様）— サーバー / ブラウザ共通
 // ------------------------------------------------------------
-// お客様が来店時に答える Google フォームのカウンセリングシート（GAS 経由で読み取り）を
-// チェック項目に反映し、お悩みと施術後の状態から 3つのプランを提案する。
+// お悩みと施術後のお身体の状態から 3つのプランを提案し、料金（1回あたり・おトク額）を計算する。
+// お客様は SalonOne の当日の予約から選ぶ（api/_lib/salonone/visits.js）。
 // 項目・判定・金額は以前のダッシュボードの「カウンセリング」画面と同じ。
-// プランの金額・特典を変える場合はこのファイルを更新する（画面がまとめて切り替わる）。
+// 金額を変える場合は下の料金表（PLAN_CARDS）を更新する（スタッフの画面とお客様向けのご説明がまとめて切り替わる）。
+// 説明の文言（コンセプト・会員のポイント・本日の特典）は src/features/care/counseling/content.jsx。
 // ============================================================
 
 // ------------------------------------------------------------
-// お悩み箇所（Google フォームの選択肢 → チェック項目）
+// お悩み箇所
 // ------------------------------------------------------------
 export const CONCERN_CATEGORIES = [
-  { key: 'face', label: '小顔', course: '小顔矯正' },
-  { key: 'posture', label: '姿勢', course: '姿勢矯正' },
-  { key: 'pelvis', label: '骨盤', course: '骨盤矯正' },
+  { key: 'face', label: '小顔', course: '小顔矯正', area: '顔・頭' },
+  { key: 'posture', label: '姿勢', course: '姿勢矯正', area: '首・肩・背中' },
+  { key: 'pelvis', label: '骨盤', course: '骨盤矯正', area: '腰・下半身' },
 ];
 
 export const CONCERN_ITEMS = [
-  { id: 'c1', label: '頭・はちの張り', cat: 'face', formLabels: ['頭・はちの張り', '頭の張り', 'はちの張り'] },
-  { id: 'c2', label: '眼精疲労', cat: 'face', formLabels: ['眼精疲労'] },
-  { id: 'c3', label: '頬のたるみ', cat: 'face', formLabels: ['頬のたるみ', '頬たるみ'] },
-  { id: 'c4', label: '食いしばり・エラの張り', cat: 'face', formLabels: ['食いしばり', 'エラの張り', '食いしばり・エラの張り'] },
-  { id: 'c5', label: '顔の左右差', cat: 'face', formLabels: ['顔の左右差'] },
-  { id: 'c6', label: '首・ストレートネック', cat: 'posture', formLabels: ['ストレートネック', '首・ストレートネック', '首の痛み'] },
-  { id: 'c7', label: '肩こり', cat: 'posture', formLabels: ['肩こり', '肩凝り'] },
-  { id: 'c8', label: '姿勢・猫背', cat: 'posture', formLabels: ['猫背', '姿勢', '姿勢・猫背', '姿勢の悪さ'] },
-  { id: 'c9', label: '反り腰', cat: 'posture', formLabels: ['反り腰'] },
-  { id: 'c10', label: '腰痛', cat: 'pelvis', formLabels: ['腰痛'] },
-  { id: 'c11', label: '股関節・膝の痛み', cat: 'pelvis', formLabels: ['股関節', '膝の痛み', '股関節・膝の痛み', '股関節の痛み'] },
-  { id: 'c12', label: '冷え・むくみ', cat: 'pelvis', formLabels: ['冷え', 'むくみ', '冷え・むくみ'] },
-  { id: 'c13', label: '生理痛・生理不順', cat: 'pelvis', formLabels: ['生理痛', '生理不順', '生理痛・生理不順'] },
-  { id: 'c14', label: '下半身太り', cat: 'pelvis', formLabels: ['下半身太り'] },
-  { id: 'c15', label: '骨盤の歪み', cat: 'pelvis', formLabels: ['骨盤の歪み', '骨盤のゆがみ'] },
-  { id: 'c16', label: 'X脚・O脚', cat: 'pelvis', formLabels: ['X脚', 'O脚', 'X脚・O脚'] },
+  { id: 'c1', label: '頭・はちの張り', cat: 'face' },
+  { id: 'c2', label: '眼精疲労', cat: 'face' },
+  { id: 'c3', label: '頬のたるみ', cat: 'face' },
+  { id: 'c4', label: '食いしばり・エラの張り', cat: 'face' },
+  { id: 'c5', label: '顔の左右差', cat: 'face' },
+  { id: 'c6', label: '首・ストレートネック', cat: 'posture' },
+  { id: 'c7', label: '肩こり', cat: 'posture' },
+  { id: 'c8', label: '姿勢・猫背', cat: 'posture' },
+  { id: 'c9', label: '反り腰', cat: 'posture' },
+  { id: 'c10', label: '腰痛', cat: 'pelvis' },
+  { id: 'c11', label: '股関節・膝の痛み', cat: 'pelvis' },
+  { id: 'c12', label: '冷え・むくみ', cat: 'pelvis' },
+  { id: 'c13', label: '生理痛・生理不順', cat: 'pelvis' },
+  { id: 'c14', label: '下半身太り', cat: 'pelvis' },
+  { id: 'c15', label: '骨盤の歪み', cat: 'pelvis' },
+  { id: 'c16', label: 'X脚・O脚', cat: 'pelvis' },
 ];
 
-// 施術後にセラピストが付けるお身体の評価（severity の合計で集中ケアを判定）
+// 施術後にセラピストが付けるお身体の評価（severity の合計で集中ケアを判定）。お客様向けの画面には出さない
 export const FEEDBACK_ITEMS = [
   { id: 'f1', label: 'Before/Afterで変化を確認', severity: 1 },
   { id: 'f2', label: '施術直後にお客様が改善を実感', severity: 1 },
@@ -50,18 +51,8 @@ export const FEEDBACK_ITEMS = [
 ];
 
 // ------------------------------------------------------------
-// プラン
+// 料金表（月額。regular は 1回の料金 × 回数）
 // ------------------------------------------------------------
-/** おすすめに出すプラン（id は下の料金表 PLAN_CARDS の id） */
-export const PLAN_CATALOG = [
-  { key: 'Premium-4', id: 'Premium', name: 'Premium', freq: 4, freqLabel: '月4回（週1回）', types: '全種類対応', desc: '全種類×週1回で最も効率的に改善', price: 32000 },
-  { key: 'Standard-4', id: 'Standard', name: 'Standard', freq: 4, freqLabel: '月4回（週1回）', types: '2種類選択', desc: '2種類を選んで週1回の集中ケア', price: 28000 },
-  { key: 'Premium-2', id: 'Premium', name: 'Premium', freq: 2, freqLabel: '月2回', types: '全種類対応', desc: '全種類を月2回でバランス良くケア', price: 18000 },
-  { key: 'Standard-2', id: 'Standard', name: 'Standard', freq: 2, freqLabel: '月2回', types: '2種類選択', desc: '2種類×月2回で着実に改善', price: 15000 },
-  { key: 'Monthly-1', id: 'Monthly', name: '月一フル', freq: 1, freqLabel: '月1回', types: '全種類対応', desc: '月1回で全種類を無理なくメンテナンス', price: 10000 },
-];
-
-/** 料金表（月額。regular は 1回の料金 × 回数） */
 export const PLAN_CARDS = [
   { id: 'Standard', name: 'Standard', badge: '一番人気', unitPrice: 10000, types: ['小顔矯正・姿勢矯正・骨盤矯正から', '2種類'], prices: [{ freq: 2, regular: 20000, price: 15000 }, { freq: 4, regular: 40000, price: 28000 }] },
   { id: 'Premium', name: 'Premium', badge: 'オススメ', unitPrice: 11000, types: ['小顔矯正・姿勢矯正・骨盤矯正の', '全種類'], prices: [{ freq: 2, regular: 22000, price: 18000 }, { freq: 4, regular: 44000, price: 32000 }] },
@@ -72,40 +63,61 @@ export const PLAN_CARDS = [
 /** 初回入会費（サブスク会員の登録時に一律） */
 export const ENTRY_FEE = 5000;
 
-// ------------------------------------------------------------
-// フォームの回答 → チェック項目
-// ------------------------------------------------------------
-/** 1つの回答が当てはまるお悩みの ID（部分一致。「首」→ 首・ストレートネック など） */
-export function matchConcern(answer) {
-  const a = String(answer || '').trim();
-  if (!a) return [];
-  return CONCERN_ITEMS
-    .filter((item) => item.formLabels.some((fl) => a.includes(fl) || fl.includes(a)))
-    .map((item) => item.id);
-}
+const FREQ_LABELS = { 1: '月1回', 2: '月2回', 4: '月4回（週1回）', 8: '月8回（週2回）' };
 
 /**
- * フォームで選ばれたお悩み → { checked: { [id]: true }, unmatched: [チェック項目に無い回答] }
- * unmatched（「頭痛」「その他」など）は画面にそのまま見せる。
+ * 選べるプラン（料金表の 1行 = 1プラン。key は「料金表の id-回数」）。
+ * おすすめに出すのは Premium・Standard・月一フル（recommendPlans）。Quick はセラピストが選び直す時だけ。
  */
-export function mapFormConcerns(answers) {
-  const checked = {};
-  const unmatched = [];
-  for (const raw of answers || []) {
-    const a = String(raw || '').trim();
-    if (!a) continue;
-    const ids = matchConcern(a);
-    if (ids.length === 0) unmatched.push(a);
-    for (const id of ids) checked[id] = true;
-  }
-  return { checked, unmatched };
+export const PLAN_CATALOG = [
+  { id: 'Premium', freq: 4, types: '全種類対応', desc: '全種類×週1回で最も効率的に改善' },
+  { id: 'Standard', freq: 4, types: '2種類選択', desc: '2種類を選んで週1回の集中ケア' },
+  { id: 'Premium', freq: 2, types: '全種類対応', desc: '全種類を月2回でバランス良くケア' },
+  { id: 'Standard', freq: 2, types: '2種類選択', desc: '2種類×月2回で着実に改善' },
+  { id: 'Monthly', freq: 1, types: '全種類対応', desc: '月1回で全種類を無理なくメンテナンス' },
+  { id: 'Quick', freq: 4, types: '1種類選択', desc: '1種類にしぼって週1回のケア' },
+  { id: 'Quick', freq: 8, types: '1種類選択', desc: '1種類にしぼって週2回のケア' },
+].map((p) => {
+  const card = PLAN_CARDS.find((c) => c.id === p.id);
+  const row = card.prices.find((r) => r.freq === p.freq);
+  return { ...p, key: `${p.id}-${p.freq}`, name: card.name, freqLabel: FREQ_LABELS[p.freq] || `月${p.freq}回`, price: row.price, regular: row.regular };
+});
+
+export const planByKey = (key) => PLAN_CATALOG.find((p) => p.key === key) || null;
+
+/**
+ * 料金の見せ方: 1回あたり（月額 ÷ 回数）と、通常料金（1回の料金 × 回数）との差額
+ * @param {{ price:number, regular:number, freq:number }} plan PLAN_CATALOG の 1件
+ */
+export function planPricing(plan) {
+  if (!plan) return null;
+  return {
+    price: plan.price,
+    regular: plan.regular,
+    perVisit: Math.round(plan.price / plan.freq),
+    savings: Math.max(0, plan.regular - plan.price),
+  };
+}
+
+/** 次回のご来店の目安（月の回数から） */
+export function visitInterval(freq) {
+  if (freq >= 8) return { next: '3〜4日後', pace: '週2回' };
+  if (freq >= 4) return { next: '1週間後', pace: '週1回' };
+  if (freq >= 2) return { next: '2週間後', pace: '2週間に1回' };
+  return { next: '1ヶ月後', pace: '月1回' };
+}
+
+/** チェックしたお悩みを部位（コース）ごとにまとめる。お悩みの無い部位は items が空 */
+export function concernsByCategory(concerns = {}) {
+  return CONCERN_CATEGORIES.map((cat) => ({
+    ...cat,
+    items: CONCERN_ITEMS.filter((c) => c.cat === cat.key && concerns[c.id]),
+  }));
 }
 
 // ------------------------------------------------------------
 // おすすめプラン（しっかり / おすすめ / お手軽）
 // ------------------------------------------------------------
-const planByKey = (key) => PLAN_CATALOG.find((p) => p.key === key) || null;
-
 /**
  * @param {Object<string, boolean>} concerns  チェックしたお悩み { c1: true, ... }
  * @param {Object<string, boolean>} feedbacks チェックした施術後の評価 { f3: true, ... }
@@ -138,58 +150,4 @@ export function recommendPlans(concerns = {}, feedbacks = {}) {
 
   const [matsu, take, ume] = keys.map(planByKey);
   return { matsu, take, ume, reasons, categories, needIntensive };
-}
-
-// ------------------------------------------------------------
-// 回答の読み取り
-// ------------------------------------------------------------
-const NO_ANSWER = /^(いいえ|なし|無し|ない|無い|特になし|特に無し|特にない|該当なし|該当無し|該当しない|no|none|n\/a|-|ー|－|―)$/i;
-
-/** 「いいえ」「なし」「該当なし」など、注意事項として出さなくてよい回答か */
-export function isNoAnswer(value) {
-  const s = String(value == null ? '' : value).normalize('NFKC').trim().replace(/[。.]+$/, '');
-  return !s || NO_ANSWER.test(s);
-}
-
-// ------------------------------------------------------------
-// フォームの店舗（GAS の回答シート）とダッシュボードの店舗
-// ------------------------------------------------------------
-/** GAS（gas/counseling.gs）にある店舗。GAS から一覧を取れない時の控え */
-export const GAS_STORES = [
-  { key: 'honatsugi', name: '本厚木店' },
-  { key: 'yamato', name: '大和店' },
-  { key: 'yokohama', name: '横浜店' },
-  { key: 'machida', name: '町田店' },
-  { key: 'kawaguchi', name: '川口店' },
-];
-
-/** 店舗名の比較用（空白・「si'se」・末尾の「店」を除く） */
-export const storeNameKey = (name) => String(name || '')
-  .normalize('NFKC')
-  .replace(/si'?se/gi, '')
-  .replace(/[\s'’]/g, '')
-  .replace(/店$/, '')
-  .toLowerCase();
-
-/**
- * 店舗名が同じフォームの店舗（無ければ ''）。
- * 「新横浜店」が「横浜店」の回答を見てしまわないよう、部分一致では対応付けない。
- */
-export function guessGasStore(storeName, gasStores = GAS_STORES) {
-  const k = storeNameKey(storeName);
-  if (!k) return '';
-  const hit = gasStores.find((g) => storeNameKey(g.name) === k);
-  return hit ? hit.key : '';
-}
-
-/**
- * 店舗の対応先。設定（storeMap）があればそれ、'none' は「連携しない」、無ければ名前で自動。
- * @param {{ id:string, name:string }} store
- * @param {Object<string,string>} storeMap { [ダッシュボード店舗ID]: GAS の店舗キー | 'none' }
- */
-export function resolveGasStore(store, storeMap, gasStores = GAS_STORES) {
-  const explicit = storeMap && storeMap[store.id];
-  if (explicit === 'none') return '';
-  if (explicit && gasStores.some((g) => g.key === explicit)) return explicit;
-  return guessGasStore(store.name, gasStores);
 }

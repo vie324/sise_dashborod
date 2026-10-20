@@ -3,8 +3,10 @@
 // ------------------------------------------------------------
 // https://salonone.net/api-docs の形（schema_version 2026-10-16）で、決まった数字を返す。
 //   認証    X-SalonOne-Api-Key: test-key（違えば 401 unauthorized）
+//           test-key-pii は「個人情報を含める」キー（受付履歴に customer_name・memo が付く）
 //   明細    /shops /staffs /visit-sources（limit・cursor。1ページ 2件で返して続きを辿らせる）
-//   マーケ  /marketing/reception-history（shop_id 必須。1ページ 4件）
+//   マーケ  /marketing/reception-history（shop_id 必須。1ページ 4件。from = to の 1日だけの取得は
+//           施術ツールの「本日のお客様」用に、その日の予約のサンプルを返す）
 //           /marketing/retention-summary /marketing/retention-customers（limit は受け付けない）
 //
 // 単体で動かす:
@@ -16,6 +18,7 @@ import http from 'node:http';
 import { fileURLToPath } from 'node:url';
 
 export const FAKE_KEY = 'test-key';
+export const FAKE_PII_KEY = 'test-key-pii';
 const BASE = '/api/analytics/v1';
 
 const SHOPS = [
@@ -90,6 +93,37 @@ function receptionRows(shopId, month) {
       row({ id: Number(`${p}52`), customer: 9502, day: 9, staff: 203, consumed: 7000, amount: 7000, method: '現金' }),
     ];
   }
+  return [];
+}
+
+/**
+ * 1日だけの取得（from = to）で返す、その日の予約（施術ツールの「本日のお客様」の確認用）。
+ * 中央店（101）: 初回 5件（会計済み・契約あり / 来店中 / 予約 / 当日キャンセル / 無断キャンセル）+ 既存 2件
+ * 駅前店（102）: 初回 1件
+ */
+function dayRows(shopId, date) {
+  const p = date.replace(/-/g, '').slice(2);
+  const row = (o) => ({
+    appointment_id: Number(`${p}${o.n}`), shop_id: shopId, customer_id: 80000 + o.n, customer_number: String(5000 + o.n),
+    received_at: `${date}T09:00:00+09:00`, reserved_at: `${date}T${o.hm}:00+09:00`, status: o.status || 'booked', cancel_type: o.cancelType || null,
+    staff_id: o.staff, staff_name: staffName(o.staff), visit_source_id: null, visit_source_name: o.source || null,
+    classification: o.cls || 'existing', joined: !!o.joined, plans: o.plans || [],
+    amount: o.amount || 0, consumed_amount: o.consumed || 0, payment_method_name: null, payment_splits: [],
+    _name: o.name,
+  });
+  if (shopId === 101) {
+    return [
+      row({ n: 11, hm: '10:00', staff: 201, cls: 'new', source: 'ホットペッパー', status: 'completed', joined: true, name: '新井 ゆい', amount: 33000, consumed: 3000,
+        plans: [{ plan_name: 'Standard 月4回', plan_kind: 'subscription', amount: 28000, total_sessions: null }] }),
+      row({ n: 12, hm: '11:30', staff: 202, status: 'completed', name: '常連 一郎', amount: 8000, consumed: 8000 }),
+      row({ n: 13, hm: '13:00', staff: 202, cls: 'new', source: 'Instagram', status: 'checked_in', name: '上田 美咲' }),
+      row({ n: 14, hm: '15:00', staff: 201, cls: 'new', source: 'ホットペッパー', status: 'cancelled', cancelType: 'same_day', name: '取消 花子' }),
+      row({ n: 15, hm: '16:30', staff: 201, name: '継続 二郎' }),
+      row({ n: 16, hm: '18:00', staff: 201, cls: 'new', source: '紹介', name: '森 さやか' }),
+      row({ n: 17, hm: '19:00', staff: 202, cls: 'new', source: 'ホットペッパー', status: 'cancelled', cancelType: 'no_show', name: '無断 太郎' }),
+    ];
+  }
+  if (shopId === 102) return [row({ n: 51, hm: '12:00', staff: 203, cls: 'new', source: 'ホットペッパー', name: '駅前 はな' })];
   return [];
 }
 
@@ -180,7 +214,8 @@ const requireShop = (url) => {
  */
 export function fakeSalonOne(url, headers = {}) {
   const key = headers['x-salonone-api-key'] || headers['X-SalonOne-Api-Key'];
-  if (key !== FAKE_KEY) return error(401, 'unauthorized');
+  if (key !== FAKE_KEY && key !== FAKE_PII_KEY) return error(401, 'unauthorized');
+  const pii = key === FAKE_PII_KEY;
   if (!url.pathname.startsWith(BASE)) return error(404, 'not_found');
   const path = url.pathname.slice(BASE.length);
   switch (path) {
@@ -206,9 +241,13 @@ export function fakeSalonOne(url, headers = {}) {
       const to = url.searchParams.get('to') || '';
       if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) return error(400, 'invalid_request', { fields: ['from', 'to'] });
       const months = new Set([from.slice(0, 7), to.slice(0, 7)]);
-      const rows = [...months].flatMap((m) => receptionRows(shopId, m))
-        .filter((r) => r.reserved_at.slice(0, 10) >= from && r.reserved_at.slice(0, 10) <= to);
-      return paginate(rows, url, 4);
+      const rows = (from === to ? dayRows(shopId, from) : [...months].flatMap((m) => receptionRows(shopId, m)))
+        .filter((r) => r.reserved_at.slice(0, 10) >= from && r.reserved_at.slice(0, 10) <= to)
+        // 氏名・予約メモは「個人情報を含める」キーのときだけ（含めないキーでは項目ごと返さない）
+        .map(({ _name, ...r }) => (pii ? { ...r, customer_name: _name || `顧客 ${r.customer_id}`, memo: '（予約メモ）' } : r));
+      const out = paginate(rows, url, 4);
+      out.body.meta.pii_included = pii;
+      return out;
     }
     case '/marketing/retention-summary': {
       const shopId = requireShop(url);

@@ -15,7 +15,7 @@ function SetupSteps() {
   return (
     <ol className="space-y-3 text-[13px] leading-relaxed text-ink-2">
       {[
-        <>SalonOne の管理画面で <strong className="text-ink">ブランド管理 &gt; 「API連携」</strong> を開き、新しいキーを発行します（用途: 社内分析ダッシュボード／有効期限: 1年がおすすめ）。<span className="block text-xs text-muted">「個人情報を含める」「サロンワンのログインを必須にする」はオフのままで構いません（集計に氏名などは使いません）。</span></>,
+        <>SalonOne の管理画面で <strong className="text-ink">ブランド管理 &gt; 「API連携」</strong> を開き、新しいキーを発行します（用途: 社内分析ダッシュボード／有効期限: 1年がおすすめ）。<span className="block text-xs text-muted">「サロンワンのログインを必須にする」はオフにします。「個人情報を含める」もオフで構いません（集計に氏名などは使いません。施術ツールのカウンセリングでお客様のお名前も一覧に出したい場合だけオンにします。オフの時は顧客番号で選びます）。</span></>,
         <>Vercel のプロジェクト設定 &gt; Environment Variables に <code className="rounded bg-surface-3 px-1">SALONONE_API_KEY</code> を追加し、再デプロイします（キーはサーバーだけで使い、画面には出しません）。</>,
         <>このページの <strong className="text-ink">接続テスト</strong> で各データが取得できるか確認し、下で店舗・スタッフ・来店経由を対応付けます。</>,
       ].map((t, i) => (

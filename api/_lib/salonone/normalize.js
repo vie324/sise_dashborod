@@ -3,14 +3,14 @@
 // ------------------------------------------------------------
 // 仕様: https://salonone.net/api-docs（schema_version 2026-10-16）
 //   /shops /staffs /visit-sources        明細（id・deleted_at など。項目の一覧は非公開）
-//   /marketing/reception-history         受付履歴の明細（予約 1件 1行）
+//   /marketing/reception-history         受付履歴の明細（予約 1件 1行。当日分は施術ツールの「本日のお客様」にも使う）
 //   /marketing/retention-summary         継続管理のサマリー
 //   /marketing/retention-customers       継続管理の顧客一覧
 // 明細（/shops など）の項目名は仕様に載っていないため、候補を複数受け付ける。
 // 正規化後の形は shared/metrics.js 冒頭のコメントを参照。
 // ============================================================
 
-import { toJstDate } from '../../../shared/dates.js';
+import { toJstDate, toJstTime } from '../../../shared/dates.js';
 
 /** obj から候補パス（'a.b' 形式可）を順に探して最初に見つかった値を返す */
 export function pick(obj, paths, fallback = undefined) {
@@ -168,6 +168,34 @@ export function normalizeReception(raw) {
     joined: toBool(pick(raw, ['joined'], false)),
     plans: normalizePlans(raw),
     referralStaffId: toId(pick(raw, ['referral_staff_id', 'referralStaffId'])),
+  };
+}
+
+/**
+ * 受付履歴の明細 1行 → 施術ツール（カウンセリング）の「本日のお客様」1行
+ *   区分 new（その店舗で最初の予約）を初回のお客様とする。
+ *   氏名 customer_name は「個人情報を含める」キーのときだけ項目ごと返る（含めないキーでは項目が無い）。
+ *   hasNameField でどちらのキーかを見分ける。予約メモ（memo）は画面で使わないので持たない。
+ */
+export function normalizeVisit(raw) {
+  const r = normalizeReception(raw);
+  const at = pick(raw, ['reserved_at', 'reservedAt', 'start_at', 'visit_start_at']);
+  const name = raw && typeof raw === 'object' ? (raw.customer_name ?? raw.customerName) : null;
+  return {
+    id: r.id,
+    shopId: r.shopId,
+    date: r.date,
+    time: toJstTime(at),
+    status: r.status,
+    isNew: r.customerClass === 'new',
+    customerNumber: String(pick(raw, ['customer_number', 'customer_code', 'customerNumber'], '')),
+    customerName: name == null ? null : String(name).trim().slice(0, 60) || null,
+    hasNameField: !!raw && typeof raw === 'object' && ('customer_name' in raw || 'customerName' in raw),
+    staffId: r.staffId,
+    staffName: r.staffName,
+    sourceName: r.sourceName,
+    joined: r.joined,
+    plans: r.plans.filter((p) => p.kind === 'subscription' || p.kind === 'ticket').map((p) => ({ name: p.name, kind: p.kind })),
   };
 }
 

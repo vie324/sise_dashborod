@@ -21,7 +21,7 @@ const n = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 const nOrNull = (v) => (v == null || !Number.isFinite(Number(v)) ? null : Number(v));
 
 /** ミリ秒 → JST の「M/D HH:mm」 */
-function jstStamp(ms) {
+export function jstStamp(ms) {
   const iso = new Date(ms + 9 * 3600 * 1000).toISOString();
   return `${Number(iso.slice(5, 7))}/${Number(iso.slice(8, 10))} ${iso.slice(11, 16)}`;
 }
@@ -90,7 +90,7 @@ function contract3ch(m) {
   return { visits, contracts, ratePct: visits > 0 ? (contracts / visits) * 100 : null };
 }
 
-async function prepare(staffCtx, { refresh } = {}) {
+export async function prepare(staffCtx, { refresh } = {}) {
   const appCtx = await loadAppContext();
   const master = await loadMaster(appCtx, { refresh });
   // デモでダッシュボード側に店舗が無い（未登録・DB未接続）ときはサンプル店舗を店舗として扱う

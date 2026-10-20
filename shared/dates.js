@@ -103,6 +103,23 @@ export function toJstDate(value) {
   return new Date(t + JST_OFFSET_MS).toISOString().slice(0, 10);
 }
 
+/**
+ * 日時文字列を JST の時刻 'HH:mm' にする（toJstDate と同じ扱い。読めなければ ''）。
+ *   '2026-11-03T10:00:00+09:00' → '10:00' / '2026-11-03T01:30:00Z' → '10:30' / '2026-11-03 18:15:00' → '18:15'
+ */
+export function toJstTime(value) {
+  if (!value) return '';
+  const s = String(value).trim();
+  const hasZone = /([zZ]|[+-]\d{2}:?\d{2})$/.test(s);
+  if (!hasZone) {
+    const m = s.match(/[T\s](\d{1,2}):(\d{2})/);
+    return m ? `${pad2(Number(m[1]))}:${m[2]}` : '';
+  }
+  const t = Date.parse(s);
+  if (Number.isNaN(t)) return '';
+  return new Date(t + JST_OFFSET_MS).toISOString().slice(11, 16);
+}
+
 /** '2026-11' → '2026年11月' */
 export function formatMonthJa(ym) {
   if (!isMonth(ym)) return ym || '';

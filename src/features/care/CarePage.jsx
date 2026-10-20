@@ -41,7 +41,7 @@ export default function CarePage() {
     <>
       <PageHeader
         title="施術ツール"
-        subtitle="カウンセリングシートの確認・プランのご提案、姿勢分析、施術レポートの作成ができます"
+        subtitle="本日のお客様へのご説明・プランのご提案、姿勢分析、施術レポートの作成ができます"
         actions={<Segmented value={tool} onChange={changeTool} options={TOOLS} ariaLabel="ツールの切り替え" />}
       />
       <div hidden={tool !== 'counseling'}>

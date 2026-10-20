@@ -7,7 +7,7 @@
 // 本番の SalonOne データと混ざらないよう、画面には必ず「デモ」表示を出す。
 // ============================================================
 
-import { addMonths, daysInMonth, addDays, monthsBetween, weekdayOf, monthOf } from '../../../shared/dates.js';
+import { addMonths, daysInMonth, addDays, monthsBetween, weekdayOf, monthOf, todayJst } from '../../../shared/dates.js';
 import { isOwnerRole } from '../../../shared/roles.js';
 
 const BASE_MONTH = '2025-09'; // シミュレーション開始月（以降を順に積み上げる）
@@ -220,6 +220,60 @@ function simulateStaff(st, untilMonth, emitMonths, out) {
       }
     }
   }
+}
+
+// ------------------------------------------------------------
+// 施術ツールの「本日のお客様」（受付履歴の当日分の代わり）
+// ------------------------------------------------------------
+// 名前は架空。「個人情報を含める」キーで取得したときの見え方を確かめられるよう名前も付ける。
+const DEMO_GUESTS = ['山本 さくら', '小林 美穂', '中村 あかり', '佐々木 恵', '加藤 由紀', '松本 理沙', '井上 真央', '木村 彩', '林 千尋', '清水 遥'];
+const DEMO_SLOTS = ['10:00', '11:00', '12:30', '14:00', '15:30', '17:00', '18:30', '19:30'];
+
+/**
+ * 店舗・日付ごとに決まった並びの予約を返す（normalizeVisit と同じ形）。
+ * 時刻を過ぎた予約は来店中（1時間）→ 会計済みにする。初回のお客様は毎日 2〜4名。
+ * @param {{ shopId:string, staff:Array<{id,name,shopId}>, date:string, now?:number }} p
+ */
+export function demoVisits({ shopId, staff, date, now = Date.now() }) {
+  const rng = mulberry32(hashSeed(`sise-demo-visits:${shopId}:${date}`));
+  const people = (staff || []).filter((s) => s.shopId === shopId);
+  const today = todayJst(now);
+  const jst = new Date(now + 9 * 3600 * 1000);
+  const nowMin = date < today ? Infinity : date > today ? -Infinity : jst.getUTCHours() * 60 + jst.getUTCMinutes();
+  const out = [];
+  let guest = Math.floor(rng() * DEMO_GUESTS.length);
+  DEMO_SLOTS.forEach((time, i) => {
+    // 乱数は時刻に関係なく同じ順に引く（時刻によって予約の顔ぶれが変わらないように）
+    const isNew = i % 3 === 1 || rng() < 0.2;
+    const empty = !isNew && rng() < 0.35; // 空き枠
+    const buys = rng() < 0.5;
+    const plan = pickWeighted(rng, PLANS);
+    const person = people.length ? people[Math.floor(rng() * people.length)] : null;
+    const customerNumber = String(1000 + Math.floor(rng() * 9000));
+    const source = pickWeighted(rng, DEMO_SOURCES).name;
+    if (empty) return;
+    const [h, m] = time.split(':').map(Number);
+    const start = h * 60 + m;
+    const status = nowMin >= start + 60 ? 'completed' : nowMin >= start ? 'checked_in' : 'reserved';
+    const contracted = isNew && buys && status === 'completed';
+    out.push({
+      id: `demo-${shopId}-${date}-${i}`,
+      shopId,
+      date,
+      time,
+      status,
+      isNew,
+      customerNumber,
+      customerName: DEMO_GUESTS[guest++ % DEMO_GUESTS.length],
+      hasNameField: true,
+      staffId: person ? person.id : '',
+      staffName: person ? person.name : '',
+      sourceName: isNew ? source : '',
+      joined: contracted,
+      plans: contracted ? [{ name: plan.name, kind: 'subscription' }] : [],
+    });
+  });
+  return out;
 }
 
 const cache = new Map();

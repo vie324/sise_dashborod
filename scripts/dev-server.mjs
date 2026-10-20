@@ -5,8 +5,7 @@
 //   node scripts/dev-server.mjs --mock-db                    メモリ上の疑似 DB（.dev-data/db.json）
 //   PORT=4000 node scripts/dev-server.mjs                     ポート変更
 //   SISE_MOCK_DB_FILE=.dev-data/other.json                   疑似 DB のファイルを分ける
-// SalonOne は SALONONE_API_KEY が無ければデモデータで動く。
-// カウンセリング（GAS）は COUNSELING_GAS_URL が無ければ、--mock-db のとき疑似 GAS（scripts/dev/gas-fake.mjs）を使う。
+// SalonOne は SALONONE_API_KEY が無ければデモデータで動く（施術ツールの「本日のお客様」もデモの予約）。
 // 画面の変更を反映するには別ターミナルで npm run watch を動かしておく。
 // ============================================================
 
@@ -36,15 +35,6 @@ if (useMock) {
   const dbFile = process.env.SISE_MOCK_DB_FILE || path.join(root, '.dev-data/db.json');
   globalThis.__SISE_SUPABASE_MOCK__ = createMockClient(dbFile);
   console.log(`疑似 DB を使用します (${path.relative(root, dbFile)})`);
-}
-
-// 疑似カウンセリング GAS（同じサーバーの /__fake-gas/exec で返す）
-const FAKE_GAS_PATH = '/__fake-gas/exec';
-// COUNSELING_GAS_URL= （空）で起動すると、疑似 GAS を使わず「未設定」の画面を確かめられる
-const fakeGas = useMock && process.env.COUNSELING_GAS_URL === undefined ? (await import('./dev/gas-fake.mjs')).fakeGas : null;
-if (fakeGas) {
-  process.env.COUNSELING_GAS_URL = `http://127.0.0.1:${port}${FAKE_GAS_PATH}`;
-  console.log('カウンセリングは疑似 GAS を使用します（設定 → カウンセリング で店舗を対応付けてください）');
 }
 
 const ROUTES = {
@@ -80,12 +70,6 @@ function readBody(req) {
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://localhost:${port}`);
-  if (fakeGas && url.pathname === FAKE_GAS_PATH) {
-    const out = fakeGas(url);
-    res.writeHead(out.status, { 'Content-Type': 'application/json; charset=utf-8' });
-    res.end(JSON.stringify(out.body));
-    return;
-  }
   if (ROUTES[url.pathname]) {
     const raw = req.method === 'POST' ? await readBody(req) : '';
     let body = raw;

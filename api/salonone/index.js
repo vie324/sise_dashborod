@@ -4,6 +4,7 @@
 // GET /api/salonone?action=status                         接続状態
 // GET /api/salonone?action=summary&month=YYYY-MM&storeId=  月次の実績・インセンティブ
 // GET /api/salonone?action=trend&months=6&month=YYYY-MM&storeId=  月次推移
+// GET /api/salonone?action=visits&storeId=                本日の予約（施術ツールのカウンセリング用）
 // GET /api/salonone?action=master                         対応付け用マスタ（管理者・本部）
 // GET /api/salonone?action=probe                          接続テスト（管理者・本部）
 // POST /api/salonone?action=clearCache                    キャッシュ破棄（管理者・本部）
@@ -14,6 +15,7 @@
 import { cors } from '../_lib/cors.js';
 import { authorizeRequest, isAdminOrOwner } from '../_lib/auth.js';
 import { buildSummary, buildTrend, buildMaster, AccessError } from '../_lib/salonone/summary.js';
+import { buildVisits } from '../_lib/salonone/visits.js';
 import { salonOneConfig, probe } from '../_lib/salonone/client.js';
 import { clearSalonOneCache } from '../_lib/salonone/provider.js';
 import { isMonth, todayJst, monthOf, addMonths, monthRange } from '../../shared/dates.js';
@@ -57,6 +59,9 @@ export default async function handler(req, res) {
         const months = Math.min(Math.max(parseInt(q.months, 10) || 6, 1), 24);
         return res.json(await buildTrend(staffCtx, { months, endMonth: month, storeId, refresh }));
       }
+      case 'visits':
+        // 日付は常に今日（JST）。店舗は 1つを指定する
+        return res.json(await buildVisits(staffCtx, { storeId: q.storeId, refresh }));
       case 'master':
         return res.json(await buildMaster(staffCtx, { refresh }));
       case 'probe': {
