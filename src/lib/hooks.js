@@ -138,6 +138,49 @@ export function useGoals(month) {
   return { ...res, save, copyFrom };
 }
 
+/** 3ヶ月の目標（start = 期の最初の月） */
+export function useQuarterGoals(start) {
+  const res = useResource(start ? `goals:q:${start}` : null, () => unwrap(dbGet('goals', { period: 'quarter', month: start })), { maxAge: 60 * 1000 });
+  const save = useCallback(async (scope, targetId, values) => {
+    const r = await dbPost('goals', { action: 'set', period: 'quarter', month: start, scope, targetId, values });
+    if (!r || r.error) throw new Error((r && r.error) || '保存に失敗しました');
+    invalidate(`goals:q:${start}`);
+    return r;
+  }, [start]);
+  const copyFrom = useCallback(async (fromStart) => {
+    const r = await dbPost('goals', { action: 'copyFrom', period: 'quarter', month: start, fromMonth: fromStart });
+    if (!r || r.error) throw new Error((r && r.error) || 'コピーに失敗しました');
+    invalidate(`goals:q:${start}`);
+    return r;
+  }, [start]);
+  // 3ヶ月の目標を、まだ決めていない単月の目標に振り分ける
+  const splitToMonths = useCallback(async () => {
+    const r = await dbPost('goals', { action: 'splitQuarter', period: 'quarter', month: start });
+    if (!r || r.error) throw new Error((r && r.error) || '振り分けに失敗しました');
+    invalidate('goals:');
+    return r;
+  }, [start]);
+  return { ...res, save, copyFrom, splitToMonths };
+}
+
+/** 特別目標（店舗ごとの期限付きの目標。設定はオーナーのみ） */
+export function useSpecialGoals() {
+  const res = useResource('goals:special', () => unwrap(dbGet('goals', { period: 'special' }), 'items'), { maxAge: 60 * 1000 });
+  const save = useCallback(async (goal) => {
+    const r = await dbPost('goals', { action: 'specialSet', goal });
+    if (!r || r.error) throw new Error((r && r.error) || '保存に失敗しました');
+    invalidate('goals:special');
+    return r;
+  }, []);
+  const remove = useCallback(async (id) => {
+    const r = await dbPost('goals', { action: 'specialDelete', id });
+    if (!r || r.error) throw new Error((r && r.error) || '削除に失敗しました');
+    invalidate('goals:special');
+    return r;
+  }, []);
+  return { ...res, save, remove };
+}
+
 export function useDashConfig() {
   return useResource('dashConfig', () => unwrap(dbGet('dashConfig'), 'config'), { maxAge: 5 * 60 * 1000 });
 }

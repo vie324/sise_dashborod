@@ -298,6 +298,7 @@ export async function buildTrend(staffCtx, { months: count = 6, endMonth, storeI
       consumedSales: combined.consumedSales,
       depositSales: combined.depositSales,
       treatmentCount: combined.treatmentCount,
+      customerCount: combined.customerCount,
       newCount: combined.newCount,
       repeatCount: combined.repeatCount,
       purchaseCount: combined.purchaseCount,
