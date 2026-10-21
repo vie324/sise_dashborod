@@ -26,6 +26,15 @@
 施術ツールのカウンセリング（本日のお客様）も同じキーで SalonOne の予約を読む。お名前まで出すかはキーの「個人情報を含める」で決まる
 （[docs/COUNSELING.md](docs/COUNSELING.md)）。
 
+### カウンセリングフォーム（Google フォーム / GAS・フォームを使う店舗だけ）
+
+| 変数 | 用途 | 既定挙動 |
+|---|---|---|
+| `COUNSELING_GAS_URL` | カウンセリングの回答を返す GAS のウェブアプリ URL | 未設定なら 設定 > カウンセリングフォーム で保存した値。どちらも無ければフォームとはつながない（予約から始める・チェックは手で付ける） |
+| `COUNSELING_GAS_TOKEN` | GAS の合言葉（スクリプト プロパティ `DASHBOARD_TOKEN` と同じ） | 未設定なら 設定 > カウンセリングフォーム の値 |
+
+手順は [docs/COUNSELING.md](docs/COUNSELING.md) §4。
+
 ### 推奨（設定しないと機能縮退）
 
 | 変数 | 用途 | 既定挙動 |
@@ -40,8 +49,8 @@
 ### 削除してよい環境変数（旧機能）
 
 SalonOne へ移った機能の変数は使わなくなった。Vercel から削除してよい:
-`SQUARE_*`, `LINE_STORE_*`, `GAS_WEBHOOK_URL`, `META_*`, `TIKTOK_*`, `SISE_RESEND_API_KEY`, `SISE_DAILY_REPORT_FROM`, `SISE_DAILY_REPORT_TO`, `BLOB_READ_WRITE_TOKEN`,
-`COUNSELING_GAS_URL`, `COUNSELING_GAS_TOKEN`（カウンセリングの Google フォーム連携。SalonOne の予約に切り替えた）
+`SQUARE_*`, `LINE_STORE_*`, `GAS_WEBHOOK_URL`, `META_*`, `TIKTOK_*`, `SISE_RESEND_API_KEY`, `SISE_DAILY_REPORT_FROM`, `SISE_DAILY_REPORT_TO`, `BLOB_READ_WRITE_TOKEN`
+（`COUNSELING_GAS_*` はカウンセリングフォームで使うので消さない）
 
 > LINE 公式アカウントの Webhook URL を SalonOne の LINE 連携に切り替えていない場合は、先に SalonOne 側の設定を済ませること
 > （このダッシュボードの `/api/line/webhook` は削除済み）。
@@ -163,18 +172,21 @@ Vercel の Environment Variables に `SISE_ADMIN_PASSWORD_HASH = <ハッシュ>`
 
 ---
 
-## 8.5 カウンセリング（本日のお客様・お客様へのご説明）
+## 8.5 カウンセリング（本日のお客様・カウンセリングフォーム・お客様へのご説明）
 
 施術ツール →「カウンセリング」は、SalonOne の今日の予約からお客様を選び、カウンセリングの後に
-全画面のご説明（コンセプト・改善のイメージ・おすすめプラン・特典・まとめ）をお客様に見せる。詳細は [docs/COUNSELING.md](docs/COUNSELING.md)。
+全画面のご説明（コンセプト・改善のイメージ・おすすめプラン・特典・まとめ）をお客様に見せる。
+Google フォームでカウンセリングシートを取っている店舗は、回答からお悩みを自動でチェックし、記入内容を表示する。詳細は [docs/COUNSELING.md](docs/COUNSELING.md)。
 
 1. 設定 > SalonOne連携 で店舗を対応付ける（対応付けの無い店舗は「予約に無いお客様」として手入力で使う）
-2. お名前を一覧・ご説明に出したい場合だけ、SalonOne のキーを「個人情報を含める」で発行し直す（含めない場合は顧客番号で選ぶ）
-3. 以前の Google フォーム連携（GAS）を使っていた場合:
-   - Apps Script の **デプロイを管理** で、そのデプロイを **アーカイブ**（URL が止まる）
-   - Vercel の `COUNSELING_GAS_URL` / `COUNSELING_GAS_TOKEN` を削除
-   - 設定画面で保存していた URL・合言葉は `dash_config` の `counseling.config` に残っている（画面・API からは読めない）。
-     不要なら `DELETE FROM dash_config WHERE key = 'counseling.config';`
+2. お名前を一覧・ご説明に出したい場合（フォームの回答と予約をお名前で自動で結びつけたい場合も）は、
+   SalonOne のキーを「個人情報を含める」で発行し直す（含めない場合は顧客番号で選び、シートは「フォームの回答」から選ぶ）
+3. Google フォームの店舗だけ:
+   - スプレッドシートの Apps Script に `gas/counseling.gs` を貼り付け、スクリプト プロパティ `DASHBOARD_TOKEN`（合言葉）を設定
+   - ウェブアプリとしてデプロイ（実行: 自分 / アクセス: 全員）
+   - 設定 > カウンセリングフォーム に URL と合言葉を保存 →「接続テスト」→ 名前の違う店舗は対応付け。
+     **SalonOne の問診票を使う店舗は「連携しない」**
+   - 古いデプロイ（以前のダッシュボードに埋め込まれていた URL）はアーカイブして止める
 
 ---
 
@@ -278,7 +290,7 @@ GROUP BY s.id ORDER BY s.role, s.name;
 
 -- 目標・SalonOne の対応付け（dash_config に JSON で保存）
 --   goals.YYYY-MM   単月の目標 / goals.q.YYYY-MM  3ヶ月の目標（期の最初の月）/ goals.special  特別目標
-SELECT key, value FROM dash_config WHERE key LIKE 'goals.%' OR key LIKE 'salonone.%' ORDER BY key;
+SELECT key, value FROM dash_config WHERE key LIKE 'goals.%' OR key LIKE 'salonone.%' OR key LIKE 'counseling.%' ORDER BY key;
 ```
 
 ### 使わなくなったテーブル

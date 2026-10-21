@@ -6,7 +6,7 @@ import { CONCERN_CATEGORIES, CONCERN_ITEMS, FEEDBACK_ITEMS, PLAN_CATALOG } from 
 // ============================================================
 // ヒアリング＆プラン診断
 // ------------------------------------------------------------
-// お悩み（カウンセリングで伺った内容。ご説明の画面でお客様がタップしても入る）と
+// お悩み（カウンセリングで伺った内容。Google フォームの店舗は回答から自動で入る。ご説明の画面でお客様がタップしても入る）と
 // 施術後の評価（セラピストが付ける）から 3つのプランを提案する。カードか「セラピスト変更」で選び直せる。
 // ============================================================
 
@@ -22,6 +22,15 @@ function CheckItem({ checked, onToggle, children, aside }) {
       <span className="min-w-0 flex-1">{children}</span>
       {aside}
     </button>
+  );
+}
+
+/** カウンセリングシート（Google フォーム）の回答から入れた項目の印 */
+function FormMark() {
+  return (
+    <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#e6f0fb] text-[#1f4f8f] dark:bg-[#3987e5]/20 dark:text-[#b8d3f6]" title="カウンセリングシートの回答から">
+      <Icon name="file-text" size={12} strokeWidth={2.2} /><span className="sr-only">カウンセリングシートの回答から</span>
+    </span>
   );
 }
 
@@ -58,12 +67,14 @@ function RecCard({ rank, plan, selected, onSelect }) {
 
 /**
  * @param {Object<string,boolean>} concerns / feedbacks  チェック状態
+ * @param {Object<string,boolean>} [fromForm]  カウンセリングシート（Google フォーム）の回答から入れた項目（「フォーム」の印）
  * @param {ReturnType<import('../../../../shared/counseling.js').recommendPlans>} recommendation
  * @param {string} selectedKey  選んでいるプラン（PLAN_CATALOG の key）
  * @param {string} overrideKey  セラピストが選び直したプラン（空なら自動）
  */
-export default function Hearing({ concerns, feedbacks, onToggleConcern, onToggleFeedback, recommendation, selectedKey, overrideKey, onSelectPlan }) {
+export default function Hearing({ concerns, feedbacks, fromForm = {}, onToggleConcern, onToggleFeedback, recommendation, selectedKey, overrideKey, onSelectPlan }) {
   const concernCount = CONCERN_ITEMS.filter((c) => concerns[c.id]).length;
+  const formCount = CONCERN_ITEMS.filter((c) => fromForm[c.id]).length;
   const feedbackCount = FEEDBACK_ITEMS.filter((f) => feedbacks[f.id]).length;
   return (
     <Card title="ヒアリング＆プラン診断" icon="list-checks" subtitle="カウンセリングで伺ったお悩みと、施術後のお身体の状態をチェックすると、おすすめプランが出ます">
@@ -72,6 +83,7 @@ export default function Hearing({ concerns, feedbacks, onToggleConcern, onToggle
           <h3 id="hearing-concerns" className="mb-2 flex items-center gap-2 text-sm font-bold text-ink">
             お悩み箇所
             <span className="text-xs font-medium text-muted">{concernCount}箇所</span>
+            {formCount ? <span className="ml-auto inline-flex items-center gap-1 text-[11px] font-semibold text-[#1f4f8f] dark:text-[#b8d3f6]"><FormMark />＝カウンセリングシートから</span> : null}
           </h3>
           <div className="space-y-3">
             {CONCERN_CATEGORIES.map((cat) => (
@@ -79,7 +91,8 @@ export default function Hearing({ concerns, feedbacks, onToggleConcern, onToggle
                 <div className="mb-1.5 text-[11px] font-bold text-muted">{cat.course}<span className="font-medium">（{cat.area}）</span></div>
                 <div className="grid gap-1.5 sm:grid-cols-2">
                   {CONCERN_ITEMS.filter((c) => c.cat === cat.key).map((item) => (
-                    <CheckItem key={item.id} checked={!!concerns[item.id]} onToggle={() => onToggleConcern(item.id)}>
+                    <CheckItem key={item.id} checked={!!concerns[item.id]} onToggle={() => onToggleConcern(item.id)}
+                      aside={fromForm[item.id] ? <FormMark /> : null}>
                       {item.label}
                     </CheckItem>
                   ))}

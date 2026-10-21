@@ -3,13 +3,17 @@
 // ------------------------------------------------------------
 // お悩みと施術後のお身体の状態から 3つのプランを提案し、料金（1回あたり・おトク額）を計算する。
 // お客様は SalonOne の当日の予約から選ぶ（api/_lib/salonone/visits.js）。
+// Google フォームでカウンセリングシートを取っている店舗は、その回答（GAS 経由。api/_lib/counseling.js）から
+// お悩みのチェックを入れ、予約とはお名前で結びつける。
 // 項目・判定・金額は以前のダッシュボードの「カウンセリング」画面と同じ。
 // 金額を変える場合は下の料金表（PLAN_CARDS）を更新する（スタッフの画面とお客様向けのご説明がまとめて切り替わる）。
 // 説明の文言（コンセプト・会員のポイント・本日の特典）は src/features/care/counseling/content.jsx。
 // ============================================================
 
+import { addDays, toJstDate } from './dates.js';
+
 // ------------------------------------------------------------
-// お悩み箇所
+// お悩み箇所（formLabels: Google フォームの選択肢の言葉 → このチェック項目）
 // ------------------------------------------------------------
 export const CONCERN_CATEGORIES = [
   { key: 'face', label: '小顔', course: '小顔矯正', area: '顔・頭' },
@@ -18,22 +22,22 @@ export const CONCERN_CATEGORIES = [
 ];
 
 export const CONCERN_ITEMS = [
-  { id: 'c1', label: '頭・はちの張り', cat: 'face' },
-  { id: 'c2', label: '眼精疲労', cat: 'face' },
-  { id: 'c3', label: '頬のたるみ', cat: 'face' },
-  { id: 'c4', label: '食いしばり・エラの張り', cat: 'face' },
-  { id: 'c5', label: '顔の左右差', cat: 'face' },
-  { id: 'c6', label: '首・ストレートネック', cat: 'posture' },
-  { id: 'c7', label: '肩こり', cat: 'posture' },
-  { id: 'c8', label: '姿勢・猫背', cat: 'posture' },
-  { id: 'c9', label: '反り腰', cat: 'posture' },
-  { id: 'c10', label: '腰痛', cat: 'pelvis' },
-  { id: 'c11', label: '股関節・膝の痛み', cat: 'pelvis' },
-  { id: 'c12', label: '冷え・むくみ', cat: 'pelvis' },
-  { id: 'c13', label: '生理痛・生理不順', cat: 'pelvis' },
-  { id: 'c14', label: '下半身太り', cat: 'pelvis' },
-  { id: 'c15', label: '骨盤の歪み', cat: 'pelvis' },
-  { id: 'c16', label: 'X脚・O脚', cat: 'pelvis' },
+  { id: 'c1', label: '頭・はちの張り', cat: 'face', formLabels: ['頭・はちの張り', '頭の張り', 'はちの張り'] },
+  { id: 'c2', label: '眼精疲労', cat: 'face', formLabels: ['眼精疲労'] },
+  { id: 'c3', label: '頬のたるみ', cat: 'face', formLabels: ['頬のたるみ', '頬たるみ'] },
+  { id: 'c4', label: '食いしばり・エラの張り', cat: 'face', formLabels: ['食いしばり', 'エラの張り', '食いしばり・エラの張り'] },
+  { id: 'c5', label: '顔の左右差', cat: 'face', formLabels: ['顔の左右差'] },
+  { id: 'c6', label: '首・ストレートネック', cat: 'posture', formLabels: ['ストレートネック', '首・ストレートネック', '首の痛み'] },
+  { id: 'c7', label: '肩こり', cat: 'posture', formLabels: ['肩こり', '肩凝り'] },
+  { id: 'c8', label: '姿勢・猫背', cat: 'posture', formLabels: ['猫背', '姿勢', '姿勢・猫背', '姿勢の悪さ'] },
+  { id: 'c9', label: '反り腰', cat: 'posture', formLabels: ['反り腰'] },
+  { id: 'c10', label: '腰痛', cat: 'pelvis', formLabels: ['腰痛'] },
+  { id: 'c11', label: '股関節・膝の痛み', cat: 'pelvis', formLabels: ['股関節', '膝の痛み', '股関節・膝の痛み', '股関節の痛み'] },
+  { id: 'c12', label: '冷え・むくみ', cat: 'pelvis', formLabels: ['冷え', 'むくみ', '冷え・むくみ'] },
+  { id: 'c13', label: '生理痛・生理不順', cat: 'pelvis', formLabels: ['生理痛', '生理不順', '生理痛・生理不順'] },
+  { id: 'c14', label: '下半身太り', cat: 'pelvis', formLabels: ['下半身太り'] },
+  { id: 'c15', label: '骨盤の歪み', cat: 'pelvis', formLabels: ['骨盤の歪み', '骨盤のゆがみ'] },
+  { id: 'c16', label: 'X脚・O脚', cat: 'pelvis', formLabels: ['X脚', 'O脚', 'X脚・O脚'] },
 ];
 
 // 施術後にセラピストが付けるお身体の評価（severity の合計で集中ケアを判定）。お客様向けの画面には出さない
@@ -113,6 +117,123 @@ export function concernsByCategory(concerns = {}) {
     ...cat,
     items: CONCERN_ITEMS.filter((c) => c.cat === cat.key && concerns[c.id]),
   }));
+}
+
+// ------------------------------------------------------------
+// フォームの回答 → チェック項目
+// ------------------------------------------------------------
+/** 1つの回答が当てはまるお悩みの ID（部分一致。「首」→ 首・ストレートネック など） */
+export function matchConcern(answer) {
+  const a = String(answer || '').trim();
+  if (!a) return [];
+  return CONCERN_ITEMS
+    .filter((item) => item.formLabels.some((fl) => a.includes(fl) || fl.includes(a)))
+    .map((item) => item.id);
+}
+
+/**
+ * フォームで選ばれたお悩み → { checked: { [id]: true }, unmatched: [チェック項目に無い回答] }
+ * unmatched（「頭痛」「その他」など）は画面にそのまま見せる。
+ */
+export function mapFormConcerns(answers) {
+  const checked = {};
+  const unmatched = [];
+  for (const raw of answers || []) {
+    const a = String(raw || '').trim();
+    if (!a) continue;
+    const ids = matchConcern(a);
+    if (ids.length === 0) unmatched.push(a);
+    for (const id of ids) checked[id] = true;
+  }
+  return { checked, unmatched };
+}
+
+/** 「いいえ」「なし」「該当なし」など、注意事項として出さなくてよい回答か */
+const NO_ANSWER = /^(いいえ|なし|無し|ない|無い|特になし|特に無し|特にない|該当なし|該当無し|該当しない|no|none|n\/a|-|ー|－|―)$/i;
+export function isNoAnswer(value) {
+  const s = String(value == null ? '' : value).normalize('NFKC').trim().replace(/[。.]+$/, '');
+  return !s || NO_ANSWER.test(s);
+}
+
+// ------------------------------------------------------------
+// 今日の予約（SalonOne）とフォームの回答をお名前で結びつける
+// ------------------------------------------------------------
+/** お名前の比較用（全角・半角と空白をそろえ、末尾の敬称を外す） */
+export const personKey = (name) => String(name || '').normalize('NFKC').replace(/\s+/g, '').replace(/(様|さま|さん)$/, '');
+
+/**
+ * 予約ごとに、同じお名前のいちばん新しい回答（days 日前までに回答したものだけ）。
+ * SalonOne のキーがお名前を返さない設定（顧客番号だけ）の時は結びつかない（スタッフが回答を選ぶ）。
+ * @param {Array<{ id:string, customerName:string|null }>} visits
+ * @param {Array<{ index:number, name:string, submittedAt:string|null }>} sheets
+ * @param {{ today:string, days?:number }} opts today は 'YYYY-MM-DD'（JST）
+ * @returns {Object<string, Object>} { [予約ID]: 回答 }
+ */
+export function linkSheetsToVisits(visits, sheets, { today, days = 3 }) {
+  const since = addDays(today, -days);
+  const latest = new Map();
+  for (const s of sheets || []) {
+    const key = personKey(s && s.name);
+    const day = toJstDate(s && s.submittedAt);
+    if (!key || !day || day < since) continue;
+    const prev = latest.get(key);
+    if (!prev || String(s.submittedAt) > String(prev.submittedAt)) latest.set(key, s);
+  }
+  const out = {};
+  for (const v of visits || []) {
+    const key = personKey(v && v.customerName);
+    if (key && latest.has(key)) out[v.id] = latest.get(key);
+  }
+  return out;
+}
+
+/** 回答と同じお名前の今日の予約（無ければ null） */
+export function visitForSheet(visits, sheet) {
+  const key = personKey(sheet && sheet.name);
+  return (key && (visits || []).find((v) => personKey(v.customerName) === key)) || null;
+}
+
+// ------------------------------------------------------------
+// フォームの店舗（GAS の回答シート）とダッシュボードの店舗
+// ------------------------------------------------------------
+/** GAS（gas/counseling.gs）にある店舗。GAS から一覧を取れない時の控え */
+export const GAS_STORES = [
+  { key: 'honatsugi', name: '本厚木店' },
+  { key: 'yamato', name: '大和店' },
+  { key: 'yokohama', name: '横浜店' },
+  { key: 'machida', name: '町田店' },
+  { key: 'kawaguchi', name: '川口店' },
+];
+
+/** 店舗名の比較用（空白・「si'se」・末尾の「店」を除く） */
+export const storeNameKey = (name) => String(name || '')
+  .normalize('NFKC')
+  .replace(/si'?se/gi, '')
+  .replace(/[\s'’]/g, '')
+  .replace(/店$/, '')
+  .toLowerCase();
+
+/**
+ * 店舗名が同じフォームの店舗（無ければ ''）。
+ * 「新横浜店」が「横浜店」の回答を見てしまわないよう、部分一致では対応付けない。
+ */
+export function guessGasStore(storeName, gasStores = GAS_STORES) {
+  const k = storeNameKey(storeName);
+  if (!k) return '';
+  const hit = gasStores.find((g) => storeNameKey(g.name) === k);
+  return hit ? hit.key : '';
+}
+
+/**
+ * 店舗の対応先。設定（storeMap）があればそれ、'none' は「連携しない」、無ければ名前で自動。
+ * @param {{ id:string, name:string }} store
+ * @param {Object<string,string>} storeMap { [ダッシュボード店舗ID]: GAS の店舗キー | 'none' }
+ */
+export function resolveGasStore(store, storeMap, gasStores = GAS_STORES) {
+  const explicit = storeMap && storeMap[store.id];
+  if (explicit === 'none') return '';
+  if (explicit && gasStores.some((g) => g.key === explicit)) return explicit;
+  return guessGasStore(store.name, gasStores);
 }
 
 // ------------------------------------------------------------

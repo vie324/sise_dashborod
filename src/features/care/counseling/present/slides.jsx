@@ -74,6 +74,57 @@ export function Cover({ ctx }) {
 }
 
 // ------------------------------------------------------------
+// 1.5 ご記入いただいた内容（カウンセリングシートの回答がある時だけ）
+//   お客様ご自身の言葉（お悩み・改善したい時期・ご要望）をそのまま大きく見せる。
+//   施術前の確認（手術歴・治療中など）・年齢・住所は、お客様向けの画面には出さない。
+// ------------------------------------------------------------
+export function Voice({ ctx }) {
+  const v = ctx.voice || { concerns: [], timeline: '', request: '' };
+  return (
+    <Frame eyebrow="Your Voice" title={`${ctx.honor}にご記入いただいた内容`} lead="カウンセリングシートに書いていただいたことを、一緒に確認させてください。">
+      <div className={cx('grid gap-[1.2em]', v.timeline || v.request ? 'lg:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)]' : '')}>
+        <section className="pz-card pz-rise flex flex-col p-[1.3em]" style={delay(1)}>
+          <h3 className="flex items-center gap-[.5em] text-[1.05em] font-bold text-brand-700">
+            <Icon name="message-square" size="1.1em" />気になっているところ
+          </h3>
+          {v.concerns.length ? (
+            <>
+              <div className="mt-[.9em] flex flex-wrap gap-[.55em]">
+                {v.concerns.map((c, i) => (
+                  <span key={c} className="pz-rise rounded-full bg-brand-50 px-[1em] py-[.45em] text-[1.15em] font-bold text-brand-800 ring-1 ring-brand-200" style={delay(i + 2, 60)}>{c}</span>
+                ))}
+              </div>
+              <p className="mt-auto flex items-center gap-[.4em] pt-[1.1em] text-[.85em] font-medium text-muted">
+                <Icon name="arrow-right" size="1em" className="shrink-0" />次のページで、からだの図でも一緒に確認します
+              </p>
+            </>
+          ) : <p className="mt-[.8em] text-[.95em] text-muted">お悩みのご記入はありませんでした。</p>}
+        </section>
+        {v.timeline || v.request ? (
+          <div className="space-y-[1.2em]">
+            {v.timeline ? (
+              <section className="pz-rise rounded-[1.1em] bg-gradient-to-br from-gold-400 to-gold-500 p-[1.2em] text-white shadow-[0_14px_36px_-18px_rgb(167_108_15/0.9)]" style={delay(3)}>
+                <p className="flex items-center gap-[.4em] text-[.9em] font-semibold text-white/90"><Icon name="target" size="1em" />改善したい時期</p>
+                <p className="pz-serif mt-[.2em] text-[1.9em] font-bold leading-tight">{v.timeline}</p>
+              </section>
+            ) : null}
+            {v.request ? (
+              <figure className="pz-card pz-rise p-[1.2em]" style={delay(4)}>
+                <figcaption className="text-[.85em] font-bold text-muted">施術のご要望</figcaption>
+                <blockquote className="pz-serif mt-[.4em] whitespace-pre-wrap text-[1.2em] leading-relaxed text-ink">「{v.request}」</blockquote>
+              </figure>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+      <p className="pz-rise mt-[1.3em] flex items-center gap-[.6em] text-[1.05em] font-semibold text-brand-700" style={delay(5)}>
+        <Icon name="circle-check" size="1.2em" className="shrink-0" />伺った内容をもとに、{ctx.honor}に合わせたケアをご提案します。
+      </p>
+    </Frame>
+  );
+}
+
+// ------------------------------------------------------------
 // 2. お悩み（からだの図 + 部位ごとのチェック。お客様にタップしていただける）
 // ------------------------------------------------------------
 export function Concerns({ ctx }) {
@@ -214,6 +265,8 @@ export function Approach() {
 export function Future({ ctx }) {
   const shown = LINES.filter((l) => ctx.activeLines[l.id]);
   const main = SCENARIOS[ctx.primaryLine] || null;
+  // カウンセリングシートの「改善したい時期」（あれば。目標と「まずは3ヶ月」を並べて見せる）
+  const goal = ctx.voice && ctx.voice.timeline ? ctx.voice.timeline : '';
   return (
     <Frame eyebrow="Your Future" title="通い方で、変わり方が違います">
       <div className="grid gap-[1.4em] lg:grid-cols-[minmax(0,1fr)_15em]">
@@ -235,6 +288,12 @@ export function Future({ ctx }) {
           </div>
         </div>
         <aside className="flex flex-col gap-[1em]">
+          {goal ? (
+            <div className="pz-card pz-rise border-gold-200 p-[.9em]" style={delay(2)}>
+              <p className="flex items-center gap-[.4em] text-[.8em] font-bold text-gold-700"><Icon name="target" size="1em" />{ctx.honor}の目標</p>
+              <p className="mt-[.15em] text-[1.25em] font-bold leading-snug text-ink">{goal}</p>
+            </div>
+          ) : null}
           <div className="pz-rise rounded-[1.1em] bg-gradient-to-br from-gold-400 to-gold-500 p-[1.1em] text-white shadow-[0_14px_36px_-18px_rgb(167_108_15/0.9)]" style={delay(2)}>
             <p className="text-[.85em] font-semibold text-white/90">まずは</p>
             <p className="pz-num leading-none"><span className="text-[3.6em] font-bold">3</span><span className="ml-[.15em] text-[1.4em] font-bold">ヶ月</span></p>
@@ -242,7 +301,7 @@ export function Future({ ctx }) {
           </div>
           {shown.length ? (
             <div className="pz-rise space-y-[.6em]" style={delay(3)}>
-              {(main && ctx.activeLines[ctx.primaryLine] ? [ctx.primaryLine] : []).concat(shown.map((l) => l.id).filter((id) => id !== ctx.primaryLine)).slice(0, 2).map((id) => {
+              {(main && ctx.activeLines[ctx.primaryLine] ? [ctx.primaryLine] : []).concat(shown.map((l) => l.id).filter((id) => id !== ctx.primaryLine)).slice(0, goal ? 1 : 2).map((id) => {
                 const l = LINES.find((x) => x.id === id);
                 const sc = SCENARIOS[id];
                 return (

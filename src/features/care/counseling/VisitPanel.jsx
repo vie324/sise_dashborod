@@ -3,6 +3,8 @@ import { Badge, Banner, Button, EmptyState, IconButton, Input, Segmented, Select
 import Icon from '../../../ui/Icon.jsx';
 import { navigate } from '../../../app/router.js';
 import { isAdminLike } from '../../../lib/access.js';
+import { todayJst, toJstDate } from '../../../../shared/dates.js';
+import { SheetList, ConcernPreview, sheetTime } from './SheetPanel.jsx';
 
 // ============================================================
 // 本日のお客様（SalonOne の今日の予約）の一覧と、選んだお客様
@@ -10,6 +12,7 @@ import { isAdminLike } from '../../../lib/access.js';
 // 初回のお客様（SalonOne の区分「新規」）を先に出す。2回目以降のお客様に改めてご説明する時は「すべての予約」から。
 // SalonOne のキーが「個人情報を含めない」設定ならお名前は来ないので、顧客番号で見分ける
 // （ご説明の画面に出すお名前は、選んだ後に手で入れられる）。
+// Google フォームを使う店舗は「フォームの回答」のタブも出し、同じお名前の予約には「シートあり」を付ける。
 // ============================================================
 
 const STATUS = {
@@ -45,7 +48,10 @@ function StatusBadge({ status }) {
   );
 }
 
-function VisitRow({ v, onSelect }) {
+/**
+ * @param {Object|null} sheet 同じお名前のカウンセリングシート（Google フォームの店舗だけ）
+ */
+function VisitRow({ v, sheet, onSelect }) {
   return (
     <li>
       <button type="button" onClick={() => onSelect(v)} className="flex w-full items-center gap-3 bg-surface px-3 py-2.5 text-left transition-colors hover:bg-surface-2">
@@ -57,11 +63,17 @@ function VisitRow({ v, onSelect }) {
           <span className="flex flex-wrap items-center gap-1.5">
             <span className={cx('truncate text-sm font-bold', v.customerName ? 'text-ink' : 'text-ink-2')}>{guestLabel(v)}</span>
             {v.isNew ? <Badge tone="gold">初回</Badge> : null}
+            {sheet ? <Badge tone="info" icon="file-text">シートあり</Badge> : null}
             {v.contracted ? <Badge tone="good" icon="check">ご契約</Badge> : null}
           </span>
           <span className="mt-0.5 block truncate text-xs text-muted">
             {[v.staffName ? `担当 ${v.staffName}` : '', v.sourceName, v.plans.length ? v.plans.join('・') : ''].filter(Boolean).join('　')}
           </span>
+          {sheet ? (
+            <span className="mt-0.5 flex items-center gap-1 truncate text-xs font-semibold text-brand-700 dark:text-brand-300">
+              <Icon name="message-square" size={12} className="shrink-0" /><span className="truncate"><ConcernPreview concerns={sheet.concerns} /></span>
+            </span>
+          ) : null}
         </span>
         <Icon name="chevron-right" size={16} className="shrink-0 text-muted" />
       </button>
@@ -94,71 +106,97 @@ const openSalonOneSettings = () => {
 };
 
 /**
- * 今日の予約の一覧
+ * 今日の予約の一覧（Google フォームの店舗は「フォームの回答」のタブも）
  * @param {Object} res useTodayVisits の戻り値
+ * @param {Object<string,Object>} links { [予約ID]: 同じお名前のカウンセリングシート }
+ * @param {Object|null} form フォームの店舗だけ。{ res, rows, arrived, visitOf, onSelect, onSearch, searching, searchResult, onClearSearch, onRefresh }
  */
-export function VisitList({ res, onSelect, onManual, onRefresh, refreshing }) {
-  const [filter, setFilter] = useState('new');
+export function VisitList({ res, links = {}, form = null, onSelect, onManual, onRefresh, refreshing }) {
   const data = res.shown;
+  const notLinked = !!(data && data.linked === false);
+  const [filter, setFilter] = useState(() => (notLinked && form ? 'form' : 'new'));
   const visits = data && data.visits ? data.visits : null;
   const firstVisits = visits ? visits.filter((v) => v.isNew) : [];
   const list = filter === 'new' ? firstVisits : visits || [];
   const err = res.error;
+  const today = todayJst();
+  const todaySheets = form && form.rows ? form.rows.filter((r) => toJstDate(r.submittedAt) === today).length : 0;
 
-  if (data && data.linked === false) {
-    return (
+  const options = [
+    { value: 'new', label: '初回のお客様', count: visits ? firstVisits.length : undefined },
+    { value: 'all', label: 'すべての予約', count: visits ? visits.length : undefined },
+  ];
+  if (form) options.push({ value: 'form', label: 'フォームの回答', count: form.rows ? todaySheets : undefined });
+
+  let body;
+  if (filter === 'form' && form) {
+    body = (
+      <SheetList rows={form.rows} loading={form.res.loading} error={form.res.error} arrived={form.arrived} visitOf={form.visitOf}
+        onSelect={form.onSelect} onSearch={form.onSearch} searching={form.searching} searchResult={form.searchResult}
+        onClearSearch={form.onClearSearch} onRefresh={form.onRefresh} />
+    );
+  } else if (notLinked) {
+    body = (
       <Banner tone="info" title="この店舗は SalonOne の店舗と対応付けられていません"
         action={isAdminLike() ? <Button size="sm" variant="secondary" iconRight="chevron-right" onClick={openSalonOneSettings}>設定する</Button> : null}>
-        設定 → SalonOne連携 で店舗を対応付けると、今日の予約がここに出ます。予約に無いお客様としても始められます。
-        <div className="mt-2"><ManualStart onStart={onManual} /></div>
+        設定 → SalonOne連携 で店舗を対応付けると、今日の予約がここに出ます。{form ? 'カウンセリングシートは「フォームの回答」から選べます。' : '予約に無いお客様としても始められます。'}
       </Banner>
+    );
+  } else if (err && !visits) {
+    body = (
+      <Banner tone="bad" title="今日の予約を読み込めませんでした" action={<Button size="sm" icon="refresh-cw" onClick={onRefresh}>再読み込み</Button>}>
+        {err.message}
+      </Banner>
+    );
+  } else if (!visits) {
+    body = (
+      <div className="space-y-2" aria-busy="true" aria-label="読み込み中">
+        {[0, 1, 2].map((i) => <Skeleton key={i} className="h-[58px] rounded-xl" />)}
+      </div>
+    );
+  } else if (list.length === 0) {
+    body = (
+      <EmptyState compact icon="calendar-check" title={filter === 'new' ? '今日の初回のお客様の予約はありません' : '今日の予約はありません'}
+        message={filter === 'new' && visits.length ? '2回目以降のお客様は「すべての予約」から選べます' : 'SalonOne に予約が入ると、ここに自動で表示されます'} />
+    );
+  } else {
+    body = (
+      <ul className="divide-y divide-line overflow-hidden rounded-xl border border-line">
+        {list.map((v) => <VisitRow key={v.id} v={v} sheet={links[v.id] || null} onSelect={onSelect} />)}
+      </ul>
     );
   }
 
+  const fetchedAt = filter === 'form' && form ? form.res.data && form.res.data.fetchedAt : data && data.fetchedAt;
   return (
     <div>
-      {data && data.stale ? <Banner tone="warn" className="mb-3">{data.stale}</Banner> : null}
-      {visits ? (
-        <Segmented size="sm" className="mb-3" value={filter} onChange={setFilter} ariaLabel="表示する予約"
-          options={[{ value: 'new', label: '初回のお客様', count: firstVisits.length }, { value: 'all', label: 'すべての予約', count: visits.length }]} />
+      {data && data.stale && filter !== 'form' ? <Banner tone="warn" className="mb-3">{data.stale}</Banner> : null}
+      {visits || form ? (
+        <Segmented size="sm" className="mb-3" value={filter} onChange={setFilter} ariaLabel="表示する一覧" options={options} />
       ) : null}
 
-      {err && !visits ? (
-        <Banner tone="bad" title="今日の予約を読み込めませんでした" action={<Button size="sm" icon="refresh-cw" onClick={onRefresh}>再読み込み</Button>}>
-          {err.message}
-        </Banner>
-      ) : !visits ? (
-        <div className="space-y-2" aria-busy="true" aria-label="読み込み中">
-          {[0, 1, 2].map((i) => <Skeleton key={i} className="h-[58px] rounded-xl" />)}
-        </div>
-      ) : list.length === 0 ? (
-        <EmptyState compact icon="calendar-check" title={filter === 'new' ? '今日の初回のお客様の予約はありません' : '今日の予約はありません'}
-          message={filter === 'new' && visits.length ? '2回目以降のお客様は「すべての予約」から選べます' : 'SalonOne に予約が入ると、ここに自動で表示されます'} />
-      ) : (
-        <ul className="divide-y divide-line overflow-hidden rounded-xl border border-line">
-          {list.map((v) => <VisitRow key={v.id} v={v} onSelect={onSelect} />)}
-        </ul>
-      )}
+      {body}
 
       <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
         <ManualStart onStart={onManual} />
-        {visits ? (
+        {(filter === 'form' && form) || visits ? (
           <span className="flex items-center gap-1 text-[11px] text-muted">
             <span className="relative flex h-2 w-2" aria-hidden="true">
               <span className="absolute inline-flex h-full w-full animate-ping-slow rounded-full bg-brand-400 opacity-60" />
               <span className="relative inline-flex h-2 w-2 rounded-full bg-brand-500" />
             </span>
-            1分ごとに自動で確認{data.fetchedAt ? `・${timeOf(data.fetchedAt)} 更新` : ''}
-            <IconButton icon="refresh-cw" label="今すぐ確認" size="sm" onClick={onRefresh} className={refreshing ? 'animate-spin' : ''} />
+            {filter === 'form' ? '30秒' : '1分'}ごとに自動で確認{fetchedAt ? `・${timeOf(fetchedAt)} 更新` : ''}
+            <IconButton icon="refresh-cw" label="今すぐ確認" size="sm" onClick={filter === 'form' && form ? form.onRefresh : onRefresh} className={refreshing ? 'animate-spin' : ''} />
           </span>
         ) : null}
       </div>
 
-      {data && data.mode === 'live' && !data.names && visits && visits.length ? (
+      {filter !== 'form' && data && data.mode === 'live' && !data.names && visits && visits.length ? (
         <p className="mt-2 flex items-start gap-1.5 rounded-lg bg-surface-2 px-2.5 py-2 text-[11px] leading-relaxed text-muted">
           <Icon name="info" size={13} className="mt-px shrink-0" />
           <span>
             SalonOne の APIキーが「個人情報を含めない」設定のため、お名前の代わりに顧客番号を表示しています（SalonOne の顧客管理と同じ番号）。
+            {form ? 'お名前が無いとカウンセリングシートと自動で結びつかないので、シートは「フォームの回答」から選んでください。' : ''}
             {isAdminLike() ? ' お名前も表示する場合は docs/COUNSELING.md の手順でキーを発行し直してください。' : ''}
           </span>
         </p>
@@ -169,15 +207,24 @@ export function VisitList({ res, onSelect, onManual, onRefresh, refreshing }) {
 
 /**
  * 選んだお客様
- * @param {{ customerName, customerNumber, time, status, isNew, staffName, sourceName, contracted, plans, manual }} guest
+ * @param {{ customerName, customerNumber, time, status, isNew, staffName, sourceName, contracted, plans, manual, formOnly, sheet }} guest
+ * @param {Object|null} pendingSheet 選んだ後に届いた（まだ反映していない）同じお名前のカウンセリングシート
  */
-export function GuestCard({ guest, callName, onCallName, onChange, onOpenTool }) {
+export function GuestCard({ guest, callName, onCallName, onChange, onOpenTool, pendingSheet, onAttachSheet }) {
   const title = guest.manual ? (guest.customerName ? `${guest.customerName} 様` : '予約に無いお客様') : guestLabel(guest);
   const meta = guest.manual
     ? ['予約に無いお客様（手入力）']
-    : [guest.time, guest.staffName ? `担当 ${guest.staffName}` : '', guest.sourceName];
+    : guest.formOnly
+      ? ['カウンセリングシートから（今日の予約は見つかりませんでした）']
+      : [guest.time, guest.staffName ? `担当 ${guest.staffName}` : '', guest.sourceName];
   return (
     <div className="animate-rise-in space-y-3">
+      {pendingSheet ? (
+        <Banner tone="info" title={`${pendingSheet.name} 様のカウンセリングシートが届きました（${sheetTime(pendingSheet.submittedAt)}）`}
+          action={<Button size="sm" variant="primary" icon="file-check" onClick={onAttachSheet}>反映する</Button>}>
+          反映すると、フォームで選ばれたお悩みがチェックに入ります（付けたチェックはそのまま残ります）。
+        </Banner>
+      ) : null}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex min-w-0 items-center gap-3">
           <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-brand-100 text-base font-bold text-brand-800 dark:bg-brand-500/20 dark:text-brand-100" aria-hidden="true">
@@ -187,6 +234,7 @@ export function GuestCard({ guest, callName, onCallName, onChange, onOpenTool })
             <h3 className="flex flex-wrap items-center gap-2 text-lg font-bold tracking-tight text-ink">
               <span className="truncate">{title}</span>
               {guest.isNew ? <Badge tone="gold">初回</Badge> : null}
+              {guest.sheet ? <Badge tone="info" icon="file-text">シートあり</Badge> : null}
               {!guest.manual && guest.status ? <StatusBadge status={guest.status} /> : null}
               {guest.contracted ? <Badge tone="good" icon="check">ご契約</Badge> : null}
             </h3>
