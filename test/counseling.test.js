@@ -1,5 +1,6 @@
 // カウンセリング（新規のお客様）: おすすめプラン・料金の計算と、SalonOne の「本日のお客様」。
 // SalonOne は scripts/dev/salonone-fake.mjs の疑似 SalonOne（1日だけの取得はその日の予約のサンプルを返す）で置き換える。
+// Google フォーム（GAS）の回答は counseling-form.test.js。
 import { test, before, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import os from 'node:os';
@@ -24,7 +25,6 @@ let db;
 let visits;
 let provider;
 let salonOneHandler;
-let dbHandler;
 let calls = [];
 
 before(async () => {
@@ -40,7 +40,6 @@ before(async () => {
   visits = await import('../api/_lib/salonone/visits.js');
   provider = await import('../api/_lib/salonone/provider.js');
   salonOneHandler = (await import('../api/salonone/index.js')).default;
-  dbHandler = (await import('../api/db/index.js')).default;
 });
 
 beforeEach(() => {
@@ -251,17 +250,4 @@ test('デモモード（APIキー未設定）でも本日のお客様を返す�
   assert.equal(r.linked, true);
   assert.ok(r.visits.length > 0);
   assert.equal(calls.length, 0);
-});
-
-// ------------------------------------------------------------
-// 以前の Google フォーム連携（GAS）の設定は読み書きさせない
-// ------------------------------------------------------------
-test('以前の GAS の URL・合言葉（dash_config の counseling.*）は一般の設定から読めず、書き換えもできない', async () => {
-  await db.from('dash_config').upsert({ key: 'counseling.config', value: { gasUrl: 'https://script.google.com/macros/s/AKfycbOLD/exec', token: 'secret-word' } }, { onConflict: 'key' });
-  const all = await callHandler(dbHandler, 'GET', { table: 'dashConfig' });
-  assert.equal('counseling.config' in all.body.config, false);
-  assert.ok((await callHandler(dbHandler, 'GET', { table: 'dashConfig', key: 'counseling.config' })).body.error);
-  assert.ok((await callHandler(dbHandler, 'POST', { table: 'dashConfig' }, { action: 'set', key: 'counseling.config', value: {} })).body.error);
-  // カウンセリングの table は無くなった
-  assert.equal((await callHandler(dbHandler, 'GET', { table: 'counseling', action: 'stores' })).code, 400);
 });

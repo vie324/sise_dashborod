@@ -108,7 +108,7 @@ test.describe('SalonOne 連携 API', () => {
   });
 });
 
-test.describe('カウンセリング（SalonOne の本日のお客様）API', () => {
+test.describe('カウンセリング（SalonOne の本日のお客様・Google フォーム）API', () => {
   test('GET /api/salonone?action=visits は店舗の指定が無ければ 400', async ({ request }) => {
     const resp = await request.get('/api/salonone?action=visits');
     if (resp.status() === 401) return;
@@ -117,7 +117,17 @@ test.describe('カウンセリング（SalonOne の本日のお客様）API', ()
     expect(data.error).toBeTruthy();
   });
 
-  test('以前の Google フォーム連携の設定（dashConfig の counseling.*）は読めない', async ({ request }) => {
+  test('GET /api/db?table=counseling&action=stores は連携状態を返し、GAS の URL は返さない', async ({ request }) => {
+    const resp = await request.get('/api/db?table=counseling&action=stores');
+    if (resp.status() === 401) return;
+    expect(resp.status()).toBe(200);
+    const data = await resp.json();
+    expect(typeof data.configured).toBe('boolean');
+    expect(Array.isArray(data.stores)).toBe(true);
+    expect(JSON.stringify(data)).not.toContain('script.google.com');
+  });
+
+  test('一般の設定（dashConfig）からカウンセリングフォームの設定は読めない', async ({ request }) => {
     const resp = await request.get('/api/db?table=dashConfig&key=counseling.config');
     if (resp.status() === 401) return;
     const data = await resp.json();

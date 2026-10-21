@@ -1,15 +1,16 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { cx } from '../../../../ui/primitives.jsx';
 import Icon from '../../../../ui/Icon.jsx';
 import { useMeasure } from '../../../../ui/charts.jsx';
-import { Wordmark, Cover, Concerns, Cause, Approach, Future, Plans, Prices, Benefits, Offers, Summary } from './slides.jsx';
+import { Wordmark, Cover, Voice, Concerns, Cause, Approach, Future, Plans, Prices, Benefits, Offers, Summary } from './slides.jsx';
 
 // ============================================================
 // お客様へのご説明（全画面）
 // ------------------------------------------------------------
 // タブレットやスマホをお客様に向けて見せる画面。1枚ずつ大きく見せるスライド形式で、
 // 「はじめに → コンセプト → 改善のイメージ → プラン → 特典 → まとめ」の順に進む。
+// カウンセリングシート（Google フォーム）の回答があるお客様は、表紙の次に「ご記入いただいた内容」が入る。
 //   次へ / 戻る: 下のボタン・左右のスワイプ・← → キー（Esc で閉じる）
 //   章の名前を押すとその章へ移る（スタッフが説明の途中から始める時も）
 // テーマに関係なく明るい配色で見せる（.theme-light）。文字の大きさは画面の大きさで決まる（.pz）。
@@ -25,8 +26,11 @@ export const CHAPTERS = [
   { id: 'summary', label: 'まとめ', icon: 'circle-check' },
 ];
 
+const hasVoice = (ctx) => !!(ctx.voice && (ctx.voice.concerns.length || ctx.voice.timeline || ctx.voice.request));
+
 export const SLIDES = [
   { id: 'cover', chapter: 'intro', title: 'はじめに', Component: Cover },
+  { id: 'voice', chapter: 'intro', title: 'ご記入いただいた内容', Component: Voice, when: hasVoice },
   { id: 'concerns', chapter: 'intro', title: 'お悩み', Component: Concerns },
   { id: 'cause', chapter: 'concept', title: 'なぜ繰り返すのか', Component: Cause },
   { id: 'approach', chapter: 'concept', title: "si'se のアプローチ", Component: Approach },
@@ -38,10 +42,8 @@ export const SLIDES = [
   { id: 'summary', chapter: 'summary', title: 'まとめ', Component: Summary },
 ];
 
-/** 章の最初のスライド */
-export const chapterStart = (chapterId) => (SLIDES.find((s) => s.chapter === chapterId) || SLIDES[0]).id;
-
-const indexOf = (id) => Math.max(0, SLIDES.findIndex((s) => s.id === id));
+/** 章の最初のスライド（どのお客様でも出るスライド） */
+export const chapterStart = (chapterId) => (SLIDES.find((s) => s.chapter === chapterId && !s.when) || SLIDES[0]).id;
 
 const fullscreenElement = () => document.fullscreenElement || document.webkitFullscreenElement || null;
 const canFullscreen = () => typeof document !== 'undefined' && !!(document.fullscreenEnabled || document.webkitFullscreenEnabled);
@@ -88,21 +90,24 @@ const isTyping = (el) => !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXT
  */
 export default function Presentation({ startAt = 'cover', ctx, onClose }) {
   const rootRef = useRef(null);
-  const [index, setIndex] = useState(() => indexOf(startAt));
+  // 出すスライド（回答が後から届いても今のスライドがずれないよう、位置ではなく id で覚える）
+  const withVoice = hasVoice(ctx);
+  const slides = useMemo(() => SLIDES.filter((s) => !s.when || s.when(ctx)), [withVoice]); // eslint-disable-line react-hooks/exhaustive-deps
+  const [currentId, setCurrentId] = useState(startAt);
   const [dir, setDir] = useState(1);
   const [isFull, setIsFull] = useState(false);
   const [stageRef, stageWidth] = useMeasure();
-  const slide = SLIDES[index];
-  const last = SLIDES.length - 1;
+  const index = Math.max(0, slides.findIndex((s) => s.id === currentId));
+  const slide = slides[index];
+  const last = slides.length - 1;
 
   const goIndex = useCallback((next) => {
-    setIndex((cur) => {
-      const n = Math.min(last, Math.max(0, next));
-      if (n !== cur) setDir(n > cur ? 1 : -1);
-      return n;
-    });
-  }, [last]);
-  const go = useCallback((id) => goIndex(indexOf(id)), [goIndex]);
+    const n = Math.min(last, Math.max(0, next));
+    if (n === index) return;
+    setDir(n > index ? 1 : -1);
+    setCurrentId(slides[n].id);
+  }, [last, index, slides]);
+  const go = useCallback((id) => goIndex(Math.max(0, slides.findIndex((s) => s.id === id))), [goIndex, slides]);
   const next = useCallback(() => goIndex(index + 1), [goIndex, index]);
   const prev = useCallback(() => goIndex(index - 1), [goIndex, index]);
 
@@ -184,7 +189,7 @@ export default function Presentation({ startAt = 'cover', ctx, onClose }) {
         <span className="hidden truncate text-[.85em] font-semibold text-ink-2 sm:block">{slide.title}</span>
         <span className="ml-auto flex items-center gap-[.5em]">
           {ctx.guestName ? <span className="hidden rounded-full bg-white/80 px-[.9em] py-[.25em] text-[.82em] font-semibold text-ink-2 shadow-card md:inline">{ctx.guestName} 様</span> : null}
-          <span className="pz-num text-[.8em] font-semibold text-muted" aria-live="polite">{index + 1} / {SLIDES.length}</span>
+          <span className="pz-num text-[.8em] font-semibold text-muted" aria-live="polite">{index + 1} / {slides.length}</span>
           {canFullscreen() ? (
             <button type="button" onClick={toggleFull} className="pz-icon-btn" aria-label={isFull ? '全画面を終わる' : '全画面で表示'} title={isFull ? '全画面を終わる' : '全画面で表示'}>
               <Icon name={isFull ? 'minimize' : 'maximize'} size="1.1em" />
