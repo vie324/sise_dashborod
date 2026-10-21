@@ -10,8 +10,11 @@
    スクリプトが OS 設定と画面のテーマ切り替えから決める。
    チャートの色はデータ可視化ガイドの検証済みパレット（カテゴリ 8 色・
    ステータス 4 色）をそのまま使う。
+   .theme-light を付けた要素の中はテーマに関係なくライトの値になる
+   （お客様に見せるご説明の画面。施術ツール → カウンセリング）。
    ============================================================ */
-:root {
+:root,
+.theme-light {
   color-scheme: light;
   --canvas: 245 246 243;
   --surface: 255 255 255;
@@ -47,6 +50,12 @@
   --status-critical: #d03b3b;
   --text-good: #006300;
   --text-bad: #b42323;
+
+  /* 改善のイメージ（症状不安定期 / 症状安定期） */
+  --sim-early-wash: rgb(57 135 229 / 0.07);
+  --sim-late-wash: rgb(227 73 72 / 0.06);
+  --sim-early-text: #1f5aa6;
+  --sim-late-text: #9b2525;
 }
 
 :root[data-theme='dark'] {
@@ -81,6 +90,11 @@
 
   --text-good: #3fcb4f;
   --text-bad: #f08a8a;
+
+  --sim-early-wash: rgb(57 135 229 / 0.06);
+  --sim-late-wash: rgb(230 103 103 / 0.05);
+  --sim-early-text: #9cc3f3;
+  --sim-late-text: #f3a3a3;
 }
 
 @layer base {
@@ -175,6 +189,236 @@
   .animate-scale-in {
     @apply animate-rise-in;
   }
+}
+
+/* ============================================================
+   お客様へのご説明（施術ツール → カウンセリング → 全画面）
+   ------------------------------------------------------------
+   お客様に画面を向けて見せるため、明るい配色に固定し（.theme-light）、
+   文字の大きさは画面の大きさから決める。中の大きさ・余白は em で指定するので、
+   スマホでも大きなタブレットでも同じ割合で見える。
+   ============================================================ */
+@layer components {
+  .pz {
+    font-size: clamp(15px, min(1.5vw, 2.3vh), 24px);
+    line-height: 1.6;
+    color: rgb(var(--ink));
+    background: #f7f6f1;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  /* 縦向きのタブレットは高さに余裕があるので、幅に合わせて大きくする */
+  @media (orientation: portrait) and (min-width: 700px) {
+    .pz { font-size: clamp(15px, 2.2vw, 24px); }
+  }
+  .pz-backdrop {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background:
+      radial-gradient(42em 30em at 100% -10%, rgb(174 217 191 / 0.45), transparent 70%),
+      radial-gradient(36em 26em at -10% 110%, rgb(244 216 140 / 0.35), transparent 70%),
+      linear-gradient(180deg, #faf9f5 0%, #f4f3ed 100%);
+  }
+  .pz-serif {
+    font-family: 'Noto Serif JP', 'Hiragino Mincho ProN', 'Yu Mincho', 'YuMincho', serif;
+    font-feature-settings: 'palt' 1;
+  }
+  .pz-num {
+    font-family: Inter, 'Noto Sans JP', system-ui, sans-serif;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
+  }
+  .pz-eyebrow {
+    font-size: 0.78em;
+    font-weight: 700;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+  }
+  .pz-display {
+    font-size: 2.8em;
+    font-weight: 700;
+    line-height: 1.25;
+    letter-spacing: 0.02em;
+  }
+  .pz-title {
+    font-size: 1.95em;
+    font-weight: 700;
+    line-height: 1.35;
+    letter-spacing: 0.02em;
+    color: rgb(var(--ink));
+  }
+  .pz-lead {
+    font-size: 1.1em;
+    line-height: 1.75;
+    color: rgb(var(--ink-2));
+  }
+  .pz-card {
+    border: 1px solid rgb(var(--line));
+    border-radius: 1.1em;
+    background: rgb(255 255 255 / 0.92);
+    box-shadow: 0 1px 2px rgb(16 24 20 / 0.04), 0 10px 30px -18px rgb(16 24 20 / 0.18);
+  }
+
+  /* お悩みのチェック */
+  .pz-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.55em;
+    min-height: 2.5em;
+    padding: 0.35em 0.85em 0.35em 0.55em;
+    border: 1px solid rgb(var(--line-strong));
+    border-radius: 0.75em;
+    background: #fff;
+    color: rgb(var(--ink-2));
+    font-size: 0.92em;
+    font-weight: 600;
+    text-align: left;
+    transition: background-color 0.2s, color 0.2s, border-color 0.2s, box-shadow 0.2s;
+  }
+  .pz-chip:hover { border-color: #7dbf9b; }
+  .pz-chip-on {
+    border-color: #236c48;
+    background: #236c48;
+    color: #fff;
+    box-shadow: 0 8px 18px -12px rgb(29 87 59 / 0.9);
+  }
+  .pz-chip-on:hover { border-color: #1d573b; }
+  .pz-check {
+    display: inline-flex;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    width: 1.3em;
+    height: 1.3em;
+    border: 1.5px solid rgb(var(--line-strong));
+    border-radius: 0.4em;
+    background: #fff;
+  }
+  .pz-check-on {
+    border-color: #fff;
+    background: #fff;
+    color: #236c48;
+  }
+
+  /* おすすめプランのカード */
+  .pz-plan {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    padding: 1.4em 1.3em 1.2em;
+    border: 1px solid rgb(var(--line));
+    border-radius: 1.25em;
+    background: #fff;
+    text-align: left;
+    box-shadow: 0 10px 30px -20px rgb(16 24 20 / 0.25);
+    transition: transform 0.25s cubic-bezier(.16,1,.3,1), box-shadow 0.25s, border-color 0.25s;
+  }
+  .pz-plan:hover { transform: translateY(-2px); }
+  .pz-plan-take {
+    border-color: #ecbf4f;
+    background: linear-gradient(180deg, #fffdf6 0%, #fff 40%);
+    box-shadow: 0 24px 50px -24px rgb(133 82 17 / 0.45);
+  }
+  .pz-plan-selected {
+    border-color: #236c48;
+    box-shadow: 0 0 0 3px rgb(35 108 72 / 0.35), 0 24px 50px -24px rgb(22 58 41 / 0.5);
+  }
+  .pz-ribbon {
+    position: absolute;
+    top: -0.85em;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 0.2em 1.1em;
+    border-radius: 999px;
+    background: linear-gradient(90deg, #c98a14, #e2a62b);
+    color: #fff;
+    font-size: 0.85em;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    white-space: nowrap;
+    box-shadow: 0 6px 16px -8px rgb(133 82 17 / 0.8);
+  }
+
+  /* ボタン */
+  .pz-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4em;
+    min-height: 2.6em;
+    padding: 0 1.2em;
+    border-radius: 999px;
+    font-weight: 700;
+    transition: background-color 0.2s;
+  }
+  .pz-btn-primary { background: #236c48; color: #fff; }
+  .pz-btn-primary:hover { background: #1d573b; }
+  .pz-icon-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.4em;
+    height: 2.4em;
+    border-radius: 999px;
+    color: rgb(var(--ink-2));
+    transition: background-color 0.2s;
+  }
+  .pz-icon-btn:hover { background: rgb(0 0 0 / 0.05); }
+  .pz-nav-btn {
+    display: inline-flex;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    gap: 0.3em;
+    min-width: 3em;
+    height: 3em;
+    padding: 0 0.6em;
+    border: 1px solid rgb(var(--line));
+    border-radius: 999px;
+    background: rgb(255 255 255 / 0.9);
+    color: rgb(var(--ink));
+    font-weight: 700;
+    box-shadow: 0 6px 16px -10px rgb(16 24 20 / 0.3);
+    transition: background-color 0.2s, opacity 0.2s;
+  }
+  .pz-nav-btn:disabled { opacity: 0.35; }
+  .pz-nav-next {
+    padding: 0 1.1em 0 1.3em;
+    border-color: #236c48;
+    background: #236c48;
+    color: #fff;
+  }
+  .pz-nav-next:hover { background: #1d573b; }
+
+  /* 強調（蛍光ペンのような下線） */
+  .pz-mark-brand mark,
+  .pz-mark-gold mark {
+    padding: 0 0.1em;
+    color: inherit;
+    font-weight: 800;
+  }
+  .pz-mark-brand mark { background: linear-gradient(transparent 60%, rgb(174 217 191 / 0.8) 60%); }
+  .pz-mark-gold mark { background: linear-gradient(transparent 60%, rgb(244 216 140 / 0.85) 60%); }
+
+  /* 動き（「視差効果を減らす」設定では下の prefers-reduced-motion で止まる） */
+  .pz-in-next { animation: pz-in-next 0.5s cubic-bezier(.16,1,.3,1) both; }
+  .pz-in-prev { animation: pz-in-prev 0.5s cubic-bezier(.16,1,.3,1) both; }
+  .pz-rise { animation: pz-rise 0.6s cubic-bezier(.16,1,.3,1) both; animation-delay: var(--d, 0ms); }
+}
+
+@keyframes pz-in-next {
+  from { opacity: 0; transform: translateX(2.5%); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes pz-in-prev {
+  from { opacity: 0; transform: translateX(-2.5%); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes pz-rise {
+  from { opacity: 0; transform: translateY(0.8em); }
+  to { opacity: 1; transform: none; }
 }
 
 /* ============================================================

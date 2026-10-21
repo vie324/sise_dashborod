@@ -4,13 +4,11 @@ import { yen } from '../../../lib/format.js';
 import { CONCERN_CATEGORIES, CONCERN_ITEMS, FEEDBACK_ITEMS, PLAN_CATALOG } from '../../../../shared/counseling.js';
 
 // ============================================================
-// 01 ヒアリング＆プラン診断
+// ヒアリング＆プラン診断
 // ------------------------------------------------------------
-// お悩み（フォームの回答から自動でチェック）と施術後の評価（セラピストが付ける）から
-// 3つのプランを提案する。カードか「セラピスト変更」で選び直せる。
+// お悩み（カウンセリングで伺った内容。ご説明の画面でお客様がタップしても入る）と
+// 施術後の評価（セラピストが付ける）から 3つのプランを提案する。カードか「セラピスト変更」で選び直せる。
 // ============================================================
-
-const CATEGORY_HINT = { face: '顔・頭', posture: '首・肩・背中', pelvis: '腰・下半身' };
 
 function CheckItem({ checked, onToggle, children, aside }) {
   return (
@@ -60,16 +58,15 @@ function RecCard({ rank, plan, selected, onSelect }) {
 
 /**
  * @param {Object<string,boolean>} concerns / feedbacks  チェック状態
- * @param {Object<string,boolean>} fromForm  フォームの回答から入れた項目（「フォーム」の印）
  * @param {ReturnType<import('../../../../shared/counseling.js').recommendPlans>} recommendation
  * @param {string} selectedKey  選んでいるプラン（PLAN_CATALOG の key）
  * @param {string} overrideKey  セラピストが選び直したプラン（空なら自動）
  */
-export default function Hearing({ concerns, feedbacks, fromForm, onToggleConcern, onToggleFeedback, recommendation, selectedKey, overrideKey, onSelectPlan }) {
+export default function Hearing({ concerns, feedbacks, onToggleConcern, onToggleFeedback, recommendation, selectedKey, overrideKey, onSelectPlan }) {
   const concernCount = CONCERN_ITEMS.filter((c) => concerns[c.id]).length;
   const feedbackCount = FEEDBACK_ITEMS.filter((f) => feedbacks[f.id]).length;
   return (
-    <Card title="01 ヒアリング＆プラン診断" icon="list-checks" subtitle="お悩みと施術後のお身体の状態をチェックすると、おすすめプランが表示されます">
+    <Card title="ヒアリング＆プラン診断" icon="list-checks" subtitle="カウンセリングで伺ったお悩みと、施術後のお身体の状態をチェックすると、おすすめプランが出ます">
       <div className="grid gap-5 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
         <section aria-labelledby="hearing-concerns">
           <h3 id="hearing-concerns" className="mb-2 flex items-center gap-2 text-sm font-bold text-ink">
@@ -79,11 +76,10 @@ export default function Hearing({ concerns, feedbacks, fromForm, onToggleConcern
           <div className="space-y-3">
             {CONCERN_CATEGORIES.map((cat) => (
               <div key={cat.key}>
-                <div className="mb-1.5 text-[11px] font-bold text-muted">{cat.course}<span className="font-medium">（{CATEGORY_HINT[cat.key]}）</span></div>
+                <div className="mb-1.5 text-[11px] font-bold text-muted">{cat.course}<span className="font-medium">（{cat.area}）</span></div>
                 <div className="grid gap-1.5 sm:grid-cols-2">
                   {CONCERN_ITEMS.filter((c) => c.cat === cat.key).map((item) => (
-                    <CheckItem key={item.id} checked={!!concerns[item.id]} onToggle={() => onToggleConcern(item.id)}
-                      aside={fromForm[item.id] ? <Badge tone="info" icon="file-text" className="!px-1.5">フォーム</Badge> : null}>
+                    <CheckItem key={item.id} checked={!!concerns[item.id]} onToggle={() => onToggleConcern(item.id)}>
                       {item.label}
                     </CheckItem>
                   ))}
