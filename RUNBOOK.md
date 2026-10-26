@@ -44,7 +44,8 @@
 | `ALLOW_LEGACY_TOKENS` | 旧 base64 のみのスタッフ URL を受理 | `true`（移行期間用） |
 | `SISE_AUTH_SECRET_PREV` | 1世代前の HMAC 秘密鍵 | 未設定（ローテーション時のみ） |
 | `ALLOWED_ORIGIN` | CORS 制限 | `*` |
-| `ANTHROPIC_API_KEY` | 施術ツールの AI 姿勢アドバイス | 未設定ならアドバイス生成だけ使えない |
+| `ANTHROPIC_API_KEY` | 施術ツールの AI 姿勢アドバイス・マンダラの AI レビューと分類の提案 | 未設定なら AI の部分だけ使えない（マンダラの週報・日報は使える） |
+| `MANDALA_AI_MODEL` | マンダラの AI のモデル | `claude-sonnet-4-6`（旧ツールの `AI_MODEL` も読む） |
 
 ### 削除してよい環境変数（旧機能）
 
@@ -66,7 +67,7 @@ git push            # PR ごとに Vercel がプレビュー URL を発行
 
 - Vercel は `vercel.json` の `buildCommand`（`npm run build`）で画面をビルドし、`public/` を配信する
 - ビルド成果物（`public/assets/`）はリポジトリに含めない
-- Serverless Functions は 3 本（`api/db`, `api/salonone`, `api/claude/advice`）。Hobby プランの上限 12 に余裕あり
+- Serverless Functions は 4 本（`api/db`, `api/salonone`, `api/claude/advice`, `api/mandala`）。Hobby プランの上限 12 に余裕あり
 
 ---
 
@@ -85,7 +86,7 @@ Vercel の Environment Variables に `SISE_ADMIN_PASSWORD_HASH = <ハッシュ>`
 2. プレビュー環境で `REQUIRE_ADMIN_AUTH=true` にしてログイン画面を確認
 3. 問題なければ本番も `REQUIRE_ADMIN_AUTH=true`
 
-`REQUIRE_ADMIN_AUTH=true` の間は、URL 無しのアクセスは管理者ログインが必要になり、`/api/db`・`/api/salonone`・`/api/claude/advice` もログインかスタッフ URL が無いと 401 を返す。
+`REQUIRE_ADMIN_AUTH=true` の間は、URL 無しのアクセスは管理者ログインが必要になり、`/api/db`・`/api/salonone`・`/api/claude/advice`・`/api/mandala` もログインかスタッフ URL が無いと 401 を返す。
 
 ---
 
@@ -187,6 +188,26 @@ Google フォームでカウンセリングシートを取っている店舗は�
    - 設定 > カウンセリングフォーム に URL と合言葉を保存 →「接続テスト」→ 名前の違う店舗は対応付け。
      **SalonOne の問診票を使う店舗は「連携しない」**
    - 古いデプロイ（以前のダッシュボードに埋め込まれていた URL）はアーカイブして止める
+
+---
+
+## 8.6 マンダラ（チャート・週報・日報）
+
+旧「マンダラチャート週次進捗管理ツール」を組み込んだ画面。詳細は [docs/MANDALA.md](docs/MANDALA.md)。
+
+1. Supabase の SQL Editor で `supabase/migrations/00006_mandala.sql` を実行（未適用だと マンダラ の画面に「テーブルがありません」と出る）
+2. AI を使うなら `ANTHROPIC_API_KEY`（施術ツールと共通）。モデルを変えるなら `MANDALA_AI_MODEL`
+3. 旧ツールのデータを移す: `node scripts/import-mandala-tool.mjs`（確認）→ `--apply`（書き込み）。
+   移す元の `MANDALA_SUPABASE_URL` / `MANDALA_SUPABASE_SERVICE_ROLE_KEY` を .env.local に書く。名前が合わない人は `--map "三浦=st-miura"`
+4. マンダラ → 設定 で、共有の範囲（オーナー）・日報の対象・日報のチェック項目を確かめる
+
+| 症状 | 確認すること |
+|---|---|
+| 「マンダラのテーブルがありません」 | `00006_mandala.sql` を適用したか |
+| AI のレビューが出ない | `ANTHROPIC_API_KEY` を設定して再デプロイしたか。週報の画面の「作り直す」で再実行できる |
+| 店長にメンバーが出ない | 設定 → スタッフ で、店長とメンバーの所属店舗が同じか |
+| 仲間のチャートが見えない | 共有の範囲がオンか。自分と相手の両方が公開しているか（相互） |
+| 日報のメニューが出ない | 店長・オーナーが その人を「日報の対象」にしたか（マンダラ → 設定 / メンバー） |
 
 ---
 

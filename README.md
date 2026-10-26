@@ -1,12 +1,13 @@
 # si'se ダッシュボード
 
 整体院（si'se 系列）の経営ダッシュボード。**SalonOne** の実績データから、売上・インセンティブ（2026年11月〜の制度）・目標を管理する。
-あわせて、SalonOne に無い **出納帳（現金・小口・経費・日次締め）** と **施術ツール（新規のカウンセリング・AI 姿勢分析・施術レポート）** を提供する。
+あわせて、SalonOne に無い **出納帳（現金・小口・経費・日次締め）** と **施術ツール（新規のカウンセリング・AI 姿勢分析・施術レポート）**、
+**マンダラ（マンダラチャート・週報・日報と AI レビュー。旧「マンダラチャート週次進捗管理ツール」を組み込んだもの）** を提供する。
 
 | | |
 |---|---|
 | 画面 | React 18 + Tailwind CSS（esbuild と Tailwind CLI でビルド）。PWA |
-| サーバー | Vercel Serverless Functions（3 本）+ Supabase (Postgres) |
+| サーバー | Vercel Serverless Functions（4 本）+ Supabase (Postgres) |
 | 実績データ | SalonOne 分析API（読み取り専用）。APIキー未設定時はデモデータ |
 | 認証 | スタッフ個別の署名付き URL（HMAC-SHA256）+ 管理者パスワード（bcrypt / HttpOnly cookie） |
 | デプロイ | Vercel（`npm run build` → `public/` を配信） |
@@ -21,6 +22,7 @@
 | 売上分析 | 月別推移・日別・経路別の新規と契約・スタッフ別 | 店長・マネージャー・オーナー |
 | 出納帳 | レジ・金庫・小口現金の残高、入出金、日次締め、操作ログ。SalonOne の現金売上を日ごとに取り込み・突合 | 全員（所属店舗） |
 | 施術ツール | カウンセリング（SalonOne の今日の予約からお客様を選ぶ → お悩み・施術後の評価からおすすめプラン → **お客様に見せる全画面のご説明**: コンセプト・改善のイメージ・おすすめプラン・料金・会員のポイント・本日の特典・まとめ。Google フォームでカウンセリングシートを取る店舗は、回答からお悩みを自動でチェックし、記入内容を表示）・AI 姿勢分析（MediaPipe + Claude）・施術レポート（画像保存/共有/印刷） | 全員（カウンセリングは所属店舗の予約・回答のみ） |
+| マンダラ | マンダラチャート（9×9・5ステップの作成 + AI の分類提案）・**週報**（できた行動のチェック・フォーカス・ひとこと振り返り。自動保存。提出すると AI がレビューして来週のフォーカスを提案）・**日報**（若手向けの業務チェックリスト）・仲間との共有と応援・チームの提出状況（ヒートマップ・CSV）・日々の動き。詳しくは **[docs/MANDALA.md](docs/MANDALA.md)** | 全員（スタッフは自分の分。店長は担当店舗、オーナーは全員。仲間に見えるのはチャートと集計だけ） |
 | 設定 | SalonOne 連携（接続テスト・対応付け）・カウンセリングフォーム（GAS・任意）・スタッフと URL 発行・店舗・制度・表示 | 管理者・オーナー |
 
 役割（設定 > スタッフ で選ぶ）: **スタッフ**（自分の数字と所属店舗の合計）/ **店長**（所属店舗の全体とスタッフ全員）/
@@ -70,7 +72,7 @@ SalonOne を正として、重複していた機能は削除した（Supabase �
 npm install
 npm run dev:local     # ビルド済みの画面 + API を http://localhost:3000 で起動（疑似 DB・デモデータ）
 npm run watch         # 別ターミナルで。src/ の変更を自動ビルド
-npm test              # 単体テスト（インセンティブ計算・集計・正規化・権限・目標）
+npm test              # 単体テスト（インセンティブ計算・集計・正規化・権限・目標・マンダラ）
 npm run build         # 本番ビルド（public/assets/ に出力）
 ```
 
@@ -84,7 +86,7 @@ npm run build         # 本番ビルド（public/assets/ に出力）
 sise_dashborod/
 ├── src/                      # 画面（React）
 │   ├── main.jsx / app/       # 起動・レイアウト・ルーティング・状態
-│   ├── features/             # home / incentives / goals / sales / cashbook / care / settings
+│   ├── features/             # home / incentives / goals / sales / cashbook / care / mandala / settings
 │   ├── ui/                   # 共通部品（ボタン・カード・チャート・メーター…）
 │   ├── lib/                  # API クライアント・権限・書式・データ取得フック
 │   └── styles/app.css        # デザイントークン（ライト/ダーク）
@@ -95,15 +97,17 @@ sise_dashborod/
 │   ├── channels.js           # 来店経由 → 集客経路
 │   ├── counseling.js         # カウンセリングのチェック項目・おすすめプラン・料金表（1回あたり・おトク額）
 │   ├── goal-plan.js          # 特別目標の逆算（どの指標をどれだけ伸ばすか）
+│   ├── mandala.js            # マンダラ: 週（月曜はじまり）・チャートの集計・進み具合・見える範囲
 │   └── dates.js              # 日付（JST）
 ├── api/
 │   ├── db/index.js           # Supabase: 店舗・スタッフ・出納帳・メニュー・目標・設定・認証・カウンセリングフォーム（GAS 経由）
 │   ├── salonone/index.js     # SalonOne 連携（実績・インセンティブ・推移・本日のお客様・接続テスト）
 │   ├── claude/advice.js      # 姿勢分析の AI アドバイス
+│   ├── mandala/index.js      # マンダラ（チャート・週報・日報・AI レビュー）。処理は _lib/mandala/
 │   └── _lib/                 # 認証・Supabase・SalonOne クライアント/正規化/デモ/集計/本日のお客様・カウンセリングフォーム
 ├── gas/counseling.gs         # カウンセリングの Google フォームの回答を返す GAS（フォームの店舗だけ。スプレッドシートに貼る）
 ├── public/                   # index.html・manifest・Service Worker・画像（assets/ はビルド成果物）
-├── scripts/                  # build.mjs・dev-server.mjs・管理者パスワードハッシュ生成・疑似 SalonOne / GAS
+├── scripts/                  # build.mjs・dev-server.mjs・管理者パスワードハッシュ生成・疑似 SalonOne / GAS・旧マンダラツールからの移行
 ├── test/                     # 単体テスト (node --test)
 ├── e2e/                      # Playwright スモークテスト
 └── supabase/migrations/      # DB スキーマ
