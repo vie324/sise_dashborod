@@ -45,6 +45,14 @@ export function invalidate(prefix) {
   }
 }
 
+/** キャッシュを捨てる（次に開いた時は前の表示を出さずに読み直す。prefix 一致） */
+export function forget(prefix) {
+  for (const key of [...cache.keys()]) if (key.startsWith(prefix)) {
+    cache.delete(key);
+    notify(key);
+  }
+}
+
 /**
  * @param {string|null} key     キャッシュキー（null なら取得しない）
  * @param {() => Promise<any>} fetcher

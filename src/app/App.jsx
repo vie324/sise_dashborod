@@ -1,6 +1,6 @@
 import { Suspense, lazy, useEffect, useState } from 'react';
 import Shell from './Shell.jsx';
-import { useRoute } from './router.js';
+import { useRoute, basePath } from './router.js';
 import { AppProvider } from './state.jsx';
 import { NAV } from './nav.js';
 import { Toaster, ConfirmHost, showToast } from '../ui/feedback.jsx';
@@ -19,6 +19,7 @@ import SalesPage from '../features/sales/SalesPage.jsx';
 const CashbookPage = lazy(() => import('../features/cashbook/CashbookPage.jsx'));
 const CarePage = lazy(() => import('../features/care/CarePage.jsx'));
 const SettingsPage = lazy(() => import('../features/settings/SettingsPage.jsx'));
+const MandalaPage = lazy(() => import('../features/mandala/MandalaPage.jsx'));
 
 function PageLoading() {
   return (
@@ -38,6 +39,7 @@ const PAGES = {
   '/cashbook': CashbookPage,
   '/care': CarePage,
   '/settings': SettingsPage,
+  '/mandala': MandalaPage,
 };
 
 // ------------------------------------------------------------
@@ -155,8 +157,9 @@ function NoAccess() {
 // ------------------------------------------------------------
 function Main({ adminSession }) {
   const path = useRoute();
-  const Page = PAGES[path] || HomePage;
-  const navItem = NAV.find((n) => n.path === path) || NAV[0];
+  const base = basePath(path);
+  const Page = PAGES[base] || HomePage;
+  const navItem = NAV.find((n) => n.path === base) || NAV[0];
   const allowed = !navItem.show || navItem.show();
   const [refreshing, setRefreshing] = useState(false);
 
@@ -166,6 +169,7 @@ function Main({ adminSession }) {
     invalidate('stores:');
     invalidate('staff:');
     invalidate('goals:');
+    invalidate('mandala:');
     // 出納帳など独自に同期している画面にも知らせる
     window.dispatchEvent(new Event('sise:refresh'));
     showToast('最新のデータを取得しています', 'info', 1800);
@@ -178,10 +182,10 @@ function Main({ adminSession }) {
 
   return (
     <Shell path={path} title={navItem.label} onRefresh={onRefresh} refreshing={refreshing} adminSession={adminSession}>
-      {/* 画面を切り替えた時だけ、ふわっと出す */}
-      <div key={path} className="animate-page-in">
+      {/* 画面を切り替えた時だけ、ふわっと出す（画面の中の階層の移動は各画面に任せる） */}
+      <div key={base} className="animate-page-in">
         <Suspense fallback={<PageLoading />}>
-          {allowed ? <Page /> : <NoAccess />}
+          {allowed ? <Page path={path} /> : <NoAccess />}
         </Suspense>
       </div>
     </Shell>

@@ -5,6 +5,8 @@ export const NAV = [
   { path: '/', label: 'ホーム', icon: 'house', mobile: true },
   { path: '/incentives', label: 'インセンティブ', icon: 'award', mobile: true },
   { path: '/goals', label: '目標', icon: 'target', mobile: true },
+  // マンダラ（チャート・週報・日報）。スマホはホームのカードと「その他」から開く
+  { path: '/mandala', label: 'マンダラ', icon: 'grid-3x3' },
   { path: '/sales', label: '売上分析', icon: 'chart-column', show: isManagerOrAbove },
   { path: '/cashbook', label: '出納帳', icon: 'wallet', mobile: true },
   { path: '/care', label: '施術ツール', icon: 'scan-line' },

@@ -3,6 +3,7 @@
 // ------------------------------------------------------------
 //   dbGet / dbPost   … /api/db（Supabase。店舗・スタッフ・出納帳・目標・設定）
 //   salonOne         … /api/salonone（SalonOne の実績・インセンティブ）
+//   mandalaGet/Post  … /api/mandala（マンダラチャート・週報・日報。失敗時は ApiError を投げる）
 //   postJson         … その他の API（/api/claude/advice など）
 // スタッフURLで開いている場合は X-Staff-Token / X-Staff-Id を必ず付ける。
 // 管理者セッションは HttpOnly cookie なので credentials: 'same-origin'。
@@ -84,6 +85,17 @@ export function salonOne(action, params = {}) {
 
 export function salonOnePost(action, body = {}) {
   return request(`/api/salonone?action=${encodeURIComponent(action)}`, { method: 'POST', body: JSON.stringify(body) });
+}
+
+/** マンダラ API（失敗時は ApiError を投げる） */
+export function mandalaGet(action, params = {}) {
+  const qs = new URLSearchParams({ action });
+  for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== null && v !== '') qs.set(k, String(v));
+  return request(`/api/mandala?${qs.toString()}`);
+}
+
+export function mandalaPost(action, body = {}) {
+  return request(`/api/mandala?action=${encodeURIComponent(action)}`, { method: 'POST', body: JSON.stringify(body) });
 }
 
 export function postJson(url, body) {
