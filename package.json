@@ -15,6 +15,7 @@
     "playwright:install": "playwright install chromium"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "0.133.0",
     "@supabase/supabase-js": "^2.101.1",
     "bcryptjs": "^3.0.3",
     "esbuild": "0.28.2",

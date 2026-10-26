@@ -5,12 +5,14 @@
   "outputDirectory": "public",
   "functions": {
     "api/salonone/index.js": { "maxDuration": 60 },
-    "api/db/index.js": { "maxDuration": 30 }
+    "api/db/index.js": { "maxDuration": 30 },
+    "api/mandala/index.js": { "maxDuration": 60 }
   },
   "rewrites": [
     { "source": "/api/db", "destination": "/api/db" },
     { "source": "/api/salonone", "destination": "/api/salonone" },
-    { "source": "/api/claude/advice", "destination": "/api/claude/advice" }
+    { "source": "/api/claude/advice", "destination": "/api/claude/advice" },
+    { "source": "/api/mandala", "destination": "/api/mandala" }
   ],
   "headers": [
     {
