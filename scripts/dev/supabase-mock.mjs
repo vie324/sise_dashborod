@@ -9,6 +9,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { mandalaSeed, MANDALA_KEYS } from './mandala-seed.mjs';
 
 const KEYS = {
   stores: ['id'],
@@ -19,6 +20,7 @@ const KEYS = {
   cashbook: ['id'],
   cashbook_log: ['id'],
   daily_close: ['date', 'store_id'],
+  ...MANDALA_KEYS,
 };
 
 const DEFAULTS = {
@@ -35,6 +37,11 @@ const FK = {
   staff_stores: [['store_id', 'stores', 'id'], ['staff_id', 'staff', 'id']],
   cashbook: [['store_id', 'stores', 'id']],
   daily_close: [['store_id', 'stores', 'id']],
+  mandala_charts: [['staff_id', 'staff', 'id']],
+  mandala_weekly_reviews: [['staff_id', 'staff', 'id']],
+  mandala_daily_reports: [['staff_id', 'staff', 'id']],
+  mandala_members: [['staff_id', 'staff', 'id']],
+  mandala_daily_check_items: [['store_id', 'stores', 'id']],
 };
 
 export function seedData() {
@@ -68,6 +75,7 @@ export function seedData() {
     cashbook: [],
     cashbook_log: [],
     daily_close: [],
+    ...mandalaSeed(),
   };
 }
 
@@ -78,6 +86,8 @@ export function createMockClient(file) {
   } catch (_) {
     db = seedData();
   }
+  // マンダラを追加する前に作った疑似 DB にも、デモのチャート・週報を入れる
+  if (!Array.isArray(db.mandala_charts)) Object.assign(db, mandalaSeed());
   for (const t of Object.keys(KEYS)) if (!Array.isArray(db[t])) db[t] = [];
   let seq = Date.now();
   const persist = () => {

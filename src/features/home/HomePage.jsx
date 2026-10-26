@@ -14,6 +14,7 @@ import StaffDetail from '../incentives/StaffDetail.jsx';
 import { ChartLegend, itemStatus } from '../incentives/parts.jsx';
 import MyHome from './MyHome.jsx';
 import SpecialGoalStrip from '../goals/SpecialGoalStrip.jsx';
+import MandalaHomeStrip from '../mandala/HomeStrip.jsx';
 import { navigate } from '../../app/router.js';
 
 function greeting() {
@@ -445,6 +446,8 @@ export default function HomePage() {
       <PageHeader title={title} subtitle={isStaff ? null : 'SalonOne の実績から、店舗とスタッフの売上・インセンティブを表示しています'} />
       <ScopeBar data={data} />
       <DataWarnings data={data} error={summary.error} preview />
+      {/* マンダラ（今週の振り返り・今日の日報）。SalonOne の読み込みを待たずに出す */}
+      <MandalaHomeStrip />
       {!data ? <LoadingBlock /> : (
         <div className={cx('transition-opacity', summary.stale || summary.loading ? 'opacity-60' : '')}>
           <SpecialGoalStrip summary={data} />

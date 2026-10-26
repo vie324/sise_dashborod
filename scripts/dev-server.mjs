@@ -51,6 +51,7 @@ const ROUTES = {
   '/api/db': 'api/db/index.js',
   '/api/salonone': 'api/salonone/index.js',
   '/api/claude/advice': 'api/claude/advice.js',
+  '/api/mandala': 'api/mandala/index.js',
 };
 const handlers = {};
 async function handlerFor(p) {

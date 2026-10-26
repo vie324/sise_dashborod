@@ -147,3 +147,29 @@ test.describe('認証・権限', () => {
     expect(data.error).toContain('認証エラー');
   });
 });
+
+test.describe('マンダラ API', () => {
+  test('不正な staff token は 401', async ({ request }) => {
+    const fakeToken = btoa(JSON.stringify({ id: 's1', n: 'fake', r: 'staff', sid: ['x'] })) + '.invalidsig';
+    const resp = await request.get('/api/mandala?action=me', { headers: { 'X-Staff-Token': fakeToken, 'X-Staff-Id': 's1' } });
+    expect(resp.status()).toBe(401);
+  });
+
+  test('管理者モードは自分のチャートを持たず、不明な action は 400', async ({ request }) => {
+    const resp = await request.get('/api/mandala?action=me');
+    if (resp.status() === 401) return; // REQUIRE_ADMIN_AUTH=true の環境
+    expect(resp.status()).toBe(200);
+    const data = await resp.json();
+    expect(data.viewer.kind).toBe('admin');
+    expect(data.viewer.canHaveChart).toBe(false);
+    const bad = await request.get('/api/mandala?action=NO_SUCH_ACTION');
+    expect(bad.status()).toBe(400);
+  });
+
+  test('一般の設定（dashConfig）からマンダラの共有設定は変えられない', async ({ request }) => {
+    const resp = await request.post('/api/db?table=dashConfig', { data: { action: 'set', key: 'mandala.settings', value: { sharingScope: 'all' } } });
+    if (resp.status() === 401) return;
+    const data = await resp.json();
+    expect(data.error).toBeTruthy();
+  });
+});
