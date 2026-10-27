@@ -136,10 +136,12 @@ function HeroWallet({ summary, me }) {
 
         <div className="mt-4 flex items-center justify-between gap-3 border-t border-white/10 pt-3.5 text-[13px]">
           <span className="flex min-w-0 items-center gap-1.5 text-white/70">
-            <Icon name={me.closed ? 'lock' : 'calendar-range'} size={14} className="shrink-0" />
-            <span className="truncate">支給期間（{pm[0]}〜{pm[pm.length - 1]}月）の{me.closed ? '支給額（確定）' : '合計'}</span>
+            <Icon name={summary.close ? 'lock' : 'calendar-range'} size={14} className="shrink-0" />
+            <span className="truncate">
+              支給期間（{pm[0]}〜{pm[pm.length - 1]}月）の{summary.close ? (me.closed ? '支給額（確定）' : '支給額（確定の記録なし）') : '合計'}
+            </span>
           </span>
-          <span className="shrink-0 font-bold num">{yen(me.closed ? me.closed.total : me.period.total)}</span>
+          <span className="shrink-0 font-bold num">{summary.close && !me.closed ? '—' : yen(me.closed ? me.closed.total : me.period.total)}</span>
         </div>
       </div>
     </section>

@@ -26,7 +26,7 @@ export default function StaffDetail({ row, summary, goal, compact = false, ancho
               value={yen(row.incentive.total)}
               sub={row.storeName ? `${row.storeName}` : null}
             />
-            <PeriodSummary className="mt-4" period={period} staffPeriod={row.period} closed={row.closed} />
+            <PeriodSummary className="mt-4" period={period} staffPeriod={row.period} closed={row.closed} periodClosed={!!summary.close} />
             <NextActions className="mt-4" incentive={row.incentive} rules={rules} />
           </div>
           <IncentiveBreakdown incentive={row.incentive} />

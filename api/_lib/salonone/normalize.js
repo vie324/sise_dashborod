@@ -138,6 +138,19 @@ export function cashPortion(raw, amount) {
   return methods.every((m) => CASH.test(m)) ? amount : 0;
 }
 
+/**
+ * 現金と他の決済方法を組み合わせた会計で、内訳（payment_splits）が無いか。
+ * 現金の分がわからないので cashPortion は 0 にしている。出納帳で件数を知らせる
+ */
+export function cashUnknownOf(raw) {
+  const splits = pick(raw, ['payment_splits', 'paymentSplits']);
+  if (Array.isArray(splits) && splits.length > 0) return false;
+  const method = pick(raw, ['payment_method_name', 'paymentMethodName', 'payment_method.name', 'payment_method']);
+  if (method == null) return false;
+  const methods = String(method).split(METHOD_SEPARATOR).filter(Boolean);
+  return methods.some((m) => CASH.test(m)) && !methods.every((m) => CASH.test(m));
+}
+
 /** この予約で購入したプラン */
 function normalizePlans(raw) {
   const plans = pick(raw, ['plans']);
@@ -173,6 +186,7 @@ export function normalizeReception(raw) {
     consumedAmount: toNum(pick(raw, ['consumed_amount', 'consumedAmount', 'consumed', 'consumed_sales'], 0)),
     salesAmount,
     cashAmount: cashPortion(raw, salesAmount),
+    cashUnknown: cashUnknownOf(raw),
     paymentMethod: String(pick(raw, ['payment_method_name', 'paymentMethodName', 'payment_method.name', 'payment_method'], '')),
     joined: toBool(pick(raw, ['joined'], false)),
     plans: normalizePlans(raw),
@@ -314,7 +328,7 @@ export function retentionCounts(summary) {
   return { ...one(summary), previousMonth: prev ? one(prev) : null };
 }
 
-const isChurnedStatus = (v) => /churn|離反/i.test(String(v || ''));
+export const isChurnedStatus = (v) => /churn|離反/i.test(String(v || ''));
 
 /**
  * 継続管理の顧客一覧をお客様ごとにまとめる（1人が複数のプランを持つと複数行になるため）。

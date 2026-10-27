@@ -103,6 +103,23 @@ export function cashByDay(receptions, shopId, month) {
   }
   return out;
 }
+/**
+ * 1店舗・1ヶ月の、現金の分がわからない会計（「現金 / クレジットカード」のように複数の決済方法で内訳が無いもの。
+ * cashByDay には入れていない）
+ * @returns {Object<string, { count:number, amount:number }>} 'YYYY-MM-DD' → 件数・会計金額
+ */
+export function cashUnknownByDay(receptions, shopId, month) {
+  const out = {};
+  for (const r of receptions || []) {
+    if (!r || !r.cashUnknown || r.status !== 'completed' || !r.date || monthOf(r.date) !== month) continue;
+    if (String(r.shopId) !== String(shopId)) continue;
+    const d = out[r.date] || (out[r.date] = { count: 0, amount: 0 });
+    d.count += 1;
+    d.amount += n(r.salesAmount);
+  }
+  return out;
+}
+
 const isContractType = (t) => t === 'subscription' || t === 'ticket' || t === 'member';
 
 /**

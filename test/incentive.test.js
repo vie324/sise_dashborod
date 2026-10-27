@@ -189,11 +189,13 @@ test('確定・CSV 用のまとめ: 支給額（項目ごと）と判定に使�
 
 test('支給一覧の CSV: BOM 付き・月ごとの行・数式にならない名前', () => {
   const res = computeStaffIncentive({ consumedSales: 576000 }, { memberCount: 10, churnRatePct: 3, avgTenureMonths: 2 }, '2026-11');
-  const row = { key: '201', name: '=佐藤', storeName: '中央店, 本店', total: 5000, months: [{ month: '2026-11', ...summarizeIncentive(res) }, { month: '2026-12', total: null }] };
+  const sum = summarizeIncentive(res);
+  const nov = { month: '2026-11', ...sum, basis: { ...sum.basis, retentionAsOf: '2026-11-30' } };
+  const row = { key: '201', name: '=佐藤', storeName: '中央店, 本店', total: 5000, months: [nov, { month: '2026-12', total: null }] };
   const csv = incentiveCsv([row], { periodLabel: '2026年11月〜12月', status: '確定' });
   assert.ok(csv.startsWith('\uFEFF'));
   const lines = csv.slice(1).trim().split('\r\n');
   assert.equal(lines.length, 2); // 見出し + 11月（まだ無い 12月は出さない）
   assert.match(lines[0], /^支給期間,状態,店舗,スタッフ/);
-  assert.equal(lines[1], `2026年11月〜12月,確定,"中央店, 本店",'=佐藤,201,2026-11,576000,0,0,0,0,0,0,10,3,2,5000,0,0,0,0,5000,5000`);
+  assert.equal(lines[1], `2026年11月〜12月,確定,"中央店, 本店",'=佐藤,201,2026-11,576000,0,0,0,0,0,0,10,3,2,2026-11-30,5000,0,0,0,0,5000,5000`);
 });

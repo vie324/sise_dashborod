@@ -42,8 +42,9 @@ export async function saveCloseDoc(periodStart, doc) {
  * 画面に返す確定の情報（見られる範囲のスタッフだけ）
  * @param {Object|null} record 確定の記録
  * @param {(row:Object) => boolean} canSee スタッフの行を見られるか
+ * @param {{ withNote?: boolean }} [opts] withNote: 確定のメモを返すか（スタッフ本人には返さない）
  */
-export function closeView(record, canSee) {
+export function closeView(record, canSee, { withNote = true } = {}) {
   if (!record) return null;
   const staff = (record.staff || []).filter(canSee);
   return {
@@ -52,7 +53,7 @@ export function closeView(record, canSee) {
     label: record.label,
     closedAt: record.closedAt,
     closedBy: record.closedBy || '',
-    note: record.note || '',
+    note: withNote ? record.note || '' : '',
     dataAsOf: record.dataAsOf,
     rulesVersion: record.rulesVersion,
     total: staff.reduce((s, r) => s + (Number(r.total) || 0), 0),

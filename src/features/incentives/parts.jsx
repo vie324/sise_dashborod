@@ -370,11 +370,23 @@ export function NextActions({ incentive, rules, className = '' }) {
 }
 
 /**
+ * 支給期間の合計。確定済みの期間は確定した金額（確定の記録に無いスタッフは null）
+ * @param {Object} summary /api/salonone summary のレスポンス
+ * @param {Object} row     summary.staff[]・summary.me
+ */
+export function periodAmount(summary, row) {
+  if (!summary.close) return row.period.total;
+  return row.closed ? row.closed.total : null;
+}
+
+/**
  * 支給期間（2ヶ月）の内訳。確定済みなら確定した金額を出し、計算し直した金額が違う時はそれも並べる。
  * @param {Object|null} [closed] 確定の記録のこのスタッフの行（summary の staff[].closed）
+ * @param {boolean} [periodClosed] 支給期間が確定済みか（確定の記録にこのスタッフがいない時に「記録なし」と出す）
  */
-export function PeriodSummary({ period, staffPeriod, closed = null, className = '' }) {
+export function PeriodSummary({ period, staffPeriod, closed = null, periodClosed = false, className = '' }) {
   if (!period || !staffPeriod) return null;
+  const missing = periodClosed && !closed;
   const months = closed ? closed.months : staffPeriod.months;
   const total = closed ? closed.total : staffPeriod.total;
   const changed = closed && closed.total !== staffPeriod.total;
@@ -382,10 +394,10 @@ export function PeriodSummary({ period, staffPeriod, closed = null, className = 
     <div className={cx('rounded-xl border border-line bg-surface-2 px-3.5 py-3', className)}>
       <div className="flex items-center justify-between gap-2">
         <span className="flex items-center gap-1.5 text-xs font-semibold text-ink-2">
-          <Icon name={closed ? 'lock' : 'calendar-range'} size={14} className="text-muted" />
-          支給期間 {period.label}{period.preview ? '（試算）' : closed ? '（確定）' : ''}
+          <Icon name={closed || missing ? 'lock' : 'calendar-range'} size={14} className="text-muted" />
+          支給期間 {period.label}{period.preview ? '（試算）' : closed ? '（確定）' : missing ? '（確定の記録なし）' : ''}
         </span>
-        <span className="text-sm font-bold text-ink num">{yen(total)}</span>
+        <span className="text-sm font-bold text-ink num">{missing ? <span className="text-muted">—</span> : yen(total)}</span>
       </div>
       <div className="mt-2 grid grid-cols-2 gap-2">
         {months.map((m) => (
@@ -398,6 +410,11 @@ export function PeriodSummary({ period, staffPeriod, closed = null, className = 
       {changed ? (
         <p className="mt-2 text-[11px] leading-relaxed text-muted">
           確定した後に SalonOne の数字が変わったため、いま計算し直すと {yen(staffPeriod.total)} です（支給額は確定した金額です）
+        </p>
+      ) : null}
+      {missing ? (
+        <p className="mt-2 text-[11px] leading-relaxed text-muted">
+          この支給期間は確定済みですが、確定した記録にこのスタッフは入っていません。上の月別はいま計算した金額です（合計 {yen(staffPeriod.total)}）。管理者に確認してください
         </p>
       ) : null}
     </div>

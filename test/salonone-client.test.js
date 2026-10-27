@@ -117,7 +117,7 @@ test('429 は 1回だけ待って取り直す', async () => {
 });
 
 test('接続テスト: 各エンドポイントの件数と項目名（値は返さない）', async () => {
-  const results = await probe(salonOneConfig(), { from: '2026-09-01', to: '2026-09-30' });
+  const results = await probe(salonOneConfig(), { from: '2026-09-01', to: '2026-09-30', payPerVisitPattern: /月2回/ });
   assert.deepEqual(results.map((r) => r.name), ['meta', 'shops', 'staff', 'visitSources', 'salesSummary', 'receptions', 'retentionSummary', 'retentionCustomers']);
   const sales = results.find((r) => r.name === 'salesSummary');
   assert.ok(sales.sampleKeys.includes('consumed_sales'));
@@ -143,6 +143,10 @@ test('接続テスト: 各エンドポイントの件数と項目名（値は返
   assert.equal(as(rec.values.paymentMethod, '現金 / クレジットカード'), '分割決済（内訳の現金の分だけ）');
   assert.equal(as(rec.values.paymentMethod, 'クレジットカード'), '現金以外');
   assert.ok(!JSON.stringify(rec).includes('customer_name'));
+  // 継続管理の顧客一覧: 状態・プラン名と、会員数での扱い（都度払いのキーワードに当たるか）
+  const cust = results.find((r) => r.name === 'retentionCustomers');
+  assert.deepEqual(cust.values.customerStatus, [{ value: 'normal', as: '離反以外' }]);
+  assert.deepEqual(cust.values.planName, [{ value: '月2回プラン', as: '都度払い（このプランだけのお客様は会員数・平均継続期間から除く）' }]);
   assert.equal(results[0].info.brand_name, "si'se");
   assert.ok(!JSON.stringify(results).includes('53000')); // 金額などの値は含めない
 

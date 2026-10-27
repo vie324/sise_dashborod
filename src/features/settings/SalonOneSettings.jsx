@@ -42,8 +42,11 @@ function RetentionCounts({ counts }) {
   );
 }
 
-/** 受付履歴に出てきた値と、ダッシュボードでの扱い（集計の前提が実際のデータと合っているかの確認用） */
-const VALUE_LABELS = [['status', '状態'], ['cancelType', 'キャンセル区分'], ['classification', '区分'], ['planKind', 'プラン種別'], ['paymentMethod', '決済方法']];
+/** 受付履歴・継続管理に出てきた値と、ダッシュボードでの扱い（集計の前提が実際のデータと合っているかの確認用） */
+const VALUE_LABELS = [
+  ['status', '状態'], ['cancelType', 'キャンセル区分'], ['classification', '区分'], ['planKind', 'プラン種別'], ['paymentMethod', '決済方法'],
+  ['customerStatus', '顧客の状態'], ['planName', 'プラン名'],
+];
 function ReceptionValues({ values }) {
   const rows = VALUE_LABELS.filter(([k]) => values[k] && values[k].length);
   if (!rows.length) return null;

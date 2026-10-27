@@ -141,8 +141,8 @@ function TeamStatusCard({ summary, onOpen }) {
   const rows = summary.staff;
   const tiers = summary.rules.sales.tiers;
   const totalMonth = rows.reduce((a, r) => a + r.incentive.total, 0);
-  // 確定済みの支給期間は確定した金額
-  const totalPeriod = rows.reduce((a, r) => a + (r.closed ? r.closed.total : r.period.total), 0);
+  // 確定済みの支給期間は確定の記録の合計（表示中の店舗のスタッフ）
+  const totalPeriod = summary.close ? summary.close.total : rows.reduce((a, r) => a + r.period.total, 0);
   const dist = [-1, ...tiers.map((_, i) => i)].map((ti) => ({ ti, count: rows.filter((r) => r.incentive.items[0].tierIndex === ti).length }));
   const close = rows
     .filter((r) => r.incentive.items[0].nextTier && r.incentive.items[0].nextTier.sessions <= 5)

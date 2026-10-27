@@ -2,8 +2,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   normalizeReception, normalizeStaff, normalizeShop, normalizeRetention, extractList, normalizeStatus,
-  contractsFromReceptions, cashPortion, normalizeSalesSummary,
+  contractsFromReceptions, cashPortion, cashUnknownOf, normalizeSalesSummary,
 } from '../api/_lib/salonone/normalize.js';
+import { cashUnknownByDay } from '../shared/metrics.js';
 import { toJstDate } from '../shared/dates.js';
 
 test('一覧の取り出し: 明細 {data:[]} / マーケ集計 {data:{rows}} / 配列', () => {
@@ -142,6 +143,22 @@ test('現金: 複数の決済方法なのに内訳が無いときは、会計金
   assert.equal(cashPortion({ payment_method_name: '現金（釣銭あり）' }, 8000), 8000);
   // 内訳があればその現金の分
   assert.equal(cashPortion({ payment_method_name: '現金 / クレジットカード', payment_splits: [{ payment_method_name: '現金', amount: 3000 }, { payment_method_name: 'クレジットカード', amount: 50000 }] }, 53000), 3000);
+
+  // 現金の分がわからない会計は、出納帳で件数を知らせる（内訳がある・現金だけ・現金以外だけは対象外）
+  assert.equal(cashUnknownOf({ payment_method_name: '現金 / クレジットカード', payment_splits: [] }), true);
+  assert.equal(cashUnknownOf({ payment_method_name: '現金 / クレジットカード', payment_splits: [{ payment_method_name: '現金', amount: 1 }] }), false);
+  assert.equal(cashUnknownOf({ payment_method_name: '現金' }), false);
+  assert.equal(cashUnknownOf({ payment_method_name: 'PayPay / クレジットカード' }), false);
+  assert.equal(cashUnknownOf({ payment_method_name: null }), false);
+  const base = { shop_id: 101, status: 'completed', reserved_at: '2026-11-03T10:00:00+09:00' };
+  const recs = [
+    normalizeReception({ ...base, appointment_id: 1, amount: 53000, payment_method_name: '現金 / クレジットカード' }),
+    normalizeReception({ ...base, appointment_id: 2, amount: 8000, payment_method_name: '現金・PayPay' }),
+    normalizeReception({ ...base, appointment_id: 3, amount: 8000, payment_method_name: '現金' }),
+    normalizeReception({ ...base, appointment_id: 4, amount: 9000, payment_method_name: '現金 / PayPay', status: 'cancelled' }),
+    normalizeReception({ ...base, appointment_id: 5, amount: 7000, payment_method_name: '現金 / PayPay', shop_id: 102 }),
+  ];
+  assert.deepEqual(cashUnknownByDay(recs, '101', '2026-11'), { '2026-11-03': { count: 2, amount: 61000 } });
 });
 
 test('継続管理: 都度払いのプランだけのお客様は会員数・平均継続期間に入れず、1人に複数行あってもお客様ごとに数える', () => {

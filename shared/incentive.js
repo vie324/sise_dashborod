@@ -330,7 +330,7 @@ export function incentiveCsv(rows, { periodLabel = '', status = '' } = {}) {
   const head = [
     '支給期間', '状態', '店舗', 'スタッフ', 'SalonOne スタッフID', '対象月',
     '施術消化売上', '既存顧客の消化売上', '3経路の新規', '3経路の契約', 'SNSの集客', 'SNSの契約', '紹介のサブスク契約',
-    '会員数', '退会率(%)', '平均継続(ヶ月)',
+    '会員数', '退会率(%)', '平均継続(ヶ月)', '会員数の記録日',
     '①施術消化売上', '②継続率', '③新規契約', '④Minimo・Threads・Instagram', '⑤紹介', '月の合計', '支給期間の合計',
   ];
   const lines = [head];
@@ -343,6 +343,7 @@ export function incentiveCsv(rows, { periodLabel = '', status = '' } = {}) {
         periodLabel, status, r.storeName || '', r.name || '', r.key, m.month,
         b.consumedSales, b.existingConsumedSales, b.newVisits3ch, b.contracts3ch, b.snsCustomers, b.snsContracts, b.referralSubscriptions,
         b.retentionKnown ? b.memberCount : null, b.retentionKnown ? round1(b.churnRatePct) : null, b.retentionKnown ? round1(b.avgTenureMonths) : null,
+        b.retentionKnown ? b.retentionAsOf || null : null,
         it.sales, it.retention, it.newContract, it.sns, it.referral, m.total, r.total,
       ]);
     }

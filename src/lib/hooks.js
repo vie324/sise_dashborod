@@ -23,12 +23,17 @@ async function load(key, fetcher) {
   const entry = cache.get(key) || {};
   if (entry.promise) return entry.promise;
   const promise = (async () => {
+    await null; // 下の cache.set の後で読み込む（読み込み中に捨てられたかを promise で見分けるため）
+    let next;
     try {
-      const data = await fetcher();
-      cache.set(key, { data, error: null, loadedAt: Date.now(), promise: null });
+      next = { data: await fetcher(), error: null, loadedAt: Date.now(), promise: null };
     } catch (e) {
-      cache.set(key, { ...(cache.get(key) || {}), error: e, promise: null });
+      next = { ...(cache.get(key) || {}), error: e, promise: null };
     }
+    // 読み込み中に forget されたキーは戻さない（閉じた画面の古い結果を残さない）
+    const cur = cache.get(key);
+    if (!cur || cur.promise !== promise) return;
+    cache.set(key, next);
     notify(key);
   })();
   cache.set(key, { ...entry, promise });
@@ -122,6 +127,8 @@ export function useStoreCash(month, storeId, { fresh = false } = {}) {
   const ok = month && storeId && storeId !== 'all';
   const key = ok ? `cash:${month}:${storeId}${fresh ? `:fresh:${openedAt}` : ''}` : null;
   const res = useResource(key, () => salonOne('cash', { month, storeId, refresh: fresh ? 1 : refreshFlag() }), { maxAge: 3 * 60 * 1000 });
+  // 開くたびに読み直した結果は、閉じたら捨てる（開くたびにキャッシュが増えないように）
+  useEffect(() => (fresh && key ? () => forget(key) : undefined), [fresh, key]);
   // 店舗や月を切り替えた直後は前の結果が残っているので、条件が一致するものだけ返す
   const match = (d) => (d && d.month === month && String(d.storeId) === String(storeId) ? d : null);
   return { ...res, data: match(res.data), shown: match(res.shown) };

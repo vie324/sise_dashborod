@@ -63,19 +63,21 @@ export function DataWarnings({ data, error, preview = false }) {
   if (!data) return null;
   const admin = isAdminLike();
   const notes = [];
-  for (const w of data.warnings || []) {
+  (data.warnings || []).forEach((w, i) => {
+    const key = `${w.code}-${i}`;
     if (w.code === 'demo') {
-      notes.push({ key: w.code, tone: 'demo', icon: 'flask-conical', text: admin ? 'デモデータを表示中（SalonOne 未接続）' : 'デモデータを表示しています（実際の数字ではありません）', action: admin ? { label: '接続する', onClick: openSalonOneSettings } : null });
-    } else if (w.code === 'db') {
-      notes.push({ key: w.code, tone: 'bad', icon: 'circle-alert', text: w.message });
+      notes.push({ key, tone: 'demo', icon: 'flask-conical', text: admin ? 'デモデータを表示中（SalonOne 未接続）' : 'デモデータを表示しています（実際の数字ではありません）', action: admin ? { label: '接続する', onClick: openSalonOneSettings } : null });
+    } else if (w.code === 'db' || w.code === 'close') {
+      notes.push({ key, tone: 'bad', icon: 'circle-alert', text: w.message });
     } else if (w.code === 'stale') {
-      notes.push({ key: w.code, tone: 'warn', icon: 'history', text: w.message });
-    } else if (w.code === 'retention') {
-      notes.push({ key: w.code, tone: 'warn', icon: 'circle-alert', text: w.message, action: admin ? { label: '接続テスト', onClick: openSalonOneSettings } : null });
+      notes.push({ key, tone: 'warn', icon: 'history', text: w.message });
+    } else if (w.code === 'unmappedStore' || w.code === 'unmappedShop' || w.code === 'duplicateShop' || w.code === 'unmappedMe') {
+      notes.push({ key, tone: 'warn', icon: 'link-2-off', text: w.message.replace(/（設定 > SalonOne連携）。?$/, ''), action: admin && w.code !== 'unmappedMe' ? { label: '対応付ける', onClick: openSalonOneSettings } : null });
     } else {
-      notes.push({ key: w.code, tone: 'warn', icon: 'link-2-off', text: w.message.replace(/（設定 > SalonOne連携）。?$/, ''), action: admin ? { label: '対応付ける', onClick: openSalonOneSettings } : null });
+      // 継続管理・売上分析・他の店舗の実績が取れなかった など
+      notes.push({ key, tone: 'warn', icon: 'circle-alert', text: w.message, action: admin ? { label: '接続テスト', onClick: openSalonOneSettings } : null });
     }
-  }
+  });
   if (preview && data.period && data.period.preview && data.rules) {
     const start = data.rules.startMonth;
     notes.push({ key: 'preview', tone: 'info', icon: 'info', text: `制度開始（${Number(start.slice(0, 4))}年${Number(start.slice(5))}月）前のため、金額は試算です` });

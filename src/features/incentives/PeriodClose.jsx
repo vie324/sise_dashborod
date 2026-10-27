@@ -39,6 +39,8 @@ export default function PeriodCloseBar({ summary }) {
   const last = period.months[period.months.length - 1];
   const ended = monthsBetween(last, monthOf(summary.asOf)) > 0;
   const changed = close ? summary.staff.filter((r) => r.closed && r.closed.total !== r.period.total).length : 0;
+  // 確定した記録に入っていないのに、いま計算すると支給額があるスタッフ（確定の後に SalonOne の数字が変わった など）
+  const missing = close ? summary.staff.filter((r) => !r.closed && r.period.total > 0).length : 0;
 
   const doClose = async () => {
     const ok = await confirmDialog({
@@ -120,9 +122,15 @@ export default function PeriodCloseBar({ summary }) {
           {Number(last.slice(5))}月が終わると確定できます。契約数（後の月の契約も数える）・会員数（取得した時点の人数）は後から変わるため、支給の前に確定して金額を固定してください。
         </p>
       ) : null}
+      {close && close.note ? <p className="mt-1.5 text-[11px] leading-relaxed text-ink-2">メモ: {close.note}</p> : null}
       {close && changed > 0 ? (
         <p className="mt-1.5 text-[11px] leading-relaxed text-muted">
           確定した後に SalonOne の数字が変わり、計算し直すと金額が違うスタッフが {changed}名います（支給額は確定した金額のままです）。
+        </p>
+      ) : null}
+      {close && missing > 0 ? (
+        <p className="mt-1.5 text-[11px] leading-relaxed text-[#b07a00] dark:text-[#f6c75a]">
+          確定した記録に入っていないのに、いま計算すると支給額があるスタッフが {missing}名います。確定を取り消して確定し直すか確認してください。
         </p>
       ) : null}
     </div>

@@ -201,6 +201,19 @@ function ImportPanel({ count, amount, onImportAll, busy }) {
   );
 }
 
+/** 現金と他の決済方法を組み合わせた会計で、内訳が無いもの（現金の分がわからないので SalonOne の現金売上に入っていない） */
+function UnknownCashBanner({ list }) {
+  const count = list.reduce((a, d) => a + d.count, 0);
+  const amount = list.reduce((a, d) => a + d.amount, 0);
+  const days = list.map((d) => `${Number(d.date.slice(5, 7))}/${Number(d.date.slice(8, 10))}`).join('・');
+  return (
+    <Banner tone="warn" title={`現金の分がわからない会計が ${num(count)}件あります（会計 ${yen(amount)}）`}>
+      「現金 / クレジットカード」のように複数の決済方法で払われ、決済の内訳が無い会計は、SalonOne の現金売上に含めていません（{days}）。
+      SalonOne の会計で内訳を登録すると、次に開いた時から現金の分が入ります。
+    </Banner>
+  );
+}
+
 function StoreReconcile({ entries, month, storeId, storeName, isDayClosed, onImport }) {
   // 店舗や月を切り替えた直後の前の結果は useStoreCash が外す
   const cash = useStoreCash(month, storeId);
@@ -266,6 +279,7 @@ function StoreReconcile({ entries, month, storeId, storeName, isDayClosed, onImp
           設定 &gt; SalonOne連携 で店舗を対応付けると、SalonOne の現金売上の表示と取り込みができます。
         </Banner>
       ) : null}
+      {!demo && data.cashUnknown && data.cashUnknown.length ? <UnknownCashBanner list={data.cashUnknown} /> : null}
       {canImport ? <ImportPanel count={importable.length} amount={importAmount} busy={busy} onImportAll={() => runImport(importable.map((r) => r.date))} /> : null}
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">

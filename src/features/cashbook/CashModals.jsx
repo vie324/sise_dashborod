@@ -138,6 +138,7 @@ export function CashCheckModal({ initialStoreId, stores, byStore, today, entries
               SalonOne の本日の現金売上（{yen(so.salon)}）は取り込み済みです。確定の前に SalonOne の最新の金額を確かめます。
             </p>
           ) : null}
+          {storeId && !so.loading && so.unknown ? <UnknownCashNote unknown={so.unknown} /> : null}
         </div>
         {storeId && so.error ? (
           <Banner tone="warn" title="SalonOne の本日の現金売上を確認できませんでした">
@@ -182,13 +183,15 @@ function useTodaySalonOneCash(storeId, today, entries) {
     if (data.mode !== 'live' || !data.linked) return { loading: false, available: false, demo: data.mode !== 'live' };
     const day = (data.days || []).find((d) => d.date === today);
     const salon = day ? Number(day.cashSales) || 0 : 0;
+    // 複数の決済方法で内訳が無い会計（現金の分がわからないので salon に入っていない）
+    const unknown = (data.cashUnknown || []).find((d) => d.date === today) || null;
     const mine = entries.filter((e) => String(e.store) === String(storeId) && e.date === today);
     const imported = mine.filter(isSalonOneCashEntry).reduce((a, e) => a + (Number(e.amount) || 0), 0);
     const manual = mine.filter(isManualSalesCash).reduce((a, e) => a + (Number(e.amount) || 0), 0);
     // 手入力の売上がある日は取り込まない（二重になる）。それ以外は確定の前に必ず取り込み直す
     const canImport = manual === 0;
     const needsImport = canImport && salon !== imported;
-    return { loading: false, available: true, salon, imported, manual, canImport, needsImport, pending: canImport ? salon - imported : 0 };
+    return { loading: false, available: true, salon, imported, manual, canImport, needsImport, pending: canImport ? salon - imported : 0, unknown };
   }, [data, cash.loading, cash.error, storeId, today, entries]);
 }
 
@@ -233,7 +236,21 @@ function SalonOneCashRow({ info, checked, onChange, idp }) {
           </span>
         </label>
       )}
+      {info.unknown ? <UnknownCashNote unknown={info.unknown} /> : null}
     </div>
+  );
+}
+
+/** 現金と他の決済方法を組み合わせた会計で、内訳が無いもの（現金の分がわからないので取り込む金額に入っていない） */
+function UnknownCashNote({ unknown }) {
+  return (
+    <p className="mt-2 flex items-start gap-1.5 text-xs leading-relaxed text-ink-2">
+      <Icon name="triangle-alert" size={13} className="mt-px shrink-0 text-[#b07a00] dark:text-[#f6c75a]" />
+      <span>
+        現金とほかの決済方法を組み合わせた会計 {unknown.count}件（{yen(unknown.amount)}）は、決済の内訳が無いため含めていません。
+        SalonOne の会計で内訳を登録してから開き直すと、現金の分が入ります。
+      </span>
+    </p>
   );
 }
 

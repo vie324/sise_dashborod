@@ -24,7 +24,7 @@ import {
 } from '../_lib/salonone/summary.js';
 import { buildVisits } from '../_lib/salonone/visits.js';
 import { salonOneConfig, probe } from '../_lib/salonone/client.js';
-import { clearSalonOneCache, snapshotRetention } from '../_lib/salonone/provider.js';
+import { clearSalonOneCache, snapshotRetention, loadAppContext, planPatterns } from '../_lib/salonone/provider.js';
 import { isMonth, todayJst, monthOf, addMonths, monthRange } from '../../shared/dates.js';
 import { INCENTIVE_RULES } from '../../shared/incentive-rules.js';
 
@@ -37,6 +37,21 @@ function isCronRequest(req) {
   const b = Buffer.from(`Bearer ${secret}`);
   return a.length === b.length && timingSafeEqual(a, b);
 }
+
+/** 継続指標を記録する。1店舗も記録できなかった時は 502（Vercel の Cron の記録・ログで気づけるように） */
+async function runSnapshot() {
+  const r = await snapshotRetention();
+  if (r.mode === 'live' && r.saved === 0 && r.failed.length) {
+    console.error('[salonone] retention snapshot failed:', r.failed);
+    return { status: 502, body: { error: '継続管理（会員数・退会率）を 1店舗も記録できませんでした', ...r } };
+  }
+  if (r.failed.length) console.warn('[salonone] retention snapshot partially failed:', r.failed);
+  return { status: 200, body: { success: true, ...r } };
+}
+
+// 管理者が手で記録を動かすのは 10分に 1回まで（SalonOne の呼び出し回数を抑える。インスタンスごと）
+const MANUAL_SNAPSHOT_INTERVAL_MS = 10 * 60 * 1000;
+let lastManualSnapshot = 0;
 
 const bodyOf = (req) => {
   if (!req.body) return {};
@@ -56,7 +71,8 @@ export default async function handler(req, res) {
   // 毎日の継続指標の記録（月の最後の日の記録がその月の会員数・退会率になる）
   if (isCronRequest(req) && (!q.action || q.action === 'cron')) {
     try {
-      return res.json({ success: true, ...(await snapshotRetention()) });
+      const out = await runSnapshot();
+      return res.status(out.status).json(out.body);
     } catch (e) {
       console.error('[salonone] cron failed:', e);
       return res.status(500).json({ error: e && e.message ? e.message : 'cron failed' });
@@ -98,11 +114,14 @@ export default async function handler(req, res) {
         // 日付は常に今日（JST）。店舗は 1つを指定する
         return res.json(await buildVisits(staffCtx, { storeId: q.storeId, refresh }));
       case 'cash': {
-        const cash = await dailyCashSales(staffCtx, { storeId: q.storeId, months: [month], refresh });
+        const { unknown, ...cash } = await dailyCashSales(staffCtx, { storeId: q.storeId, months: [month], refresh });
+        const byDate = ([a], [b]) => (a < b ? -1 : 1);
         return res.json({
           ...cash,
           month,
-          days: Object.entries(cash.days).sort(([a], [b]) => (a < b ? -1 : 1)).map(([date, cashSales]) => ({ date, cashSales })),
+          days: Object.entries(cash.days).sort(byDate).map(([date, cashSales]) => ({ date, cashSales })),
+          // 現金の分がわからない会計（複数の決済方法で内訳が無い。days には入れていない）
+          cashUnknown: Object.entries(unknown || {}).sort(byDate).map(([date, v]) => ({ date, count: v.count, amount: v.amount })),
           fetchedAt: new Date(cash.fetchedAt).toISOString(),
         });
       }
@@ -121,7 +140,17 @@ export default async function handler(req, res) {
       case 'cron': {
         // 管理者が手で動かす時（Cron は上で処理済み）
         if (!isAdminOrOwner(staffCtx)) return res.status(403).json({ error: '管理者またはオーナーのみ利用できます' });
-        return res.json({ success: true, ...(await snapshotRetention()) });
+        const wait = lastManualSnapshot + MANUAL_SNAPSHOT_INTERVAL_MS - Date.now();
+        if (wait > 0) return res.status(429).json({ error: `続けて記録できません。${Math.ceil(wait / 60000)}分ほどおいてから試してください` });
+        lastManualSnapshot = Date.now();
+        let out = null;
+        try {
+          out = await runSnapshot();
+        } finally {
+          // 記録できなかった時は、すぐにやり直せるようにする
+          if (!out || out.status !== 200) lastManualSnapshot = 0;
+        }
+        return res.status(out.status).json(out.body);
       }
       case 'master':
         return res.json(await buildMaster(staffCtx, { refresh }));
@@ -132,7 +161,9 @@ export default async function handler(req, res) {
           return res.json({ configured: false, results: [], message: 'SALONONE_API_KEY が未設定です（デモデータで動作中）' });
         }
         const prev = addMonths(monthOf(today), -1);
-        const results = await probe(cfg, { from: monthRange(prev).from, to: today });
+        // 継続管理のプラン名が都度払いのキーワード（設定）に当たるかも出す
+        const { payPerVisitPattern } = planPatterns(await loadAppContext());
+        const results = await probe(cfg, { from: monthRange(prev).from, to: today, payPerVisitPattern });
         return res.json({ configured: true, baseUrl: cfg.baseUrl, results });
       }
       case 'clearCache': {
