@@ -204,6 +204,11 @@ test('他店舗にヘルプで入ったスタッフ: インセンティブは表
   assert.deepEqual(mine.me.incentive, satoAll.incentive);
   assert.deepEqual(mine.staff.map((r) => r.name), ['佐藤 美咲']);
   assert.deepEqual(mine.stores.map((s) => s.storeId), ['store-1']); // 店舗の数字は所属店舗だけ
+
+  // 本人の推移（自己ベスト）も全店舗の実績。店舗の推移は所属店舗だけ
+  const trend = await summary.buildTrend(SATO, { months: 2, endMonth: PREV, storeId: 'all' });
+  assert.deepEqual(trend.staff.map((r) => [r.key, r.values[PREV]]), [['201', 35000]]);
+  assert.equal(trend.months.find((m) => m.month === PREV).consumedSales, 34000);
 });
 
 test('出納帳への取り込み用: 日ごとの現金売上（分割決済は現金の分だけ）', async () => {
