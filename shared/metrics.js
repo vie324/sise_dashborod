@@ -89,6 +89,20 @@ function dayBucket(map, date) {
 
 const isCash = (method) => /現金|cash/i.test(String(method || ''));
 const cashOf = (r) => (r.cashAmount != null ? n(r.cashAmount) : (isCash(r.paymentMethod) ? n(r.salesAmount) : 0));
+
+/**
+ * 1店舗・1ヶ月の日別の現金売上（出納帳への取り込み・突合用）。computeMonth の店舗の日別 cashSales と同じ数え方
+ * @returns {Object<string, number>} 'YYYY-MM-DD' → 現金売上（会計完了の予約のうち現金で受け取った額）
+ */
+export function cashByDay(receptions, shopId, month) {
+  const out = {};
+  for (const r of receptions || []) {
+    if (!r || r.status !== 'completed' || !r.date || monthOf(r.date) !== month) continue;
+    if (String(r.shopId) !== String(shopId)) continue;
+    out[r.date] = (out[r.date] || 0) + cashOf(r);
+  }
+  return out;
+}
 const isContractType = (t) => t === 'subscription' || t === 'ticket' || t === 'member';
 
 /**

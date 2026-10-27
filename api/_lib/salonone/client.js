@@ -16,7 +16,7 @@
 //                                   上げてもらった場合だけ、その値より少し小さい値に変える）
 // ============================================================
 
-import { extractList } from './normalize.js';
+import { extractList, retentionCounts, normalizeStatus, normalizeCustomerClass, cashPortion } from './normalize.js';
 
 export const DEFAULT_BASE_URL = 'https://salonone.net/api/analytics/v1';
 
@@ -302,6 +302,30 @@ function safeInfo(obj) {
 }
 
 /**
+ * 受付履歴に出てくる値の種類と、ダッシュボードでの扱い（状態・区分・プラン種別・決済方法。顧客の情報は含まない）。
+ * 集計の前提（どの状態を会計完了として数えるか・どの決済を現金とするか）が実際のデータと合っているかを確かめる用。
+ */
+function receptionValues(list) {
+  const distinct = (fn) => [...new Set(list.flatMap((r) => [].concat(fn(r) ?? []).filter((v) => v != null && v !== '').map(String)))].slice(0, 20);
+  const STATUS_LABEL = { completed: '会計完了（集計する）', reserved: '予約', checked_in: '来店中', cancelled: 'キャンセル', no_show: '無断キャンセル' };
+  const CLASS_LABEL = { new: '新規（初回の判定に使う）', repeat: '継続', existing: '既存' };
+  return {
+    status: distinct((r) => r.status).map((v) => ({ value: v, as: STATUS_LABEL[normalizeStatus(v)] || '不明（集計しない）' })),
+    cancelType: distinct((r) => r.cancel_type).map((v) => ({ value: v, as: v === 'no_show' ? '無断キャンセル' : 'キャンセル' })),
+    classification: distinct((r) => r.classification).map((v) => ({ value: v, as: CLASS_LABEL[normalizeCustomerClass({ classification: v })] })),
+    planKind: distinct((r) => (Array.isArray(r.plans) ? r.plans.map((p) => p && p.plan_kind) : [])).map((v) => ({
+      value: v, as: v === 'subscription' ? 'サブスク（契約）' : v === 'ticket' ? '回数券（契約）' : '契約に数えない',
+    })),
+    paymentMethod: distinct((r) => [r.payment_method_name, ...(Array.isArray(r.payment_splits) ? r.payment_splits.map((sp) => sp && sp.payment_method_name) : [])])
+      .map((v) => ({
+        value: v,
+        // 「現金 / クレジットカード」のような分割決済は、内訳（payment_splits）の現金の分だけを数える
+        as: /[/／・、,，+＋]/.test(v) && /現金|cash/i.test(v) ? '分割決済（内訳の現金の分だけ）' : cashPortion({ payment_method_name: v }, 1) === 1 ? '現金' : '現金以外',
+      })),
+  };
+}
+
+/**
  * 各エンドポイントを 1回ずつ呼び、HTTP ステータス・件数・項目名を返す（値は返さない）。
  * 受付履歴・継続管理は店舗の指定が必須なので、店舗一覧の先頭の店舗で試す。
  */
@@ -356,12 +380,14 @@ export async function probe(cfg, { from, to }) {
   });
   await step('receptions', async (path) => {
     const json = await request(cfg, path, { from, to, shop_id: shopId });
-    return { ...listResult(extractList(json), json), shopId };
+    const list = extractList(json);
+    return { ...listResult(list, json), shopId, values: receptionValues(list) };
   });
   await step('retentionSummary', async (path) => {
     const json = await request(cfg, path, { from, to, shop_id: shopId, plan_kind: 'subscription' });
     const data = json && json.data && typeof json.data === 'object' ? json.data : json;
-    return { count: 1, topLevelKeys: keysOf(json), sampleKeys: keysOf(data), nested: nestedKeys([data]), shopId };
+    // 人数（集計値。顧客の情報ではない）は SalonOne の継続管理の画面と見比べられるように出す
+    return { count: 1, topLevelKeys: keysOf(json), sampleKeys: keysOf(data), nested: nestedKeys([data]), shopId, counts: retentionCounts(data) };
   });
   await step('retentionCustomers', async (path) => {
     const json = await request(cfg, path, { from, to, shop_id: shopId, plan_kind: 'subscription' });

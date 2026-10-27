@@ -136,10 +136,10 @@ function HeroWallet({ summary, me }) {
 
         <div className="mt-4 flex items-center justify-between gap-3 border-t border-white/10 pt-3.5 text-[13px]">
           <span className="flex min-w-0 items-center gap-1.5 text-white/70">
-            <Icon name="calendar-range" size={14} className="shrink-0" />
-            <span className="truncate">支給期間（{pm[0]}〜{pm[pm.length - 1]}月）の合計</span>
+            <Icon name={me.closed ? 'lock' : 'calendar-range'} size={14} className="shrink-0" />
+            <span className="truncate">支給期間（{pm[0]}〜{pm[pm.length - 1]}月）の{me.closed ? '支給額（確定）' : '合計'}</span>
           </span>
-          <span className="shrink-0 font-bold num">{yen(me.period.total)}</span>
+          <span className="shrink-0 font-bold num">{yen(me.closed ? me.closed.total : me.period.total)}</span>
         </div>
       </div>
     </section>
@@ -365,7 +365,9 @@ function personalBest(trend, me, month) {
 function MonthHighlights({ summary, me, trend }) {
   const m = me.metrics;
   const store = summary.store;
-  const share = store && store.consumedSales > 0 ? (m.consumedSales / store.consumedSales) * 100 : null;
+  // 店舗内シェアは、表示中の店舗での自分の実績で出す（ヘルプで入った他店舗の分は店舗の合計に入っていないため）
+  const inStore = me.scopeMetrics || m;
+  const share = store && store.consumedSales > 0 ? (inStore.consumedSales / store.consumedSales) * 100 : null;
   const best = personalBest(trend, me, summary.month);
   const current = m.consumedSales;
   const live = isCurrentMonth(summary.progress);

@@ -153,11 +153,14 @@ export function buildMapping(appCtx, master) {
 
   const storeToShop = new Map();
   const shopToStore = new Map();
+  // 2つの店舗を同じ SalonOne の店舗に対応付けている（全店舗の合計では 1回だけ数える）
+  const duplicateShops = [];
   for (const store of appCtx.stores) {
     const shopId = demo ? store.id : (shopMap[store.id] ? String(shopMap[store.id]) : '');
     if (!shopId) continue;
     storeToShop.set(store.id, shopId);
     if (!shopToStore.has(shopId)) shopToStore.set(shopId, store.id);
+    else if (!duplicateShops.includes(shopId)) duplicateShops.push(shopId);
   }
   if (demo && appCtx.stores.length === 0) {
     // サンプル店舗しか無い場合は、その ID をそのまま店舗 ID として使う
@@ -176,7 +179,7 @@ export function buildMapping(appCtx, master) {
     }
   }
   return {
-    storeToShop, shopToStore, staffToS1, s1ToStaff,
+    storeToShop, shopToStore, staffToS1, s1ToStaff, duplicateShops,
     unmappedStores: appCtx.stores.filter((s) => !storeToShop.has(s.id)).map((s) => s.id),
     knownStore: (id) => storeIds.has(id),
   };
@@ -216,15 +219,16 @@ function shopMonthReceptions(cfg, shopId, month, asOf, refresh) {
 /**
  * 1店舗の継続指標（サブスク。取得時点の値）
  * 人数は 30分ごと、平均継続期間（顧客一覧。ゆっくりしか変わらない）は 6時間ごとに取り直す。
+ * 顧客一覧のプラン名が「都度払い」のキーワードに当たるお客様は会員数・平均継続期間に入れない。
  */
-async function shopRetention(cfg, shopId, asOf, refresh) {
+async function shopRetention(cfg, shopId, asOf, refresh, { payPerVisitPattern } = {}) {
   const [summary, customers] = await Promise.all([
     cached(`ret:${shopId}`, TTL_RETENTION, () => fetchRetentionSummary(cfg, { from: monthRange(monthOf(asOf)).from, to: asOf, shopId }), refresh),
     // 平均継続期間: 直近 1年にサブスクの支払いがあったお客様の継続月数
     cached(`tenure:${shopId}`, TTL_TENURE, () => fetchRetentionCustomers(cfg, { from: addDays(asOf, -365), to: asOf, shopId }), refresh),
   ]);
   return {
-    value: { ...normalizeRetention(summary.value, customers.value), asOf },
+    value: { ...normalizeRetention(summary.value, customers.value, { payPerVisitPattern }), asOf },
     fetchedAt: Math.min(summary.fetchedAt, customers.fetchedAt),
     freshAt: summary.fetchedAt,
     stale: summary.stale || customers.stale,
@@ -259,15 +263,47 @@ async function saveRetentionSnapshots(month, byShop) {
 }
 
 /**
+ * 全店舗の当月の継続指標を SalonOne から取り直して記録する（Vercel Cron から毎日 23時台に呼ぶ）。
+ * 継続管理は取得時点の値しか返らないため、画面を開いた時だけの記録だと、月末近くに誰も開かなかった月は
+ * 月の途中の値がその月の値になってしまう。毎日記録し、月の最後の日の記録をその月の値にする。
+ * @returns {Promise<{ mode:string, month:string|null, asOf?:string, saved:number, failed:Array<{shopId:string,error:string}> }>}
+ */
+export async function snapshotRetention() {
+  const appCtx = await loadAppContext();
+  if (appCtx.dbError) throw new Error(`Supabase に接続できません: ${appCtx.dbError}`);
+  const master = await loadMaster(appCtx, { refresh: true });
+  if (master.mode !== 'live') return { mode: master.mode, month: null, saved: 0, failed: [] };
+  const cfg = salonOneConfig();
+  const asOf = todayJst();
+  const month = monthOf(asOf);
+  const { payPerVisitPattern } = planPatterns(appCtx);
+  const results = await Promise.all(master.shops.map((s) => shopRetention(cfg, s.id, asOf, true, { payPerVisitPattern })
+    .then((r) => ({ shopId: s.id, ...r }), (e) => ({ shopId: s.id, failed: e }))));
+  const fresh = {};
+  const failed = [];
+  for (const r of results) {
+    // 取り直せず前回の値が返ったもの（stale）は、その時点の値ではないので記録しない
+    if (r.failed || r.stale) failed.push({ shopId: r.shopId, error: r.failed ? r.failed.message : String(r.error || '') });
+    else fresh[r.shopId] = r.value;
+  }
+  if (Object.keys(fresh).length) await saveRetentionSnapshots(month, fresh);
+  return { mode: 'live', month, asOf, saved: Object.keys(fresh).length, failed };
+}
+
+/**
  * 指定月のデータ一式
  * @param {Object} opts
  * @param {string[]} opts.months 集計する月（売上サマリ + 受付履歴）
  * @param {string[]} [opts.receptionMonths] 受付履歴だけ要る月（後の月の契約・前の月のキャンセルを見るため）
  * @param {boolean} [opts.receptions=true] 受付履歴を取るか（推移は売上サマリだけで足りるので false）
+ * @param {boolean} [opts.summaries=true] 売上サマリを取るか（出納帳の現金売上は受付履歴だけで足りるので false）
+ * @param {boolean} [opts.retention=true] 当月の継続管理を取るか
  * @param {string[]} [opts.shopIds] 取得する SalonOne 店舗（省略時は全店舗）。権限による絞り込みは呼び出し側で行う
  * @returns {Promise<{ mode, receptions, contracts, salesSummaries, retentionOverrides, retentionFromContracts, receptionsLoaded, asOf, stale, warnings }>}
  */
-export async function loadDataset(appCtx, master, { months, receptionMonths = [], receptions: withReceptions = true, shopIds, refresh } = {}) {
+export async function loadDataset(appCtx, master, {
+  months, receptionMonths = [], receptions: withReceptions = true, summaries: withSummaries = true, retention: withRetention = true, shopIds, refresh,
+} = {}) {
   const asOf = todayJst();
   const current = monthOf(asOf);
   const notFuture = (m) => monthsBetween(m, current) >= 0;
@@ -277,7 +313,7 @@ export async function loadDataset(appCtx, master, { months, receptionMonths = []
     const sim = simulateDemo({ shops: master.shops, staff: master.staff, months: all, asOf });
     return {
       mode: 'demo', receptions: sim.receptions, contracts: sim.contracts, salesSummaries: {}, retentionOverrides: {},
-      retentionFromContracts: true, receptionsLoaded: true, asOf, stale: [], warnings: [],
+      retentionFromContracts: true, receptionsLoaded: true, asOf, stale: [], warnings: [], fetchedAt: Date.now(),
     };
   }
 
@@ -289,15 +325,16 @@ export async function loadDataset(appCtx, master, { months, receptionMonths = []
   const recMonths = withReceptions ? [...new Set([...wanted, ...receptionMonths])].filter(notFuture) : [];
   const recJob = (m, shopId) => shopMonthReceptions(cfg, shopId, m, asOf, refresh && recent(m));
   const sumJobs = [];
-  for (const m of wanted) {
+  for (const m of withSummaries ? wanted : []) {
     for (const shopId of targets) {
       sumJobs.push(shopMonthSummary(cfg, shopId, m, asOf, refresh && recent(m)).then((r) => ({ m, shopId, ...r }), (e) => ({ m, shopId, failed: e })));
     }
   }
   const recJobs = [];
   for (const m of recMonths) for (const shopId of targets) recJobs.push(recJob(m, shopId));
-  const retJobs = wanted.includes(current)
-    ? targets.map((shopId) => shopRetention(cfg, shopId, asOf, refresh).then((r) => ({ shopId, ...r }), (e) => ({ shopId, failed: e })))
+  const { payPerVisitPattern } = planPatterns(appCtx);
+  const retJobs = withRetention && wanted.includes(current)
+    ? targets.map((shopId) => shopRetention(cfg, shopId, asOf, refresh, { payPerVisitPattern }).then((r) => ({ shopId, ...r }), (e) => ({ shopId, failed: e })))
     : [];
   const [sumResults, recResults, retResults] = await Promise.all([Promise.all(sumJobs), Promise.all(recJobs), Promise.all(retJobs)]);
 
@@ -318,6 +355,8 @@ export async function loadDataset(appCtx, master, { months, receptionMonths = []
   const receptions = recResults.flatMap((r) => r.value);
   const contracts = contractsFromReceptions(receptions, planPatterns(appCtx));
   const stale = [...sumResults, ...recResults].filter((r) => r.stale).map((r) => ({ fetchedAt: r.fetchedAt, error: r.error }));
+  // いちばん古いデータの取得時刻（キャッシュから返した分も含む。画面の「◯時◯分取得」に使う）
+  const fetchedTimes = [...sumResults, ...recResults].filter((r) => !r.failed && r.fetchedAt).map((r) => r.fetchedAt);
 
   // 継続指標: 過去の月は保存した値、当月は取得した値
   const snapshots = appCtx.config[RETENTION_KEY] || {};
@@ -343,6 +382,7 @@ export async function loadDataset(appCtx, master, { months, receptionMonths = []
   return {
     mode: 'live', receptions, contracts, salesSummaries, retentionOverrides, retentionFromContracts: false,
     receptionsLoaded: withReceptions || failedSummaries.length > 0, asOf, stale, warnings,
+    fetchedAt: fetchedTimes.length ? Math.min(...fetchedTimes) : Date.now(),
   };
 }
 

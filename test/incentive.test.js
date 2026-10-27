@@ -10,6 +10,8 @@ import {
   contractsNeededForRate,
   paymentPeriodOf,
   sumPeriod,
+  summarizeIncentive,
+  incentiveCsv,
 } from '../shared/incentive.js';
 
 test('施術消化売上: 各段階の境界は「以上」で判定する', () => {
@@ -163,4 +165,35 @@ test('合計と支給期間の合算', () => {
   const period = sumPeriod([nov, dec]);
   assert.equal(period.total, 66000);
   assert.equal(period.byKey.sales, 35000);
+});
+
+test('確定・CSV 用のまとめ: 支給額（項目ごと）と判定に使った数字', () => {
+  const m = {
+    consumedSales: 700000, existingConsumedSales: 450000,
+    newVisits: { hotpepper: 6, meta: 3, homepage: 1, instagram: 7, minimo: 3 },
+    newContracts: { hotpepper: 4, meta: 1, homepage: 1, instagram: 2 },
+    referralSubscriptions: 1,
+  };
+  const res = computeStaffIncentive(m, { memberCount: 60, churnRatePct: 8, avgTenureMonths: 4.2 }, '2026-11');
+  const s = summarizeIncentive(res);
+  assert.deepEqual(s.items, { sales: 30000, retention: 5000, newContract: 15000, sns: 4000, referral: 2000 });
+  assert.equal(s.total, 56000);
+  assert.deepEqual(s.basis, {
+    consumedSales: 700000, existingConsumedSales: 450000, newVisits3ch: 10, contracts3ch: 6, snsCustomers: 10, snsContracts: 2,
+    referralSubscriptions: 1, retentionKnown: true, memberCount: 60, churnRatePct: 8, avgTenureMonths: 4.2,
+  });
+  assert.equal(summarizeIncentive(null), null);
+  // 継続指標の記録が無い月は「わからない」として残す
+  assert.equal(summarizeIncentive(computeStaffIncentive(m, null, '2026-11')).basis.retentionKnown, false);
+});
+
+test('支給一覧の CSV: BOM 付き・月ごとの行・数式にならない名前', () => {
+  const res = computeStaffIncentive({ consumedSales: 576000 }, { memberCount: 10, churnRatePct: 3, avgTenureMonths: 2 }, '2026-11');
+  const row = { key: '201', name: '=佐藤', storeName: '中央店, 本店', total: 5000, months: [{ month: '2026-11', ...summarizeIncentive(res) }, { month: '2026-12', total: null }] };
+  const csv = incentiveCsv([row], { periodLabel: '2026年11月〜12月', status: '確定' });
+  assert.ok(csv.startsWith('\uFEFF'));
+  const lines = csv.slice(1).trim().split('\r\n');
+  assert.equal(lines.length, 2); // 見出し + 11月（まだ無い 12月は出さない）
+  assert.match(lines[0], /^支給期間,状態,店舗,スタッフ/);
+  assert.equal(lines[1], `2026年11月〜12月,確定,"中央店, 本店",'=佐藤,201,2026-11,576000,0,0,0,0,0,0,10,3,2,5000,0,0,0,0,5000,5000`);
 });

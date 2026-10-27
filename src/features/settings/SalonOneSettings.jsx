@@ -29,12 +29,42 @@ function SetupSteps() {
 }
 
 /** 接続テストの 1行（取得できた項目名 / エラーの説明） */
+/** 継続管理の人数（SalonOne の マーケティング > 継続管理 の画面と見比べる用） */
+function RetentionCounts({ counts }) {
+  const line = (c) => `継続 ${c.continuing} / 要フォロー ${c.follow} / 要注意 ${c.attention} / 離反 ${c.churned}`;
+  const members = counts.continuing + counts.follow + counts.attention;
+  return (
+    <div className="rounded-lg bg-surface-2 px-2.5 py-2 text-ink">
+      <div>{line(counts)} → 会員数 {members}名（離反以外）</div>
+      {counts.previousMonth ? <div className="text-muted">1か月前: {line(counts.previousMonth)}</div> : null}
+      <div className="mt-1 text-muted">SalonOne の マーケティング &gt; 継続管理（サブスク）の人数と同じか確認してください。継続顧客数がすでに要フォロー・要注意を含む場合は会員数が多く出ます。</div>
+    </div>
+  );
+}
+
+/** 受付履歴に出てきた値と、ダッシュボードでの扱い（集計の前提が実際のデータと合っているかの確認用） */
+const VALUE_LABELS = [['status', '状態'], ['cancelType', 'キャンセル区分'], ['classification', '区分'], ['planKind', 'プラン種別'], ['paymentMethod', '決済方法']];
+function ReceptionValues({ values }) {
+  const rows = VALUE_LABELS.filter(([k]) => values[k] && values[k].length);
+  if (!rows.length) return null;
+  return (
+    <div className="rounded-lg bg-surface-2 px-2.5 py-2">
+      <div className="mb-0.5 font-semibold text-ink">値の種類と、ダッシュボードでの扱い</div>
+      {rows.map(([k, label]) => (
+        <div key={k} className="text-ink-2"><span className="text-muted">{label}:</span> {values[k].map((v) => `${v.value} → ${v.as}`).join(' / ')}</div>
+      ))}
+    </div>
+  );
+}
+
 function ProbeDetail({ r }) {
   if (!r.ok) return <span className="text-[#8f2121] dark:text-[#f2b0b0]">{(r.error || '').replace(/^SalonOne API エラー \([^)]*\): /, '')}</span>;
   const info = r.info ? Object.entries(r.info) : [];
   const nested = r.nested ? Object.entries(r.nested).filter(([, keys]) => keys.length) : [];
   return (
     <div className="space-y-1">
+      {r.counts ? <RetentionCounts counts={r.counts} /> : null}
+      {r.values ? <ReceptionValues values={r.values} /> : null}
       {info.length ? <div className="text-ink">{info.map(([k, v]) => `${k}: ${v}`).join(' / ')}</div> : null}
       <div>{r.sampleKeys && r.sampleKeys.length ? r.sampleKeys.join(', ') : '（0件のため項目名は確認できません）'}</div>
       {nested.map(([k, keys]) => <div key={k} className="text-muted"><code>{k}</code>: {keys.join(', ')}</div>)}
@@ -115,7 +145,7 @@ function ConnectionCard({ status, master }) {
                 </div>
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                   <Button variant="ghost" size="sm" icon="copy" onClick={copyProbe}>結果をコピー</Button>
-                  <span className="text-xs text-muted">値（金額・顧客）は含まれません。うまくいかない時は開発担当に共有してください。</span>
+                  <span className="text-xs text-muted">金額・顧客の情報は含まれません（継続管理の人数と、状態・決済方法などの値の種類だけ表示します）。うまくいかない時は開発担当に共有してください。</span>
                 </div>
               </div>
             )
@@ -258,7 +288,7 @@ export default function SalonOneSettings() {
               <Field label="シェアプラン" hint="紹介インセンティブの対象外にします（既定: シェア）">
                 <Input value={planRules.sharePlanKeyword || ''} placeholder="シェア" onChange={(e) => setPlanRules((r) => ({ ...r, sharePlanKeyword: e.target.value }))} />
               </Field>
-              <Field label="都度払い" hint="会員数に数えません（既定: 都度）">
+              <Field label="都度払い" hint="この言葉を含むプランは新規契約に数えず、このプランのサブスクだけのお客様は会員数・平均継続期間に数えません（既定: 都度）">
                 <Input value={planRules.payPerVisitKeyword || ''} placeholder="都度" onChange={(e) => setPlanRules((r) => ({ ...r, payPerVisitKeyword: e.target.value }))} />
               </Field>
             </div>

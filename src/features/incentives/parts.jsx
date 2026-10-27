@@ -2,7 +2,7 @@ import Icon from '../../ui/Icon.jsx';
 import { Card, Badge, cx } from '../../ui/primitives.jsx';
 import { TierMeter, StatusPill, Meter } from '../../ui/stats.jsx';
 import { CumulativeChart } from '../../ui/charts.jsx';
-import { yen, yenShort, num, pct } from '../../lib/format.js';
+import { yen, yenShort, num, pct, dateJa } from '../../lib/format.js';
 import { forecastMonthEnd } from '../../../shared/metrics.js';
 import { channelLabel } from '../../../shared/channels.js';
 import { dayOfMonth } from '../../../shared/dates.js';
@@ -282,12 +282,23 @@ export function ReferralCard({ item, rules }) {
   );
 }
 
-export function RetentionCard({ item, rules, storeName }) {
+/** 継続指標の出どころ（SalonOne の継続管理を取得した日。過去の月はその月の最後の記録） */
+export function retentionSourceText(retention) {
+  if (!retention) return null;
+  const parts = [];
+  if (retention.asOf) parts.push(`${dateJa(retention.asOf, { weekday: false })}時点の SalonOne の継続管理（サブスク）`);
+  if (retention.payPerVisitExcluded > 0) parts.push(`都度払いのプランだけのお客様 ${retention.payPerVisitExcluded}名を除く`);
+  return parts.length ? parts.join('・') : null;
+}
+
+export function RetentionCard({ item, rules, storeName, retention = null }) {
   const st = itemStatus(item);
+  const source = retentionSourceText(retention);
   return (
     <Card title="継続率インセンティブ" icon="repeat" actions={<StatusPill status={st.status} label={st.label} />}
       subtitle={`${storeName ? `${storeName}の` : '店舗全体の'}条件をすべて満たすと、1人あたり月額 ${yen(rules.retention.amountPerPerson)}`}>
       <ConditionList conditions={item.conditions} />
+      {source ? <p className="mt-3 text-[11px] leading-relaxed text-muted">{source}</p> : null}
     </Card>
   );
 }
@@ -358,26 +369,37 @@ export function NextActions({ incentive, rules, className = '' }) {
   );
 }
 
-/** 支給期間（2ヶ月）の内訳 */
-export function PeriodSummary({ period, staffPeriod, className = '' }) {
+/**
+ * 支給期間（2ヶ月）の内訳。確定済みなら確定した金額を出し、計算し直した金額が違う時はそれも並べる。
+ * @param {Object|null} [closed] 確定の記録のこのスタッフの行（summary の staff[].closed）
+ */
+export function PeriodSummary({ period, staffPeriod, closed = null, className = '' }) {
   if (!period || !staffPeriod) return null;
+  const months = closed ? closed.months : staffPeriod.months;
+  const total = closed ? closed.total : staffPeriod.total;
+  const changed = closed && closed.total !== staffPeriod.total;
   return (
     <div className={cx('rounded-xl border border-line bg-surface-2 px-3.5 py-3', className)}>
       <div className="flex items-center justify-between gap-2">
         <span className="flex items-center gap-1.5 text-xs font-semibold text-ink-2">
-          <Icon name="calendar-range" size={14} className="text-muted" />
-          支給期間 {period.label}{period.preview ? '（試算）' : ''}
+          <Icon name={closed ? 'lock' : 'calendar-range'} size={14} className="text-muted" />
+          支給期間 {period.label}{period.preview ? '（試算）' : closed ? '（確定）' : ''}
         </span>
-        <span className="text-sm font-bold text-ink num">{yen(staffPeriod.total)}</span>
+        <span className="text-sm font-bold text-ink num">{yen(total)}</span>
       </div>
       <div className="mt-2 grid grid-cols-2 gap-2">
-        {staffPeriod.months.map((m) => (
+        {months.map((m) => (
           <div key={m.month} className="flex items-center justify-between rounded-lg bg-surface px-2.5 py-1.5 text-xs">
             <span className="text-ink-2">{Number(m.month.slice(5))}月</span>
             <span className="font-semibold text-ink num">{m.total == null ? <span className="text-muted">未確定</span> : yen(m.total)}</span>
           </div>
         ))}
       </div>
+      {changed ? (
+        <p className="mt-2 text-[11px] leading-relaxed text-muted">
+          確定した後に SalonOne の数字が変わったため、いま計算し直すと {yen(staffPeriod.total)} です（支給額は確定した金額です）
+        </p>
+      ) : null}
     </div>
   );
 }

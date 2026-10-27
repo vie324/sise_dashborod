@@ -193,12 +193,13 @@ async function setStoreStatus(storeId, status) {
 // ダッシュボード設定 (dashConfig) — KV ストア
 // ------------------------------------------------------------
 // 'goals.*' は目標データ（goals テーブル扱い）、'counseling.*' はカウンセリングの GAS の URL・合言葉
-// （スタッフに見せない）、'mandala.*' はマンダラの共有設定（/api/mandala で権限を見て変える）なので、
+// （スタッフに見せない）、'mandala.*' はマンダラの共有設定（/api/mandala で権限を見て変える）、
+// 'incentive.*' は確定したインセンティブ（スタッフ全員の金額。/api/salonone で見られる範囲だけ返す）なので、
 // ここからは読み書きしない。それぞれの API から扱う。
 // 書き込みは管理者・オーナーのみ（SalonOne 連携の対応付けなど）。
 // ============================================================
 
-const RESERVED_PREFIXES = ['goals.', 'counseling.', 'mandala.'];
+const RESERVED_PREFIXES = ['goals.', 'counseling.', 'mandala.', 'incentive.'];
 const isReservedKey = (key) => RESERVED_PREFIXES.some((p) => String(key || '').startsWith(p));
 const reservedError = (key) => ({ error: `このキーは ${String(key).split('.')[0]} から扱ってください` });
 

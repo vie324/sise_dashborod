@@ -138,9 +138,13 @@ function ChannelCard({ data }) {
 }
 
 function StaffTable({ data }) {
-  if (data.staff.length === 0) return null;
+  // 表示中の店舗での実績（SalonOne の売上分析で店舗を絞った時と同じ）。インセンティブは全店舗の実績で計算する
+  const rows = data.staffInScope || data.staff;
+  if (rows.length === 0) return null;
+  const helpers = rows.some((r) => r.home === false);
   return (
-    <Card title="スタッフ別" icon="users" pad={false}>
+    <Card title="スタッフ別" icon="users" pad={false}
+      subtitle={helpers ? '表示中の店舗での実績。ヘルプのスタッフも含みます（インセンティブはスタッフごとに全店舗の実績で計算）' : '表示中の店舗での実績'}>
       <div className="scroll-x">
         <table className="data-table">
           <thead>
@@ -158,11 +162,14 @@ function StaffTable({ data }) {
             </tr>
           </thead>
           <tbody>
-            {data.staff.map((r) => {
+            {rows.map((r) => {
               const m = r.metrics;
               return (
                 <tr key={r.key}>
-                  <td className="whitespace-nowrap"><div className="font-semibold text-ink">{r.name}</div><div className="text-[11px] text-muted">{r.storeName}</div></td>
+                  <td className="whitespace-nowrap">
+                    <div className="flex items-center gap-1.5 font-semibold text-ink">{r.name}{r.home === false ? <Badge tone="neutral">ヘルプ</Badge> : null}</div>
+                    <div className="text-[11px] text-muted">{r.storeName}</div>
+                  </td>
                   <td className="num-cell font-semibold text-ink">{yen(m.consumedSales)}</td>
                   <td className="num-cell">{num(m.newCount)}</td>
                   <td className="num-cell">{num(m.repeatCount)}</td>

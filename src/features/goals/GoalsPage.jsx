@@ -79,7 +79,7 @@ function MonthlyGoals() {
                         format={(v) => pct(v)} gapLabel={(g) => `${num(g, 1)}pt`} progress={progress} timing={timing} />
                     ) : null}
                     {goal.memberCount ? (
-                      <GoalRow label="会員数" kind="level" actual={actualRet.memberCount || 0} target={goal.memberCount} format={(v) => `${num(v)}名`}
+                      <GoalRow label="会員数" kind="level" actual={actualRet.memberCount ?? null} target={goal.memberCount} format={(v) => `${num(v)}名`}
                         gapLabel={(g) => `${num(g)}名`} progress={progress} timing={timing} />
                     ) : null}
                     {goal.memo ? <p className="pt-3 text-xs leading-relaxed text-ink-2"><Icon name="sticky-note" size={13} className="mr-1 inline text-muted" />{goal.memo}</p> : null}

@@ -3,6 +3,9 @@
   "installCommand": "npm install",
   "buildCommand": "npm run build",
   "outputDirectory": "public",
+  "crons": [
+    { "path": "/api/salonone?action=cron", "schedule": "30 14 * * *" }
+  ],
   "functions": {
     "api/salonone/index.js": { "maxDuration": 60 },
     "api/db/index.js": { "maxDuration": 30 },

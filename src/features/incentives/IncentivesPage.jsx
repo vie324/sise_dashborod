@@ -8,6 +8,7 @@ import { yen } from '../../lib/format.js';
 import { ScopeBar, DataWarnings } from '../shared/ScopeBar.jsx';
 import StaffDetail from './StaffDetail.jsx';
 import RulesView from './RulesView.jsx';
+import PeriodCloseBar from './PeriodClose.jsx';
 import { INCENTIVE_META } from './parts.jsx';
 import { INCENTIVE_RULES } from '../../../shared/incentive-rules.js';
 import { takeFocusIncentive, scrollToIncentive } from './focus.js';
@@ -18,6 +19,9 @@ const goalOf = (goals, row) => (goals && goals.staff && row.staffId && goals.sta
 function Amount({ value, strong }) {
   return <span className={cx('num', value > 0 ? (strong ? 'font-bold text-ink' : 'text-ink') : 'text-muted')}>{yen(value)}</span>;
 }
+
+/** 支給期間の合計（確定済みなら確定した金額） */
+const periodTotal = (r) => (r.closed ? r.closed.total : r.period.total);
 
 function StaffTable({ summary, onOpen }) {
   const rows = summary.staff;
@@ -35,7 +39,7 @@ function StaffTable({ summary, onOpen }) {
                 <th>スタッフ</th>
                 {ITEM_KEYS.map((k) => <th key={k} className="text-right">{INCENTIVE_META[k].title.replace('Minimo・Threads・Instagram', 'SNS')}</th>)}
                 <th className="text-right">今月合計</th>
-                <th className="text-right">支給期間の合計</th>
+                <th className="text-right">支給期間の合計{summary.close ? '（確定）' : ''}</th>
               </tr>
             </thead>
             <tbody>
@@ -47,14 +51,17 @@ function StaffTable({ summary, onOpen }) {
                   </td>
                   {ITEM_KEYS.map((k) => <td key={k} className="num-cell"><Amount value={itemAmount(r, k)} /></td>)}
                   <td className="num-cell"><Amount value={r.incentive.total} strong /></td>
-                  <td className="num-cell"><Amount value={r.period.total} strong /></td>
+                  <td className="num-cell">
+                    <Amount value={periodTotal(r)} strong />
+                    {r.closed && r.closed.total !== r.period.total ? <div className="text-[11px] text-muted">再計算 {yen(r.period.total)}</div> : null}
+                  </td>
                 </tr>
               ))}
               <tr className="bg-surface-2">
                 <td className="font-semibold text-ink-2">合計</td>
                 {ITEM_KEYS.map((k) => <td key={k} className="num-cell font-semibold"><Amount value={total((r) => itemAmount(r, k))} /></td>)}
                 <td className="num-cell"><Amount value={total((r) => r.incentive.total)} strong /></td>
-                <td className="num-cell"><Amount value={total((r) => r.period.total)} strong /></td>
+                <td className="num-cell"><Amount value={total(periodTotal)} strong /></td>
               </tr>
             </tbody>
           </table>
@@ -68,7 +75,7 @@ function StaffTable({ summary, onOpen }) {
               <span className="flex w-full items-center justify-between gap-2">
                 <span className="min-w-0">
                   <span className="block truncate font-semibold text-ink">{r.name}</span>
-                  <span className="block text-[11px] text-muted">{r.storeName} ・ 期間合計 {yen(r.period.total)}</span>
+                  <span className="block text-[11px] text-muted">{r.storeName} ・ 期間合計{r.closed ? '（確定）' : ''} {yen(periodTotal(r))}</span>
                 </span>
                 <span className="flex items-center gap-1 text-lg font-bold text-ink num">{yen(r.incentive.total)}<Icon name="chevron-right" size={16} className="text-muted" /></span>
               </span>
@@ -128,7 +135,8 @@ export default function IncentivesPage() {
             <div className={cx('transition-opacity', summary.stale || summary.loading ? 'opacity-60' : '')}>
               {tab === 'staff' ? (
                 <>
-                  <p className="mb-3 text-xs text-muted">支給期間 {data.period.label}。行を選ぶと「次のランクまで」などの内訳を表示します。</p>
+                  <PeriodCloseBar summary={data} />
+                  <p className="mb-3 text-xs text-muted">行を選ぶと「次のランクまで」などの内訳を表示します。インセンティブは、ヘルプで入った他店舗の分も含めてスタッフごとに全店舗の実績で計算しています。</p>
                   <StaffTable summary={data} onOpen={setOpen} />
                 </>
               ) : data.me ? (

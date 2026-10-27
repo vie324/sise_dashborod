@@ -99,6 +99,24 @@ test.describe('SalonOne 連携 API', () => {
     expect(resp.status()).toBe(400);
   });
 
+  test('出納帳の現金売上（action=cash）は店舗の指定が無ければ 400', async ({ request }) => {
+    const resp = await request.get('/api/salonone?action=cash&storeId=all');
+    if (resp.status() === 401) return;
+    expect(resp.status()).toBe(400);
+  });
+
+  test('インセンティブの確定は POST だけ', async ({ request }) => {
+    const resp = await request.get('/api/salonone?action=closePeriod');
+    if (resp.status() === 401) return;
+    expect(resp.status()).toBe(405);
+  });
+
+  test('確定したインセンティブは一般の設定（dashConfig）から読めない', async ({ request }) => {
+    const resp = await request.get('/api/db?table=dashConfig&key=incentive.close.2026-11');
+    const data = await resp.json();
+    expect(data.error).toBeTruthy();
+  });
+
   test('不正な staff token は 401', async ({ request }) => {
     const fakeToken = btoa(JSON.stringify({ id: 's1', n: 'fake', r: 'staff', sid: ['x'] })) + '.invalidsig';
     const resp = await request.get('/api/salonone?action=summary', {

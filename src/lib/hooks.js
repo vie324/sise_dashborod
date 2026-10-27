@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { dbGet, dbPost, salonOne } from './api.js';
+import { dbGet, dbPost, salonOne, salonOnePost } from './api.js';
 
 // ============================================================
 // データ取得フック（キャッシュ付き・再取得中も前の表示を保つ）
@@ -110,6 +110,34 @@ export function refreshSalonOne() {
   forceRefreshUntil = Date.now() + 8000;
   invalidate('summary:');
   invalidate('trend:');
+  invalidate('cash:');
+}
+
+/**
+ * 1店舗・1ヶ月の SalonOne の日別の現金売上（出納帳の突合・レジ金チェック・日次締め用。受付履歴だけを読む軽い取得）。
+ * fresh: 開くたびに SalonOne から読み直す（レジ金チェック・締めのダイアログ。数分前の金額で差異を出さないため）
+ */
+export function useStoreCash(month, storeId, { fresh = false } = {}) {
+  const [openedAt] = useState(() => Date.now());
+  const ok = month && storeId && storeId !== 'all';
+  const key = ok ? `cash:${month}:${storeId}${fresh ? `:fresh:${openedAt}` : ''}` : null;
+  const res = useResource(key, () => salonOne('cash', { month, storeId, refresh: fresh ? 1 : refreshFlag() }), { maxAge: 3 * 60 * 1000 });
+  // 店舗や月を切り替えた直後は前の結果が残っているので、条件が一致するものだけ返す
+  const match = (d) => (d && d.month === month && String(d.storeId) === String(storeId) ? d : null);
+  return { ...res, data: match(res.data), shown: match(res.shown) };
+}
+
+/** インセンティブの確定・取り消し（オーナー・管理者） */
+export async function closeIncentivePeriod(body) {
+  const r = await salonOnePost('closePeriod', body);
+  invalidate('summary:');
+  return r;
+}
+
+export async function reopenIncentivePeriod(body) {
+  const r = await salonOnePost('reopenPeriod', body);
+  invalidate('summary:');
+  return r;
 }
 
 // ------------------------------------------------------------

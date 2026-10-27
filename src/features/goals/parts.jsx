@@ -19,6 +19,8 @@ import { INCENTIVE_RULES } from '../../../shared/incentive-rules.js';
 export function judge(actual, target, progress, timing, kind, gapLabel) {
   if (!target) return { status: 'none' };
   if (timing === 'future') return { status: 'pending', label: 'これから' };
+  // 実績がわからない（会員数の記録が無い月など）時は 0 として未達にしない
+  if (actual == null) return { status: 'pending', label: 'データなし' };
   if (actual >= target) return { status: 'achieved' };
   if (timing === 'past') return { status: 'unmet', label: '未達' };
   if (kind === 'level') return { status: 'behind', label: gapLabel ? `あと${gapLabel(target - actual)}` : 'もう少し' };
@@ -37,20 +39,20 @@ export function GoalRow({ label, actual, target, format, progress, timing, perDa
       <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
         <span className="text-[13px] font-semibold text-ink">{label}</span>
         <span className="text-[13px] text-ink-2">
-          <span className="text-base font-bold text-ink num">{timing === 'future' ? '—' : format(actual)}</span>
+          <span className="text-base font-bold text-ink num">{timing === 'future' || actual == null ? '—' : format(actual)}</span>
           {target ? <span className="num"> / {format(target)}</span> : <span className="text-muted"> / 目標未設定</span>}
         </span>
       </div>
       {target ? (
         <>
-          <Meter className="mt-2" value={timing === 'future' ? 0 : actual} max={target}
+          <Meter className="mt-2" value={timing === 'future' || actual == null ? 0 : actual} max={target}
             marker={timing === 'current' && kind === 'cumulative' ? target * progress.ratio : null}
             tone={st.status === 'achieved' ? 'good' : st.status === 'behind' || st.status === 'unmet' ? 'warn' : 'brand'} label={`${label}の達成率`} />
           <div className="mt-1.5 flex flex-wrap items-center justify-between gap-2 text-xs text-ink-2">
             <StatusPill {...st} />
             {timing === 'current' && kind === 'cumulative' && gap > 0 && perDayUnit ? (
               <span>残り{remainingDays}日・1日あたり <span className="font-semibold text-ink num">{perDayUnit(Math.ceil(gap / Math.max(1, remainingDays)))}</span></span>
-            ) : timing !== 'future' ? <span className="num">達成率 {pct((actual / target) * 100, 0)}</span> : null}
+            ) : timing !== 'future' && actual != null ? <span className="num">達成率 {pct((actual / target) * 100, 0)}</span> : null}
           </div>
         </>
       ) : null}

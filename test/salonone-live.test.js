@@ -125,16 +125,85 @@ test('当月: 継続管理から会員数・退会率・平均継続期間を出
 
   const saved = await db.from('dash_config').select('value').eq('key', provider.RETENTION_KEY).maybeSingle();
   assert.equal(saved.data.value[CURRENT]['101'].memberCount, 50);
-  // 店舗を絞ったときは、その店舗の分だけ取りに行く
-  assert.ok(calls.every((u) => !u.searchParams.get('shop_id') || u.searchParams.get('shop_id') === '101'));
+  // スタッフのインセンティブ（継続率は所属店舗の条件）のため、店舗を絞っていても全店舗の分を取る
+  assert.equal(saved.data.value[CURRENT]['102'].memberCount, 12);
+  assert.equal(s.store.retention.memberCount, 50); // 店舗の数字は中央店だけ
 });
 
-test('スタッフは自分の店舗の分だけ取得し、自分の行だけ見える', async () => {
+test('スタッフには自分の行と所属店舗の数字だけを返す（インセンティブの計算には全店舗の実績を使う）', async () => {
   const s = await summary.buildSummary(SATO, { month: PREV, storeId: 'all' });
   assert.equal(s.staff.length, 1);
   assert.equal(s.me.metrics.consumedSales, 25000);
-  const shopsRequested = new Set(calls.map((u) => u.searchParams.get('shop_id')).filter(Boolean));
-  assert.deepEqual([...shopsRequested], ['101']);
+  assert.deepEqual(s.staffInScope.map((r) => r.key), ['201']);
+  assert.deepEqual(s.stores.map((r) => r.storeId), ['store-1']);
+  assert.equal(s.store.consumedSales, 34000);
+  assert.deepEqual(s.sources, []);
+  assert.ok(!JSON.stringify(s).includes('田中'), '他店舗のスタッフの名前を返さない');
+  await assert.rejects(summary.buildSummary(SATO, { month: PREV, storeId: 'store-2' }), (e) => e.status === 403);
+});
+
+/**
+ * 佐藤（201・中央店 101 の所属）が駅前店（102）にヘルプで入った月にする:
+ * 駅前店の売上分析のスタッフ別に 佐藤 10,000円・1回、受付履歴に 15日の来店 1件を足す。
+ */
+function withHelperAtStation(base) {
+  return async (input, init) => {
+    const url = new URL(String(input));
+    const res = await base(input, init);
+    if (url.searchParams.get('shop_id') !== '102' || !res.ok) return res;
+    const body = await res.json();
+    if (url.pathname.endsWith('/sales/summary')) {
+      const d = body.data;
+      d.consumed_sales += 10000;
+      d.digest_sales += 10000;
+      d.treatment_count += 1;
+      d.repeat_visit_count += 1;
+      d.by_staff.push({ staff_id: 201, staff_name: '佐藤 美咲', consumed_sales: 10000, digest_sales: 10000, new_visit_count: 0, repeat_visit_count: 1, customer_count: 1, treatment_count: 1, purchase_count: 0 });
+    }
+    if (url.pathname.endsWith('/marketing/reception-history') && !url.searchParams.get('cursor')) {
+      const month = url.searchParams.get('from').slice(0, 7);
+      body.data.push({
+        appointment_id: 990001, shop_id: 102, customer_id: 9599, reserved_at: `${month}-15T11:00:00+09:00`, status: 'completed',
+        staff_id: 201, staff_name: '佐藤 美咲', classification: 'existing', joined: false, plans: [],
+        amount: 10000, consumed_amount: 10000, payment_method_name: 'クレジットカード', payment_splits: [],
+      });
+    }
+    return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  };
+}
+
+test('他店舗にヘルプで入ったスタッフ: インセンティブは表示中の店舗に関係なく全店舗の実績で計算する', async () => {
+  globalThis.fetch = withHelperAtStation(fakeFetch(calls));
+  const all = await summary.buildSummary(null, { month: PREV, storeId: 'all' });
+  const satoAll = all.staff.find((r) => r.name === '佐藤 美咲');
+  assert.equal(satoAll.metrics.consumedSales, 35000);
+  assert.equal(satoAll.metrics.treatmentCount, 5);
+  assert.equal(satoAll.storeId, 'store-1'); // 所属は SalonOne の所属店舗
+
+  provider.clearSalonOneCache();
+  const central = await summary.buildSummary(null, { month: PREV, storeId: 'store-1' });
+  const satoCentral = central.staff.find((r) => r.name === '佐藤 美咲');
+  assert.equal(satoCentral.metrics.consumedSales, 35000); // 中央店だけを見ていても全店舗の合計
+  assert.deepEqual(satoCentral.incentive, satoAll.incentive);
+  assert.equal(satoCentral.period.total, satoAll.period.total);
+  // 売上分析のスタッフ別（表示中の店舗だけの数字）
+  assert.equal(central.staffInScope.find((r) => r.name === '佐藤 美咲').metrics.consumedSales, 25000);
+  assert.equal(central.store.consumedSales, 34000); // 店舗の数字は中央店だけのまま
+
+  // 駅前店: 佐藤さんは所属ではないのでインセンティブの一覧には出さず、売上分析のスタッフ別には出す
+  const station = await summary.buildSummary(null, { month: PREV, storeId: 'store-2' });
+  assert.equal(station.staff.find((r) => r.name === '佐藤 美咲'), undefined);
+  assert.equal(station.staffInScope.find((r) => r.name === '佐藤 美咲').metrics.consumedSales, 10000);
+  assert.equal(station.store.consumedSales, 24000);
+  assert.deepEqual(station.sources, []); // 来店経由は表示中の店舗のぶんだけ
+
+  // 本人（スタッフURL・所属は中央店のみ）も同じ金額を見る
+  provider.clearSalonOneCache();
+  const mine = await summary.buildSummary(SATO, { month: PREV, storeId: 'all' });
+  assert.equal(mine.me.metrics.consumedSales, 35000);
+  assert.deepEqual(mine.me.incentive, satoAll.incentive);
+  assert.deepEqual(mine.staff.map((r) => r.name), ['佐藤 美咲']);
+  assert.deepEqual(mine.stores.map((s) => s.storeId), ['store-1']); // 店舗の数字は所属店舗だけ
 });
 
 test('出納帳への取り込み用: 日ごとの現金売上（分割決済は現金の分だけ）', async () => {

@@ -4,7 +4,7 @@ import { resolveStoreId } from './stores.js';
 import { dailyCashSales, AccessError } from './salonone/summary.js';
 import { SalonOneError } from './salonone/client.js';
 import { SALES_CATEGORIES, SALONONE_CASH_CATEGORY, salonOneCashEntryId, isSalonOneCashEntry } from '../../shared/cashbook.js';
-import { isDate, monthOf, todayJst } from '../../shared/dates.js';
+import { isDate, monthOf } from '../../shared/dates.js';
 
 // ============================================================
 // 出納帳 (cashbook) + 出納帳ログ + 日次締め
@@ -289,9 +289,9 @@ async function cbImportSalonOneCash(body, staffCtx) {
 
   let cash;
   try {
-    // 当日分は締めの直前に取り込むことが多いので、キャッシュを使わず SalonOne から読み直す
-    const refresh = dates.includes(todayJst());
-    cash = await dailyCashSales(staffCtx, { storeId, months: [...new Set(dates.map(monthOf))].sort(), refresh });
+    // 取り込む金額は常に SalonOne から読み直す（当月・前月。画面に出ていた金額が数分前のものでも、最新で記録する）。
+    // 受付履歴だけを取るので、1ヶ月あたり 1回の呼び出しで済む
+    cash = await dailyCashSales(staffCtx, { storeId, months: [...new Set(dates.map(monthOf))].sort(), refresh: true });
   } catch (e) {
     if (e instanceof AccessError) return { error: e.message };
     if (e instanceof SalonOneError) return { error: `SalonOne のデータを取得できませんでした: ${e.message}` };
