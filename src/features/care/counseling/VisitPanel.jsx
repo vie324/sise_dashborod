@@ -209,8 +209,9 @@ export function VisitList({ res, links = {}, form = null, onSelect, onManual, on
  * 選んだお客様
  * @param {{ customerName, customerNumber, time, status, isNew, staffName, sourceName, contracted, plans, manual, formOnly, sheet }} guest
  * @param {Object|null} pendingSheet 選んだ後に届いた（まだ反映していない）同じお名前のカウンセリングシート
+ * @param {Function|null} onPickSheet フォームの回答から選んで付ける（フォームの店舗で、回答の一覧を読めた時だけ）
  */
-export function GuestCard({ guest, callName, onCallName, onChange, onOpenTool, pendingSheet, onAttachSheet }) {
+export function GuestCard({ guest, callName, onCallName, onChange, onOpenTool, pendingSheet, onAttachSheet, onPickSheet }) {
   const title = guest.manual ? (guest.customerName ? `${guest.customerName} 様` : '予約に無いお客様') : guestLabel(guest);
   const meta = guest.manual
     ? ['予約に無いお客様（手入力）']
@@ -243,6 +244,23 @@ export function GuestCard({ guest, callName, onCallName, onChange, onOpenTool, p
         </div>
         <Button size="sm" variant="secondary" icon="users" onClick={onChange}>別のお客様</Button>
       </div>
+
+      {!guest.sheet && !pendingSheet && onPickSheet ? (
+        <div className="rounded-xl border border-dashed border-line-strong px-3 py-2.5 sm:flex sm:items-center sm:gap-3">
+          <div className="flex min-w-0 flex-1 items-start gap-2.5">
+            <Icon name="file-question-mark" size={18} className="mt-0.5 shrink-0 text-muted" />
+            <div className="min-w-0">
+              <p className="text-[13px] font-bold text-ink">{guest.manual ? 'カウンセリングシート' : 'カウンセリングシートが見つかりません'}</p>
+              <p className="text-xs leading-relaxed text-muted">
+                {guest.manual
+                  ? 'フォームに記入いただいた方は、回答を選ぶとお悩みがチェックに入ります'
+                  : 'まだ届いていないか、SalonOne とフォームでお名前の書き方が違います。回答を選ぶとお悩みがチェックに入ります'}
+              </p>
+            </div>
+          </div>
+          <Button size="sm" variant="secondary" icon="file-search" onClick={onPickSheet} className="mt-2.5 w-full sm:mt-0 sm:w-auto">回答から選ぶ</Button>
+        </div>
+      ) : null}
 
       <div className="flex flex-col gap-2 rounded-xl bg-surface-2 p-3 sm:flex-row sm:items-center">
         <label htmlFor="cs-call-name" className="shrink-0 text-xs font-semibold text-ink-2">ご説明の画面のお名前</label>

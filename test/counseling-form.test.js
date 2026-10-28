@@ -10,7 +10,7 @@ import { createMockClient } from '../scripts/dev/supabase-mock.mjs';
 import { fakeGasFetch, FAKE_GAS_TOKEN } from '../scripts/dev/gas-fake.mjs';
 import {
   mapFormConcerns, matchConcern, isNoAnswer, guessGasStore, resolveGasStore, GAS_STORES,
-  personKey, linkSheetsToVisits, visitForSheet,
+  personKey, personKeys, linkSheetsToVisits, visitForSheet, rankSheetsFor, nameSearch, CONCERN_ITEMS,
 } from '../shared/counseling.js';
 
 const GAS_URL = 'https://script.google.com/macros/s/AKfycbFAKEDEPLOYMENT1234TA/exec';
@@ -99,6 +99,79 @@ test('予約とフォームの回答をお名前で結びつける: 同じ人は
   assert.equal(visitForSheet(visits, { name: '小林 美穂' }).id, 'v2');
   assert.equal(visitForSheet(visits, { name: '吉田 真央' }), null);
   assert.equal(visitForSheet(visits, { name: '' }), null);
+});
+
+test('SalonOne の登録の重なり（名の欄にも姓・姓の欄にもお名前）・読みのかっこ書き・異体字でも同じ人とみなす', () => {
+  assert.deepEqual(personKeys('山田 山田　花子'), ['山田山田花子', '山田花子']);
+  assert.deepEqual(personKeys('山田 山田花子 様'), ['山田山田花子', '山田花子']);
+  assert.deepEqual(personKeys('山田花子 花子'), ['山田花子花子', '山田花子']);
+  assert.deepEqual(personKeys('山田 花子 花子'), ['山田花子花子', '山田花子']);
+  assert.deepEqual(personKeys('山田 花子'), ['山田花子']);
+  assert.deepEqual(personKeys('林 林太郎'), ['林林太郎']); // 1文字の姓で始まる名は重なりとみなさない
+  assert.deepEqual(personKeys('林 林　太郎'), ['林林太郎', '林太郎']);
+  assert.deepEqual(personKeys(''), []);
+  assert.equal(personKey('山田 花子（ヤマダ ハナコ）'), '山田花子');
+  assert.equal(personKey('(ヤマダ)'), 'ヤマダ');
+  assert.equal(personKey('髙橋　愛'), personKey('高橋 愛'));
+  assert.equal(personKey('𠮷川 舞'), personKey('吉川 舞'));
+  assert.equal(personKey('マリア・ロペス'), personKey('マリア ロペス'));
+
+  const visits = [
+    { id: 'v1', customerName: '山田 山田　花子' },
+    { id: 'v2', customerName: '髙橋 愛' },
+    { id: 'v3', customerName: '林 林太郎' },
+    { id: 'v4', customerName: '大野 さき' },
+  ];
+  const sheets = [
+    { index: 1, name: '山田花子', submittedAt: '2026-10-21T01:00:00.000Z' },
+    { index: 2, name: '高橋　愛 様', submittedAt: '2026-10-21T02:00:00.000Z' },
+    { index: 3, name: '林 太郎', submittedAt: '2026-10-21T03:00:00.000Z' },
+    { index: 4, name: '大野 さき（オオノ）', submittedAt: '2026-10-21T04:00:00.000Z' },
+  ];
+  const links = linkSheetsToVisits(visits, sheets, { today: '2026-10-21' });
+  assert.deepEqual(Object.fromEntries(Object.entries(links).map(([id, x]) => [id, x.index])), { v1: 1, v2: 2, v4: 4 });
+  // 回答から予約を探す時も同じ
+  assert.equal(visitForSheet(visits, { name: '山田 花子' }).id, 'v1');
+  assert.equal(visitForSheet(visits, { name: '林 太郎' }), null);
+  // 書き方まで同じ予約を先に（重なりを外して同じになる予約より）
+  assert.equal(visitForSheet([{ id: 'a', customerName: '山田 山田花子' }, { id: 'b', customerName: '山田 花子' }], { name: '山田花子' }).id, 'b');
+});
+
+test('回答から選ぶ時の並び: 3日以内でお名前が近い回答 → 3日以内 → それより前（それぞれ新しい順）', () => {
+  const sheets = [
+    { index: 1, name: '山田 由美', submittedAt: '2026-10-10T01:00:00.000Z' },
+    { index: 2, name: 'ヤマダ ハナコ', submittedAt: '2026-10-21T05:00:00.000Z' },
+    { index: 3, name: '山田はなこ', submittedAt: '2026-10-21T01:00:00.000Z' },
+    { index: 4, name: '佐藤 花子', submittedAt: '2026-10-20T01:00:00.000Z' },
+    { index: 5, name: '鈴木 一美', submittedAt: '2026-10-21T06:00:00.000Z' },
+  ];
+  const order = (name) => rankSheetsFor(name, sheets, { today: '2026-10-21' }).map((x) => x.index);
+  assert.deepEqual(order('山田 花子'), [3, 4, 5, 2, 1]);
+  assert.deepEqual(order(''), [5, 2, 3, 4, 1]);
+  assert.deepEqual(rankSheetsFor('山田 花子', undefined, { today: '2026-10-21' }), []);
+});
+
+test('お名前の検索: 空白・全角半角・「様」の違いで漏れない（GAS には最初の 2文字で聞く）', () => {
+  const s = nameSearch('山田　花子 様');
+  assert.equal(s.gasQuery, '山田');
+  assert.equal(s.matches('山田花子'), true);
+  assert.equal(s.matches('山田 花子'), true);
+  assert.equal(s.matches('山田 由美'), false);
+  assert.equal(nameSearch('花子').matches('山田 花子'), true);
+  assert.equal(nameSearch('髙橋').gasQuery, '髙橋'); // GAS には書かれたまま聞く
+  assert.equal(nameSearch('髙橋').matches('高橋 愛'), true);
+  assert.equal(nameSearch(' 様 '), null);
+  assert.equal(nameSearch(''), null);
+});
+
+test('フォームの選択肢はすべてチェック項目に入る（全店舗のフォームの選択肢。二の腕のたるみ は姿勢矯正）', () => {
+  const FORM_OPTIONS = ['頭・はちの張り', '眼精疲労', '頬のたるみ', '食いしばり・エラの張り', '顔の左右差', '首・ストレートネック', '肩こり', '腰痛',
+    '股関節・膝の痛み', '冷え・むくみ', '生理痛・生理不順', '下半身太り', '二の腕のたるみ', '骨盤の歪み', '姿勢・猫背', '反り腰', 'X脚・O脚'];
+  for (const o of FORM_OPTIONS) assert.equal(matchConcern(o).length, 1, o);
+  const ids = FORM_OPTIONS.map((o) => matchConcern(o)[0]);
+  assert.equal(new Set(ids).size, FORM_OPTIONS.length);
+  assert.equal(new Set(CONCERN_ITEMS.map((c) => c.id)).size, CONCERN_ITEMS.length);
+  assert.equal(CONCERN_ITEMS.find((c) => c.id === matchConcern('二の腕のたるみ')[0]).cat, 'posture');
 });
 
 test('フォームの店舗との対応付け: 名前が同じ店舗だけ自動（新横浜店は横浜店にしない）', () => {
@@ -208,7 +281,72 @@ test('行がずれていたら名前で取り直す・名前で検索できる',
 
   const found = await counseling.counselingGet({ action: 'search', storeId: 'store-hon', q: '小林' }, HON_STAFF);
   assert.deepEqual(found.customers.map((c) => c.name), ['小林 美穂']);
+  // 空白なし・敬称つき・名だけでも見つかる
+  for (const q of ['小林美穂', '小林　美穂 様', '美穂']) {
+    const r = await counseling.counselingGet({ action: 'search', storeId: 'store-hon', q }, HON_STAFF);
+    assert.deepEqual(r.customers.map((c) => c.name), ['小林 美穂'], q);
+  }
+  assert.deepEqual((await counseling.counselingGet({ action: 'search', storeId: 'store-hon', q: '小林 由紀' }, HON_STAFF)).customers, []);
+  assert.equal(calls.filter((u) => u.searchParams.get('action') === 'search').every((u) => Array.from(u.searchParams.get('q')).length <= 2), true);
   assert.equal((await counseling.counselingGet({ action: 'search', storeId: 'store-hon', q: ' ' }, HON_STAFF)).code, 'bad_request');
+});
+
+test('質問の並びが違うフォーム（川口店）: 以前の GAS が別の質問の列から読んだ項目は出さない', async () => {
+  // 以前の GAS は「改善したい時期」を免責事項の列、「施術のご要望」を施術経験の列、「施術経験」を手術歴の列から読んでいた
+  const headers = ['タイムスタンプ', 'お名前を教えてください。', '生年月日を教えてください。', '電話番号を教えてください。', 'メールアドレスを教えてください。',
+    '職業を教えてください。', 'お住まいを教えてください。', '該当するものにチェックを入れてください。', 'お悩み箇所にチェックをお願いいたします。',
+    '施術に関するご要望がございましたらご記入ください。', 'ご利用されたことのある施術がございましたら教えてください。', '手術歴があればご記入ください。',
+    '現在治療中の病気や怪我があればご記入ください。', 'アレルギーがあればご記入ください。', '美容整形等をされている場合、ご記入ください。', '接客へのご要望',
+    '妊娠中の方・特定疾患の方・ペースメーカー及び金属がある方はお知らせください。', '【免責事項及び注意事項】 1. 当サロンでは美容、身体の機能改善を目的とし']
+    .map((h, i) => `${i}:${h.slice(0, 30)}`);
+  const colMap = { TIMESTAMP: 0, NAME: 1, VISIT_PURPOSE: 7, CONCERNS: 8, IMPROVEMENT_TIMELINE: 17, TREATMENT_REQUEST: 10, TREATMENT_EXPERIENCE: 11, SURGERY_HISTORY: 11 };
+  const customer = {
+    index: 0, name: '川口 テスト', timestamp: '2026-10-21T01:00:00.000Z', concerns: ['肩こり'], visitPurpose: ['施術効果を確認したい'],
+    improvementTimeline: '上記の内容を理解した上で施術をうけ、施術後の異議を申し立てません。', treatmentRequest: '整体, マッサージ', treatmentExperience: ['無'],
+    surgeryHistory: '無', currentTreatment: '無', allergy: '無', cosmeticSurgery: '', pregnancyCheck: '',
+  };
+  const old = counseling.normDetail(customer, { colMap, headers });
+  assert.equal(old.improvementTimeline, '');
+  assert.equal(old.treatmentRequest, '');
+  assert.deepEqual(old.treatmentExperience, []);
+  assert.deepEqual(old.visitPurpose, ['施術効果を確認したい']);
+  assert.deepEqual(old.concerns, ['肩こり']);
+
+  // 新しい GAS（正しい列から読む・無い質問は -1）はそのまま出す
+  const fixed = counseling.normDetail({ ...customer, improvementTimeline: '', treatmentRequest: '強めでお願いします', treatmentExperience: ['整体', 'マッサージ'] },
+    { colMap: { ...colMap, IMPROVEMENT_TIMELINE: -1, TREATMENT_REQUEST: 9, TREATMENT_EXPERIENCE: 10 }, headers });
+  assert.equal(fixed.treatmentRequest, '強めでお願いします');
+  assert.deepEqual(fixed.treatmentExperience, ['整体', 'マッサージ']);
+  // 見出しが返らない GAS（疑似 GAS など）は確かめずに出す
+  assert.equal(counseling.normDetail(customer, undefined).treatmentRequest, '整体, マッサージ');
+
+  // 標準の並び（本厚木店など）はそのまま
+  const standard = ['タイムスタンプ', 'お名前を教えてください。', '', '', '', '', '', '該当するものにチェックを入れてください。', 'お悩み箇所にチェックをお願いいたします。',
+    '上記で回答いただいたお悩みはいつまでに解消したいといった目標はございますか？', '施術に関するご要望がございましたらご記入ください。',
+    'ご利用されたことのある施術がございましたら教えてください。'].map((h, i) => `${i}:${h.slice(0, 30)}`);
+  const std = counseling.normDetail({ ...customer, improvementTimeline: '3ヶ月以内に解消したい。', treatmentRequest: '肩を重点的に', treatmentExperience: ['整体'] },
+    { colMap: { ...colMap, IMPROVEMENT_TIMELINE: 9, TREATMENT_REQUEST: 10, TREATMENT_EXPERIENCE: 11 }, headers: standard });
+  assert.equal(std.improvementTimeline, '3ヶ月以内に解消したい。');
+  assert.equal(std.treatmentRequest, '肩を重点的に');
+  assert.deepEqual(std.treatmentExperience, ['整体']);
+});
+
+test('1件の内容は GAS の列の見出しも見て返す（detail の _debug を使う）', async () => {
+  const base = fakeGasFetch(calls);
+  globalThis.fetch = async (input) => {
+    const url = new URL(String(input));
+    if (url.searchParams.get('action') !== 'detail') return base(input);
+    calls.push(url);
+    const body = {
+      store: 'honatsugi',
+      _debug: { colMap: { TREATMENT_REQUEST: 10 }, headers: ['10:ご利用されたことのある施術がございましたら教えてください。'] },
+      customer: { index: 0, name: '本厚木 テスト', timestamp: '2026-10-21T01:00:00.000Z', concerns: [], treatmentRequest: '整体' },
+    };
+    return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  };
+  const r = await counseling.counselingGet({ action: 'detail', storeId: 'store-hon', index: '0', name: '本厚木 テスト' }, HON_STAFF);
+  assert.equal(r.customer.name, '本厚木 テスト');
+  assert.equal(r.customer.treatmentRequest, '');
 });
 
 test('20秒以内の読み直しは GAS を呼ばない（refresh=1 なら呼ぶ）', async () => {
