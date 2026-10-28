@@ -173,14 +173,16 @@ test('確定・CSV 用のまとめ: 支給額（項目ごと）と判定に使�
     newVisits: { hotpepper: 6, meta: 3, homepage: 1, instagram: 7, minimo: 3 },
     newContracts: { hotpepper: 4, meta: 1, homepage: 1, instagram: 2 },
     referralSubscriptions: 1,
+    crossStoreContracts: 2,
   };
   const res = computeStaffIncentive(m, { memberCount: 60, churnRatePct: 8, avgTenureMonths: 4.2 }, '2026-11');
   const s = summarizeIncentive(res);
-  assert.deepEqual(s.items, { sales: 30000, retention: 5000, newContract: 15000, sns: 4000, referral: 2000 });
-  assert.equal(s.total, 56000);
+  // 系列店での契約は 1件 2,000円
+  assert.deepEqual(s.items, { sales: 30000, retention: 5000, newContract: 15000, sns: 4000, referral: 2000, crossStore: 4000 });
+  assert.equal(s.total, 60000);
   assert.deepEqual(s.basis, {
     consumedSales: 700000, existingConsumedSales: 450000, newVisits3ch: 10, contracts3ch: 6, snsCustomers: 10, snsContracts: 2,
-    referralSubscriptions: 1, retentionKnown: true, memberCount: 60, churnRatePct: 8, avgTenureMonths: 4.2,
+    referralSubscriptions: 1, crossStoreContracts: 2, retentionKnown: true, memberCount: 60, churnRatePct: 8, avgTenureMonths: 4.2,
   });
   assert.equal(summarizeIncentive(null), null);
   // 継続指標の記録が無い月は「わからない」として残す
@@ -197,5 +199,7 @@ test('支給一覧の CSV: BOM 付き・月ごとの行・数式にならない�
   const lines = csv.slice(1).trim().split('\r\n');
   assert.equal(lines.length, 2); // 見出し + 11月（まだ無い 12月は出さない）
   assert.match(lines[0], /^支給期間,状態,店舗,スタッフ/);
-  assert.equal(lines[1], `2026年11月〜12月,確定,"中央店, 本店",'=佐藤,201,2026-11,576000,0,0,0,0,0,0,10,3,2,2026-11-30,5000,0,0,0,0,5000,5000`);
+  assert.equal(lines[1], `2026年11月〜12月,確定,"中央店, 本店",'=佐藤,201,2026-11,576000,0,0,0,0,0,0,0,10,3,2,2026-11-30,5000,0,0,0,0,0,5000,5000`);
+  assert.match(lines[0], /紹介のサブスク契約,系列店での契約,会員数/);
+  assert.match(lines[0], /⑤紹介,⑥系列店での契約,月の合計/);
 });

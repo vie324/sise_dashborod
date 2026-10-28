@@ -4,6 +4,7 @@ import { TierMeter, StatusPill, Meter } from '../../ui/stats.jsx';
 import { CumulativeChart } from '../../ui/charts.jsx';
 import { yen, yenShort, num, pct, dateJa } from '../../lib/format.js';
 import { forecastMonthEnd } from '../../../shared/metrics.js';
+import { INCENTIVE_RULES } from '../../../shared/incentive-rules.js';
 import { channelLabel } from '../../../shared/channels.js';
 import { dayOfMonth } from '../../../shared/dates.js';
 
@@ -15,8 +16,9 @@ export const INCENTIVE_META = {
   sales: { icon: 'banknote', title: '施術消化売上' },
   retention: { icon: 'repeat', title: '継続率', short: '継続率（店舗）' },
   newContract: { icon: 'user-plus', title: '新規契約' },
-  sns: { icon: 'smartphone', title: 'Minimo・Threads・Instagram', short: 'SNS集客' },
+  sns: { icon: 'smartphone', title: 'Minimo・Threads・Instagram', short: 'SNS集客', column: 'SNS' },
   referral: { icon: 'users', title: '紹介' },
+  crossStore: { icon: 'arrow-left-right', title: '系列店での契約', column: '系列店' },
 };
 
 /** インセンティブ 1項目の状態（色だけに頼らずラベルとアイコンで示す） */
@@ -36,13 +38,14 @@ export function itemStatus(item) {
       if (!item.eligible) return { status: item.gap <= 3 ? 'close' : 'unmet', label: `あと${item.gap}名` };
       return item.amount > 0 ? { status: 'achieved', label: `${item.contracts}件契約` } : { status: 'pending', label: '契約0件' };
     case 'referral':
+    case 'crossStore':
       return item.contracts > 0 ? { status: 'achieved', label: `${item.contracts}件` } : { status: 'none', label: '0件' };
     default:
       return { status: 'pending' };
   }
 }
 
-/** 5項目の内訳（行リスト） */
+/** 6項目の内訳（行リスト） */
 export function IncentiveBreakdown({ incentive, onSelect, className = '' }) {
   if (!incentive) return null;
   return (
@@ -278,6 +281,36 @@ export function ReferralCard({ item, rules }) {
         <div className="text-lg font-bold text-ink num">{yen(item.amount)}</div>
       </div>
       <p className="mt-3 text-xs leading-relaxed text-muted">SalonOne の専用URL/QRコード経由の予約が対象。来店前キャンセル・既存のお客様・シェアプランは対象外です。</p>
+    </Card>
+  );
+}
+
+/**
+ * 系列店での契約（店長以上が登録した、来店した店舗とは別の系列店での契約）
+ * @param {Array} [entries] この月の登録（summary の staff[].crossStore）
+ */
+export function CrossStoreCard({ item, rules, entries = [] }) {
+  const r = rules.crossStore || INCENTIVE_RULES.crossStore;
+  return (
+    <Card title="系列店での契約" icon="arrow-left-right" actions={<StatusPill {...itemStatus(item)} />}
+      subtitle={`来店したお客様が系列の他店舗で契約したら1件 ${yen(r.amountPerContract)}（店長が登録します）`}>
+      <div className="flex items-end justify-between">
+        <div>
+          <div className="text-xs font-semibold text-ink-2">系列店で契約したお客様</div>
+          <div className="mt-1 text-3xl font-bold text-ink num">{item.contracts}<span className="ml-1 text-base font-semibold text-ink-2">件</span></div>
+        </div>
+        <div className="text-lg font-bold text-ink num">{yen(item.amount)}</div>
+      </div>
+      {entries.length ? (
+        <ul className="mt-3 divide-y divide-line border-t border-line text-[13px]">
+          {entries.map((e) => (
+            <li key={e.id} className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 py-2">
+              <span className="min-w-0 text-ink">{dateJa(e.date, { weekday: false })} {e.customerName}様<span className="text-ink-2"> ・ {e.planName}</span></span>
+              <span className="text-xs text-ink-2">{e.contractStoreName}で契約</span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
     </Card>
   );
 }

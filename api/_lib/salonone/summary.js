@@ -18,6 +18,7 @@ import { INCENTIVE_RULES } from '../../../shared/incentive-rules.js';
 import { addMonths, monthProgress, monthsBetween, monthOf, monthRange, listMonths, todayJst, formatMonthJa } from '../../../shared/dates.js';
 import { loadAppContext, loadMaster, buildMapping, loadDataset } from './provider.js';
 import { loadCloseDoc, saveCloseDoc, closeView } from './closes.js';
+import { loadCrossEntries, crossExclusions, crossCreditsByMonth } from './cross.js';
 import { normalizeRole, isOwnerRole } from '../../../shared/roles.js';
 
 const n = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
@@ -178,6 +179,16 @@ async function loadCloseRecord(period, appCtx) {
   }
 }
 
+/** 系列店での契約の登録（Supabase につながらない時は別の注意（db）を出しているので読まない） */
+async function loadCrossRecord(months, appCtx) {
+  if (appCtx.dbError) return { entries: [] };
+  try {
+    return { entries: await loadCrossEntries(months) };
+  } catch (e) {
+    return { entries: [], error: e && e.message ? e.message : String(e) };
+  }
+}
+
 /**
  * インセンティブの一覧に出るスタッフ（ヘルプで入った他店舗の実績も取る対象）。
  * スタッフ本人は自分だけ。店長以上は所属店舗が表示中の店舗のスタッフ・所属のわからないスタッフ・本人
@@ -215,12 +226,15 @@ export async function buildSummary(staffCtx, { month, storeId, refresh, refreshO
   const prevMonth = addMonths(month, -1);
   const months = [...new Set([prevMonth, month, ...period.months])].sort();
   const last = months[months.length - 1];
-  const [data, close] = await Promise.all([
+  // 新規の判定に前の月（最初の予約をキャンセルして後日来店）、契約に後の 2ヶ月（生涯基準）の受付履歴も見る。
+  // 支給期間の最初の月の前の月も取り、支給期間のどちらの月を開いても期間の金額が同じになるようにする
+  const receptionMonths = [addMonths(period.months[0], -1), ...listMonths(addMonths(last, 1), addMonths(last, 2))];
+  // 系列店での契約は、2,000円をその月に付け、契約した店舗の新規契約（生涯基準なので後の月の契約も）から除く
+  const crossMonths = listMonths([...months, ...receptionMonths].sort()[0], addMonths(last, 2));
+  const [data, close, cross] = await Promise.all([
     loadDataset(appCtx, master, {
       months,
-      // 新規の判定に前の月（最初の予約をキャンセルして後日来店）、契約に後の 2ヶ月（生涯基準）の受付履歴も見る。
-      // 支給期間の最初の月の前の月も取り、支給期間のどちらの月を開いても期間の金額が同じになるようにする
-      receptionMonths: [addMonths(period.months[0], -1), ...listMonths(addMonths(last, 1), addMonths(last, 2))],
+      receptionMonths,
       shopIds: selectedShopIds,
       otherShopIds: allShopIds.filter((id) => !shopSet.has(id)),
       staffIds: relevant,
@@ -230,7 +244,12 @@ export async function buildSummary(staffCtx, { month, storeId, refresh, refreshO
       refreshOlderThan,
     }),
     loadCloseRecord(period, appCtx),
+    loadCrossRecord(crossMonths, appCtx),
   ]);
+  const excludedContracts = crossExclusions(cross.entries);
+  const crossCredits = crossCreditsByMonth(cross.entries);
+  const crossCount = (m, id) => ((crossCredits.get(m) || new Map()).get(id) || 0);
+  const withCross = (sm, m, id) => ({ ...(sm || {}), crossStoreContracts: crossCount(m, id) });
   const channelMap = appCtx.config['salonone.channelMap'] || {};
   const monthInput = (m) => ({
     receptions: data.receptions,
@@ -241,6 +260,7 @@ export async function buildSummary(staffCtx, { month, storeId, refresh, refreshO
     retentionOverrides: data.retentionOverrides[m],
     retentionFromContracts: data.retentionFromContracts,
     salesSummaries: data.salesSummaries[m],
+    excludedContracts,
   });
 
   const computed = {};
@@ -284,6 +304,13 @@ export async function buildSummary(staffCtx, { month, storeId, refresh, refreshO
   // 期間の途中で辞めた人も、実績のある月の分が期間の合計・確定に入るようにする）
   const s1StaffById = new Map(master.staff.map((s) => [s.id, s]));
   const listed = new Set(s1StaffById.keys());
+  // 系列店での契約を付けたスタッフが、その後スタッフ一覧からいなくなっても期間の合計・確定に入れる
+  const periodCross = cross.entries.filter((e) => period.months.includes(String(e.date).slice(0, 7)) || String(e.date).slice(0, 7) === month);
+  for (const e of periodCross) {
+    if (!s1StaffById.has(e.creditKey)) {
+      s1StaffById.set(e.creditKey, { id: e.creditKey, name: e.creditName || e.creditKey, shopId: mapping.storeToShop.get(e.creditStoreId) || null });
+    }
+  }
   for (const c of [cur, ...period.months.map((pm) => computed[pm])]) {
     for (const [id, sm] of Object.entries(c ? c.staff : {})) {
       const known = s1StaffById.get(id);
@@ -317,9 +344,9 @@ export async function buildSummary(staffCtx, { month, storeId, refresh, refreshO
       return shopId && c.shops[shopId] ? c.shops[shopId].retention : null;
     };
     const homeRetention = retentionIn(cur);
-    const incentive = computeStaffIncentive(m || {}, homeRetention, month);
+    const incentive = computeStaffIncentive(withCross(m, month, s1.id), homeRetention, month);
     const periodResults = period.months.map((pm) => (computed[pm]
-      ? computeStaffIncentive(computed[pm].staff[s1.id] || {}, retentionIn(computed[pm]), pm)
+      ? computeStaffIncentive(withCross(computed[pm].staff[s1.id], pm, s1.id), retentionIn(computed[pm]), pm)
       : null));
     const periodSum = sumPeriod(periodResults);
     rows.push({
@@ -331,6 +358,14 @@ export async function buildSummary(staffCtx, { month, storeId, refresh, refreshO
       scopeMetrics: pickMetrics(inScope) || EMPTY_METRICS,
       prevConsumedSales: prev && prev.staff[s1.id] ? n(prev.staff[s1.id].consumedSales) : (prev ? 0 : null),
       daily: m ? m.daily.map((d) => ({ date: d.date, consumedSales: d.consumedSales, treatmentCount: d.treatmentCount })) : [],
+      // この月の系列店での契約（2,000円の内訳）
+      crossStore: cross.entries
+        .filter((e) => e.creditKey === s1.id && String(e.date).slice(0, 7) === month)
+        .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
+        .map((e) => ({
+          id: e.id, date: e.date, customerName: e.customerName, planName: e.planName,
+          contractStoreName: (appCtx.stores.find((x) => x.id === e.contractStoreId) || {}).name || '',
+        })),
       // 継続率インセンティブで見た所属店舗の継続指標（取得した日・都度払いを除いた人数つき）
       homeRetention,
       incentive,
@@ -388,6 +423,7 @@ export async function buildSummary(staffCtx, { month, storeId, refresh, refreshO
   // オーナー・マネージャーは施術しないこともあるので、未連携の注意は出さない
   if (scope.staffId && !myS1 && (scope.role === 'staff' || scope.role === 'manager')) warnings.push({ code: 'unmappedMe', message: 'あなたのアカウントが SalonOne のスタッフと未連携です。管理者に連携を依頼してください。' });
   if (close.error) warnings.push({ code: 'close', message: `インセンティブの確定の記録を読めませんでした: ${close.error}` });
+  if (cross.error) warnings.push({ code: 'cross', message: `系列店での契約の登録を読めませんでした（2,000円が入っていません）: ${cross.error}` });
   warnings.push(...dataWarnings(master, data));
 
   return {
@@ -406,6 +442,11 @@ export async function buildSummary(staffCtx, { month, storeId, refresh, refreshO
     me,
     sources: scope.role === 'staff' ? [] : curSel.sources,
     close: closeInfo,
+    // 支給期間の系列店での契約の件数と、契約した店舗の SalonOne の契約と結びついていない件数（店長以上）
+    cross: ownOnly ? null : {
+      count: periodCross.filter((e) => period.months.includes(String(e.date).slice(0, 7))).length,
+      unlinked: periodCross.filter((e) => period.months.includes(String(e.date).slice(0, 7)) && !e.link).length,
+    },
     warnings,
   };
 }
@@ -438,7 +479,7 @@ export async function dailyCashSales(staffCtx, { storeId, months, refresh = fals
 // ------------------------------------------------------------
 // 確定の時は、この時間より前に取得したデータを SalonOne から取り直す（直前に開いた画面の分は取り直さない）
 const CLOSE_FRESH_MS = 10 * 60 * 1000;
-const CLOSE_ISSUE_CODES = new Set(['stale', 'salesSummary', 'retention', 'otherShops', 'db', 'unmappedStore', 'unmappedShop', 'duplicateShop']);
+const CLOSE_ISSUE_CODES = new Set(['stale', 'salesSummary', 'retention', 'otherShops', 'db', 'cross', 'unmappedStore', 'unmappedShop', 'duplicateShop']);
 
 /** 確定の前に確認してほしいこと（取得できなかったデータ・記録の無い継続指標・未連携のスタッフ など） */
 function closeIssues(s) {
@@ -468,6 +509,9 @@ function closeIssues(s) {
   }
   if (idle.size) {
     out.push({ code: 'retentionIdle', message: `施術の無い月にも継続率インセンティブが入っています: ${byMonth(idle)}。所属店舗のスタッフとして支給してよいか確認してください` });
+  }
+  if (s.cross && s.cross.unlinked > 0) {
+    out.push({ code: 'crossUnlinked', message: `系列店での契約のうち ${s.cross.unlinked}件は、契約した店舗の SalonOne の契約と結びついていません（その店舗の新規契約の数を減らしていません）` });
   }
   const unlinked = s.staff.filter((r) => !r.linked && n(r.period.total) > 0);
   if (unlinked.length) {

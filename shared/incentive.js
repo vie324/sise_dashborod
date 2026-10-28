@@ -250,6 +250,23 @@ export function computeReferralIncentive(m, rules = INCENTIVE_RULES) {
 }
 
 // ------------------------------------------------------------
+// 6. 系列店での契約（店長以上が登録した件数）
+// ------------------------------------------------------------
+
+export function computeCrossStoreIncentive(m, rules = INCENTIVE_RULES) {
+  const r = rules.crossStore;
+  const contracts = Math.max(0, num(m.crossStoreContracts));
+  return {
+    key: r.key,
+    label: r.label,
+    amount: contracts * r.amountPerContract,
+    achieved: contracts > 0,
+    eligible: true,
+    contracts,
+  };
+}
+
+// ------------------------------------------------------------
 // まとめ
 // ------------------------------------------------------------
 
@@ -267,6 +284,7 @@ export function computeStaffIncentive(metrics, retention, month, rules = INCENTI
     computeNewContractIncentive(m, rules),
     computeSnsIncentive(m, rules),
     computeReferralIncentive(m, rules),
+    computeCrossStoreIncentive(m, rules),
   ];
   const total = items.reduce((s, it) => s + it.amount, 0);
   return {
@@ -301,6 +319,7 @@ export function summarizeIncentive(res) {
       snsCustomers: by.sns.customers,
       snsContracts: by.sns.contracts,
       referralSubscriptions: by.referral.contracts,
+      crossStoreContracts: by.crossStore ? by.crossStore.contracts : 0,
       retentionKnown: by.retention.known,
       memberCount: cond(by.retention, 'members'),
       churnRatePct: cond(by.retention, 'churn'),
@@ -329,9 +348,9 @@ const round1 = (v) => (v == null || !Number.isFinite(Number(v)) ? null : Math.ro
 export function incentiveCsv(rows, { periodLabel = '', status = '' } = {}) {
   const head = [
     '支給期間', '状態', '店舗', 'スタッフ', 'SalonOne スタッフID', '対象月',
-    '施術消化売上', '既存顧客の消化売上', '3経路の新規', '3経路の契約', 'SNSの集客', 'SNSの契約', '紹介のサブスク契約',
+    '施術消化売上', '既存顧客の消化売上', '3経路の新規', '3経路の契約', 'SNSの集客', 'SNSの契約', '紹介のサブスク契約', '系列店での契約',
     '会員数', '退会率(%)', '平均継続(ヶ月)', '会員数の記録日',
-    '①施術消化売上', '②継続率', '③新規契約', '④Minimo・Threads・Instagram', '⑤紹介', '月の合計', '支給期間の合計',
+    '①施術消化売上', '②継続率', '③新規契約', '④Minimo・Threads・Instagram', '⑤紹介', '⑥系列店での契約', '月の合計', '支給期間の合計',
   ];
   const lines = [head];
   for (const r of rows || []) {
@@ -341,10 +360,10 @@ export function incentiveCsv(rows, { periodLabel = '', status = '' } = {}) {
       const it = m.items || {};
       lines.push([
         periodLabel, status, r.storeName || '', r.name || '', r.key, m.month,
-        b.consumedSales, b.existingConsumedSales, b.newVisits3ch, b.contracts3ch, b.snsCustomers, b.snsContracts, b.referralSubscriptions,
+        b.consumedSales, b.existingConsumedSales, b.newVisits3ch, b.contracts3ch, b.snsCustomers, b.snsContracts, b.referralSubscriptions, b.crossStoreContracts || 0,
         b.retentionKnown ? b.memberCount : null, b.retentionKnown ? round1(b.churnRatePct) : null, b.retentionKnown ? round1(b.avgTenureMonths) : null,
         b.retentionKnown ? b.retentionAsOf || null : null,
-        it.sales, it.retention, it.newContract, it.sns, it.referral, m.total, r.total,
+        it.sales, it.retention, it.newContract, it.sns, it.referral, it.crossStore || 0, m.total, r.total,
       ]);
     }
   }

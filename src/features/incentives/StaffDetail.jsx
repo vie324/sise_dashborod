@@ -2,7 +2,7 @@ import { Card } from '../../ui/primitives.jsx';
 import { HeroFigure } from '../../ui/stats.jsx';
 import { yen } from '../../lib/format.js';
 import {
-  IncentiveBreakdown, SalesTierCard, NewContractCard, SnsCard, ReferralCard, RetentionCard, PeriodSummary, NextActions,
+  IncentiveBreakdown, SalesTierCard, NewContractCard, SnsCard, ReferralCard, CrossStoreCard, RetentionCard, PeriodSummary, NextActions,
 } from './parts.jsx';
 
 /**
@@ -43,6 +43,11 @@ export default function StaffDetail({ row, summary, goal, compact = false, ancho
         <div {...anchor('sns')}><SnsCard item={items.sns} rules={rules} /></div>
         <div {...anchor('referral')}><ReferralCard item={items.referral} rules={rules} /></div>
       </div>
+      {items.crossStore ? (
+        <div {...anchor('crossStore')}>
+          <CrossStoreCard item={items.crossStore} rules={rules} entries={row.crossStore || []} />
+        </div>
+      ) : null}
       <div {...anchor('retention')}>
         <RetentionCard item={items.retention} rules={rules} storeName={row.storeName} retention={row.homeRetention} />
       </div>

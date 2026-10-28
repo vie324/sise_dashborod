@@ -300,8 +300,10 @@ function applySalesSummaries(summaries, shopOut, staffOut, { emptyShop, emptySta
  * @param {Object} [input.salesSummaries] shopId → 売上サマリ（SalonOne の売上分析）
  * @param {boolean} [input.countsFromReceptions=true]
  *   受付履歴を取っていない（推移）ときは false。新規数・既存数・契約数は売上サマリに無ければ null にする
+ * @param {Set<string>} [input.excludedContracts] 新規契約に数えないお客様（`${shopId}|${customerId}`）。
+ *   系列店での契約として初回の店舗のスタッフに付けた分（二重に数えない）
  */
-export function computeMonth({ receptions, contracts, month, asOf, channelMap, retentionOverrides, retentionFromContracts = true, salesSummaries, countsFromReceptions = true }) {
+export function computeMonth({ receptions, contracts, month, asOf, channelMap, retentionOverrides, retentionFromContracts = true, salesSummaries, countsFromReceptions = true, excludedContracts = null }) {
   const today = asOf || todayJst();
   const { from, to } = monthRange(month);
   const contractsByCustomer = indexContracts(contracts);
@@ -367,8 +369,9 @@ export function computeMonth({ receptions, contracts, month, asOf, channelMap, r
     const list = contractsByCustomer.get(r.customerId) || [];
     const relevant = list.filter((c) => c.startDate && c.startDate >= from && c.startDate <= today
       && (!c.shopId || !r.shopId || c.shopId === r.shopId));
-    const contracted = relevant.some((c) => isContractType(c.type));
-    const subscribed = relevant.some((c) => c.type === 'subscription' && !c.isSharePlan);
+    const excluded = !!excludedContracts && excludedContracts.has(`${r.shopId}|${r.customerId}`);
+    const contracted = !excluded && relevant.some((c) => isContractType(c.type));
+    const subscribed = !excluded && relevant.some((c) => c.type === 'subscription' && !c.isSharePlan);
 
     const shop = getShop(r.shopId);
     shop.newVisits[channel] += 1;

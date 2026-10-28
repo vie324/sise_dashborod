@@ -222,7 +222,7 @@ function OutlookCard({ summary, me, goal }) {
 }
 
 // ------------------------------------------------------------
-// 今月のミッション（5つのインセンティブ）
+// 今月のミッション（インセンティブの項目ごと）
 // ------------------------------------------------------------
 function buildMissions(me, rules) {
   const it = byKey(me.incentive.items);
@@ -275,6 +275,18 @@ function buildMissions(me, rules) {
     detail: <>紹介からのサブスク契約 <b className="num">{ref.contracts}件</b></>,
     hint: `1件ごとに ${yen(rules.referral.amountPerContract)}`,
   });
+
+  // 系列店での契約は店長が登録するので、あった時だけ出す
+  const xs = it.crossStore;
+  if (xs && xs.contracts > 0) {
+    out.push({
+      key: 'crossStore',
+      amount: xs.amount,
+      progress: null,
+      detail: <>系列店で契約したお客様 <b className="num">{xs.contracts}件</b></>,
+      hint: `1件ごとに ${yen((rules.crossStore || {}).amountPerContract || 0)}`,
+    });
+  }
 
   const ret = it.retention;
   const met = ret.conditions.filter((c) => c.met).length;
@@ -454,6 +466,7 @@ function achievementsOf(me, rules) {
   }
   if (it.sns.eligible) list.push({ key: 'sns', weight: 40, title: 'SNS集客 10名達成', text: 'Minimo・Threads・Instagram 経由の契約が 1件 ¥2,000 になります' });
   if (it.referral.contracts > 0) list.push({ key: `referral:${it.referral.contracts}`, weight: 30, title: '紹介インセンティブ獲得', text: `紹介からのサブスク契約 ${it.referral.contracts}件` });
+  if (it.crossStore && it.crossStore.contracts > 0) list.push({ key: `crossStore:${it.crossStore.contracts}`, weight: 25, title: '系列店での契約', text: `系列店で契約したお客様 ${it.crossStore.contracts}件` });
   if (it.retention.eligible) list.push({ key: 'retention', weight: 20, title: '継続率インセンティブ達成', text: '店舗の継続条件をすべて満たしています' });
   return list;
 }

@@ -9,11 +9,12 @@ import { ScopeBar, DataWarnings } from '../shared/ScopeBar.jsx';
 import StaffDetail from './StaffDetail.jsx';
 import RulesView from './RulesView.jsx';
 import PeriodCloseBar from './PeriodClose.jsx';
+import CrossStorePanel from './CrossStore.jsx';
 import { INCENTIVE_META, periodAmount } from './parts.jsx';
 import { INCENTIVE_RULES } from '../../../shared/incentive-rules.js';
 import { takeFocusIncentive, scrollToIncentive } from './focus.js';
 
-const ITEM_KEYS = ['sales', 'retention', 'newContract', 'sns', 'referral'];
+const ITEM_KEYS = ['sales', 'retention', 'newContract', 'sns', 'referral', 'crossStore'];
 const goalOf = (goals, row) => (goals && goals.staff && row.staffId && goals.staff[row.staffId] ? goals.staff[row.staffId].consumedSales : null);
 
 function Amount({ value, strong }) {
@@ -50,7 +51,7 @@ function StaffTable({ summary, onOpen }) {
             <thead>
               <tr>
                 <th>スタッフ</th>
-                {ITEM_KEYS.map((k) => <th key={k} className="text-right">{INCENTIVE_META[k].title.replace('Minimo・Threads・Instagram', 'SNS')}</th>)}
+                {ITEM_KEYS.map((k) => <th key={k} className="text-right">{INCENTIVE_META[k].column || INCENTIVE_META[k].title}</th>)}
                 <th className="text-right">今月合計</th>
                 <th className="text-right">支給期間の合計{summary.close ? '（確定）' : ''}</th>
               </tr>
@@ -109,7 +110,7 @@ function StaffTable({ summary, onOpen }) {
 }
 
 export default function IncentivesPage() {
-  const { month, storeId } = useApp();
+  const { month, storeId, today } = useApp();
   const summary = useSummary(month, storeId);
   const goals = useGoals(month);
   const data = summary.shown;
@@ -153,6 +154,7 @@ export default function IncentivesPage() {
                   <PeriodCloseBar summary={data} />
                   <p className="mb-3 text-xs text-muted">行を選ぶと「次のランクまで」などの内訳を表示します。インセンティブは、ヘルプで入った他店舗の分も含めてスタッフごとに全店舗の実績で計算しています。</p>
                   <StaffTable summary={data} onOpen={setOpen} />
+                  {!data.period.preview ? <CrossStorePanel month={month} storeId={storeId} today={today} /> : null}
                 </>
               ) : data.me ? (
                 <StaffDetail row={data.me} summary={data} goal={goalOf(goals.shown, data.me)} anchors />

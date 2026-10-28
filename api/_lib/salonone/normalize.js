@@ -211,6 +211,8 @@ export function normalizeVisit(raw) {
     time: toJstTime(at),
     status: r.status,
     isNew: r.customerClass === 'new',
+    // SalonOne の顧客 ID（系列店での契約を結びつける用。画面には返さない）
+    customerId: r.customerId,
     customerNumber: String(pick(raw, ['customer_number', 'customer_code', 'customerNumber'], '')),
     customerName: name == null ? null : String(name).trim().slice(0, 60) || null,
     hasNameField: !!raw && typeof raw === 'object' && ('customer_name' in raw || 'customerName' in raw),

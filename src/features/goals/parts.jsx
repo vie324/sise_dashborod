@@ -74,6 +74,7 @@ export function StoreGoalModal({ open, onClose, store, goal, periodLabel, period
     if (!open) return;
     setForm({
       consumedSales: goal && goal.consumedSales ? String(goal.consumedSales) : '',
+      depositSales: goal && goal.depositSales ? String(goal.depositSales) : '',
       newVisits: goal && goal.newVisits ? String(goal.newVisits) : '',
       contractRatePct: goal && goal.contractRatePct ? String(goal.contractRatePct) : '',
       memberCount: goal && goal.memberCount ? String(goal.memberCount) : '',
@@ -102,6 +103,9 @@ export function StoreGoalModal({ open, onClose, store, goal, periodLabel, period
         <Field label={quarter ? '施術消化売上（3ヶ月の合計・円）' : '施術消化売上（円）'} hint={perMonth(form.consumedSales, yen) || '空欄にすると目標なし'}>
           <Input inputMode="numeric" value={form.consumedSales || ''} onChange={set('consumedSales')} placeholder={quarter ? '例: 12000000' : '例: 4000000'} />
         </Field>
+        <Field label={quarter ? '入金売上（3ヶ月の合計・円）' : '入金売上（円）'} hint={perMonth(form.depositSales, yen) || '回数券・サブスクの販売を含む入金の合計（空欄にすると目標なし）'}>
+          <Input inputMode="numeric" value={form.depositSales || ''} onChange={set('depositSales')} placeholder={quarter ? '例: 15000000' : '例: 5000000'} />
+        </Field>
         <Field label={quarter ? '新規来店・3経路（3ヶ月の合計・名）' : '新規来店・3経路（名）'} hint={perMonth(form.newVisits, (v) => `${num(v, 1)}名`)}>
           <Input inputMode="numeric" value={form.newVisits || ''} onChange={set('newVisits')} placeholder={quarter ? '例: 90' : '例: 30'} />
         </Field>
@@ -115,6 +119,7 @@ export function StoreGoalModal({ open, onClose, store, goal, periodLabel, period
 
 export function StaffGoalModal({ open, onClose, row, goal, periodLabel, period = 'month', onSave }) {
   const [value, setValue] = useState('');
+  const [deposit, setDeposit] = useState('');
   const [memo, setMemo] = useState('');
   const [busy, setBusy] = useState(false);
   const quarter = period === 'quarter';
@@ -122,12 +127,13 @@ export function StaffGoalModal({ open, onClose, row, goal, periodLabel, period =
   useEffect(() => {
     if (!open) return;
     setValue(goal && goal.consumedSales ? String(goal.consumedSales) : '');
+    setDeposit(goal && goal.depositSales ? String(goal.depositSales) : '');
     setMemo((goal && goal.memo) || '');
   }, [open, goal]);
   const save = async () => {
     setBusy(true);
     try {
-      await onSave({ consumedSales: value, memo });
+      await onSave({ consumedSales: value, depositSales: deposit, memo });
       showToast('目標を保存しました', 'success');
       onClose();
     } catch (e) {
@@ -157,6 +163,10 @@ export function StaffGoalModal({ open, onClose, row, goal, periodLabel, period =
       <Field label={quarter ? '施術消化売上の目標（3ヶ月の合計・円）' : '施術消化売上の目標（円）'}
         hint={quarter && toNumber(value) > 0 ? `月あたり ${yen(toNumber(value) / 3)}` : '自由に入力することもできます。空欄にすると目標なし'}>
         <Input inputMode="numeric" value={value} onChange={(e) => setValue(e.target.value)} placeholder={quarter ? '例: 2424000' : '例: 808000'} />
+      </Field>
+      <Field label={quarter ? '入金売上の目標（3ヶ月の合計・円）' : '入金売上の目標（円）'} className="mt-4"
+        hint={quarter && toNumber(deposit) > 0 ? `月あたり ${yen(toNumber(deposit) / 3)}` : '回数券・サブスクの販売を含む入金の合計。空欄にすると目標なし'}>
+        <Input inputMode="numeric" value={deposit} onChange={(e) => setDeposit(e.target.value)} placeholder={quarter ? '例: 3000000' : '例: 1000000'} />
       </Field>
       <Field label="メモ" className="mt-4"><Textarea value={memo} onChange={(e) => setMemo(e.target.value)} maxLength={200} placeholder="意識すること・取り組みなど" /></Field>
     </Modal>

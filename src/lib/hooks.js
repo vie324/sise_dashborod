@@ -138,11 +138,32 @@ export function useStoreCash(month, storeId, { fresh = false } = {}) {
 export async function closeIncentivePeriod(body) {
   const r = await salonOnePost('closePeriod', body);
   invalidate('summary:');
+  invalidate('cross:');
   return r;
 }
 
 export async function reopenIncentivePeriod(body) {
   const r = await salonOnePost('reopenPeriod', body);
+  invalidate('summary:');
+  invalidate('cross:');
+  return r;
+}
+
+/** 系列店での契約（月の登録と、店長以上は登録の画面で選ぶ店舗・スタッフ） */
+export function useCrossStore(month, storeId) {
+  const key = month ? `cross:${month}:${storeId || 'all'}` : null;
+  return useResource(key, () => salonOne('cross', { month, storeId }), { maxAge: 60 * 1000 });
+}
+
+/** 契約した店舗・日の SalonOne の契約（登録の画面で選ぶ。開くたびに読み直す） */
+export function crossStoreCandidates(storeId, date) {
+  return salonOne('crossCandidates', { storeId, date });
+}
+
+/** 系列店での契約の登録・削除（店長以上）。インセンティブの数字も読み直す */
+export async function saveCrossStore(action, body) {
+  const r = await salonOnePost(action, body);
+  invalidate('cross:');
   invalidate('summary:');
   return r;
 }

@@ -41,12 +41,13 @@ const mLabel = (m) => `${Number(m.slice(5))}月`;
 
 /** 店舗の 3ヶ月の実績 */
 function storeTotals(monthData, sid) {
-  const out = { consumedSales: 0, visits: 0, contracts: 0, memberCount: null, byMonth: {} };
+  const out = { consumedSales: 0, depositSales: 0, visits: 0, contracts: 0, memberCount: null, byMonth: {} };
   for (const d of monthData) {
     if (!d) continue;
     const row = d.stores.find((s) => s.storeId === sid);
     if (!row) continue;
     out.consumedSales += row.consumedSales || 0;
+    out.depositSales += row.depositSales || 0;
     out.visits += (row.contract3ch && row.contract3ch.visits) || 0;
     out.contracts += (row.contract3ch && row.contract3ch.contracts) || 0;
     if (row.retention && row.retention.memberCount != null) out.memberCount = row.retention.memberCount;
@@ -62,9 +63,10 @@ function staffTotals(monthData) {
   for (const d of monthData) {
     if (!d) continue;
     for (const row of d.staff) {
-      const acc = map.get(row.key) || { row, consumedSales: 0, byMonth: {} };
+      const acc = map.get(row.key) || { row, consumedSales: 0, depositSales: 0, byMonth: {} };
       acc.row = row; // 名前・連携はいちばん新しい月のもの
       acc.consumedSales += row.metrics.consumedSales || 0;
+      acc.depositSales += row.metrics.depositSales || 0;
       acc.byMonth[d.month] = row.metrics.consumedSales || 0;
       map.set(row.key, acc);
     }
@@ -216,6 +218,9 @@ export default function QuarterGoals() {
                 {goal ? (
                   <div className="divide-y divide-line">
                     <GoalRow label="施術消化売上（3ヶ月の合計）" actual={t.consumedSales} target={goal.consumedSales} format={yen} progress={progress} timing={timing} perDayUnit={yen} />
+                    {goal.depositSales ? (
+                      <GoalRow label="入金売上（3ヶ月の合計）" actual={t.depositSales} target={goal.depositSales} format={yen} progress={progress} timing={timing} perDayUnit={yen} />
+                    ) : null}
                     <GoalRow label="新規来店（3経路・3ヶ月の合計）" actual={t.visits} target={goal.newVisits} format={(v) => `${num(v)}名`} progress={progress} timing={timing} perDayUnit={(v) => `${num(v)}名`} />
                     {goal.contractRatePct ? (
                       <GoalRow label="契約率（3経路・3ヶ月の通算）" kind="level" actual={t.ratePct} target={goal.contractRatePct}
@@ -228,7 +233,7 @@ export default function QuarterGoals() {
                     {goal.memo ? <p className="pt-3 text-xs leading-relaxed text-ink-2"><Icon name="sticky-note" size={13} className="mr-1 inline text-muted" />{goal.memo}</p> : null}
                   </div>
                 ) : (
-                  <EmptyState compact icon="target" title="3ヶ月の目標が未設定です" message={canEditStore(s.storeId) ? '3ヶ月の合計の施術消化売上・新規来店と、契約率・期末の会員数の目標を設定できます' : '店長・マネージャー・オーナーが設定します'} />
+                  <EmptyState compact icon="target" title="3ヶ月の目標が未設定です" message={canEditStore(s.storeId) ? '3ヶ月の合計の施術消化売上・入金売上・新規来店と、契約率・期末の会員数の目標を設定できます' : '店長・マネージャー・オーナーが設定します'} />
                 )}
                 <MonthBreakdown months={months} actual={t.byMonth} monthlyGoals={monthlyGoals} quarterTarget={goal && goal.consumedSales} thisMonth={thisMonth} />
               </Card>
@@ -242,7 +247,7 @@ export default function QuarterGoals() {
         <Card><EmptyState icon="users" title="表示できるスタッフがいません" message={timing === 'future' ? 'この 3ヶ月が始まると実績が表示されます' : manager ? 'SalonOne のスタッフとダッシュボードのスタッフを連携してください（設定 > SalonOne連携）' : 'SalonOne のスタッフと連携されていません'} /></Card>
       ) : (
         <div className={cx('grid gap-3 md:grid-cols-2', loading ? 'opacity-60' : '')}>
-          {staff.map(({ row, consumedSales, byMonth }) => {
+          {staff.map(({ row, consumedSales, depositSales, byMonth }) => {
             const goal = row.staffId ? goals.staff[row.staffId] : null;
             const target = goal ? goal.consumedSales : null;
             const tier = tierOf(target, 3);
@@ -259,6 +264,11 @@ export default function QuarterGoals() {
                   <GoalRow label="施術消化売上（3ヶ月の合計）" actual={consumedSales} target={target} format={yen} progress={progress} timing={timing}
                     perDayUnit={(v) => `${yen(v)}（${(v / INCENTIVE_RULES.unitPrice).toFixed(1)}回）`} />
                 </div>
+                {goal && goal.depositSales ? (
+                  <div className="mt-3 border-t border-line pt-3">
+                    <GoalRow label="入金売上（3ヶ月の合計）" actual={depositSales} target={goal.depositSales} format={yen} progress={progress} timing={timing} perDayUnit={yen} />
+                  </div>
+                ) : null}
                 <div className="mt-2 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-ink-2">
                   {months.map((m) => (
                     <span key={m} className="num">{mLabel(m)} {monthsBetween(m, thisMonth) >= 0 ? yenShort(byMonth[m] || 0) : '—'}</span>

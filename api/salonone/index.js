@@ -12,6 +12,10 @@
 // POST /api/salonone?action=closePeriod  { month, operator, note, force }  支給期間のインセンティブを確定（オーナー・管理者）
 // POST /api/salonone?action=reopenPeriod { month, operator }               確定を取り消す（オーナー・管理者）
 // GET /api/salonone?action=cron                           毎日の継続指標の記録（Vercel Cron。Authorization: Bearer <CRON_SECRET>）
+// GET /api/salonone?action=cross&month=YYYY-MM&storeId=   系列店での契約の一覧（店長以上は登録の画面で選ぶ店舗・スタッフも）
+// GET /api/salonone?action=crossCandidates&storeId=&date=YYYY-MM-DD  契約した店舗・日の SalonOne の契約（店長以上）
+// POST /api/salonone?action=crossAdd { date, customerName, planName, contractStoreId, creditKey, receptionId?, memo? }  登録（店長以上）
+// POST /api/salonone?action=crossDelete { id, month }      削除（店長以上）
 //
 // SalonOne の APIキーはサーバーの環境変数にだけ置き、ブラウザへは返さない。
 // ============================================================
@@ -23,6 +27,7 @@ import {
   buildSummary, buildTrend, buildMaster, dailyCashSales, closePeriod, reopenPeriod, AccessError,
 } from '../_lib/salonone/summary.js';
 import { buildVisits } from '../_lib/salonone/visits.js';
+import { listCrossStore, crossStoreCandidates, addCrossStore, deleteCrossStore } from '../_lib/salonone/cross-handlers.js';
 import { salonOneConfig, probe } from '../_lib/salonone/client.js';
 import { clearSalonOneCache, snapshotRetention, loadAppContext, planPatterns } from '../_lib/salonone/provider.js';
 import { isMonth, todayJst, monthOf, addMonths, monthRange } from '../../shared/dates.js';
@@ -151,6 +156,19 @@ export default async function handler(req, res) {
           if (!out || out.status !== 200) lastManualSnapshot = 0;
         }
         return res.status(out.status).json(out.body);
+      }
+      case 'cross':
+        return res.json(await listCrossStore(staffCtx, { month, storeId }));
+      case 'crossCandidates':
+        return res.json(await crossStoreCandidates(staffCtx, { storeId: q.storeId, date: q.date }));
+      case 'crossAdd':
+      case 'crossDelete': {
+        if (req.method !== 'POST') return res.status(405).json({ error: 'POST で呼び出してください' });
+        const body = bodyOf(req);
+        const operator = String((staffCtx && staffCtx.name) || body.operator || '管理者');
+        return res.json(action === 'crossAdd'
+          ? await addCrossStore(staffCtx, body, operator)
+          : await deleteCrossStore(staffCtx, { id: body.id, month: body.month }, operator));
       }
       case 'master':
         return res.json(await buildMaster(staffCtx, { refresh }));
