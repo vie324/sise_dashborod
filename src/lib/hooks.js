@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { dbGet, dbPost, salonOne } from './api.js';
+import { dbGet, dbPost, salonOne, salonOnePost } from './api.js';
 
 // ============================================================
 // データ取得フック（キャッシュ付き・再取得中も前の表示を保つ）
@@ -23,12 +23,17 @@ async function load(key, fetcher) {
   const entry = cache.get(key) || {};
   if (entry.promise) return entry.promise;
   const promise = (async () => {
+    await null; // 下の cache.set の後で読み込む（読み込み中に捨てられたかを promise で見分けるため）
+    let next;
     try {
-      const data = await fetcher();
-      cache.set(key, { data, error: null, loadedAt: Date.now(), promise: null });
+      next = { data: await fetcher(), error: null, loadedAt: Date.now(), promise: null };
     } catch (e) {
-      cache.set(key, { ...(cache.get(key) || {}), error: e, promise: null });
+      next = { ...(cache.get(key) || {}), error: e, promise: null };
     }
+    // 読み込み中に forget されたキーは戻さない（閉じた画面の古い結果を残さない）
+    const cur = cache.get(key);
+    if (!cur || cur.promise !== promise) return;
+    cache.set(key, next);
     notify(key);
   })();
   cache.set(key, { ...entry, promise });
@@ -110,6 +115,57 @@ export function refreshSalonOne() {
   forceRefreshUntil = Date.now() + 8000;
   invalidate('summary:');
   invalidate('trend:');
+  invalidate('cash:');
+}
+
+/**
+ * 1店舗・1ヶ月の SalonOne の日別の現金売上（出納帳の突合・レジ金チェック・日次締め用。受付履歴だけを読む軽い取得）。
+ * fresh: 開くたびに SalonOne から読み直す（レジ金チェック・締めのダイアログ。数分前の金額で差異を出さないため）
+ */
+export function useStoreCash(month, storeId, { fresh = false } = {}) {
+  const [openedAt] = useState(() => Date.now());
+  const ok = month && storeId && storeId !== 'all';
+  const key = ok ? `cash:${month}:${storeId}${fresh ? `:fresh:${openedAt}` : ''}` : null;
+  const res = useResource(key, () => salonOne('cash', { month, storeId, refresh: fresh ? 1 : refreshFlag() }), { maxAge: 3 * 60 * 1000 });
+  // 開くたびに読み直した結果は、閉じたら捨てる（開くたびにキャッシュが増えないように）
+  useEffect(() => (fresh && key ? () => forget(key) : undefined), [fresh, key]);
+  // 店舗や月を切り替えた直後は前の結果が残っているので、条件が一致するものだけ返す
+  const match = (d) => (d && d.month === month && String(d.storeId) === String(storeId) ? d : null);
+  return { ...res, data: match(res.data), shown: match(res.shown) };
+}
+
+/** インセンティブの確定・取り消し（オーナー・管理者） */
+export async function closeIncentivePeriod(body) {
+  const r = await salonOnePost('closePeriod', body);
+  invalidate('summary:');
+  invalidate('cross:');
+  return r;
+}
+
+export async function reopenIncentivePeriod(body) {
+  const r = await salonOnePost('reopenPeriod', body);
+  invalidate('summary:');
+  invalidate('cross:');
+  return r;
+}
+
+/** 系列店での契約（月の登録と、店長以上は登録の画面で選ぶ店舗・スタッフ） */
+export function useCrossStore(month, storeId) {
+  const key = month ? `cross:${month}:${storeId || 'all'}` : null;
+  return useResource(key, () => salonOne('cross', { month, storeId }), { maxAge: 60 * 1000 });
+}
+
+/** 契約した店舗・日の SalonOne の契約（登録の画面で選ぶ。開くたびに読み直す） */
+export function crossStoreCandidates(storeId, date) {
+  return salonOne('crossCandidates', { storeId, date });
+}
+
+/** 系列店での契約の登録・削除（店長以上）。インセンティブの数字も読み直す */
+export async function saveCrossStore(action, body) {
+  const r = await salonOnePost(action, body);
+  invalidate('cross:');
+  invalidate('summary:');
+  return r;
 }
 
 // ------------------------------------------------------------

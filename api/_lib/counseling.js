@@ -22,7 +22,7 @@
 
 import { supabase } from './supabase.js';
 import { canAccessStore, isAdminOrOwner } from './auth.js';
-import { GAS_STORES, guessGasStore, resolveGasStore, isNoAnswer } from '../../shared/counseling.js';
+import { GAS_STORES, guessGasStore, resolveGasStore, isNoAnswer, nameSearch } from '../../shared/counseling.js';
 
 export const CONFIG_KEY = 'counseling.config';
 
@@ -227,9 +227,40 @@ export function cautionsOf(c) {
   return out;
 }
 
-export function normDetail(c) {
-  const base = normListRow(c);
+// フォームによって質問の並びが違い（川口店は「改善したい時期」が無く「接客へのご要望」がある）、
+// 以前の GAS は見出しで見つからない項目を本厚木店の列の位置で読むため、別の質問の回答が入ることがある。
+// GAS が返す列の見出し（_debug）で確かめ、項目に合わない見出しの列から読んだ回答は出さない
+// （gas/counseling.gs を更新すると正しい列から読む）。
+const FIELD_HEADERS = [
+  ['VISIT_PURPOSE', 'visitPurpose', /該当|きっかけ|来店|知った/],
+  ['IMPROVEMENT_TIMELINE', 'improvementTimeline', /いつまで|いつ頃|時期|目標|期間/],
+  ['TREATMENT_REQUEST', 'treatmentRequest', /要望|希望|リクエスト/],
+  ['TREATMENT_EXPERIENCE', 'treatmentExperience', /利用|経験|受けたこと/],
+];
+
+/** GAS が読んだ列の見出しが項目に合わない回答を空にする（見出しが返らない GAS ではそのまま） */
+export function dropMisreadFields(c, debug) {
+  const colMap = debug && debug.colMap;
+  const headers = debug && Array.isArray(debug.headers) ? debug.headers.map(String) : null;
+  if (!c || !colMap || typeof colMap !== 'object' || !headers) return c;
+  const headerAt = (i) => {
+    const h = headers.find((x) => x.startsWith(`${i}:`));
+    return h === undefined ? null : h.slice(String(i).length + 1);
+  };
+  const out = { ...c };
+  for (const [col, field, re] of FIELD_HEADERS) {
+    const i = colMap[col];
+    if (!Number.isInteger(i) || i < 0) continue;
+    const h = headerAt(i);
+    if (h !== null && !re.test(h)) out[field] = Array.isArray(c[field]) ? [] : '';
+  }
+  return out;
+}
+
+export function normDetail(raw, debug) {
+  const base = normListRow(raw);
   if (!base) return null;
+  const c = dropMisreadFields(raw, debug);
   return {
     ...base,
     birthday: text(c.birthday, 40),
@@ -307,13 +338,13 @@ async function detailAction(cfg, staffCtx, params) {
     return cached(`detail|${cfg.gasUrl}|${JSON.stringify(p)}`, TTL_DETAIL, () => callGas(cfg, p));
   };
   try {
-    let c = null;
+    let body = null;
     if (index !== null) {
-      try { c = (await fetchBy({ index })).customer; } catch (e) { if (!name) throw e; }
+      try { body = await fetchBy({ index }); } catch (e) { if (!name) throw e; }
     }
     // 回答の削除などで行がずれた時は名前で取り直す
-    if (name && (!c || text(c.name, 100) !== name)) c = (await fetchBy({ name })).customer;
-    const customer = c ? normDetail(c) : null;
+    if (name && (!body || !body.customer || text(body.customer.name, 100) !== name)) body = await fetchBy({ name });
+    const customer = body && body.customer ? normDetail(body.customer, body._debug) : null;
     if (!customer) return { error: 'カウンセリングシートが見つかりません', code: 'not_found' };
     return { storeId: sc.store.id, customer };
   } catch (e) {
@@ -375,9 +406,10 @@ export async function counselingGet(params, staffCtx) {
     case 'recent':
       return listAction(cfg, staffCtx, params.storeId, { action: 'recent', limit: RECENT_LIMIT }, refresh);
     case 'search': {
-      const q = text(params.q, 50);
-      if (!q) return { error: '検索するお名前を入力してください', code: 'bad_request' };
-      return listAction(cfg, staffCtx, params.storeId, { action: 'search', q }, refresh);
+      const search = nameSearch(text(params.q, 50));
+      if (!search) return { error: '検索するお名前を入力してください', code: 'bad_request' };
+      const r = await listAction(cfg, staffCtx, params.storeId, { action: 'search', q: search.gasQuery }, refresh);
+      return r.error ? r : { ...r, customers: r.customers.filter((c) => search.matches(c.name)) };
     }
     case 'detail':
       return detailAction(cfg, staffCtx, params);

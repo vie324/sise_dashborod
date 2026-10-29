@@ -8,21 +8,39 @@ import { yen } from '../../lib/format.js';
 import { ScopeBar, DataWarnings } from '../shared/ScopeBar.jsx';
 import StaffDetail from './StaffDetail.jsx';
 import RulesView from './RulesView.jsx';
-import { INCENTIVE_META } from './parts.jsx';
+import PeriodCloseBar from './PeriodClose.jsx';
+import CrossStorePanel from './CrossStore.jsx';
+import { INCENTIVE_META, periodAmount } from './parts.jsx';
 import { INCENTIVE_RULES } from '../../../shared/incentive-rules.js';
 import { takeFocusIncentive, scrollToIncentive } from './focus.js';
 
-const ITEM_KEYS = ['sales', 'retention', 'newContract', 'sns', 'referral'];
+const ITEM_KEYS = ['sales', 'retention', 'newContract', 'sns', 'referral', 'crossStore'];
 const goalOf = (goals, row) => (goals && goals.staff && row.staffId && goals.staff[row.staffId] ? goals.staff[row.staffId].consumedSales : null);
 
 function Amount({ value, strong }) {
   return <span className={cx('num', value > 0 ? (strong ? 'font-bold text-ink' : 'text-ink') : 'text-muted')}>{yen(value)}</span>;
 }
 
+/** 支給期間の合計のセル（確定済みなら確定した金額。計算し直した金額が違う・確定の記録が無い時はその旨も） */
+function PeriodCell({ summary, r }) {
+  const value = periodAmount(summary, r);
+  const note = summary.close && !r.closed ? `確定の記録なし・再計算 ${yen(r.period.total)}`
+    : summary.close && r.closed.total !== r.period.total ? `再計算 ${yen(r.period.total)}` : null;
+  return (
+    <>
+      {value == null ? <span className="text-muted">—</span> : <Amount value={value} strong />}
+      {note ? <div className="text-[11px] text-muted">{note}</div> : null}
+    </>
+  );
+}
+
 function StaffTable({ summary, onOpen }) {
   const rows = summary.staff;
   if (rows.length === 0) return <Card><EmptyState icon="users" title="この範囲のスタッフ実績はまだありません" /></Card>;
   const total = (fn) => rows.reduce((a, r) => a + fn(r), 0);
+  // 確定済みの期間の合計は確定の記録の合計（一覧に出ていないスタッフの確定分があれば、その旨も出す）
+  const closedTotal = summary.close ? summary.close.total : null;
+  const hiddenClosed = summary.close ? closedTotal - total((r) => (r.closed ? r.closed.total : 0)) : 0;
   const itemAmount = (r, key) => (r.incentive.items.find((i) => i.key === key) || {}).amount || 0;
   return (
     <>
@@ -33,9 +51,9 @@ function StaffTable({ summary, onOpen }) {
             <thead>
               <tr>
                 <th>スタッフ</th>
-                {ITEM_KEYS.map((k) => <th key={k} className="text-right">{INCENTIVE_META[k].title.replace('Minimo・Threads・Instagram', 'SNS')}</th>)}
+                {ITEM_KEYS.map((k) => <th key={k} className="text-right">{INCENTIVE_META[k].column || INCENTIVE_META[k].title}</th>)}
                 <th className="text-right">今月合計</th>
-                <th className="text-right">支給期間の合計</th>
+                <th className="text-right">支給期間の合計{summary.close ? '（確定）' : ''}</th>
               </tr>
             </thead>
             <tbody>
@@ -47,14 +65,17 @@ function StaffTable({ summary, onOpen }) {
                   </td>
                   {ITEM_KEYS.map((k) => <td key={k} className="num-cell"><Amount value={itemAmount(r, k)} /></td>)}
                   <td className="num-cell"><Amount value={r.incentive.total} strong /></td>
-                  <td className="num-cell"><Amount value={r.period.total} strong /></td>
+                  <td className="num-cell"><PeriodCell summary={summary} r={r} /></td>
                 </tr>
               ))}
               <tr className="bg-surface-2">
                 <td className="font-semibold text-ink-2">合計</td>
                 {ITEM_KEYS.map((k) => <td key={k} className="num-cell font-semibold"><Amount value={total((r) => itemAmount(r, k))} /></td>)}
                 <td className="num-cell"><Amount value={total((r) => r.incentive.total)} strong /></td>
-                <td className="num-cell"><Amount value={total((r) => r.period.total)} strong /></td>
+                <td className="num-cell">
+                  <Amount value={summary.close ? closedTotal : total((r) => r.period.total)} strong />
+                  {hiddenClosed ? <div className="text-[11px] text-muted">一覧にいないスタッフの確定分 {yen(hiddenClosed)} を含む</div> : null}
+                </td>
               </tr>
             </tbody>
           </table>
@@ -68,7 +89,9 @@ function StaffTable({ summary, onOpen }) {
               <span className="flex w-full items-center justify-between gap-2">
                 <span className="min-w-0">
                   <span className="block truncate font-semibold text-ink">{r.name}</span>
-                  <span className="block text-[11px] text-muted">{r.storeName} ・ 期間合計 {yen(r.period.total)}</span>
+                  <span className="block text-[11px] text-muted">
+                    {r.storeName} ・ 期間合計{summary.close ? (r.closed ? `（確定） ${yen(r.closed.total)}` : '（確定の記録なし）') : ` ${yen(r.period.total)}`}
+                  </span>
                 </span>
                 <span className="flex items-center gap-1 text-lg font-bold text-ink num">{yen(r.incentive.total)}<Icon name="chevron-right" size={16} className="text-muted" /></span>
               </span>
@@ -87,7 +110,7 @@ function StaffTable({ summary, onOpen }) {
 }
 
 export default function IncentivesPage() {
-  const { month, storeId } = useApp();
+  const { month, storeId, today } = useApp();
   const summary = useSummary(month, storeId);
   const goals = useGoals(month);
   const data = summary.shown;
@@ -128,8 +151,10 @@ export default function IncentivesPage() {
             <div className={cx('transition-opacity', summary.stale || summary.loading ? 'opacity-60' : '')}>
               {tab === 'staff' ? (
                 <>
-                  <p className="mb-3 text-xs text-muted">支給期間 {data.period.label}。行を選ぶと「次のランクまで」などの内訳を表示します。</p>
+                  <PeriodCloseBar summary={data} />
+                  <p className="mb-3 text-xs text-muted">行を選ぶと「次のランクまで」などの内訳を表示します。インセンティブは、ヘルプで入った他店舗の分も含めてスタッフごとに全店舗の実績で計算しています。</p>
                   <StaffTable summary={data} onOpen={setOpen} />
+                  {!data.period.preview ? <CrossStorePanel month={month} storeId={storeId} today={today} /> : null}
                 </>
               ) : data.me ? (
                 <StaffDetail row={data.me} summary={data} goal={goalOf(goals.shown, data.me)} anchors />

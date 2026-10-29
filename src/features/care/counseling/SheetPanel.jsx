@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Badge, Banner, Button, Card, EmptyState, Input, Skeleton, cx } from '../../../ui/primitives.jsx';
 import Icon from '../../../ui/Icon.jsx';
 import { toJstDate, todayJst, addDays } from '../../../../shared/dates.js';
@@ -7,8 +7,9 @@ import { matchConcern } from '../../../../shared/counseling.js';
 // ============================================================
 // カウンセリングシート（Google フォームの回答）— フォームを使う店舗だけ
 // ------------------------------------------------------------
-//   SheetList  届いた回答の一覧（お名前で過去の回答も探せる）
-//   SheetCard  選んだお客様の回答。施術前の確認・お悩み・ご要望・目標時期を大きく見やすく出す
+//   SheetList   届いた回答の一覧（お名前で過去の回答も探せる）
+//   SheetPicker 選んだお客様に回答を付ける（お名前の書き方が違って自動で結びつかなかった時・選び直す時）
+//   SheetCard   選んだお客様の回答。施術前の確認・お悩み・ご要望・目標時期を大きく見やすく出す
 // ============================================================
 
 const FRESH_MS = 60 * 60 * 1000;
@@ -162,13 +163,44 @@ function concernNote(concerns) {
 }
 
 /**
- * @param {Object} sheet api/_lib/counseling.js の normDetail（電話・メールは含まない）
+ * 予約にカウンセリングシートを付ける（お名前の書き方が違って自動で結びつかなかった時・選び直す時）
+ * @param {Object} form VisitList の form と同じ（{ res, visitOf, onSearch, searching, searchResult, onClearSearch, onRefresh }）
+ * @param {Array} rows 回答（3日以内・お名前が近い回答が先）
+ * @param {boolean} replacing 付いているシートを選び直すか
  */
-export function SheetCard({ sheet, loading, error, onRetry }) {
+export function SheetPicker({ form, rows, guestName, replacing, onPick, onClose }) {
+  // 開いたら一覧が見えるところまで送る（スマホでは選んだお客様の下に開くため）
+  useEffect(() => {
+    const el = document.getElementById('sheet-picker');
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, []);
+  return (
+    <Card id="sheet-picker" title={replacing ? 'カウンセリングシートを選び直す' : 'カウンセリングシートを選ぶ'} icon="file-search" className="animate-rise-in scroll-mt-20"
+      subtitle={`${guestName ? `${guestName} 様の` : 'このお客様の'}回答を選ぶと、フォームのお悩みがチェックに入ります`}
+      actions={<Button size="sm" variant="ghost" icon="x" onClick={onClose}>閉じる</Button>}>
+      {replacing ? (
+        <p className="mb-3 flex items-start gap-1.5 rounded-lg bg-surface-2 px-2.5 py-2 text-xs leading-relaxed text-ink-2">
+          <Icon name="info" size={13} className="mt-0.5 shrink-0" />選び直すと、前のシートから入ったチェックは外れます
+        </p>
+      ) : null}
+      <SheetList rows={rows} loading={form.res.loading} error={form.res.error} arrived={null} visitOf={form.visitOf}
+        onSelect={onPick} onSearch={form.onSearch} searching={form.searching} searchResult={form.searchResult}
+        onClearSearch={form.onClearSearch} onRefresh={form.onRefresh} />
+    </Card>
+  );
+}
+
+/**
+ * @param {Object} sheet api/_lib/counseling.js の normDetail（電話・メールは含まない）
+ * @param {Function|null} onRepick 別の回答を選び直す（フォームの店舗だけ）
+ */
+export function SheetCard({ sheet, loading, error, onRetry, onRepick }) {
+  const repick = onRepick ? <Button size="sm" variant="ghost" icon="file-search" onClick={onRepick}>選び直す</Button> : null;
   if (!sheet) {
     if (error) {
       return (
-        <Banner tone="bad" title="カウンセリングシートを開けませんでした" action={<Button size="sm" icon="refresh-cw" onClick={onRetry}>もう一度</Button>}>
+        <Banner tone="bad" title="カウンセリングシートを開けませんでした"
+          action={<span className="flex flex-wrap gap-1.5"><Button size="sm" icon="refresh-cw" onClick={onRetry}>もう一度</Button>{repick}</span>}>
           {error.message}
         </Banner>
       );
@@ -188,7 +220,12 @@ export function SheetCard({ sheet, loading, error, onRetry }) {
   return (
     <Card title="カウンセリングシート" icon="file-text" className="animate-rise-in"
       subtitle={`${sheet.name} 様が Google フォームに記入した内容`}
-      actions={sheet.submittedAt ? <Badge tone="info" icon="clock">{sheetTime(sheet.submittedAt)}</Badge> : null}>
+      actions={(
+        <span className="flex flex-col items-end gap-1 sm:flex-row sm:items-center sm:gap-1.5">
+          {sheet.submittedAt ? <Badge tone="info" icon="clock">{sheetTime(sheet.submittedAt)}</Badge> : null}
+          {repick}
+        </span>
+      )}>
       {/* 施術の前に確認すること（いちばん上に、目立たせる） */}
       {sheet.cautions && sheet.cautions.length ? (
         <section className="mb-4 rounded-2xl border-2 border-[#efc0c0] bg-[#fdf2f2] p-3.5 dark:border-[#d03b3b]/40 dark:bg-[#d03b3b]/10" role="note" aria-label="施術の前に確認">

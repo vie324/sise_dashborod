@@ -117,7 +117,7 @@ test('429 は 1回だけ待って取り直す', async () => {
 });
 
 test('接続テスト: 各エンドポイントの件数と項目名（値は返さない）', async () => {
-  const results = await probe(salonOneConfig(), { from: '2026-09-01', to: '2026-09-30' });
+  const results = await probe(salonOneConfig(), { from: '2026-09-01', to: '2026-09-30', payPerVisitPattern: /月2回/ });
   assert.deepEqual(results.map((r) => r.name), ['meta', 'shops', 'staff', 'visitSources', 'salesSummary', 'receptions', 'retentionSummary', 'retentionCustomers']);
   const sales = results.find((r) => r.name === 'salesSummary');
   assert.ok(sales.sampleKeys.includes('consumed_sales'));
@@ -130,6 +130,23 @@ test('接続テスト: 各エンドポイントの件数と項目名（値は返
   assert.deepEqual(rec.nested.plans, ['plan_name', 'plan_kind', 'amount', 'total_sessions']);
   assert.deepEqual(rec.nested.payment_splits, ['payment_method_name', 'amount']);
   assert.ok(results.find((r) => r.name === 'retentionSummary').nested.previous_month.includes('churned_count'));
+  // SalonOne の画面と見比べる人数と、受付履歴の値の扱い（顧客の情報は出さない）
+  assert.deepEqual(results.find((r) => r.name === 'retentionSummary').counts, {
+    continuing: 40, follow: 6, attention: 4, churned: 30, previousMonth: { continuing: 42, follow: 5, attention: 3, churned: 27 },
+  });
+  const as = (list, value) => (list.find((v) => v.value === value) || {}).as;
+  assert.equal(as(rec.values.status, 'completed'), '会計完了（集計する）');
+  assert.equal(as(rec.values.status, 'cancelled'), 'キャンセル');
+  assert.equal(as(rec.values.classification, 'new'), '新規（初回の判定に使う）');
+  assert.equal(as(rec.values.planKind, 'subscription'), 'サブスク（契約）');
+  assert.equal(as(rec.values.paymentMethod, '現金'), '現金');
+  assert.equal(as(rec.values.paymentMethod, '現金 / クレジットカード'), '分割決済（内訳の現金の分だけ）');
+  assert.equal(as(rec.values.paymentMethod, 'クレジットカード'), '現金以外');
+  assert.ok(!JSON.stringify(rec).includes('customer_name'));
+  // 継続管理の顧客一覧: 状態・プラン名と、会員数での扱い（都度払いのキーワードに当たるか）
+  const cust = results.find((r) => r.name === 'retentionCustomers');
+  assert.deepEqual(cust.values.customerStatus, [{ value: 'normal', as: '離反以外' }]);
+  assert.deepEqual(cust.values.planName, [{ value: '月2回プラン', as: '都度払い（このプランだけのお客様は会員数・平均継続期間から除く）' }]);
   assert.equal(results[0].info.brand_name, "si'se");
   assert.ok(!JSON.stringify(results).includes('53000')); // 金額などの値は含めない
 

@@ -2,8 +2,9 @@ import Icon from '../../ui/Icon.jsx';
 import { Card, Badge, cx } from '../../ui/primitives.jsx';
 import { TierMeter, StatusPill, Meter } from '../../ui/stats.jsx';
 import { CumulativeChart } from '../../ui/charts.jsx';
-import { yen, yenShort, num, pct } from '../../lib/format.js';
+import { yen, yenShort, num, pct, dateJa } from '../../lib/format.js';
 import { forecastMonthEnd } from '../../../shared/metrics.js';
+import { INCENTIVE_RULES } from '../../../shared/incentive-rules.js';
 import { channelLabel } from '../../../shared/channels.js';
 import { dayOfMonth } from '../../../shared/dates.js';
 
@@ -15,8 +16,9 @@ export const INCENTIVE_META = {
   sales: { icon: 'banknote', title: '施術消化売上' },
   retention: { icon: 'repeat', title: '継続率', short: '継続率（店舗）' },
   newContract: { icon: 'user-plus', title: '新規契約' },
-  sns: { icon: 'smartphone', title: 'Minimo・Threads・Instagram', short: 'SNS集客' },
+  sns: { icon: 'smartphone', title: 'Minimo・Threads・Instagram', short: 'SNS集客', column: 'SNS' },
   referral: { icon: 'users', title: '紹介' },
+  crossStore: { icon: 'arrow-left-right', title: '系列店での契約', column: '系列店' },
 };
 
 /** インセンティブ 1項目の状態（色だけに頼らずラベルとアイコンで示す） */
@@ -36,13 +38,14 @@ export function itemStatus(item) {
       if (!item.eligible) return { status: item.gap <= 3 ? 'close' : 'unmet', label: `あと${item.gap}名` };
       return item.amount > 0 ? { status: 'achieved', label: `${item.contracts}件契約` } : { status: 'pending', label: '契約0件' };
     case 'referral':
+    case 'crossStore':
       return item.contracts > 0 ? { status: 'achieved', label: `${item.contracts}件` } : { status: 'none', label: '0件' };
     default:
       return { status: 'pending' };
   }
 }
 
-/** 5項目の内訳（行リスト） */
+/** 6項目の内訳（行リスト） */
 export function IncentiveBreakdown({ incentive, onSelect, className = '' }) {
   if (!incentive) return null;
   return (
@@ -282,12 +285,53 @@ export function ReferralCard({ item, rules }) {
   );
 }
 
-export function RetentionCard({ item, rules, storeName }) {
+/**
+ * 系列店での契約（店長以上が登録した、来店した店舗とは別の系列店での契約）
+ * @param {Array} [entries] この月の登録（summary の staff[].crossStore）
+ */
+export function CrossStoreCard({ item, rules, entries = [] }) {
+  const r = rules.crossStore || INCENTIVE_RULES.crossStore;
+  return (
+    <Card title="系列店での契約" icon="arrow-left-right" actions={<StatusPill {...itemStatus(item)} />}
+      subtitle={`来店したお客様が系列の他店舗で契約したら1件 ${yen(r.amountPerContract)}（店長が登録します）`}>
+      <div className="flex items-end justify-between">
+        <div>
+          <div className="text-xs font-semibold text-ink-2">系列店で契約したお客様</div>
+          <div className="mt-1 text-3xl font-bold text-ink num">{item.contracts}<span className="ml-1 text-base font-semibold text-ink-2">件</span></div>
+        </div>
+        <div className="text-lg font-bold text-ink num">{yen(item.amount)}</div>
+      </div>
+      {entries.length ? (
+        <ul className="mt-3 divide-y divide-line border-t border-line text-[13px]">
+          {entries.map((e) => (
+            <li key={e.id} className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 py-2">
+              <span className="min-w-0 text-ink">{dateJa(e.date, { weekday: false })} {e.customerName}様<span className="text-ink-2"> ・ {e.planName}</span></span>
+              <span className="text-xs text-ink-2">{e.contractStoreName}で契約</span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </Card>
+  );
+}
+
+/** 継続指標の出どころ（SalonOne の継続管理を取得した日。過去の月はその月の最後の記録） */
+export function retentionSourceText(retention) {
+  if (!retention) return null;
+  const parts = [];
+  if (retention.asOf) parts.push(`${dateJa(retention.asOf, { weekday: false })}時点の SalonOne の継続管理（サブスク）`);
+  if (retention.payPerVisitExcluded > 0) parts.push(`都度払いのプランだけのお客様 ${retention.payPerVisitExcluded}名を除く`);
+  return parts.length ? parts.join('・') : null;
+}
+
+export function RetentionCard({ item, rules, storeName, retention = null }) {
   const st = itemStatus(item);
+  const source = retentionSourceText(retention);
   return (
     <Card title="継続率インセンティブ" icon="repeat" actions={<StatusPill status={st.status} label={st.label} />}
       subtitle={`${storeName ? `${storeName}の` : '店舗全体の'}条件をすべて満たすと、1人あたり月額 ${yen(rules.retention.amountPerPerson)}`}>
       <ConditionList conditions={item.conditions} />
+      {source ? <p className="mt-3 text-[11px] leading-relaxed text-muted">{source}</p> : null}
     </Card>
   );
 }
@@ -358,26 +402,54 @@ export function NextActions({ incentive, rules, className = '' }) {
   );
 }
 
-/** 支給期間（2ヶ月）の内訳 */
-export function PeriodSummary({ period, staffPeriod, className = '' }) {
+/**
+ * 支給期間の合計。確定済みの期間は確定した金額（確定の記録に無いスタッフは null）
+ * @param {Object} summary /api/salonone summary のレスポンス
+ * @param {Object} row     summary.staff[]・summary.me
+ */
+export function periodAmount(summary, row) {
+  if (!summary.close) return row.period.total;
+  return row.closed ? row.closed.total : null;
+}
+
+/**
+ * 支給期間（2ヶ月）の内訳。確定済みなら確定した金額を出し、計算し直した金額が違う時はそれも並べる。
+ * @param {Object|null} [closed] 確定の記録のこのスタッフの行（summary の staff[].closed）
+ * @param {boolean} [periodClosed] 支給期間が確定済みか（確定の記録にこのスタッフがいない時に「記録なし」と出す）
+ */
+export function PeriodSummary({ period, staffPeriod, closed = null, periodClosed = false, className = '' }) {
   if (!period || !staffPeriod) return null;
+  const missing = periodClosed && !closed;
+  const months = closed ? closed.months : staffPeriod.months;
+  const total = closed ? closed.total : staffPeriod.total;
+  const changed = closed && closed.total !== staffPeriod.total;
   return (
     <div className={cx('rounded-xl border border-line bg-surface-2 px-3.5 py-3', className)}>
       <div className="flex items-center justify-between gap-2">
         <span className="flex items-center gap-1.5 text-xs font-semibold text-ink-2">
-          <Icon name="calendar-range" size={14} className="text-muted" />
-          支給期間 {period.label}{period.preview ? '（試算）' : ''}
+          <Icon name={closed || missing ? 'lock' : 'calendar-range'} size={14} className="text-muted" />
+          支給期間 {period.label}{period.preview ? '（試算）' : closed ? '（確定）' : missing ? '（確定の記録なし）' : ''}
         </span>
-        <span className="text-sm font-bold text-ink num">{yen(staffPeriod.total)}</span>
+        <span className="text-sm font-bold text-ink num">{missing ? <span className="text-muted">—</span> : yen(total)}</span>
       </div>
       <div className="mt-2 grid grid-cols-2 gap-2">
-        {staffPeriod.months.map((m) => (
+        {months.map((m) => (
           <div key={m.month} className="flex items-center justify-between rounded-lg bg-surface px-2.5 py-1.5 text-xs">
             <span className="text-ink-2">{Number(m.month.slice(5))}月</span>
             <span className="font-semibold text-ink num">{m.total == null ? <span className="text-muted">未確定</span> : yen(m.total)}</span>
           </div>
         ))}
       </div>
+      {changed ? (
+        <p className="mt-2 text-[11px] leading-relaxed text-muted">
+          確定した後に SalonOne の数字が変わったため、いま計算し直すと {yen(staffPeriod.total)} です（支給額は確定した金額です）
+        </p>
+      ) : null}
+      {missing ? (
+        <p className="mt-2 text-[11px] leading-relaxed text-muted">
+          この支給期間は確定済みですが、確定した記録にこのスタッフは入っていません。上の月別はいま計算した金額です（合計 {yen(staffPeriod.total)}）。管理者に確認してください
+        </p>
+      ) : null}
     </div>
   );
 }

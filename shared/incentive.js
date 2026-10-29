@@ -250,6 +250,23 @@ export function computeReferralIncentive(m, rules = INCENTIVE_RULES) {
 }
 
 // ------------------------------------------------------------
+// 6. 系列店での契約（店長以上が登録した件数）
+// ------------------------------------------------------------
+
+export function computeCrossStoreIncentive(m, rules = INCENTIVE_RULES) {
+  const r = rules.crossStore;
+  const contracts = Math.max(0, num(m.crossStoreContracts));
+  return {
+    key: r.key,
+    label: r.label,
+    amount: contracts * r.amountPerContract,
+    achieved: contracts > 0,
+    eligible: true,
+    contracts,
+  };
+}
+
+// ------------------------------------------------------------
 // まとめ
 // ------------------------------------------------------------
 
@@ -267,6 +284,7 @@ export function computeStaffIncentive(metrics, retention, month, rules = INCENTI
     computeNewContractIncentive(m, rules),
     computeSnsIncentive(m, rules),
     computeReferralIncentive(m, rules),
+    computeCrossStoreIncentive(m, rules),
   ];
   const total = items.reduce((s, it) => s + it.amount, 0);
   return {
@@ -276,6 +294,80 @@ export function computeStaffIncentive(metrics, retention, month, rules = INCENTI
     total,
     items,
   };
+}
+
+/**
+ * 1ヶ月分の結果を、支給額（項目ごと）と判定に使った数字だけにまとめる（確定の記録・CSV 用）
+ * @param {Object} res computeStaffIncentive の結果
+ */
+export function summarizeIncentive(res) {
+  if (!res) return null;
+  const by = Object.fromEntries(res.items.map((it) => [it.key, it]));
+  const cond = (item, key) => {
+    const c = item && item.conditions ? item.conditions.find((x) => x.key === key) : null;
+    return c ? c.current : null;
+  };
+  return {
+    month: res.month,
+    total: res.total,
+    items: Object.fromEntries(res.items.map((it) => [it.key, it.amount])),
+    basis: {
+      consumedSales: by.sales.current,
+      existingConsumedSales: cond(by.newContract, 'existingSales'),
+      newVisits3ch: by.newContract.visits,
+      contracts3ch: by.newContract.contracts,
+      snsCustomers: by.sns.customers,
+      snsContracts: by.sns.contracts,
+      referralSubscriptions: by.referral.contracts,
+      crossStoreContracts: by.crossStore ? by.crossStore.contracts : 0,
+      retentionKnown: by.retention.known,
+      memberCount: cond(by.retention, 'members'),
+      churnRatePct: cond(by.retention, 'churn'),
+      avgTenureMonths: cond(by.retention, 'tenure'),
+    },
+  };
+}
+
+// ------------------------------------------------------------
+// 支給一覧の CSV（給与の計算用。Excel で開けるよう BOM 付き）
+// ------------------------------------------------------------
+const csvCell = (v) => {
+  if (v == null) return '';
+  let s = String(v);
+  // 数式として解釈されないように（=・+・-・@ で始まる文字列）
+  if (typeof v === 'string' && /^[=+\-@]/.test(s)) s = `'${s}`;
+  return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+};
+const round1 = (v) => (v == null || !Number.isFinite(Number(v)) ? null : Math.round(Number(v) * 10) / 10);
+
+/**
+ * @param {Array<{ key, name, storeName, total, months: Array<{ month, total, items, basis }> }>} rows
+ *   確定の記録の staff、または summary の staff を { ...row, months: row.period.months, total: row.period.total } にしたもの
+ * @param {{ periodLabel?: string, status?: string }} [opts] status は「確定」「見込み」など
+ */
+export function incentiveCsv(rows, { periodLabel = '', status = '' } = {}) {
+  const head = [
+    '支給期間', '状態', '店舗', 'スタッフ', 'SalonOne スタッフID', '対象月',
+    '施術消化売上', '既存顧客の消化売上', '3経路の新規', '3経路の契約', 'SNSの集客', 'SNSの契約', '紹介のサブスク契約', '系列店での契約',
+    '会員数', '退会率(%)', '平均継続(ヶ月)', '会員数の記録日',
+    '①施術消化売上', '②継続率', '③新規契約', '④Minimo・Threads・Instagram', '⑤紹介', '⑥系列店での契約', '月の合計', '支給期間の合計',
+  ];
+  const lines = [head];
+  for (const r of rows || []) {
+    for (const m of r.months || []) {
+      if (m.total == null) continue;
+      const b = m.basis || {};
+      const it = m.items || {};
+      lines.push([
+        periodLabel, status, r.storeName || '', r.name || '', r.key, m.month,
+        b.consumedSales, b.existingConsumedSales, b.newVisits3ch, b.contracts3ch, b.snsCustomers, b.snsContracts, b.referralSubscriptions, b.crossStoreContracts || 0,
+        b.retentionKnown ? b.memberCount : null, b.retentionKnown ? round1(b.churnRatePct) : null, b.retentionKnown ? round1(b.avgTenureMonths) : null,
+        b.retentionKnown ? b.retentionAsOf || null : null,
+        it.sales, it.retention, it.newContract, it.sns, it.referral, it.crossStore || 0, m.total, r.total,
+      ]);
+    }
+  }
+  return `﻿${lines.map((row) => row.map(csvCell).join(',')).join('\r\n')}\r\n`;
 }
 
 /** 支給期間内の各月の結果を合算する（存在しない月は 0 扱い） */

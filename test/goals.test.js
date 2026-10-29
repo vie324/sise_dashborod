@@ -28,15 +28,16 @@ before(async () => {
 });
 
 test('3ヶ月の目標: 期の最初の月で保存し、単月の目標とは別に持つ', async () => {
-  const ok = await goalsPost({ action: 'set', period: 'quarter', month: '2027-01', scope: 'store', targetId: 'store-1', values: { consumedSales: '7,500,000', newVisits: 100, contractRatePct: 50, memberCount: 160 } }, TAKAHASHI);
+  const ok = await goalsPost({ action: 'set', period: 'quarter', month: '2027-01', scope: 'store', targetId: 'store-1', values: { consumedSales: '7,500,000', depositSales: '9,000,000円', newVisits: 100, contractRatePct: 50, memberCount: 160 } }, TAKAHASHI);
   assert.equal(ok.success, true);
   assert.equal(ok.goal.consumedSales, 7500000);
+  assert.equal(ok.goal.depositSales, 9000000); // 入金売上の目標
   // 期の途中の月は受け付けない
   assert.ok((await goalsPost({ action: 'set', period: 'quarter', month: '2027-02', scope: 'store', targetId: 'store-1', values: { consumedSales: 1 } }, null)).error);
   assert.ok((await goalsGet({ period: 'quarter', month: '2027-02' }, null)).error);
   // スタッフは店舗の 3ヶ月の目標を設定できない・自分の分は設定できる
   assert.ok((await goalsPost({ action: 'set', period: 'quarter', month: '2027-01', scope: 'store', targetId: 'store-1', values: { consumedSales: 1 } }, SATO)).error);
-  assert.equal((await goalsPost({ action: 'set', period: 'quarter', month: '2027-01', scope: 'staff', targetId: 'st-sato', values: { consumedSales: 2424000 } }, SATO)).success, true);
+  assert.equal((await goalsPost({ action: 'set', period: 'quarter', month: '2027-01', scope: 'staff', targetId: 'st-sato', values: { consumedSales: 2424000, depositSales: 3000000 } }, SATO)).success, true);
   const q = await goalsGet({ period: 'quarter', month: '2027-01' }, SATO);
   assert.equal(q.period, 'quarter');
   assert.equal(q.stores['store-1'].consumedSales, 7500000);
@@ -53,11 +54,14 @@ test('3ヶ月の目標を単月に振り分ける（決めてある単月の目�
   assert.equal(r.skipped, 1); // 佐藤さんの 2月
   const [jan, feb, mar] = await Promise.all(['2027-01', '2027-02', '2027-03'].map((m) => goalsGet({ month: m }, null)));
   assert.deepEqual([jan, feb, mar].map((d) => d.stores['store-1'].consumedSales), [2500000, 2500000, 2500000]);
+  assert.deepEqual([jan, feb, mar].map((d) => d.stores['store-1'].depositSales), [3000000, 3000000, 3000000]);
   assert.deepEqual([jan, feb, mar].map((d) => d.stores['store-1'].newVisits), [33, 33, 34]);
   assert.equal(jan.stores['store-1'].contractRatePct, 50);
   assert.equal(jan.stores['store-1'].memberCount, undefined);
   assert.equal(mar.stores['store-1'].memberCount, 160); // 期末の人数は 3ヶ月目
   assert.deepEqual([jan, feb, mar].map((d) => d.staff['st-sato'].consumedSales), [808000, 900000, 808000]);
+  assert.deepEqual([jan, mar].map((d) => d.staff['st-sato'].depositSales), [1000000, 1000000]);
+  assert.equal(feb.staff['st-sato'].depositSales, undefined); // 決めてあった 2月はそのまま
   // 2回目は何もしない
   assert.equal((await goalsPost({ action: 'splitQuarter', period: 'quarter', month: '2027-01' }, null)).filled, 0);
 });

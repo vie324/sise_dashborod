@@ -79,4 +79,14 @@ export const INCENTIVE_RULES = Object.freeze({
     label: '紹介',
     amountPerContract: 2000,
   },
+
+  // 6. 系列店での契約（ドミナント出店）
+  //   来店した店舗とは別の系列店で契約した場合、初回に来店した店舗のスタッフに 1件 2,000円。
+  //   SalonOne では契約した店舗の契約になるため、店長以上がこのシステムで登録する
+  //   （契約した店舗の新規契約の数からは除く。api/_lib/salonone/cross.js）
+  crossStore: {
+    key: 'crossStore',
+    label: '系列店での契約',
+    amountPerContract: 2000,
+  },
 });

@@ -99,6 +99,35 @@ test.describe('SalonOne 連携 API', () => {
     expect(resp.status()).toBe(400);
   });
 
+  test('出納帳の現金売上（action=cash）は店舗の指定が無ければ 400', async ({ request }) => {
+    const resp = await request.get('/api/salonone?action=cash&storeId=all');
+    if (resp.status() === 401) return;
+    expect(resp.status()).toBe(400);
+  });
+
+  test('インセンティブの確定は POST だけ', async ({ request }) => {
+    const resp = await request.get('/api/salonone?action=closePeriod');
+    if (resp.status() === 401) return;
+    expect(resp.status()).toBe(405);
+  });
+
+  test('確定したインセンティブは一般の設定（dashConfig）から読めない', async ({ request }) => {
+    const resp = await request.get('/api/db?table=dashConfig&key=incentive.close.2026-11');
+    const data = await resp.json();
+    expect(data.error).toBeTruthy();
+  });
+
+  test('系列店での契約: 登録・削除は POST だけ、月の指定が無い一覧は 400、記録は dashConfig から読めない', async ({ request }) => {
+    const add = await request.get('/api/salonone?action=crossAdd');
+    if (add.status() === 401) return;
+    expect(add.status()).toBe(405);
+    expect((await request.get('/api/salonone?action=crossDelete')).status()).toBe(405);
+    expect((await request.get('/api/salonone?action=cross&month=2026-13')).status()).toBe(200); // 月が正しくなければ今月
+    expect((await request.get('/api/salonone?action=crossCandidates&storeId=all&date=2026-11-01')).status()).toBe(400);
+    const cfg = await (await request.get('/api/db?table=dashConfig&key=incentive.cross.2026-11')).json();
+    expect(cfg.error).toBeTruthy();
+  });
+
   test('不正な staff token は 401', async ({ request }) => {
     const fakeToken = btoa(JSON.stringify({ id: 's1', n: 'fake', r: 'staff', sid: ['x'] })) + '.invalidsig';
     const resp = await request.get('/api/salonone?action=summary', {

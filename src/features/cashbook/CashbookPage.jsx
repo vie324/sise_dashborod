@@ -5,7 +5,7 @@ import Icon from '../../ui/Icon.jsx';
 import { MonthPicker, StorePicker } from '../../ui/pickers.jsx';
 import { confirmDialog, showToast } from '../../ui/feedback.jsx';
 import { isStoreIdAllowed, isManagerOrAbove } from '../../lib/access.js';
-import { useSummary } from '../../lib/hooks.js';
+import { useStoreCash } from '../../lib/hooks.js';
 import { dateJa, yen } from '../../lib/format.js';
 import { monthOf, todayJst } from '../../../shared/dates.js';
 import { isSalonOneCashEntry } from '../../../shared/cashbook.js';
@@ -32,13 +32,10 @@ import { CashCheckModal, DailyCloseModal } from './CashModals.jsx';
  * （1店舗を選んでいて、SalonOne が接続済みのときだけ）。
  */
 function SalonOneImportNotice({ entries, month, storeId, isDayClosed, onOpen }) {
-  const summary = useSummary(month, storeId);
-  const data = summary.shown && summary.shown.month === month && summary.shown.scope && String(summary.shown.scope.storeId) === String(storeId) ? summary.shown : null;
-  const salonDaily = data && data.store ? data.store.daily : null;
+  const data = useStoreCash(month, storeId).shown;
+  const salonDaily = data ? data.days : null;
   const pending = useMemo(() => {
-    if (!data || data.mode !== 'live') return null;
-    const row = (data.stores || []).find((x) => String(x.storeId) === String(storeId));
-    if (!row || !row.linked) return null;
+    if (!data || data.mode !== 'live' || !data.linked) return null;
     const r = reconcileDaily({ entries, storeId, month, salonDaily: salonDaily || [], asOf: data.asOf });
     // 当日分は締めの時に取り込むので、ここでは前日までを数える
     const days = r.rows.filter((x) => x.canImport && x.date < data.asOf && !isDayClosed(x.date, storeId));

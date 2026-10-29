@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { dbGet, dbPost } from '../../lib/api.js';
+import { invalidate } from '../../lib/hooks.js';
 import { currentAccess, displayName } from '../../lib/access.js';
 import { showToast } from '../../ui/feedback.jsx';
 import { todayJst } from '../../../shared/dates.js';
@@ -264,6 +265,8 @@ export function useCashbook() {
       return null;
     }
     fetchFromDb({ quiet: true });
+    // 取り込みはサーバーで SalonOne から読み直している。突合の SalonOne 側の金額も読み直す
+    invalidate('cash:');
     return r;
   }, [fetchFromDb]);
 

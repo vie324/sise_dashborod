@@ -11,7 +11,7 @@ import { forecastMonthEnd } from '../../../shared/metrics.js';
 import { dayOfMonth, formatMonthJa } from '../../../shared/dates.js';
 import { ScopeBar, DataWarnings } from '../shared/ScopeBar.jsx';
 import StaffDetail from '../incentives/StaffDetail.jsx';
-import { ChartLegend, itemStatus } from '../incentives/parts.jsx';
+import { ChartLegend, itemStatus, retentionSourceText } from '../incentives/parts.jsx';
 import MyHome from './MyHome.jsx';
 import SpecialGoalStrip from '../goals/SpecialGoalStrip.jsx';
 import MandalaHomeStrip from '../mandala/HomeStrip.jsx';
@@ -141,7 +141,8 @@ function TeamStatusCard({ summary, onOpen }) {
   const rows = summary.staff;
   const tiers = summary.rules.sales.tiers;
   const totalMonth = rows.reduce((a, r) => a + r.incentive.total, 0);
-  const totalPeriod = rows.reduce((a, r) => a + r.period.total, 0);
+  // 確定済みの支給期間は確定の記録の合計（表示中の店舗のスタッフ）
+  const totalPeriod = summary.close ? summary.close.total : rows.reduce((a, r) => a + r.period.total, 0);
   const dist = [-1, ...tiers.map((_, i) => i)].map((ti) => ({ ti, count: rows.filter((r) => r.incentive.items[0].tierIndex === ti).length }));
   const close = rows
     .filter((r) => r.incentive.items[0].nextTier && r.incentive.items[0].nextTier.sessions <= 5)
@@ -157,7 +158,7 @@ function TeamStatusCard({ summary, onOpen }) {
           <div className="mt-1 text-[22px] font-bold text-ink num">{yen(totalMonth)}</div>
         </div>
         <div>
-          <div className="text-xs font-semibold text-ink-2">支給期間の合計</div>
+          <div className="text-xs font-semibold text-ink-2">支給期間の合計{summary.close ? '（確定）' : ''}</div>
           <div className="mt-1 text-[22px] font-bold text-ink num">{yen(totalPeriod)}</div>
         </div>
       </div>
@@ -220,6 +221,7 @@ function TeamStatusCard({ summary, onOpen }) {
               </li>
             ))}
           </ul>
+          {retentionSourceText(single.retention) ? <p className="mt-2 text-[11px] leading-relaxed text-muted">{retentionSourceText(single.retention)}</p> : null}
         </div>
       ) : null}
     </Card>

@@ -31,6 +31,7 @@ export const CONCERN_ITEMS = [
   { id: 'c7', label: '肩こり', cat: 'posture', formLabels: ['肩こり', '肩凝り'] },
   { id: 'c8', label: '姿勢・猫背', cat: 'posture', formLabels: ['猫背', '姿勢', '姿勢・猫背', '姿勢の悪さ'] },
   { id: 'c9', label: '反り腰', cat: 'posture', formLabels: ['反り腰'] },
+  { id: 'c17', label: '二の腕のたるみ', cat: 'posture', formLabels: ['二の腕のたるみ', '二の腕'] },
   { id: 'c10', label: '腰痛', cat: 'pelvis', formLabels: ['腰痛'] },
   { id: 'c11', label: '股関節・膝の痛み', cat: 'pelvis', formLabels: ['股関節', '膝の痛み', '股関節・膝の痛み', '股関節の痛み'] },
   { id: 'c12', label: '冷え・むくみ', cat: 'pelvis', formLabels: ['冷え', 'むくみ', '冷え・むくみ'] },
@@ -158,8 +159,45 @@ export function isNoAnswer(value) {
 // ------------------------------------------------------------
 // 今日の予約（SalonOne）とフォームの回答をお名前で結びつける
 // ------------------------------------------------------------
+// お名前によく出る異体字（SalonOne の登録とフォームで書き方が分かれやすいもの）
+const NAME_VARIANTS = {
+  髙: '高', 﨑: '崎', 嵜: '崎', 邉: '辺', 邊: '辺', 濵: '浜', 濱: '浜', 澤: '沢', 齋: '斎', 齊: '斎', 斉: '斎',
+  德: '徳', 櫻: '桜', 廣: '広', 國: '国', 眞: '真', 惠: '恵', 冨: '富', '𠮷': '吉',
+};
+const NAME_VARIANT_RE = new RegExp(`[${Object.keys(NAME_VARIANTS).join('')}]`, 'gu');
+
+/** お名前を空白で区切った部分（全角・半角、読みのかっこ書き、末尾の敬称、異体字をそろえる） */
+function nameParts(name) {
+  let s = String(name || '').normalize('NFKC');
+  const bare = s.replace(/\([^)]*\)|【[^】]*】/g, ' ');
+  s = bare.trim() ? bare : s.replace(/[()【】]/g, ' ');
+  s = s.replace(NAME_VARIANT_RE, (c) => NAME_VARIANTS[c]).replace(/[・.]/g, '').trim().replace(/\s*(様|さま|さん)$/, '');
+  return s.split(/\s+/).filter(Boolean);
+}
+
+/**
+ * お名前の比較用のキー。1つめが基本で、2つめからは SalonOne でよくある登録の重なりを外したもの
+ *   「山田 山田　花子」「山田 山田花子」（名の欄にも姓）→ 山田山田花子 / 山田花子
+ *   「山田花子 花子」（姓の欄にもお名前）              → 山田花子花子 / 山田花子
+ * 1文字の姓は「林 林太郎」のような名と見分けられないので、空白で分かれている時（「林 林　太郎」）だけ外す。
+ */
+export function personKeys(name) {
+  const parts = nameParts(name);
+  const base = parts.join('');
+  if (!base) return [];
+  const keys = [base];
+  if (parts.length >= 2) {
+    const [first, second] = parts;
+    const [prev, last] = parts.slice(-2);
+    const repeats = (a, b, has) => a === b || (a.length >= 2 && b.length > a.length && has(b, a));
+    if (repeats(first, second, (b, a) => b.startsWith(a))) keys.push(parts.slice(1).join(''));
+    if (repeats(last, prev, (b, a) => b.endsWith(a))) keys.push(parts.slice(0, -1).join(''));
+  }
+  return [...new Set(keys)].filter((k, i) => i === 0 || k.length >= 2);
+}
+
 /** お名前の比較用（全角・半角と空白をそろえ、末尾の敬称を外す） */
-export const personKey = (name) => String(name || '').normalize('NFKC').replace(/\s+/g, '').replace(/(様|さま|さん)$/, '');
+export const personKey = (name) => personKeys(name)[0] || '';
 
 /**
  * 予約ごとに、同じお名前のいちばん新しい回答（days 日前までに回答したものだけ）。
@@ -173,24 +211,69 @@ export function linkSheetsToVisits(visits, sheets, { today, days = 3 }) {
   const since = addDays(today, -days);
   const latest = new Map();
   for (const s of sheets || []) {
-    const key = personKey(s && s.name);
     const day = toJstDate(s && s.submittedAt);
-    if (!key || !day || day < since) continue;
-    const prev = latest.get(key);
-    if (!prev || String(s.submittedAt) > String(prev.submittedAt)) latest.set(key, s);
+    if (!day || day < since) continue;
+    for (const key of personKeys(s && s.name)) {
+      const prev = latest.get(key);
+      if (!prev || String(s.submittedAt) > String(prev.submittedAt)) latest.set(key, s);
+    }
   }
   const out = {};
   for (const v of visits || []) {
-    const key = personKey(v && v.customerName);
-    if (key && latest.has(key)) out[v.id] = latest.get(key);
+    const key = personKeys(v && v.customerName).find((k) => latest.has(k));
+    if (key) out[v.id] = latest.get(key);
   }
   return out;
 }
 
-/** 回答と同じお名前の今日の予約（無ければ null） */
+/** 回答と同じお名前の今日の予約（無ければ null。書き方まで同じ予約を先に） */
 export function visitForSheet(visits, sheet) {
-  const key = personKey(sheet && sheet.name);
-  return (key && (visits || []).find((v) => personKey(v.customerName) === key)) || null;
+  const keys = personKeys(sheet && sheet.name);
+  if (keys.length === 0) return null;
+  const list = visits || [];
+  return list.find((v) => personKey(v.customerName) === keys[0])
+    || list.find((v) => personKeys(v.customerName).some((k) => keys.includes(k)))
+    || null;
+}
+
+/** 2つのお名前が近いか（姓が同じ・一方の名前の部分がもう一方に入っている） */
+function similarName(a, b) {
+  const pa = nameParts(a);
+  const pb = nameParts(b);
+  const ka = pa.join('');
+  const kb = pb.join('');
+  if (!ka || !kb) return false;
+  if (ka.slice(0, 2) === kb.slice(0, 2) && ka.length >= 2) return true;
+  return pa.some((p) => p.length >= 2 && kb.includes(p)) || pb.some((p) => p.length >= 2 && ka.includes(p));
+}
+
+/**
+ * 予約に付けるカウンセリングシートを選ぶ時の並び。
+ * days 日以内の回答を先に（その中ではお名前が近い回答を先に）、あとは新しい順
+ * @param {string} name 予約のお名前
+ * @param {Array<{ name:string, submittedAt:string|null }>} sheets
+ * @param {{ today:string, days?:number }} opts
+ */
+export function rankSheetsFor(name, sheets, { today, days = 3 }) {
+  const since = addDays(today, -days);
+  const score = (s) => ((toJstDate(s.submittedAt) || '') >= since ? 2 : 0) + (name && similarName(name, s.name) ? 1 : 0);
+  return (sheets || [])
+    .map((s) => ({ s, k: score(s) }))
+    .sort((x, y) => y.k - x.k || String(y.s.submittedAt || '').localeCompare(String(x.s.submittedAt || '')))
+    .map((x) => x.s);
+}
+
+/**
+ * お名前の検索（GAS は「お名前にその文字を含む」でしか探せないので、空白の位置や全角・半角で漏れないよう
+ * GAS には最初の 2文字で聞き、返ってきた回答をここで絞る）
+ * @returns {{ gasQuery:string, matches:(name:string)=>boolean } | null} 検索できる文字が無ければ null
+ */
+export function nameSearch(q) {
+  const words = nameParts(q);
+  const first = String(q || '').normalize('NFKC').replace(/[()【】]/g, ' ').trim().split(/\s+/)[0].replace(/(様|さま|さん)$/, '');
+  const gasQuery = Array.from(first).slice(0, 2).join('');
+  if (words.length === 0 || !gasQuery) return null;
+  return { gasQuery, matches: (n) => { const k = personKey(n); return words.every((w) => k.includes(w)); } };
 }
 
 // ------------------------------------------------------------

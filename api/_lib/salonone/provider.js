@@ -37,26 +37,32 @@ const cache = new Map();
 const MAX_ENTRIES = 500;
 const RETRY_AFTER_FAILURE_MS = 60 * 1000;
 
-/** @returns {Promise<{ value:any, fetchedAt:number, stale:boolean, error?:string }>} */
+/**
+ * @param {boolean|number} refresh true: 取り直す。数値: その ms 以内に取りに行ったもの（取りに行っている途中を含む）は
+ *   そのまま使い、それより前のもの・取り直せなかったものだけ取り直す（インセンティブの確定。上限に当たって確認を挟んだ
+ *   後の確定でも、取り直せなかった分だけを取りに行く）
+ * @returns {Promise<{ value:any, fetchedAt:number, stale:boolean, error?:string }>}
+ */
 function cached(key, ttlMs, loader, refresh) {
   const now = Date.now();
   const hit = cache.get(key);
-  if (!refresh && hit && hit.expires > now) return hit.pending;
+  const recentEnough = typeof refresh === 'number' && hit && hit.startedAt > 0 && now - hit.startedAt <= refresh;
+  if (hit && (recentEnough || (!refresh && hit.expires > now))) return hit.pending;
   const last = hit ? hit.last : null;
   const pending = loader().then(
     (value) => {
       const res = { value, fetchedAt: Date.now(), stale: false };
-      cache.set(key, { pending: Promise.resolve(res), expires: Date.now() + ttlMs, last: res });
+      cache.set(key, { pending: Promise.resolve(res), expires: Date.now() + ttlMs, last: res, startedAt: now });
       return res;
     },
     (e) => {
       if (!last) { cache.delete(key); throw e; }
       const res = { ...last, stale: true, error: e && e.message ? e.message : String(e) };
-      cache.set(key, { pending: Promise.resolve(res), expires: Date.now() + RETRY_AFTER_FAILURE_MS, last });
+      cache.set(key, { pending: Promise.resolve(res), expires: Date.now() + RETRY_AFTER_FAILURE_MS, last, startedAt: 0 });
       return res;
     },
   );
-  cache.set(key, { pending, expires: now + ttlMs, last });
+  cache.set(key, { pending, expires: now + ttlMs, last, startedAt: now });
   if (cache.size > MAX_ENTRIES) cache.delete(cache.keys().next().value);
   return pending;
 }
@@ -153,11 +159,14 @@ export function buildMapping(appCtx, master) {
 
   const storeToShop = new Map();
   const shopToStore = new Map();
+  // 2つの店舗を同じ SalonOne の店舗に対応付けている（全店舗の合計では 1回だけ数える）
+  const duplicateShops = [];
   for (const store of appCtx.stores) {
     const shopId = demo ? store.id : (shopMap[store.id] ? String(shopMap[store.id]) : '');
     if (!shopId) continue;
     storeToShop.set(store.id, shopId);
     if (!shopToStore.has(shopId)) shopToStore.set(shopId, store.id);
+    else if (!duplicateShops.includes(shopId)) duplicateShops.push(shopId);
   }
   if (demo && appCtx.stores.length === 0) {
     // サンプル店舗しか無い場合は、その ID をそのまま店舗 ID として使う
@@ -176,7 +185,7 @@ export function buildMapping(appCtx, master) {
     }
   }
   return {
-    storeToShop, shopToStore, staffToS1, s1ToStaff,
+    storeToShop, shopToStore, staffToS1, s1ToStaff, duplicateShops,
     unmappedStores: appCtx.stores.filter((s) => !storeToShop.has(s.id)).map((s) => s.id),
     knownStore: (id) => storeIds.has(id),
   };
@@ -185,7 +194,7 @@ export function buildMapping(appCtx, master) {
 // ------------------------------------------------------------
 // 受付履歴・継続管理
 // ------------------------------------------------------------
-function planPatterns(appCtx) {
+export function planPatterns(appCtx) {
   const rules = appCtx.config['salonone.planRules'] || {};
   return {
     sharePlanPattern: keywordPattern(rules.sharePlanKeyword, 'シェア'),
@@ -216,15 +225,16 @@ function shopMonthReceptions(cfg, shopId, month, asOf, refresh) {
 /**
  * 1店舗の継続指標（サブスク。取得時点の値）
  * 人数は 30分ごと、平均継続期間（顧客一覧。ゆっくりしか変わらない）は 6時間ごとに取り直す。
+ * 顧客一覧のプラン名が「都度払い」のキーワードに当たるお客様は会員数・平均継続期間に入れない。
  */
-async function shopRetention(cfg, shopId, asOf, refresh) {
+async function shopRetention(cfg, shopId, asOf, refresh, { payPerVisitPattern } = {}) {
   const [summary, customers] = await Promise.all([
     cached(`ret:${shopId}`, TTL_RETENTION, () => fetchRetentionSummary(cfg, { from: monthRange(monthOf(asOf)).from, to: asOf, shopId }), refresh),
     // 平均継続期間: 直近 1年にサブスクの支払いがあったお客様の継続月数
     cached(`tenure:${shopId}`, TTL_TENURE, () => fetchRetentionCustomers(cfg, { from: addDays(asOf, -365), to: asOf, shopId }), refresh),
   ]);
   return {
-    value: { ...normalizeRetention(summary.value, customers.value), asOf },
+    value: { ...normalizeRetention(summary.value, customers.value, { payPerVisitPattern }), asOf },
     fetchedAt: Math.min(summary.fetchedAt, customers.fetchedAt),
     freshAt: summary.fetchedAt,
     stale: summary.stale || customers.stale,
@@ -259,15 +269,55 @@ async function saveRetentionSnapshots(month, byShop) {
 }
 
 /**
+ * 全店舗の当月の継続指標を SalonOne から取り直して記録する（Vercel Cron から毎日 23時台に呼ぶ）。
+ * 継続管理は取得時点の値しか返らないため、画面を開いた時だけの記録だと、月末近くに誰も開かなかった月は
+ * 月の途中の値がその月の値になってしまう。毎日記録し、月の最後の日の記録をその月の値にする。
+ * @returns {Promise<{ mode:string, month:string|null, asOf?:string, saved:number, failed:Array<{shopId:string,error:string}> }>}
+ */
+export async function snapshotRetention() {
+  const appCtx = await loadAppContext();
+  if (appCtx.dbError) throw new Error(`Supabase に接続できません: ${appCtx.dbError}`);
+  const master = await loadMaster(appCtx, { refresh: true });
+  if (master.mode !== 'live') return { mode: master.mode, month: null, saved: 0, failed: [] };
+  const cfg = salonOneConfig();
+  const asOf = todayJst();
+  const month = monthOf(asOf);
+  const { payPerVisitPattern } = planPatterns(appCtx);
+  const results = await Promise.all(master.shops.map((s) => shopRetention(cfg, s.id, asOf, true, { payPerVisitPattern })
+    .then((r) => ({ shopId: s.id, ...r }), (e) => ({ shopId: s.id, failed: e }))));
+  const fresh = {};
+  const failed = [];
+  for (const r of results) {
+    // 取り直せず前回の値が返ったもの（stale）は、その時点の値ではないので記録しない
+    if (r.failed || r.stale) failed.push({ shopId: r.shopId, error: r.failed ? r.failed.message : String(r.error || '') });
+    else fresh[r.shopId] = r.value;
+  }
+  if (Object.keys(fresh).length) await saveRetentionSnapshots(month, fresh);
+  return { mode: 'live', month, asOf, saved: Object.keys(fresh).length, failed };
+}
+
+/**
  * 指定月のデータ一式
  * @param {Object} opts
  * @param {string[]} opts.months 集計する月（売上サマリ + 受付履歴）
  * @param {string[]} [opts.receptionMonths] 受付履歴だけ要る月（後の月の契約・前の月のキャンセルを見るため）
  * @param {boolean} [opts.receptions=true] 受付履歴を取るか（推移は売上サマリだけで足りるので false）
- * @param {string[]} [opts.shopIds] 取得する SalonOne 店舗（省略時は全店舗）。権限による絞り込みは呼び出し側で行う
- * @returns {Promise<{ mode, receptions, contracts, salesSummaries, retentionOverrides, retentionFromContracts, receptionsLoaded, asOf, stale, warnings }>}
+ * @param {boolean} [opts.summaries=true] 売上サマリを取るか（出納帳の現金売上は受付履歴だけで足りるので false）
+ * @param {boolean} [opts.retention=true] 当月の継続管理を取るか
+ * @param {string[]} [opts.shopIds] すべてを取る SalonOne 店舗（省略時は全店舗）。権限による絞り込みは呼び出し側で行う
+ * @param {string[]} [opts.otherShopIds] スタッフの実績のためだけに見る店舗（ヘルプで入った分）。売上サマリを取り、
+ *   そのスタッフ別に staffIds のスタッフがいる店舗だけ受付履歴も取る。取れなくても画面は出す（注意を返す）
+ * @param {Set<string>} [opts.staffIds] otherShopIds の受付履歴を取るか決めるスタッフ（SalonOne のスタッフ ID）
+ * @param {boolean} [opts.unlistedStaff] SalonOne のスタッフ一覧に無い（辞めた）スタッフで、shopIds の店舗に実績のある人も staffIds に加える
+ * @param {string[]} [opts.retentionShopIds] 継続管理も取る otherShopIds（スタッフの所属店舗）
+ * @param {boolean} [opts.refresh] 当月・前月を SalonOne から取り直す
+ * @param {number} [opts.refreshOlderThan] すべての月で、この ms より前に取得したものを取り直す（インセンティブの確定）
+ * @returns {Promise<{ mode, receptions, contracts, salesSummaries, retentionOverrides, retentionFromContracts, receptionsLoaded, asOf, stale, warnings, fetchedAt }>}
  */
-export async function loadDataset(appCtx, master, { months, receptionMonths = [], receptions: withReceptions = true, shopIds, refresh } = {}) {
+export async function loadDataset(appCtx, master, {
+  months, receptionMonths = [], receptions: withReceptions = true, summaries: withSummaries = true, retention: withRetention = true,
+  shopIds, otherShopIds = [], staffIds = null, unlistedStaff = false, retentionShopIds = [], refresh, refreshOlderThan = null,
+} = {}) {
   const asOf = todayJst();
   const current = monthOf(asOf);
   const notFuture = (m) => monthsBetween(m, current) >= 0;
@@ -277,34 +327,64 @@ export async function loadDataset(appCtx, master, { months, receptionMonths = []
     const sim = simulateDemo({ shops: master.shops, staff: master.staff, months: all, asOf });
     return {
       mode: 'demo', receptions: sim.receptions, contracts: sim.contracts, salesSummaries: {}, retentionOverrides: {},
-      retentionFromContracts: true, receptionsLoaded: true, asOf, stale: [], warnings: [],
+      retentionFromContracts: true, receptionsLoaded: true, asOf, stale: [], warnings: [], fetchedAt: Date.now(),
     };
   }
 
   const cfg = salonOneConfig();
   const targets = [...new Set((shopIds || master.shops.map((s) => s.id)).map(String).filter(Boolean))];
+  const others = [...new Set((otherShopIds || []).map(String))].filter((id) => id && !targets.includes(id));
   const startedAt = Date.now();
-  // 更新ボタンで取り直すのは当月と前月だけ（締まった月は長めのキャッシュのまま）
+  // 更新ボタンで取り直すのは当月と前月だけ（締まった月は長めのキャッシュのまま）。
+  // 確定の時はすべての月で、少し前（refreshOlderThan）より前に取得したものを取り直す
   const recent = (m) => monthsBetween(m, current) <= 1;
+  const refreshFor = (m) => (typeof refreshOlderThan === 'number' ? refreshOlderThan : !!refresh && recent(m));
   const recMonths = withReceptions ? [...new Set([...wanted, ...receptionMonths])].filter(notFuture) : [];
-  const recJob = (m, shopId) => shopMonthReceptions(cfg, shopId, m, asOf, refresh && recent(m));
+  const recJob = (m, shopId) => shopMonthReceptions(cfg, shopId, m, asOf, refreshFor(m));
+  const sumJob = (m, shopId) => shopMonthSummary(cfg, shopId, m, asOf, refreshFor(m)).then((r) => ({ m, shopId, ...r }), (e) => ({ m, shopId, failed: e }));
   const sumJobs = [];
-  for (const m of wanted) {
-    for (const shopId of targets) {
-      sumJobs.push(shopMonthSummary(cfg, shopId, m, asOf, refresh && recent(m)).then((r) => ({ m, shopId, ...r }), (e) => ({ m, shopId, failed: e })));
-    }
+  const otherSumJobs = [];
+  for (const m of withSummaries ? wanted : []) {
+    for (const shopId of targets) sumJobs.push(sumJob(m, shopId));
+    for (const shopId of others) otherSumJobs.push(sumJob(m, shopId));
   }
   const recJobs = [];
   for (const m of recMonths) for (const shopId of targets) recJobs.push(recJob(m, shopId));
-  const retJobs = wanted.includes(current)
-    ? targets.map((shopId) => shopRetention(cfg, shopId, asOf, refresh).then((r) => ({ shopId, ...r }), (e) => ({ shopId, failed: e })))
+  const { payPerVisitPattern } = planPatterns(appCtx);
+  const retTargets = [...new Set([...targets, ...(retentionShopIds || []).map(String).filter((id) => others.includes(id))])];
+  const retJobs = withRetention && wanted.includes(current)
+    ? retTargets.map((shopId) => shopRetention(cfg, shopId, asOf, refresh, { payPerVisitPattern }).then((r) => ({ shopId, ...r }), (e) => ({ shopId, failed: e })))
     : [];
-  const [sumResults, recResults, retResults] = await Promise.all([Promise.all(sumJobs), Promise.all(recJobs), Promise.all(retJobs)]);
+  // 他の店舗: 売上サマリのスタッフ別に対象のスタッフがいる店舗だけ受付履歴を取る（ヘルプが無ければ売上サマリだけで済む）
+  const otherJob = (async () => {
+    const sums = await Promise.all(otherSumJobs);
+    if (!withReceptions || !sums.length) return { sums, recs: [] };
+    let want = staffIds;
+    if (want && unlistedStaff) {
+      // スタッフ一覧に無い（辞めた）スタッフも、表示中の店舗に実績があれば一覧に出るので、ヘルプの分を取る
+      const listed = new Set(master.staff.map((x) => String(x.id)));
+      want = new Set(want);
+      for (const r of await Promise.all(sumJobs)) {
+        for (const x of (!r.failed && r.value && r.value.staff) || []) if (!listed.has(String(x.staffId))) want.add(String(x.staffId));
+      }
+    }
+    const need = new Set();
+    for (const r of sums) {
+      if (r.failed) continue;
+      const rows = r.value && r.value.staff;
+      // スタッフ別が無い応答はいたかどうかわからないので取る
+      if (!rows || !want || rows.some((x) => want.has(String(x.staffId)))) need.add(r.shopId);
+    }
+    const jobs = [];
+    for (const shopId of need) for (const m of recMonths) jobs.push(recJob(m, shopId).catch((e) => ({ m, shopId, failed: e })));
+    return { sums, recs: await Promise.all(jobs) };
+  })();
+  const [sumResults, recResults, retResults, other] = await Promise.all([Promise.all(sumJobs), Promise.all(recJobs), Promise.all(retJobs), otherJob]);
 
   const warnings = [];
   const salesSummaries = Object.fromEntries(wanted.map((m) => [m, {}]));
   const failedSummaries = sumResults.filter((r) => r.failed);
-  for (const r of sumResults) if (!r.failed) salesSummaries[r.m][r.shopId] = r.value;
+  for (const r of [...sumResults, ...other.sums]) if (!r.failed) salesSummaries[r.m][r.shopId] = r.value;
   // 売上サマリが取れなかった店舗・月は受付履歴から集計する（推移で受付履歴を取っていない場合は取りに行く）
   if (failedSummaries.length) {
     const first = failedSummaries[0].failed;
@@ -314,24 +394,35 @@ export async function loadDataset(appCtx, master, { months, receptionMonths = []
       recResults.push(...await Promise.all(failedSummaries.map((r) => recJob(r.m, r.shopId))));
     }
   }
+  // 他の店舗は取れなくても画面は出す（ヘルプで入った分がスタッフの実績に入っていないかもしれないと知らせる）
+  const otherFailed = [...other.sums, ...other.recs].filter((r) => r.failed);
+  if (otherFailed.length) {
+    if (other.sums.length && other.sums.every((r) => r.failed && r.failed.code === 'unauthorized')) throw other.sums[0].failed;
+    warnings.push({ code: 'otherShops', message: `他の店舗の実績の一部を取得できなかったため、ヘルプで入った分がスタッフのインセンティブに入っていない可能性があります: ${otherFailed[0].failed.message.replace(/^SalonOne API エラー \([^)]*\): /, '')}` });
+  }
+  const otherRecs = other.recs.filter((r) => !r.failed);
 
-  const receptions = recResults.flatMap((r) => r.value);
+  const receptions = [...recResults, ...otherRecs].flatMap((r) => r.value);
   const contracts = contractsFromReceptions(receptions, planPatterns(appCtx));
-  const stale = [...sumResults, ...recResults].filter((r) => r.stale).map((r) => ({ fetchedAt: r.fetchedAt, error: r.error }));
+  const loaded = [...sumResults, ...recResults, ...other.sums, ...otherRecs];
+  const stale = loaded.filter((r) => r.stale).map((r) => ({ fetchedAt: r.fetchedAt, error: r.error }));
+  // いちばん古いデータの取得時刻（キャッシュから返した分も含む。画面の「◯時◯分取得」に使う）
+  const fetchedTimes = loaded.filter((r) => !r.failed && r.fetchedAt).map((r) => r.fetchedAt);
 
   // 継続指標: 過去の月は保存した値、当月は取得した値
   const snapshots = appCtx.config[RETENTION_KEY] || {};
   const retentionOverrides = {};
   for (const m of wanted) retentionOverrides[m] = { ...(snapshots[m] || {}) };
   const fresh = {};
+  const retentionFailed = [];
   for (const r of retResults) {
-    if (r.failed) {
-      warnings.push({ code: 'retention', message: `継続管理（会員数・退会率）を取得できませんでした: ${r.failed.message}` });
-      continue;
-    }
+    if (r.failed) { retentionFailed.push(r); continue; }
     retentionOverrides[current][r.shopId] = r.value;
     if (r.stale) stale.push({ fetchedAt: r.fetchedAt, error: r.error });
     else if (r.freshAt >= startedAt) fresh[r.shopId] = r.value;
+  }
+  if (retentionFailed.length) {
+    warnings.push({ code: 'retention', message: `継続管理（会員数・退会率）を取得できませんでした: ${retentionFailed[0].failed.message}` });
   }
   if (Object.keys(fresh).length && !appCtx.dbError) {
     try {
@@ -343,6 +434,7 @@ export async function loadDataset(appCtx, master, { months, receptionMonths = []
   return {
     mode: 'live', receptions, contracts, salesSummaries, retentionOverrides, retentionFromContracts: false,
     receptionsLoaded: withReceptions || failedSummaries.length > 0, asOf, stale, warnings,
+    fetchedAt: fetchedTimes.length ? Math.min(...fetchedTimes) : Date.now(),
   };
 }
 

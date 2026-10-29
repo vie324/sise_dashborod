@@ -11,8 +11,9 @@ import { SPECIAL_METRICS, defaultSpecialTitle } from '../../shared/goal-plan.js'
 //   単月     'goals.YYYY-MM'
 //   3ヶ月    'goals.q.YYYY-MM'（期の最初の月。1〜3月・4〜6月・7〜9月・10〜12月）
 //            どちらも { stores: { [storeId]: Goal }, staff: { [staffId]: Goal }, updatedAt, updatedBy }
-//            Goal = { consumedSales?, treatmentCount?, newVisits?, contractRatePct?, memberCount?, memo?, updatedAt, updatedBy }
-//            3ヶ月の consumedSales・newVisits は 3ヶ月の合計、memberCount は期末の人数
+//            Goal = { consumedSales?, depositSales?, treatmentCount?, newVisits?, contractRatePct?, memberCount?, memo?, updatedAt, updatedBy }
+//            depositSales は入金売上（SalonOne の売上分析の入金売上）
+//            3ヶ月の consumedSales・depositSales・newVisits は 3ヶ月の合計、memberCount は期末の人数
 //   特別目標 'goals.special' = { items: [SpecialGoal] }
 //            SpecialGoal = { id, storeId, title, metric, target, deadline, startMonth, memo, createdAt, createdBy, updatedAt, updatedBy }
 //            「12月までに月売上100万円！」のような、1店舗だけの期限付きの目標
@@ -23,7 +24,7 @@ import { SPECIAL_METRICS, defaultSpecialTitle } from '../../shared/goal-plan.js'
 //   特別目標は、その店舗を見られる人が閲覧できる
 // ============================================================
 
-const NUMERIC_FIELDS = ['consumedSales', 'treatmentCount', 'newVisits', 'contractRatePct', 'memberCount'];
+const NUMERIC_FIELDS = ['consumedSales', 'depositSales', 'treatmentCount', 'newVisits', 'contractRatePct', 'memberCount'];
 const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
 const SPECIAL_KEY = 'goals.special';
 const SPECIAL_MAX = 100;
@@ -121,7 +122,7 @@ function splitGoal(goal, index) {
     const each = Math.floor(total / 3 / unit) * unit;
     return index < 2 ? each : total - each * 2;
   };
-  for (const [field, unit] of [['consumedSales', 1000], ['treatmentCount', 1], ['newVisits', 1]]) {
+  for (const [field, unit] of [['consumedSales', 1000], ['depositSales', 1000], ['treatmentCount', 1], ['newVisits', 1]]) {
     const v = goal[field] ? split(goal[field], unit) : 0;
     if (v > 0) out[field] = v;
   }

@@ -6,12 +6,12 @@ import { useApp } from '../../../app/state.jsx';
 import { yen } from '../../../lib/format.js';
 import { monthOf } from '../../../../shared/dates.js';
 import {
-  recommendPlans, planByKey, planPricing, mapFormConcerns, linkSheetsToVisits, visitForSheet,
+  recommendPlans, planByKey, planPricing, mapFormConcerns, linkSheetsToVisits, visitForSheet, rankSheetsFor,
 } from '../../../../shared/counseling.js';
 import { shareCustomerName, initialStaffName } from '../shared/prefill.js';
 import { useTodayVisits, useSheetStores, useRecentSheets, fetchSheet, searchSheets } from './useCounseling.js';
 import { VisitList, GuestCard, StorePicker, familyName } from './VisitPanel.jsx';
-import { SheetCard, sheetKey } from './SheetPanel.jsx';
+import { SheetCard, SheetPicker, sheetKey } from './SheetPanel.jsx';
 import Hearing from './Hearing.jsx';
 import { primaryLineFor } from './Simulation.jsx';
 import Presentation, { CHAPTERS, chapterStart } from './present/Presentation.jsx';
@@ -21,7 +21,8 @@ import Presentation, { CHAPTERS, chapterStart } from './present/Presentation.jsx
 // ------------------------------------------------------------
 // 1. 本日のお客様: SalonOne の今日の予約から選ぶ（予約に無いお客様は手入力でも始められる）
 //    Google フォームでカウンセリングシートを取っている店舗は、同じお名前の回答を予約に結びつけ、
-//    選ぶとフォームのお悩みがチェックに入り、記入内容（施術前の確認・ご要望・目標時期など）が大きく出る
+//    選ぶとフォームのお悩みがチェックに入り、記入内容（施術前の確認・ご要望・目標時期など）が大きく出る。
+//    お名前の書き方が違って結びつかない時は、選んだお客様に「回答から選ぶ」で付ける（このタブの間は予約に付いたまま）
 // 2. ヒアリング＆プラン診断: お悩みと施術後の評価 → 3つのおすすめプラン
 // 3. お客様に説明する: 全画面のご説明（コンセプト・改善のイメージ・プラン・特典・まとめ）を
 //    お客様に向けて見せる。章を選んで途中から始めることもできる
@@ -32,6 +33,8 @@ const STORE_KEY = 'sise_counseling_store';
 const STATE_KEY = 'sise_counseling_state_v2';
 /** フォームの回答への参照（一覧の 1行から。中身は fetchSheet で取り直す） */
 const sheetRef = (row) => (row ? { index: row.index, name: row.name, submittedAt: row.submittedAt || null } : null);
+/** スタッフが予約に付けた回答（予約の一覧の「シートあり」・お悩みの表示に使う） */
+const linkRef = (row) => ({ ...sheetRef(row), concerns: row.concerns || [] });
 // 改善のイメージで最初に見せる線（おすすめの「月4回 → 月2回に切替」と「施術1回のみ」）
 const DEFAULT_LINES = { l2: true, l6: true };
 
@@ -110,6 +113,9 @@ export default function Counseling({ active = true, onOpenTool }) {
   const [search, setSearch] = useState(null); // { q, rows }
   const [searching, setSearching] = useState(false);
   const [arrived, setArrived] = useState(() => new Set());
+  // スタッフが選んで予約に付けた回答 { [予約ID]: 回答 }（お名前の書き方が違って自動で結びつかなかった時）
+  const [manualLinks, setManualLinks] = useState(saved.manualLinks || {});
+  const [picking, setPicking] = useState(false);
 
   // 見られない店舗が保存されていたら、ヘッダーで選んでいる店舗か最初の店舗にする
   useEffect(() => {
@@ -128,8 +134,13 @@ export default function Counseling({ active = true, onOpenTool }) {
   const formLinked = !!(ready && formInfo && formInfo.configured && formInfo.stores.some((x) => x.id === storeId && x.linked));
   const recentSheets = useRecentSheets(formLinked ? storeId : null, active);
   const sheetRows = recentSheets.data ? recentSheets.data.customers : null;
-  // 予約 ↔ 同じお名前の回答（3日前までの回答）
-  const links = useMemo(() => (formLinked && sheetRows ? linkSheetsToVisits(visitRows, sheetRows, { today }) : {}), [formLinked, sheetRows, visitRows, today]);
+  // 予約 ↔ 同じお名前の回答（3日前までの回答）。スタッフが選んで付けた回答はそちらを使う
+  const links = useMemo(() => {
+    if (!formLinked || !sheetRows) return {};
+    const out = linkSheetsToVisits(visitRows, sheetRows, { today });
+    for (const v of visitRows) if (manualLinks[v.id]) out[v.id] = manualLinks[v.id];
+    return out;
+  }, [formLinked, sheetRows, visitRows, today, manualLinks]);
   // 回答 → 結びついた今日の予約（「フォームの回答」の一覧の「今日 ◯時 予約」。予約の一覧の「シートあり」と同じ結びつき）
   const linkedVisits = useMemo(() => {
     const m = new Map();
@@ -140,9 +151,9 @@ export default function Counseling({ active = true, onOpenTool }) {
   // 選んだお客様とチェックをこのタブの間だけ残す
   useEffect(() => {
     try {
-      sessionStorage.setItem(STATE_KEY, JSON.stringify({ storeId, guest, callName, concerns, feedbacks, overrideKey, activeLines, appliedSheet }));
+      sessionStorage.setItem(STATE_KEY, JSON.stringify({ storeId, guest, callName, concerns, feedbacks, overrideKey, activeLines, appliedSheet, manualLinks }));
     } catch (_) { /* noop */ }
-  }, [storeId, guest, callName, concerns, feedbacks, overrideKey, activeLines, appliedSheet]);
+  }, [storeId, guest, callName, concerns, feedbacks, overrideKey, activeLines, appliedSheet, manualLinks]);
 
   // ---- お客様 ----
   const startWith = (g) => {
@@ -180,6 +191,7 @@ export default function Counseling({ active = true, onOpenTool }) {
     setOverrideKey('');
     setActiveLines(DEFAULT_LINES);
     setAppliedSheet('');
+    setPicking(false);
     shareCustomerName('');
   };
 
@@ -214,6 +226,28 @@ export default function Counseling({ active = true, onOpenTool }) {
   }, [guestSheetKey, sheetTick]); // eslint-disable-line react-hooks/exhaustive-deps
   const fromForm = useMemo(() => (sheet ? mapFormConcerns(sheet.concerns).checked : {}), [sheet]);
 
+  // ---- 回答を選んで付ける（自動で結びつかなかった時・選び直す時） ----
+  const openPicker = () => { setSearch(null); setPicking(true); };
+  const closePicker = () => { setSearch(null); setPicking(false); };
+  const pickSheet = (row) => {
+    closePicker();
+    if (!guest) return;
+    // 予約の無いお客様（フォームの回答から始めた）は、選んだ回答のお客様として始め直す
+    if (guest.formOnly) { selectSheet(row); return; }
+    if (guest.sheet && sheetKey(guest.sheet) === sheetKey(row)) return;
+    // 選び直した時は、前のシートから入ったチェックを外す
+    if (guest.sheet) setConcerns((prev) => Object.fromEntries(Object.entries(prev).filter(([id]) => !fromForm[id])));
+    setGuest((g) => ({ ...g, sheet: sheetRef(row) }));
+    if (!guest.manual) setManualLinks((m) => ({ ...m, [guest.id]: linkRef(row) }));
+  };
+  // 選ぶ時の並び（3日以内・お名前が近い回答を先に。ほかの予約と結びついた回答は後ろ）
+  const pickRows = useMemo(() => {
+    if (!picking || !guest || !sheetRows) return sheetRows;
+    const ranked = rankSheetsFor(guest.customerName || callName, sheetRows, { today });
+    const taken = (r) => { const v = linkedVisits.get(sheetKey(r)); return !!v && v.id !== guest.id; };
+    return [...ranked.filter((r) => !taken(r)), ...ranked.filter(taken)];
+  }, [picking, guest, sheetRows, callName, today, linkedVisits]);
+
   // ---- 新しい回答が届いたら知らせる ----
   const seenRef = useRef({ storeId: null, keys: null });
   useEffect(() => {
@@ -245,6 +279,7 @@ export default function Counseling({ active = true, onOpenTool }) {
     resetGuest();
     setSearch(null);
     setArrived(new Set());
+    setManualLinks({});
     setStoreIdState(id);
     try { localStorage.setItem(STORE_KEY, id); } catch (_) { /* noop */ }
   };
@@ -326,14 +361,18 @@ export default function Counseling({ active = true, onOpenTool }) {
         )}>
         {guest ? (
           <GuestCard guest={shownGuest} callName={callName} onCallName={changeCallName} onChange={resetGuest} onOpenTool={onOpenTool}
-            pendingSheet={pendingSheet} onAttachSheet={attachSheet} />
+            pendingSheet={pendingSheet} onAttachSheet={attachSheet} onPickSheet={formProps && sheetRows && !picking ? openPicker : null} />
         ) : (
           <VisitList res={visits} links={links} form={formProps} onSelect={selectVisit} onManual={startManual} onRefresh={refresh} refreshing={refreshing} />
         )}
       </Card>
 
-      {guest && guest.sheet ? (
-        <SheetCard sheet={sheet} loading={sheetLoading} error={sheetError} onRetry={() => setSheetTick((n) => n + 1)} />
+      {guest && picking && formProps ? (
+        <SheetPicker form={formProps} rows={pickRows} guestName={guest.customerName || callName.trim()} replacing={!!guest.sheet}
+          onPick={pickSheet} onClose={closePicker} />
+      ) : guest && guest.sheet ? (
+        <SheetCard sheet={sheet} loading={sheetLoading} error={sheetError} onRetry={() => setSheetTick((n) => n + 1)}
+          onRepick={formProps ? openPicker : null} />
       ) : null}
 
       <Hearing concerns={concerns} feedbacks={feedbacks} fromForm={fromForm}

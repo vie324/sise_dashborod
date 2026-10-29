@@ -89,6 +89,37 @@ function dayBucket(map, date) {
 
 const isCash = (method) => /現金|cash/i.test(String(method || ''));
 const cashOf = (r) => (r.cashAmount != null ? n(r.cashAmount) : (isCash(r.paymentMethod) ? n(r.salesAmount) : 0));
+
+/**
+ * 1店舗・1ヶ月の日別の現金売上（出納帳への取り込み・突合用）。computeMonth の店舗の日別 cashSales と同じ数え方
+ * @returns {Object<string, number>} 'YYYY-MM-DD' → 現金売上（会計完了の予約のうち現金で受け取った額）
+ */
+export function cashByDay(receptions, shopId, month) {
+  const out = {};
+  for (const r of receptions || []) {
+    if (!r || r.status !== 'completed' || !r.date || monthOf(r.date) !== month) continue;
+    if (String(r.shopId) !== String(shopId)) continue;
+    out[r.date] = (out[r.date] || 0) + cashOf(r);
+  }
+  return out;
+}
+/**
+ * 1店舗・1ヶ月の、現金の分がわからない会計（「現金 / クレジットカード」のように複数の決済方法で内訳が無いもの。
+ * cashByDay には入れていない）
+ * @returns {Object<string, { count:number, amount:number }>} 'YYYY-MM-DD' → 件数・会計金額
+ */
+export function cashUnknownByDay(receptions, shopId, month) {
+  const out = {};
+  for (const r of receptions || []) {
+    if (!r || !r.cashUnknown || r.status !== 'completed' || !r.date || monthOf(r.date) !== month) continue;
+    if (String(r.shopId) !== String(shopId)) continue;
+    const d = out[r.date] || (out[r.date] = { count: 0, amount: 0 });
+    d.count += 1;
+    d.amount += n(r.salesAmount);
+  }
+  return out;
+}
+
 const isContractType = (t) => t === 'subscription' || t === 'ticket' || t === 'member';
 
 /**
@@ -269,8 +300,10 @@ function applySalesSummaries(summaries, shopOut, staffOut, { emptyShop, emptySta
  * @param {Object} [input.salesSummaries] shopId → 売上サマリ（SalonOne の売上分析）
  * @param {boolean} [input.countsFromReceptions=true]
  *   受付履歴を取っていない（推移）ときは false。新規数・既存数・契約数は売上サマリに無ければ null にする
+ * @param {Set<string>} [input.excludedContracts] 新規契約に数えないお客様（`${shopId}|${customerId}`）。
+ *   系列店での契約として初回の店舗のスタッフに付けた分（二重に数えない）
  */
-export function computeMonth({ receptions, contracts, month, asOf, channelMap, retentionOverrides, retentionFromContracts = true, salesSummaries, countsFromReceptions = true }) {
+export function computeMonth({ receptions, contracts, month, asOf, channelMap, retentionOverrides, retentionFromContracts = true, salesSummaries, countsFromReceptions = true, excludedContracts = null }) {
   const today = asOf || todayJst();
   const { from, to } = monthRange(month);
   const contractsByCustomer = indexContracts(contracts);
@@ -336,8 +369,9 @@ export function computeMonth({ receptions, contracts, month, asOf, channelMap, r
     const list = contractsByCustomer.get(r.customerId) || [];
     const relevant = list.filter((c) => c.startDate && c.startDate >= from && c.startDate <= today
       && (!c.shopId || !r.shopId || c.shopId === r.shopId));
-    const contracted = relevant.some((c) => isContractType(c.type));
-    const subscribed = relevant.some((c) => c.type === 'subscription' && !c.isSharePlan);
+    const excluded = !!excludedContracts && excludedContracts.has(`${r.shopId}|${r.customerId}`);
+    const contracted = !excluded && relevant.some((c) => isContractType(c.type));
+    const subscribed = !excluded && relevant.some((c) => c.type === 'subscription' && !c.isSharePlan);
 
     const shop = getShop(r.shopId);
     shop.newVisits[channel] += 1;

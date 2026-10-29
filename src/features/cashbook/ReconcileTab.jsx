@@ -3,7 +3,7 @@ import Icon from '../../ui/Icon.jsx';
 import { Badge, Banner, Button, Card, EmptyState, Skeleton, cx } from '../../ui/primitives.jsx';
 import { StatTile } from '../../ui/stats.jsx';
 import { showToast } from '../../ui/feedback.jsx';
-import { useSummary } from '../../lib/hooks.js';
+import { useStoreCash } from '../../lib/hooks.js';
 import { dateJa, dateTimeJa, num, signedYen, yen } from '../../lib/format.js';
 import { formatMonthJa } from '../../../shared/dates.js';
 import { reconcileDaily } from './calc.js';
@@ -13,7 +13,7 @@ import { reconcileDaily } from './calc.js';
 // ------------------------------------------------------------
 // 1店舗・1ヶ月を日別に
 //   出納帳の現金売上（SalonOne から取り込んだ記録 + 手入力の現金売上）
-//   SalonOne の現金売上（summary.store.daily[].cashSales）
+//   SalonOne の現金売上（/api/salonone?action=cash の days[].cashSales。受付履歴の現金の会計）
 // を並べる。SalonOne が接続済みなら、ずれている日をここから取り込める
 // （1日 1件の入金として記録。手入力の売上がある日は二重になるので取り込まない）。
 // ============================================================
@@ -201,14 +201,26 @@ function ImportPanel({ count, amount, onImportAll, busy }) {
   );
 }
 
+/** 現金と他の決済方法を組み合わせた会計で、内訳が無いもの（現金の分がわからないので SalonOne の現金売上に入っていない） */
+function UnknownCashBanner({ list }) {
+  const count = list.reduce((a, d) => a + d.count, 0);
+  const amount = list.reduce((a, d) => a + d.amount, 0);
+  const days = list.map((d) => `${Number(d.date.slice(5, 7))}/${Number(d.date.slice(8, 10))}`).join('・');
+  return (
+    <Banner tone="warn" title={`現金の分がわからない会計が ${num(count)}件あります（会計 ${yen(amount)}）`}>
+      「現金 / クレジットカード」のように複数の決済方法で払われ、決済の内訳が無い会計は、SalonOne の現金売上に含めていません（{days}）。
+      SalonOne の会計で内訳を登録すると、次に開いた時から現金の分が入ります。
+    </Banner>
+  );
+}
+
 function StoreReconcile({ entries, month, storeId, storeName, isDayClosed, onImport }) {
-  const summary = useSummary(month, storeId);
+  // 店舗や月を切り替えた直後の前の結果は useStoreCash が外す
+  const cash = useStoreCash(month, storeId);
   const [showAll, setShowAll] = useState(false);
   const [busy, setBusy] = useState(false);
-  // 店舗や月を切り替えた直後は前の結果が残っているので、条件が一致するものだけ使う
-  const shown = summary.shown;
-  const data = shown && shown.month === month && shown.scope && String(shown.scope.storeId) === String(storeId) ? shown : null;
-  const salonDaily = data && data.store ? data.store.daily : null;
+  const data = cash.shown;
+  const salonDaily = data ? data.days : null;
   const result = useMemo(() => reconcileDaily({
     entries,
     storeId,
@@ -218,11 +230,11 @@ function StoreReconcile({ entries, month, storeId, storeName, isDayClosed, onImp
   }), [entries, storeId, month, salonDaily, data]);
 
   if (!data) {
-    if (summary.error && !summary.loading) {
+    if (cash.error && !cash.loading) {
       return (
         <Banner tone="bad" title="SalonOne のデータを取得できませんでした"
-          action={<Button size="sm" variant="secondary" icon="refresh-cw" onClick={() => summary.reload()}>再読み込み</Button>}>
-          {summary.error.message || String(summary.error)}
+          action={<Button size="sm" variant="secondary" icon="refresh-cw" onClick={() => cash.reload()}>再読み込み</Button>}>
+          {cash.error.message || String(cash.error)}
         </Banner>
       );
     }
@@ -237,8 +249,7 @@ function StoreReconcile({ entries, month, storeId, storeName, isDayClosed, onImp
   }
 
   const demo = data.mode === 'demo';
-  const storeRow = (data.stores || []).find((s) => String(s.storeId) === String(storeId));
-  const unlinked = !demo && storeRow && storeRow.linked === false;
+  const unlinked = !demo && data.linked === false;
   const canImport = !demo && !unlinked && !!onImport;
   // 締め済みの日はサーバーでも取り込まないので、ボタンも出さない
   const rowsAll = result.rows.map((r) => (r.canImport && isDayClosed(r.date, storeId) ? { ...r, canImport: false } : r));
@@ -268,6 +279,7 @@ function StoreReconcile({ entries, month, storeId, storeName, isDayClosed, onImp
           設定 &gt; SalonOne連携 で店舗を対応付けると、SalonOne の現金売上の表示と取り込みができます。
         </Banner>
       ) : null}
+      {!demo && data.cashUnknown && data.cashUnknown.length ? <UnknownCashBanner list={data.cashUnknown} /> : null}
       {canImport ? <ImportPanel count={importable.length} amount={importAmount} busy={busy} onImportAll={() => runImport(importable.map((r) => r.date))} /> : null}
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -281,7 +293,7 @@ function StoreReconcile({ entries, month, storeId, storeName, isDayClosed, onImp
 
       <Card
         title="日別の突合"
-        subtitle={`${storeName(storeId)}・${formatMonthJa(month)}／SalonOne ${dateTimeJa(data.generatedAt)}取得${demo ? '（デモ）' : ''}`}
+        subtitle={`${storeName(storeId)}・${formatMonthJa(month)}／SalonOne ${dateTimeJa(data.fetchedAt)}取得${demo ? '（デモ）' : ''}`}
         icon="git-compare-arrows"
         bodyClassName="!px-0 !pb-1 sm:!pb-2"
         actions={(

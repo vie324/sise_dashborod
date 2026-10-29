@@ -51,7 +51,10 @@ const COUNSELING_STORES = {
   kawaguchi: 'カウンセリング回答_川口店'
 };
 
-// 本厚木店のフォーム列順のフォールバック (ヘッダー検出失敗時の保険)
+// 本厚木店のフォーム列順のフォールバック (ヘッダー検出失敗時の保険)。
+// 使うのは COUNSELING_COL_REQUIRED の列だけ。他の項目は見出しで見つからなければ空にする
+// （川口店のように質問の並びが違うフォームで、別の質問の回答を読まないように）
+const COUNSELING_COL_REQUIRED = { TIMESTAMP: true, NAME: true, CONCERNS: true };
 const COUNSELING_COL_DEFAULT = {
   TIMESTAMP: 0, NAME: 1, BIRTHDAY: 2, PHONE: 3, EMAIL: 4,
   OCCUPATION: 5, ADDRESS: 6, VISIT_PURPOSE: 7, CONCERNS: 8,
@@ -69,11 +72,12 @@ const COUNSELING_HEADER_KEYWORDS = {
   EMAIL:                ['メールアドレス', 'メール', 'email', 'mail'],
   OCCUPATION:           ['ご職業', '職業', 'occupation'],
   ADDRESS:              ['ご住所', '住所', '地域', 'address', 'お住まい'],
-  VISIT_PURPOSE:        ['ご来店', '来店目的', '来店きっかけ', 'きっかけ', '何で知りました', '知ったきっかけ'],
+  VISIT_PURPOSE:        ['該当するもの', 'ご来店', '来店目的', '来店きっかけ', 'きっかけ', '何で知りました', '知ったきっかけ'],
   CONCERNS:             ['お悩み', '気になる箇所', '気になる部位', '気になること', 'お身体のお悩み', 'お体のお悩み', 'お体で気になる', 'お身体で気になる', '不調', '症状', 'お困り'],
-  IMPROVEMENT_TIMELINE: ['いつまでに', 'どのくらいの期間', '改善したい時期', '改善', '期間', 'いつ頃まで'],
-  TREATMENT_REQUEST:    ['施術のご希望', '施術の希望', 'ご希望の施術', '施術についてのご要望', 'リクエスト', '希望する施術'],
-  TREATMENT_EXPERIENCE: ['整体', 'マッサージ', 'カイロ', 'ご利用経験', '利用経験', '受けたことが', '施術経験'],
+  // 「改善」「期間」だけでは探さない（免責事項の見出しの「機能改善」に当たってしまう）
+  IMPROVEMENT_TIMELINE: ['いつまでに', 'どのくらいの期間', '改善したい時期', 'いつ頃まで'],
+  TREATMENT_REQUEST:    ['施術に関するご要望', '施術のご要望', '施術のご希望', '施術の希望', 'ご希望の施術', '施術についてのご要望', 'リクエスト', '希望する施術'],
+  TREATMENT_EXPERIENCE: ['ご利用されたことのある', 'ご利用経験', '利用経験', '受けたことが', '施術経験', '整体', 'マッサージ', 'カイロ'],
   SURGERY_HISTORY:      ['手術', '外科'],
   CURRENT_TREATMENT:    ['通院', '治療中'],
   ALLERGY:              ['アレルギー'],
@@ -221,7 +225,7 @@ function detectCounselingColumns(headerRow) {
       C[key] = found;
       usedCols[found] = key;
     } else {
-      C[key] = COUNSELING_COL_DEFAULT[key] !== undefined ? COUNSELING_COL_DEFAULT[key] : -1;
+      C[key] = COUNSELING_COL_REQUIRED[key] && COUNSELING_COL_DEFAULT[key] !== undefined ? COUNSELING_COL_DEFAULT[key] : -1;
     }
   }
   return C;

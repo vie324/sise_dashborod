@@ -117,10 +117,14 @@ export function normalizeCustomerClass(raw) {
 }
 
 const CASH = /現金|cash/i;
+// 決済方法の名前の区切り（分割決済は「現金 / クレジットカード」のように 1つの名前にまとめて返る）
+const METHOD_SEPARATOR = /\s*[/／・、,，+＋]\s*/;
 
 /**
  * 現金で受け取った額。分割決済なら内訳のうち現金の分、そうでなければ決済方法が現金なら会計金額。
  * 決済方法の情報が無いときは null（呼び出し側で決済方法の名前から判定する）。
+ * 「現金 / クレジットカード」のように複数の決済方法なのに内訳が無いときは、現金の分がわからないので 0
+ * （会計金額をまるごと現金にすると、カードの分までレジに入ったことになるため）。
  */
 export function cashPortion(raw, amount) {
   const splits = pick(raw, ['payment_splits', 'paymentSplits']);
@@ -129,7 +133,22 @@ export function cashPortion(raw, amount) {
   }
   const method = pick(raw, ['payment_method_name', 'paymentMethodName', 'payment_method.name', 'payment_method']);
   if (method == null) return null;
-  return CASH.test(String(method)) ? amount : 0;
+  const methods = String(method).split(METHOD_SEPARATOR).filter(Boolean);
+  if (!methods.some((m) => CASH.test(m))) return 0;
+  return methods.every((m) => CASH.test(m)) ? amount : 0;
+}
+
+/**
+ * 現金と他の決済方法を組み合わせた会計で、内訳（payment_splits）が無いか。
+ * 現金の分がわからないので cashPortion は 0 にしている。出納帳で件数を知らせる
+ */
+export function cashUnknownOf(raw) {
+  const splits = pick(raw, ['payment_splits', 'paymentSplits']);
+  if (Array.isArray(splits) && splits.length > 0) return false;
+  const method = pick(raw, ['payment_method_name', 'paymentMethodName', 'payment_method.name', 'payment_method']);
+  if (method == null) return false;
+  const methods = String(method).split(METHOD_SEPARATOR).filter(Boolean);
+  return methods.some((m) => CASH.test(m)) && !methods.every((m) => CASH.test(m));
 }
 
 /** この予約で購入したプラン */
@@ -148,7 +167,10 @@ function normalizePlans(raw) {
  * 日時は店舗のタイムゾーン（オフセット付き）なので、そのまま JST の日付にする。
  */
 export function normalizeReception(raw) {
-  const status = pick(raw, ['cancel_type']) === 'no_show' ? 'no_show' : normalizeStatus(pick(raw, ['status', 'state']));
+  const cancelType = pick(raw, ['cancel_type', 'cancelType']);
+  const rawStatus = pick(raw, ['status', 'state']);
+  // 状態の項目が無くキャンセル区分だけある行は、会計完了ではなくキャンセルとして扱う
+  const status = cancelType === 'no_show' ? 'no_show' : (rawStatus == null && cancelType ? 'cancelled' : normalizeStatus(rawStatus));
   const salesAmount = toNum(pick(raw, ['amount', 'sales', 'sales_amount', 'total_amount'], 0));
   const sourceName = pick(raw, ['visit_source_name', 'visit_source.name', 'visitSourceName', 'source_name']);
   return {
@@ -164,6 +186,7 @@ export function normalizeReception(raw) {
     consumedAmount: toNum(pick(raw, ['consumed_amount', 'consumedAmount', 'consumed', 'consumed_sales'], 0)),
     salesAmount,
     cashAmount: cashPortion(raw, salesAmount),
+    cashUnknown: cashUnknownOf(raw),
     paymentMethod: String(pick(raw, ['payment_method_name', 'paymentMethodName', 'payment_method.name', 'payment_method'], '')),
     joined: toBool(pick(raw, ['joined'], false)),
     plans: normalizePlans(raw),
@@ -188,6 +211,8 @@ export function normalizeVisit(raw) {
     time: toJstTime(at),
     status: r.status,
     isNew: r.customerClass === 'new',
+    // SalonOne の顧客 ID（系列店での契約を結びつける用。画面には返さない）
+    customerId: r.customerId,
     customerNumber: String(pick(raw, ['customer_number', 'customer_code', 'customerNumber'], '')),
     customerName: name == null ? null : String(name).trim().slice(0, 60) || null,
     hasNameField: !!raw && typeof raw === 'object' && ('customer_name' in raw || 'customerName' in raw),
@@ -296,23 +321,57 @@ export function normalizeSalesSummary(raw) {
 
 const countOf = (obj, key) => toNum(pick(obj, [`${key}_count`, key], 0));
 
+/** 継続管理の状態の人数（接続テストで SalonOne の画面と見比べる用） */
+export function retentionCounts(summary) {
+  const one = (o) => ({
+    continuing: countOf(o, 'continuing'), follow: countOf(o, 'follow'), attention: countOf(o, 'attention'), churned: countOf(o, 'churned'),
+  });
+  const prev = pick(summary, ['previous_month', 'previousMonth']);
+  return { ...one(summary), previousMonth: prev ? one(prev) : null };
+}
+
+export const isChurnedStatus = (v) => /churn|離反/i.test(String(v || ''));
+
+/**
+ * 継続管理の顧客一覧をお客様ごとにまとめる（1人が複数のプランを持つと複数行になるため）。
+ *   months  サブスク継続月数（行の中で最も長いもの）
+ *   payPerVisitOnly  プラン名がすべて都度払いのキーワードに当たる
+ *   churned すべての行が離反
+ */
+function retentionCustomersByPerson(customers, payPerVisitPattern) {
+  const byId = new Map();
+  (customers || []).forEach((c, i) => {
+    const id = toId(pick(c, ['customer_id', 'customerId', 'id'])) || `row-${i}`;
+    const p = byId.get(id) || { months: null, payPerVisitOnly: true, churned: true };
+    const m = toNumOrNull(pick(c, ['subscription_months', 'subscriptionMonths']));
+    if (m != null && (p.months == null || m > p.months)) p.months = m;
+    const plan = String(pick(c, ['plan_name', 'planName'], ''));
+    if (!payPerVisitPattern || !payPerVisitPattern.test(plan)) p.payPerVisitOnly = false;
+    if (!isChurnedStatus(pick(c, ['status', 'state']))) p.churned = false;
+    byId.set(id, p);
+  });
+  return [...byId.values()];
+}
+
 /**
  * 継続管理（サブスク）のサマリー + 顧客一覧 → 店舗の継続指標
- *   会員数        取得時点の 正常 + 要フォロー + 要注意（離反以外）
+ *   会員数        取得時点の 正常 + 要フォロー + 要注意（離反以外）。
+ *                 プラン名が都度払いのキーワードに当たるサブスクだけのお客様（顧客一覧で離反以外）は除く
  *   退会率        直近 1か月に離反へ移った人数 ÷ 1か月前の会員数
- *   平均継続期間  顧客一覧のサブスク継続月数の平均
+ *   平均継続期間  顧客一覧のサブスク継続月数の平均（お客様ごと。都度払いだけのお客様は除く）
  * @param {Object} summary   /marketing/retention-summary の data
  * @param {Array}  customers /marketing/retention-customers の一覧
+ * @param {{ payPerVisitPattern?: RegExp }} [opts]
  */
-export function normalizeRetention(summary, customers = []) {
+export function normalizeRetention(summary, customers = [], { payPerVisitPattern } = {}) {
   const members = (o) => countOf(o, 'continuing') + countOf(o, 'follow') + countOf(o, 'attention');
-  const memberCount = members(summary);
+  const people = retentionCustomersByPerson(customers, payPerVisitPattern);
+  const payPerVisitExcluded = payPerVisitPattern ? people.filter((p) => p.payPerVisitOnly && !p.churned).length : 0;
+  const memberCount = Math.max(0, members(summary) - payPerVisitExcluded);
   const prev = pick(summary, ['previous_month', 'previousMonth']);
   const membersAtStart = prev ? members(prev) : null;
   const churnCount = prev ? Math.max(0, countOf(summary, 'churned') - countOf(prev, 'churned')) : null;
-  const months = (customers || [])
-    .map((c) => toNumOrNull(pick(c, ['subscription_months', 'subscriptionMonths'])))
-    .filter((v) => v != null);
+  const months = people.filter((p) => !(payPerVisitPattern && p.payPerVisitOnly)).map((p) => p.months).filter((v) => v != null);
   return {
     memberCount,
     membersAtStart,
@@ -320,5 +379,6 @@ export function normalizeRetention(summary, customers = []) {
     churnRatePct: membersAtStart ? (churnCount / membersAtStart) * 100 : null,
     avgTenureMonths: months.length ? months.reduce((s, v) => s + v, 0) / months.length : null,
     tenureSample: months.length,
+    payPerVisitExcluded,
   };
 }

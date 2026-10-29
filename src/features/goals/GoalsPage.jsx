@@ -73,19 +73,22 @@ function MonthlyGoals() {
                 {goal ? (
                   <div className="divide-y divide-line">
                     <GoalRow label="施術消化売上" actual={s.consumedSales || 0} target={goal.consumedSales} format={yen} progress={progress} timing={timing} perDayUnit={yen} />
+                    {goal.depositSales ? (
+                      <GoalRow label="入金売上" actual={s.depositSales || 0} target={goal.depositSales} format={yen} progress={progress} timing={timing} perDayUnit={yen} />
+                    ) : null}
                     <GoalRow label="新規来店（3経路）" actual={(s.contract3ch && s.contract3ch.visits) || 0} target={goal.newVisits} format={(v) => `${num(v)}名`} progress={progress} timing={timing} perDayUnit={(v) => `${num(v)}名`} />
                     {goal.contractRatePct ? (
                       <GoalRow label="契約率（3経路）" kind="level" actual={s.contract3ch && s.contract3ch.ratePct != null ? s.contract3ch.ratePct : 0} target={goal.contractRatePct}
                         format={(v) => pct(v)} gapLabel={(g) => `${num(g, 1)}pt`} progress={progress} timing={timing} />
                     ) : null}
                     {goal.memberCount ? (
-                      <GoalRow label="会員数" kind="level" actual={actualRet.memberCount || 0} target={goal.memberCount} format={(v) => `${num(v)}名`}
+                      <GoalRow label="会員数" kind="level" actual={actualRet.memberCount ?? null} target={goal.memberCount} format={(v) => `${num(v)}名`}
                         gapLabel={(g) => `${num(g)}名`} progress={progress} timing={timing} />
                     ) : null}
                     {goal.memo ? <p className="pt-3 text-xs leading-relaxed text-ink-2"><Icon name="sticky-note" size={13} className="mr-1 inline text-muted" />{goal.memo}</p> : null}
                   </div>
                 ) : (
-                  <EmptyState compact icon="target" title="目標が未設定です" message={canEditStore(s.storeId) ? '施術消化売上・新規来店・契約率・会員数の目標を設定できます' : '店長・マネージャー・オーナーが設定します'} />
+                  <EmptyState compact icon="target" title="目標が未設定です" message={canEditStore(s.storeId) ? '施術消化売上・入金売上・新規来店・契約率・会員数の目標を設定できます' : '店長・マネージャー・オーナーが設定します'} />
                 )}
               </Card>
             );
@@ -115,6 +118,11 @@ function MonthlyGoals() {
                   <GoalRow label="施術消化売上" actual={row.metrics.consumedSales} target={target} format={yen} progress={progress} timing={timing}
                     perDayUnit={(v) => `${yen(v)}（${(v / INCENTIVE_RULES.unitPrice).toFixed(1)}回）`} />
                 </div>
+                {goal && goal.depositSales ? (
+                  <div className="mt-3 border-t border-line pt-3">
+                    <GoalRow label="入金売上" actual={row.metrics.depositSales} target={goal.depositSales} format={yen} progress={progress} timing={timing} perDayUnit={yen} />
+                  </div>
+                ) : null}
                 {goal && goal.memo ? <p className="mt-2 text-xs leading-relaxed text-ink-2"><Icon name="sticky-note" size={13} className="mr-1 inline text-muted" />{goal.memo}</p> : null}
               </Card>
             );

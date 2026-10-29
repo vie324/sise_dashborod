@@ -217,3 +217,22 @@ test('全店舗合算と月末予測', () => {
   assert.equal(c.retention.avgTenureMonths, 7);
   assert.equal(forecastMonthEnd(300000, 10, 30), 900000);
 });
+
+test('系列店での契約: 登録して結びつけたお客様の契約は、契約した店舗の新規契約に数えない（来店は数える）', () => {
+  const rec = (o) => R({ date: '2026-11-09', staffId: 's2', shopId: 'B', customerClass: 'new', sourceName: 'ホットペッパー', ...o });
+  const receptions = [rec({ customerId: 'c1' }), rec({ customerId: 'c2', sourceName: '紹介' })];
+  const contracts = [
+    { customerId: 'c1', shopId: 'B', type: 'subscription', startDate: '2026-11-09' },
+    { customerId: 'c2', shopId: 'B', type: 'subscription', startDate: '2026-11-09' },
+  ];
+  const base = computeMonth({ receptions, contracts, month: '2026-11', asOf: '2026-11-30' });
+  assert.equal(base.staff.s2.newContracts.hotpepper, 1);
+  assert.equal(base.staff.s2.referralSubscriptions, 1);
+  const ex = computeMonth({ receptions, contracts, month: '2026-11', asOf: '2026-11-30', excludedContracts: new Set(['B|c1', 'B|c2']) });
+  assert.equal(ex.staff.s2.newVisits.hotpepper, 1); // 来店はそのまま
+  assert.equal(ex.staff.s2.newContracts.hotpepper, 0);
+  assert.equal(ex.staff.s2.referralSubscriptions, 0); // 紹介のサブスクとしても二重に数えない
+  assert.equal(ex.shops.B.newContracts.hotpepper, 0);
+  // 別の店舗の同じお客様には関係しない
+  assert.equal(computeMonth({ receptions, contracts, month: '2026-11', asOf: '2026-11-30', excludedContracts: new Set(['A|c1']) }).staff.s2.newContracts.hotpepper, 1);
+});

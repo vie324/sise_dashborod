@@ -112,6 +112,17 @@ export default function RulesView({ rules }) {
         </ul>
       </Section>
 
+      {rules.crossStore ? (
+        <Section no="6" title="系列店での契約" icon="arrow-left-right">
+          <p>来店したお客様が、系列の他店舗（ドミナント出店）で契約した場合：初回に来店した店舗のスタッフに <strong className="text-ink">1件 {yen(rules.crossStore.amountPerContract)}</strong></p>
+          <ul className="list-disc space-y-0.5 pl-5 text-xs">
+            <li>SalonOne では契約した店舗の契約になるため、店長以上がこのシステムで登録します（お客様名・プラン名・契約した店舗）</li>
+            <li>契約した店舗の SalonOne の契約を選んで登録すると、その店舗の担当の新規契約からは除きます（二重に数えません）</li>
+            <li>契約日の月のインセンティブになります。確定した支給期間には登録できません</li>
+          </ul>
+        </Section>
+      ) : null}
+
       <Card title="SalonOne のデータからの集計方法" icon="database" subtitle="画面の数字はすべて次のルールで計算しています">
         <dl className="grid gap-x-6 gap-y-3 text-[13px] sm:grid-cols-2">
           {[
@@ -124,6 +135,8 @@ export default function RulesView({ rules }) {
             ['退会率', '直近1か月に離反になった人数 ÷ 1か月前の会員数（SalonOne の継続管理から）'],
             ['平均継続期間', '直近1年にサブスクの支払いがあったお客様の、サブスク継続月数の平均'],
             ['紹介', '経路が「紹介」の新規のお客様がサブスク（シェアプランを除く）を契約した件数'],
+            ['系列店での契約', '店長以上が登録した件数。契約した店舗の SalonOne の契約を選んだ分は、その店舗の担当の新規契約（3経路・SNS・紹介）から除く'],
+            ['2回目以降の来店での契約', '初回来店の担当スタッフの契約として数える（契約率の分母・分子をそろえるため）'],
           ].map(([k, v]) => (
             <div key={k}>
               <dt className="font-semibold text-ink">{k}</dt>
