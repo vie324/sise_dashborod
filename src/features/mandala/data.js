@@ -109,8 +109,10 @@ export function useMySales() {
   const me = summary.shown && summary.shown.me;
   if (!me) return { linked: false, loading: enabled && summary.loading };
   const row = trend.shown && trend.shown.staff ? trend.shown.staff.find((r) => r.key === me.key) : null;
-  // 締まった直近 3ヶ月の平均（チャートの「現状の月売上」の目安）
-  const closed = [1, 2, 3].map((n) => addMonths(thisMonth, -n)).map((m) => (row && row.values ? row.values[m] : null)).filter((v) => v > 0);
+  // 締まった直近 3ヶ月の平均（チャートの「現状の月売上」の目安）。施術消化売上の記録が無い月（SalonOne の消化売上で埋めた月）は数え方が違うので除く
+  const oldBasis = new Set(((trend.shown && trend.shown.months) || []).filter((m) => m.consumedBasis === 'salonone').map((m) => m.month));
+  const closed = [1, 2, 3].map((n) => addMonths(thisMonth, -n)).filter((m) => !oldBasis.has(m))
+    .map((m) => (row && row.values ? row.values[m] : null)).filter((v) => v > 0);
   return {
     linked: true,
     month: thisMonth,

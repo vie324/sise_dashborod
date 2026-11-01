@@ -75,8 +75,8 @@ test('支給期間の確定: 期間が終わってから・確認事項があれ
   assert.equal(closed.close.label, '2026年11月〜12月');
   assert.equal(closed.close.closedBy, 'オーナー');
   const sato = closed.close.staff.find((r) => r.key === '201');
-  // 疑似 SalonOne は毎月同じ数字: 佐藤さんは 25,000円（ランク外）・紹介はサブスクではない → 0円
-  assert.deepEqual(sato.months.map((m) => [m.month, m.total, m.basis.consumedSales]), [['2026-11', 0, 25000], ['2026-12', 0, 25000]]);
+  // 疑似 SalonOne は毎月同じ数字: 佐藤さんは施術消化売上 20,000円（ランク外）・紹介はサブスクではない → 0円
+  assert.deepEqual(sato.months.map((m) => [m.month, m.total, m.basis.consumedSales]), [['2026-11', 0, 20000], ['2026-12', 0, 20000]]);
   assert.equal(closed.close.total, closed.close.staff.reduce((a, r) => a + r.total, 0));
 
   // 確定した後は、どちらの月を開いても確定の情報が付く
@@ -168,9 +168,9 @@ test('毎日の継続指標の記録（Cron）: 1店舗も記録できなけれ�
 });
 
 /**
- * 支給期間（2026年11〜12月）に次のスタッフ・店舗を足す:
+ * 支給期間（2026年11〜12月）に次のスタッフ・店舗を足す（売上分析のスタッフ別と受付履歴の両方）:
  *   205 退職 さくら … スタッフ一覧に無い（辞めた）。11月だけ中央店（101）で 600,000円・1回
- *   206 ヘルプ 花子 … SalonOne の所属店舗 103 はダッシュボードと未連携。11月は中央店、12月は駅前店（102）で施術
+ *   206 ヘルプ 花子 … SalonOne の所属店舗 103 はダッシュボードと未連携。11月は中央店、12月は駅前店（102）で施術（各 300,000円）
  *   207 休職 ゆり   … 中央店の所属。施術なし
  *   104 新店舗     … ダッシュボードの店舗と未連携。11月に売上がある
  */
@@ -199,6 +199,15 @@ function withPeriodStaff(base) {
       const extra = (id, name, consumed) => ({ staff_id: id, staff_name: name, consumed_sales: consumed, digest_sales: consumed, new_visit_count: 0, repeat_visit_count: 1, customer_count: 1, treatment_count: 1, purchase_count: 0 });
       if (month === '2026-11' && shop === '101') body.data.by_staff.push(extra(205, '退職 さくら', 600000), extra(206, 'ヘルプ 花子', 300000));
       if (month === '2026-12' && shop === '102') body.data.by_staff.push(extra(206, 'ヘルプ 花子', 300000));
+    }
+    if (p.endsWith('/marketing/reception-history') && !url.searchParams.get('cursor')) {
+      const visit = (id, staff, name, amount) => ({
+        appointment_id: id, shop_id: Number(shop), customer_id: id, reserved_at: `${month}-15T11:00:00+09:00`, status: 'completed',
+        staff_id: staff, staff_name: name, classification: 'existing', joined: false, plans: [],
+        amount, consumed_amount: amount, payment_method_name: 'クレジットカード', payment_splits: [],
+      });
+      if (month === '2026-11' && shop === '101') body.data.push(visit(880001, 205, '退職 さくら', 600000), visit(880002, 206, 'ヘルプ 花子', 300000));
+      if (month === '2026-12' && shop === '102') body.data.push(visit(880003, 206, 'ヘルプ 花子', 300000));
     }
     return ok(body);
   };
@@ -329,7 +338,7 @@ test('出納帳用の現金売上: 受付履歴だけを取り、日ごとの現
   const res = await call(salononeHandler, { query: { action: 'cash', storeId: 'store-1', month: '2026-11' } });
   assert.equal(res.code, 200, JSON.stringify(res.body));
   assert.equal(res.body.linked, true);
-  assert.deepEqual(res.body.days, [{ date: '2026-11-02', cashSales: 8000 }, { date: '2026-11-03', cashSales: 3000 }, { date: '2026-11-04', cashSales: 3000 }, { date: '2026-11-06', cashSales: 0 }, { date: '2026-11-07', cashSales: 0 }, { date: '2026-11-08', cashSales: 3000 }]);
+  assert.deepEqual(res.body.days, [{ date: '2026-11-02', cashSales: 8000 }, { date: '2026-11-03', cashSales: 3000 }, { date: '2026-11-04', cashSales: 3000 }, { date: '2026-11-06', cashSales: 0 }, { date: '2026-11-07', cashSales: 0 }, { date: '2026-11-08', cashSales: 3000 }, { date: '2026-11-10', cashSales: 0 }]);
   assert.ok(!calls.some((u) => u.pathname.endsWith('/sales/summary') || u.pathname.includes('retention')), '売上サマリ・継続管理は取らない');
   assert.ok(calls.filter((u) => u.pathname.endsWith('/marketing/reception-history')).every((u) => u.searchParams.get('shop_id') === '101'));
   // スタッフは所属店舗だけ。店舗を選ばない取得はできない

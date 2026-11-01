@@ -7,11 +7,12 @@
 // GET /api/salonone?action=visits&storeId=                本日の予約（施術ツールのカウンセリング用）
 // GET /api/salonone?action=cash&storeId=&month=YYYY-MM     1店舗の日別の現金売上（出納帳の突合・締め用。受付履歴だけを取る）
 // GET /api/salonone?action=master                         対応付け用マスタ（管理者・本部）
+// GET /api/salonone?action=planUnits&month=YYYY-MM         プランの施術 1回分の金額（自動で決まった金額と、0円の来店に当てた数。管理者・本部）
 // GET /api/salonone?action=probe                          接続テスト（管理者・本部）
 // POST /api/salonone?action=clearCache                    キャッシュ破棄（管理者・本部）
 // POST /api/salonone?action=closePeriod  { month, operator, note, force }  支給期間のインセンティブを確定（オーナー・管理者）
 // POST /api/salonone?action=reopenPeriod { month, operator }               確定を取り消す（オーナー・管理者）
-// GET /api/salonone?action=cron                           毎日の継続指標の記録（Vercel Cron。Authorization: Bearer <CRON_SECRET>）
+// GET /api/salonone?action=cron                           毎日の継続指標・施術消化売上の記録（Vercel Cron。Authorization: Bearer <CRON_SECRET>）
 // GET /api/salonone?action=cross&month=YYYY-MM&storeId=   系列店での契約の一覧（店長以上は登録の画面で選ぶ店舗・スタッフも）
 // GET /api/salonone?action=crossCandidates&storeId=&date=YYYY-MM-DD  契約した店舗・日の SalonOne の契約（店長以上）
 // POST /api/salonone?action=crossAdd { date, customerName, planName, contractStoreId, creditKey, receptionId?, memo? }  登録（店長以上）
@@ -24,7 +25,7 @@ import { timingSafeEqual } from 'node:crypto';
 import { cors } from '../_lib/cors.js';
 import { authorizeRequest, isAdminOrOwner } from '../_lib/auth.js';
 import {
-  buildSummary, buildTrend, buildMaster, dailyCashSales, closePeriod, reopenPeriod, AccessError,
+  buildSummary, buildTrend, buildMaster, dailyCashSales, closePeriod, reopenPeriod, snapshotConsumption, buildPlanUnits, AccessError,
 } from '../_lib/salonone/summary.js';
 import { buildVisits } from '../_lib/salonone/visits.js';
 import { listCrossStore, crossStoreCandidates, addCrossStore, deleteCrossStore } from '../_lib/salonone/cross-handlers.js';
@@ -43,15 +44,25 @@ function isCronRequest(req) {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
-/** 継続指標を記録する。1店舗も記録できなかった時は 502（Vercel の Cron の記録・ログで気づけるように） */
+/**
+ * 継続指標と施術消化売上（推移のグラフ用）を記録する。継続指標を 1店舗も記録できなかった時は 502
+ * （Vercel の Cron の記録・ログで気づけるように）。施術消化売上は記録できなくても次の日にやり直すので 200 のまま
+ */
 async function runSnapshot() {
   const r = await snapshotRetention();
+  let consumption;
+  try {
+    consumption = await snapshotConsumption();
+  } catch (e) {
+    consumption = { mode: r.mode, months: [], failed: [{ month: null, error: e && e.message ? e.message : String(e) }] };
+  }
+  if (consumption.failed.length) console.warn('[salonone] consumption snapshot failed:', consumption.failed);
   if (r.mode === 'live' && r.saved === 0 && r.failed.length) {
     console.error('[salonone] retention snapshot failed:', r.failed);
-    return { status: 502, body: { error: '継続管理（会員数・退会率）を 1店舗も記録できませんでした', ...r } };
+    return { status: 502, body: { error: '継続管理（会員数・退会率）を 1店舗も記録できませんでした', ...r, consumption } };
   }
   if (r.failed.length) console.warn('[salonone] retention snapshot partially failed:', r.failed);
-  return { status: 200, body: { success: true, ...r } };
+  return { status: 200, body: { success: true, ...r, consumption } };
 }
 
 // 管理者が手で記録を動かすのは 10分に 1回まで（SalonOne の呼び出し回数を抑える。インスタンスごと）
@@ -172,6 +183,8 @@ export default async function handler(req, res) {
       }
       case 'master':
         return res.json(await buildMaster(staffCtx, { refresh }));
+      case 'planUnits':
+        return res.json(await buildPlanUnits(staffCtx, { month }));
       case 'probe': {
         if (!isAdminOrOwner(staffCtx)) return res.status(403).json({ error: '管理者またはオーナーのみ利用できます' });
         const cfg = salonOneConfig();

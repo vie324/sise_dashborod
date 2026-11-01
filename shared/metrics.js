@@ -7,7 +7,7 @@
 //   { id, shopId, staffId, staffName?, customerId, date:'YYYY-MM-DD',
 //     status:'completed'|'reserved'|'checked_in'|'cancelled'|'no_show',
 //     customerClass:'new'|'repeat'|'existing', sourceName,
-//     consumedAmount,   // 消化額
+//     consumedAmount,   // 施術 1回分の金額（shared/consumption.js の valueReceptions で SalonOne の消化額から付ける）
 //     salesAmount,      // 会計金額（入金）
 //     cashAmount?,      // そのうち現金（分割決済の内訳から。無ければ paymentMethod で判定）
 //     paymentMethod, referralStaffId? }
@@ -17,12 +17,14 @@
 //     planName, isSharePlan, startDate, endDate|null }
 //
 // 売上サマリ salesSummary（SalonOne の「売上分析」と同じ数字。店舗ごと）:
-//   { consumedSales, depositSales, newCount, repeatCount, treatmentCount, customerCount, purchaseCount,
+//   { consumedSales, depositSales, newCount, repeatCount, treatmentCount, customerCount, purchaseCount, productSales,
 //     daily:[{ date, ...同じ項目 }] | null, staff:[{ staffId, name, ...同じ項目 }] | null }
 //   null の項目は受付履歴からの集計のまま。
 //
 // 集計ルール
-//   - 消化売上・入金売上・新規数・既存数（2回目以降の来店）・施術数・顧客数・契約数（購入数）は、
+//   - 施術消化売上は、受付履歴の会計完了の来店の「施術 1回分の金額」の合計から、売上分析の物販売上を差し引いた金額
+//     （shared/consumption.js。SalonOne の売上分析の消化売上とは定義が違う。参考に salonOneConsumedSales に残す）
+//   - 入金売上・新規数・既存数（2回目以降の来店）・施術数・顧客数・契約数（購入数）は、
 //     売上サマリがあればその値を使う（SalonOne の売上分析と同じ数字にする）。
 //     無いとき（デモ・取得失敗）は受付履歴の会計完了（completed）の予約から集計する
 //   - 新規 = その店舗で初めての来店（会計完了）。最初の予約をキャンセルして後日来店した場合も含む。
@@ -241,17 +243,38 @@ function rescaleDaily(daily, key, total, fallbackDate) {
   return daily.map((d, i) => ({ ...d, [key]: floors[i] }));
 }
 
-const OFFICIAL_KEYS = ['consumedSales', 'depositSales', 'treatmentCount', 'customerCount', 'newCount', 'repeatCount', 'purchaseCount'];
-const DAILY_KEYS = { consumedSales: 'consumedSales', depositSales: 'depositSales', treatmentCount: 'treatmentCount', newCount: 'newVisits' };
+const OFFICIAL_KEYS = ['depositSales', 'treatmentCount', 'customerCount', 'newCount', 'repeatCount', 'purchaseCount'];
+const DAILY_KEYS = { depositSales: 'depositSales', treatmentCount: 'treatmentCount', newCount: 'newVisits' };
 
-/** 売上サマリ（SalonOne の売上分析）の値で、店舗・日別・スタッフ別の数字を置き換える */
-function applySalesSummaries(summaries, shopOut, staffOut, { emptyShop, emptyStaff, lastDate }) {
+/**
+ * 施術消化売上から物販売上を差し引く（物販は来店ごとに分けられないので月の合計で）。
+ * 初回来店とそれ以外の比で分け、施術消化売上・既存顧客の消化売上・初回来店の消化額をそろえて減らす
+ */
+function deductProducts(b, productSales, lastDate) {
+  const products = Math.max(0, n(productSales));
+  const total = n(b.consumedSales);
+  if (!products || total <= 0) return;
+  const off = Math.min(products, total);
+  const firstOff = Math.round((off * n(b.firstVisitConsumed)) / total);
+  b.consumedSales = total - off;
+  b.firstVisitConsumed = Math.max(0, n(b.firstVisitConsumed) - firstOff);
+  b.existingConsumedSales = Math.max(0, b.consumedSales - b.firstVisitConsumed);
+  b.daily = rescaleDaily(b.daily, 'consumedSales', b.consumedSales, lastDate);
+}
+
+/**
+ * 売上サマリ（SalonOne の売上分析）の値で、店舗・日別・スタッフ別の数字を置き換える。
+ * 施術消化売上は受付履歴の施術 1回分の合計のまま、物販売上だけを差し引く（受付履歴を取った店舗の分だけ）
+ */
+function applySalesSummaries(summaries, shopOut, staffOut, { emptyShop, emptyStaff, lastDate, receptionShops }) {
   const official = new Map(); // staffId → 全店舗の合計
   for (const [shopId, sum] of Object.entries(summaries || {})) {
     if (!sum) continue;
     const shop = shopOut[shopId] || (shopOut[shopId] = emptyShop(shopId));
     for (const k of OFFICIAL_KEYS) if (sum[k] != null) shop[k] = sum[k];
-    if (sum.consumedSales != null) shop.existingConsumedSales = Math.max(0, sum.consumedSales - shop.firstVisitConsumed);
+    shop.salonOneConsumedSales = sum.consumedSales;
+    shop.productSales = sum.productSales;
+    if (receptionShops.has(shopId)) deductProducts(shop, sum.productSales, lastDate);
     if (sum.daily) {
       // 売上分析にある項目だけ日別を置き換える（現金売上は受付履歴のまま）
       const keys = Object.keys(DAILY_KEYS).filter((k) => sum.daily.some((d) => d[k] != null));
@@ -266,8 +289,10 @@ function applySalesSummaries(summaries, shopOut, staffOut, { emptyShop, emptySta
     }
     shop.basis = 'salonone';
     for (const row of sum.staff || []) {
-      const acc = official.get(row.staffId) || { shopId, name: row.name, best: -Infinity };
+      const acc = official.get(row.staffId) || { shopId, name: row.name, best: -Infinity, salonOneConsumedSales: null, productSales: 0 };
       for (const k of OFFICIAL_KEYS) if (row[k] != null) acc[k] = n(acc[k]) + row[k];
+      if (row.consumedSales != null) acc.salonOneConsumedSales = n(acc.salonOneConsumedSales) + row.consumedSales;
+      if (receptionShops.has(shopId)) acc.productSales += n(row.productSales);
       if (n(row.consumedSales) > acc.best) { acc.best = n(row.consumedSales); acc.shopId = shopId; }
       if (!acc.name && row.name) acc.name = row.name;
       official.set(row.staffId, acc);
@@ -277,10 +302,9 @@ function applySalesSummaries(summaries, shopOut, staffOut, { emptyShop, emptySta
     const st = staffOut[staffId] || (staffOut[staffId] = emptyStaff(staffId, acc.shopId));
     if (!st.name && acc.name) st.name = acc.name;
     for (const k of OFFICIAL_KEYS) if (acc[k] != null) st[k] = acc[k];
-    if (acc.consumedSales != null) {
-      st.existingConsumedSales = Math.max(0, acc.consumedSales - st.firstVisitConsumed);
-      st.daily = rescaleDaily(st.daily, 'consumedSales', acc.consumedSales, lastDate);
-    }
+    st.salonOneConsumedSales = acc.salonOneConsumedSales;
+    st.productSales = acc.productSales;
+    deductProducts(st, acc.productSales, lastDate);
     st.basis = 'salonone';
   }
 }
@@ -491,7 +515,9 @@ export function computeMonth({ receptions, contracts, month, asOf, channelMap, r
   }
 
   const lastDate = today < to ? today : to;
-  if (salesSummaries) applySalesSummaries(salesSummaries, shopOut, staffOut, { emptyShop, emptyStaff, lastDate });
+  // 物販売上を差し引くのは、その月の受付履歴を取った店舗の分だけ（取っていない店舗の施術は合計に入っていない）
+  const receptionShops = new Set(all.filter((r) => monthOf(r.date) === month).map((r) => r.shopId));
+  if (salesSummaries) applySalesSummaries(salesSummaries, shopOut, staffOut, { emptyShop, emptyStaff, lastDate, receptionShops });
 
   return {
     month,
@@ -506,6 +532,7 @@ export function computeMonth({ receptions, contracts, month, asOf, channelMap, r
 export function combineShops(shopList) {
   const out = {
     consumedSales: 0, existingConsumedSales: 0, depositSales: 0, treatmentCount: 0, customerCount: 0, cashSales: 0,
+    salonOneConsumedSales: null, productSales: null,
     newVisits: emptyChannelMap(), newContracts: emptyChannelMap(), newVisitTotal: 0, newContractTotal: 0,
     newCount: 0, repeatCount: 0, purchaseCount: 0,
     referralSubscriptions: 0, daily: [],
@@ -521,6 +548,8 @@ export function combineShops(shopList) {
     for (const k of ['consumedSales', 'existingConsumedSales', 'depositSales', 'treatmentCount', 'customerCount', 'cashSales', 'newVisitTotal', 'newContractTotal', 'referralSubscriptions']) {
       out[k] += n(s[k]);
     }
+    // SalonOne の売上分析の消化売上（参考）・物販売上。売上分析のある店舗の分の合計
+    for (const k of ['salonOneConsumedSales', 'productSales']) if (s[k] != null) out[k] = n(out[k]) + n(s[k]);
     // 新規数・既存数・契約数は、わからない店舗が 1つでもあれば合計もわからない（null）
     for (const k of ['newCount', 'repeatCount', 'purchaseCount']) {
       out[k] = out[k] == null || s[k] == null ? null : out[k] + n(s[k]);

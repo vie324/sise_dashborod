@@ -61,7 +61,14 @@ export default function RulesView({ rules }) {
       </Card>
 
       <Section no="1" title="施術消化売上インセンティブ" icon="banknote">
-        <p>SalonOne の「施術消化売上」を評価基準とします。</p>
+        <p>施術消化売上（施術した日に、施術した担当者に計上する<strong className="text-ink">施術 1回分の金額</strong>の合計）を評価基準とします。</p>
+        <ul className="list-disc space-y-0.5 pl-5">
+          <li>都度払い・初回体験：その来店で払った施術代（例: 初回 3,000円）</li>
+          <li>サブスク：月額 ÷ 月の回数（例: 月2回 15,000円 → 1回 7,500円）</li>
+          <li>回数券：購入額 ÷ 回数</li>
+          <li>プランの購入代・毎月のサブスク課金そのもの（入金売上）、使わなかった回・失効、物販は含めません</li>
+        </ul>
+        <p className="text-xs text-muted">SalonOne の消化額が 0円になっているサブスクの来店は、そのお客様のプランの 1回分の金額で数えます（2026年11月から。SalonOne の売上分析の「消化売上」とは数え方が違います）。</p>
         <TierTable head={['月間施術消化売上（条件）', 'インセンティブ支給額']} rows={salesRows} />
         <div className="rounded-xl bg-surface-2 px-3.5 py-3">
           <p className="font-semibold text-ink">評価基準額の算出根拠：1回あたり {yen(rules.unitPrice)}</p>

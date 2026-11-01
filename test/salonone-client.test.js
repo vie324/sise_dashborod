@@ -52,15 +52,15 @@ test('明細は next_cursor で最後まで辿る（削除済みの行も返る�
 
 test('受付履歴は店舗ごと・ページを辿って取得する', async () => {
   const rows = await fetchReceptions(salonOneConfig(), { from: '2026-09-01', to: '2026-09-30', shopId: '101' });
-  assert.equal(rows.length, 8);
+  assert.equal(rows.length, 9);
   const pages = calls.filter((u) => u.pathname.endsWith('/marketing/reception-history'));
-  assert.equal(pages.length, 2);
+  assert.equal(pages.length, 3); // 疑似 SalonOne は 1ページ 4件
   assert.equal(pages[0].searchParams.get('shop_id'), '101');
 });
 
 test('limit を受け付けない一覧は外して取り直す', async () => {
   const rows = await fetchRetentionCustomers(salonOneConfig(), { from: '2025-10-16', to: '2026-10-16', shopId: '101' });
-  assert.equal(rows.length, 3);
+  assert.equal(rows.length, 5);
   const tries = calls.filter((u) => u.pathname.endsWith('/retention-customers'));
   assert.equal(tries.length, 2);
   assert.equal(tries[1].searchParams.has('limit'), false);
