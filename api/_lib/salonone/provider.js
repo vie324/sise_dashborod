@@ -7,9 +7,13 @@
 //   salonone.staffMap   : { [ダッシュボードスタッフID]: SalonOneスタッフID }
 //   salonone.channelMap : { [来店経由名]: 経路キー }
 //   salonone.planRules  : { sharePlanKeyword, payPerVisitKeyword }
+//   salonone.planUnits  : { [プラン名]: 施術 1回分の金額 }（自動で決まらない・違う時だけ。shared/consumption.js）
 //   salonone.retentionSnapshots : { 'YYYY-MM': { [SalonOne店舗ID]: 継続指標 } }
 //       継続管理の値は「取得した時点」のものしか取れないため、当月分を取得するたびに保存し、
 //       過去の月はここに残った値（その月の最後の取得時点）を使う。
+//   incentive.consumption : { 'YYYY-MM': { shops: { [SalonOne店舗ID]: 施術消化売上 }, staff: { [SalonOneスタッフID]: 施術消化売上 }, at } }
+//       推移のグラフ用。施術消化売上は受付履歴から計算するため、推移で毎月の受付履歴を取らずに済むように残す。
+//       スタッフごとの金額を含むので 'incentive.'（/api/db の dashConfig からは読み書きできない）に置く
 // デモモードでは SalonOne 側の ID = ダッシュボード側の ID として扱う。
 // ============================================================
 
@@ -20,13 +24,16 @@ import {
 } from './client.js';
 import {
   normalizeShop, normalizeStaff, normalizeVisitSourceName, normalizeReception, normalizeRetention,
-  normalizeSalesSummary, contractsFromReceptions, normalizeVisit,
+  normalizeSalesSummary, contractsFromReceptions, normalizeVisit, normalizeRetentionPlans,
 } from './normalize.js';
+import { valueReceptions } from '../../../shared/consumption.js';
 import { demoMaster, simulateDemo, DEMO_SOURCES } from './demo.js';
 import { monthRange, monthOf, monthsBetween, todayJst, addDays } from '../../../shared/dates.js';
 
 export const RETENTION_KEY = 'salonone.retentionSnapshots';
-export const CONFIG_KEYS = ['salonone.shopMap', 'salonone.staffMap', 'salonone.channelMap', 'salonone.planRules', RETENTION_KEY];
+export const PLAN_UNITS_KEY = 'salonone.planUnits';
+export const CONSUMPTION_KEY = 'incentive.consumption';
+export const CONFIG_KEYS = ['salonone.shopMap', 'salonone.staffMap', 'salonone.channelMap', 'salonone.planRules', PLAN_UNITS_KEY, RETENTION_KEY, CONSUMPTION_KEY];
 
 // ------------------------------------------------------------
 // インスタンス内キャッシュ（サーバーレスのウォーム中だけ有効）
@@ -230,8 +237,7 @@ function shopMonthReceptions(cfg, shopId, month, asOf, refresh) {
 async function shopRetention(cfg, shopId, asOf, refresh, { payPerVisitPattern } = {}) {
   const [summary, customers] = await Promise.all([
     cached(`ret:${shopId}`, TTL_RETENTION, () => fetchRetentionSummary(cfg, { from: monthRange(monthOf(asOf)).from, to: asOf, shopId }), refresh),
-    // 平均継続期間: 直近 1年にサブスクの支払いがあったお客様の継続月数
-    cached(`tenure:${shopId}`, TTL_TENURE, () => fetchRetentionCustomers(cfg, { from: addDays(asOf, -365), to: asOf, shopId }), refresh),
+    shopCustomers(cfg, shopId, asOf, refresh),
   ]);
   return {
     value: { ...normalizeRetention(summary.value, customers.value, { payPerVisitPattern }), asOf },
@@ -239,6 +245,39 @@ async function shopRetention(cfg, shopId, asOf, refresh, { payPerVisitPattern } 
     freshAt: summary.fetchedAt,
     stale: summary.stale || customers.stale,
     error: summary.error || customers.error,
+  };
+}
+
+/**
+ * 1店舗の継続管理の顧客一覧（直近 1年にサブスクの支払いがあったお客様。1人がプランごとに複数行）。
+ * 平均継続期間と、施術 1回分の金額（消化額が 0円の来店のお客様のプラン）に使う。ゆっくりしか変わらないので 6時間ごと
+ */
+function shopCustomers(cfg, shopId, asOf, refresh) {
+  return cached(`tenure:${shopId}`, TTL_TENURE, () => fetchRetentionCustomers(cfg, { from: addDays(asOf, -365), to: asOf, shopId }), refresh);
+}
+
+/** 施術 1回分の金額を付けるのに、お客様のプランが要る受付（会計完了・SalonOne の消化額が 0円・プランの購入が無い） */
+const needsPlan = (r) => r.status === 'completed' && !(Number(r.consumedAmount) > 0) && !r.billing
+  && !(r.plans || []).some((p) => p.kind === 'subscription' || p.kind === 'ticket');
+
+/**
+ * 受付に施術 1回分の金額を付ける（shared/consumption.js）。お客様のプランは、消化額が 0円の来店のある店舗の
+ * 継続管理の顧客一覧から取る（取れなかった店舗は注意を返す）
+ */
+async function valueTreatments(cfg, appCtx, receptions, { asOf, refresh, live }) {
+  const shops = live ? [...new Set(receptions.filter(needsPlan).map((r) => r.shopId))] : [];
+  const results = await Promise.all(shops.map((shopId) => shopCustomers(cfg, shopId, asOf, refresh)
+    .then((r) => ({ shopId, ...r }), (e) => ({ shopId, failed: e }))));
+  const retentionPlans = results.flatMap((r) => (r.failed ? [] : normalizeRetentionPlans(r.value)));
+  const valued = valueReceptions(receptions, { retentionPlans, overrides: appCtx.config[PLAN_UNITS_KEY] || {} });
+  const failed = results.filter((r) => r.failed);
+  return {
+    receptions: valued.receptions,
+    consumption: { units: [...valued.units.values()], stats: valued.stats },
+    stale: results.filter((r) => !r.failed && r.stale).map((r) => ({ fetchedAt: r.fetchedAt, error: r.error })),
+    warning: failed.length
+      ? { code: 'consumption', message: `継続管理の顧客一覧を取得できなかった店舗があるため、SalonOne の消化額が 0円のサブスクの来店に 1回分の金額を付けられていない可能性があります: ${failed[0].failed.message.replace(/^SalonOne API エラー \([^)]*\): /, '')}` }
+      : null,
   };
 }
 
@@ -266,6 +305,27 @@ async function saveRetentionSnapshots(month, byShop) {
   const value = Object.fromEntries(Object.keys(all).sort().slice(-24).map((k) => [k, all[k]]));
   const { error: e2 } = await supabase.from('dash_config').upsert({ key: RETENTION_KEY, value }, { onConflict: 'key' });
   if (e2) throw e2;
+}
+
+/**
+ * 月ごとの施術消化売上を記録する（店舗・スタッフごとに上書き。24ヶ月分）。
+ * 同じ値なら書かない（画面を開くたびに書き込まないように）
+ * @param {Object} current 読み込み済みの記録（appCtx.config[CONSUMPTION_KEY]）。差が無いか見るだけ
+ * @returns {Promise<boolean>} 書いたか
+ */
+export async function saveConsumptionSnapshot(month, { shops = {}, staff = {} }, current = null) {
+  const prev = current && current[month];
+  const same = (a, b) => Object.entries(a).every(([k, v]) => b && b[k] === v);
+  if (prev && same(shops, prev.shops) && same(staff, prev.staff)) return false;
+  const { data, error } = await supabase.from('dash_config').select('value').eq('key', CONSUMPTION_KEY).maybeSingle();
+  if (error) throw error;
+  const all = (data && data.value && typeof data.value === 'object') ? data.value : {};
+  const was = all[month] || {};
+  all[month] = { shops: { ...(was.shops || {}), ...shops }, staff: { ...(was.staff || {}), ...staff }, at: new Date().toISOString() };
+  const value = Object.fromEntries(Object.keys(all).sort().slice(-24).map((k) => [k, all[k]]));
+  const { error: e2 } = await supabase.from('dash_config').upsert({ key: CONSUMPTION_KEY, value }, { onConflict: 'key' });
+  if (e2) throw e2;
+  return true;
 }
 
 /**
@@ -325,9 +385,11 @@ export async function loadDataset(appCtx, master, {
   if (master.mode === 'demo') {
     const all = [...new Set([...wanted, ...receptionMonths])].filter(notFuture);
     const sim = simulateDemo({ shops: master.shops, staff: master.staff, months: all, asOf });
+    const valued = await valueTreatments(null, appCtx, sim.receptions, { asOf, live: false });
     return {
-      mode: 'demo', receptions: sim.receptions, contracts: sim.contracts, salesSummaries: {}, retentionOverrides: {},
+      mode: 'demo', receptions: valued.receptions, contracts: sim.contracts, salesSummaries: {}, retentionOverrides: {},
       retentionFromContracts: true, receptionsLoaded: true, asOf, stale: [], warnings: [], fetchedAt: Date.now(),
+      consumption: valued.consumption,
     };
   }
 
@@ -402,10 +464,19 @@ export async function loadDataset(appCtx, master, {
   }
   const otherRecs = other.recs.filter((r) => !r.failed);
 
-  const receptions = [...recResults, ...otherRecs].flatMap((r) => r.value);
+  let receptions = [...recResults, ...otherRecs].flatMap((r) => r.value);
   const contracts = contractsFromReceptions(receptions, planPatterns(appCtx));
   const loaded = [...sumResults, ...recResults, ...other.sums, ...otherRecs];
   const stale = loaded.filter((r) => r.stale).map((r) => ({ fetchedAt: r.fetchedAt, error: r.error }));
+  // 施術 1回分の金額（売上を集計する時だけ。出納帳・来店経由の一覧は SalonOne の値のまま）
+  let consumption = null;
+  if (withSummaries && receptions.length) {
+    const valued = await valueTreatments(cfg, appCtx, receptions, { asOf, refresh: typeof refreshOlderThan === 'number' ? refreshOlderThan : refresh, live: true });
+    receptions = valued.receptions;
+    consumption = valued.consumption;
+    stale.push(...valued.stale);
+    if (valued.warning) warnings.push(valued.warning);
+  }
   // いちばん古いデータの取得時刻（キャッシュから返した分も含む。画面の「◯時◯分取得」に使う）
   const fetchedTimes = loaded.filter((r) => !r.failed && r.fetchedAt).map((r) => r.fetchedAt);
 
@@ -435,6 +506,7 @@ export async function loadDataset(appCtx, master, {
     mode: 'live', receptions, contracts, salesSummaries, retentionOverrides, retentionFromContracts: false,
     receptionsLoaded: withReceptions || failedSummaries.length > 0, asOf, stale, warnings,
     fetchedAt: fetchedTimes.length ? Math.min(...fetchedTimes) : Date.now(),
+    consumption,
   };
 }
 

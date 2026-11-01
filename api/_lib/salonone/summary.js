@@ -16,9 +16,12 @@ import {
 } from '../../../shared/incentive.js';
 import { INCENTIVE_RULES } from '../../../shared/incentive-rules.js';
 import { addMonths, monthProgress, monthsBetween, monthOf, monthRange, listMonths, todayJst, formatMonthJa } from '../../../shared/dates.js';
-import { loadAppContext, loadMaster, buildMapping, loadDataset } from './provider.js';
+import {
+  loadAppContext, loadMaster, buildMapping, loadDataset, saveConsumptionSnapshot, CONSUMPTION_KEY, PLAN_UNITS_KEY,
+} from './provider.js';
 import { loadCloseDoc, saveCloseDoc, closeView } from './closes.js';
 import { loadCrossEntries, crossExclusions, crossCreditsByMonth } from './cross.js';
+import { planKey } from '../../../shared/consumption.js';
 import { normalizeRole, isOwnerRole } from '../../../shared/roles.js';
 
 const n = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
@@ -74,8 +77,12 @@ function resolveSelection(scope, storeId) {
 function pickMetrics(s) {
   if (!s) return null;
   return {
+    // 施術消化売上（施術 1回分の合計 − 物販。shared/consumption.js）
     consumedSales: n(s.consumedSales),
     existingConsumedSales: n(s.existingConsumedSales),
+    // SalonOne の売上分析の消化売上（参考。定義が違う）と物販売上
+    salonOneConsumedSales: nOrNull(s.salonOneConsumedSales),
+    productSales: nOrNull(s.productSales),
     depositSales: n(s.depositSales),
     treatmentCount: n(s.treatmentCount),
     customerCount: n(s.customerCount),
@@ -200,6 +207,40 @@ function relevantStaffIds(master, mapping, scope, shopSet, myS1) {
     if (!s.shopId || shopSet.has(s.shopId) || !mapping.shopToStore.has(s.shopId)) out.add(s.id);
   }
   return out;
+}
+
+/** 施術 1回分の金額がわからなかった来店（月・条件で絞る）→ 件数とプラン名（多い順） */
+function unknownPlanVisits(receptions, months, where = () => true) {
+  const byPlan = new Map();
+  for (const r of receptions || []) {
+    if (r.valueSource !== 'unknown' || !months.includes(monthOf(r.date)) || !where(r)) continue;
+    byPlan.set(r.valuePlan || '（プラン名なし）', (byPlan.get(r.valuePlan || '（プラン名なし）') || 0) + 1);
+  }
+  const plans = [...byPlan].sort((a, b) => b[1] - a[1]);
+  return { count: plans.reduce((s, [, c]) => s + c, 0), plans: plans.map(([name, c]) => `${name} ${c}件`) };
+}
+
+/**
+ * 月ごとの施術消化売上を記録する（推移のグラフ用）。売上分析・顧客一覧が取れていて、前回の値ではない時だけ。
+ * 店舗は売上分析の取れた店舗、スタッフは全店舗の実績を取ったスタッフ（他の店舗の取得に失敗した時は残さない）
+ */
+async function saveSnapshots(master, appCtx, data, computed, months, { shopIds, staffIds }) {
+  if (master.mode !== 'live' || appCtx.dbError || (data.stale || []).length) return;
+  const codes = new Set((data.warnings || []).map((w) => w.code));
+  if (codes.has('salesSummary') || codes.has('consumption')) return;
+  for (const m of months) {
+    const c = computed[m];
+    if (!c) continue;
+    const shops = {};
+    for (const id of shopIds) if (data.salesSummaries[m] && data.salesSummaries[m][id]) shops[id] = n(c.shops[id] && c.shops[id].consumedSales);
+    const staff = {};
+    if (!codes.has('otherShops')) for (const id of staffIds || []) staff[id] = n(c.staff[id] && c.staff[id].consumedSales);
+    try {
+      await saveConsumptionSnapshot(m, { shops, staff }, appCtx.config[CONSUMPTION_KEY]);
+    } catch (e) {
+      console.warn('[salonone] consumption snapshot save failed:', e.message);
+    }
+  }
 }
 
 /**
@@ -424,7 +465,15 @@ export async function buildSummary(staffCtx, { month, storeId, refresh, refreshO
   if (scope.staffId && !myS1 && (scope.role === 'staff' || scope.role === 'manager')) warnings.push({ code: 'unmappedMe', message: 'あなたのアカウントが SalonOne のスタッフと未連携です。管理者に連携を依頼してください。' });
   if (close.error) warnings.push({ code: 'close', message: `インセンティブの確定の記録を読めませんでした: ${close.error}` });
   if (cross.error) warnings.push({ code: 'cross', message: `系列店での契約の登録を読めませんでした（2,000円が入っていません）: ${cross.error}` });
+  // 施術 1回分の金額がわからない来店（プランはあるが 1回分の金額が決まらない）。施術消化売上に入っていない
+  if (!ownOnly) {
+    const unknown = unknownPlanVisits(data.receptions, [month, ...period.months], (r) => shopSet.has(r.shopId) || relevant.has(String(r.staffId)));
+    if (unknown.count) {
+      warnings.push({ code: 'planUnit', message: `施術 1回分の金額がわからないプランの来店が ${unknown.count}件あります（${unknown.plans.join('・')}）。施術消化売上に入っていないので、設定 > SalonOne連携 > プランの 1回分の金額 で入れてください。` });
+    }
+  }
   warnings.push(...dataWarnings(master, data));
+  await saveSnapshots(master, appCtx, data, computed, [prevMonth, month], { shopIds: selectedShopIds, staffIds: relevant });
 
   return {
     mode: master.mode,
@@ -479,7 +528,7 @@ export async function dailyCashSales(staffCtx, { storeId, months, refresh = fals
 // ------------------------------------------------------------
 // 確定の時は、この時間より前に取得したデータを SalonOne から取り直す（直前に開いた画面の分は取り直さない）
 const CLOSE_FRESH_MS = 10 * 60 * 1000;
-const CLOSE_ISSUE_CODES = new Set(['stale', 'salesSummary', 'retention', 'otherShops', 'db', 'cross', 'unmappedStore', 'unmappedShop', 'duplicateShop']);
+const CLOSE_ISSUE_CODES = new Set(['stale', 'salesSummary', 'retention', 'otherShops', 'db', 'cross', 'unmappedStore', 'unmappedShop', 'duplicateShop', 'consumption', 'planUnit']);
 
 /** 確定の前に確認してほしいこと（取得できなかったデータ・記録の無い継続指標・未連携のスタッフ など） */
 function closeIssues(s) {
@@ -594,10 +643,13 @@ export async function buildTrend(staffCtx, { months: count = 6, endMonth, storeI
   // スタッフ本人の推移（自己ベスト）はインセンティブと同じく全店舗の実績で出す（他の店舗は売上サマリだけ）。
   // 店舗の推移は表示中の店舗だけ
   const otherShopIds = ownOnly && myS1 ? allShopIdsOf(master, selectedShopIds).filter((id) => !selectedShopIds.includes(id)) : [];
-  // 推移は SalonOne の売上分析（売上サマリ）だけで出す（受付履歴は取らない＝呼び出し回数を抑える）
+  // 推移は SalonOne の売上分析（売上サマリ）だけで出す（受付履歴は取らない＝呼び出し回数を抑える）。
+  // 施術消化売上は受付履歴から計算するので、月ごとの記録（incentive.consumption）を使う。記録の無い月は
+  // SalonOne の売上分析の消化売上（定義が違う）で埋め、consumedBasis: 'salonone' を付ける
   const data = await loadDataset(appCtx, master, { months, receptions: false, shopIds: selectedShopIds, otherShopIds, refresh });
   const channelMap = appCtx.config['salonone.channelMap'] || {};
   const shopSet = new Set(selectedShopIds);
+  const snaps = master.mode === 'live' ? (appCtx.config[CONSUMPTION_KEY] || {}) : {};
 
   const series = [];
   const staffSeries = new Map();
@@ -608,10 +660,30 @@ export async function buildTrend(staffCtx, { months: count = 6, endMonth, storeI
       retentionOverrides: data.retentionOverrides[m], retentionFromContracts: data.retentionFromContracts,
       salesSummaries: data.salesSummaries[m], countsFromReceptions: data.receptionsLoaded,
     });
+    const snap = snaps[m] || {};
+    let fromSalonOne = false;
+    // 記録 → （受付履歴を取っていなければ）SalonOne の売上分析の消化売上 → 受付履歴からの集計（デモ・売上分析が取れない時）
+    const consumedOf = (b, saved) => {
+      if (saved != null) return n(saved);
+      if (b && !data.receptionsLoaded && b.salonOneConsumedSales != null) { fromSalonOne = true; return n(b.salonOneConsumedSales); }
+      return n(b && b.consumedSales);
+    };
     const combined = combineShops(selectedShopIds.map((id) => c.shops[id]).filter(Boolean));
+    const consumedSales = selectedShopIds.reduce((sum, id) => sum + consumedOf(c.shops[id], snap.shops ? snap.shops[id] : null), 0);
+    for (const [s1Id, sm] of Object.entries(c.staff)) {
+      if (ownOnly ? s1Id !== myS1 : !shopSet.has(sm.shopId)) continue;
+      let row = staffSeries.get(s1Id);
+      if (!row) {
+        const s1 = master.staff.find((s) => s.id === s1Id) || { id: s1Id, name: sm.name || s1Id, shopId: sm.shopId };
+        row = { ...staffIdentity(s1, mapping, appCtx, master), values: {} };
+        staffSeries.set(s1Id, row);
+      }
+      row.values[m] = consumedOf(sm, snap.staff ? snap.staff[s1Id] : null);
+    }
     series.push({
       month: m,
-      consumedSales: combined.consumedSales,
+      consumedSales,
+      consumedBasis: fromSalonOne ? 'salonone' : 'treatment',
       depositSales: combined.depositSales,
       treatmentCount: combined.treatmentCount,
       customerCount: combined.customerCount,
@@ -622,22 +694,82 @@ export async function buildTrend(staffCtx, { months: count = 6, endMonth, storeI
       memberCount: combined.retention.memberCount,
       churnRatePct: combined.retention.churnRatePct,
     });
-    for (const [s1Id, sm] of Object.entries(c.staff)) {
-      if (ownOnly ? s1Id !== myS1 : !shopSet.has(sm.shopId)) continue;
-      let row = staffSeries.get(s1Id);
-      if (!row) {
-        const s1 = master.staff.find((s) => s.id === s1Id) || { id: s1Id, name: sm.name || s1Id, shopId: sm.shopId };
-        row = { ...staffIdentity(s1, mapping, appCtx, master), values: {} };
-        staffSeries.set(s1Id, row);
-      }
-      row.values[m] = sm.consumedSales;
-    }
   }
   return {
     mode: master.mode,
     asOf: data.asOf,
     months: series,
     staff: Array.from(staffSeries.values()).sort((a, b) => a.name.localeCompare(b.name, 'ja')),
+    warnings: dataWarnings(master, data),
+  };
+}
+
+/**
+ * 施術消化売上の月ごとの記録を SalonOne から計算し直して残す（Vercel Cron から毎日。推移のグラフ用）。
+ * 当月（月の初めの 5日は前月も）と、記録の無い過去の月を 1つ（直近 12ヶ月の新しい月から）。全店舗の分を取る
+ * @returns {Promise<{ mode:string, months:string[], failed:Array<{ month:string, error:string }> }>}
+ */
+export async function snapshotConsumption({ asOf = todayJst() } = {}) {
+  const { appCtx, master } = await prepare(null);
+  if (master.mode !== 'live') return { mode: master.mode, months: [], failed: [] };
+  if (appCtx.dbError) throw new Error(`Supabase に接続できません: ${appCtx.dbError}`);
+  const current = monthOf(asOf);
+  const months = [current];
+  if (Number(asOf.slice(8, 10)) <= 5) months.push(addMonths(current, -1));
+  const snaps = appCtx.config[CONSUMPTION_KEY] || {};
+  const missing = listMonths(addMonths(current, -12), addMonths(current, -1)).reverse().find((m) => !snaps[m] && !months.includes(m));
+  if (missing) months.push(missing);
+  const shopIds = master.shops.map((s) => String(s.id));
+  const done = [];
+  const failed = [];
+  for (const m of months) {
+    try {
+      const data = await loadDataset(appCtx, master, { months: [m], retention: false, shopIds, refresh: m === current });
+      const bad = data.warnings.find((w) => w.code === 'salesSummary' || w.code === 'consumption');
+      if (bad || data.stale.length) { failed.push({ month: m, error: bad ? bad.message : 'SalonOne から最新のデータを取得できませんでした' }); continue; }
+      const c = computeMonth({ receptions: data.receptions, contracts: data.contracts, month: m, asOf: data.asOf, salesSummaries: data.salesSummaries[m], retentionFromContracts: false });
+      const shops = Object.fromEntries(shopIds.filter((id) => data.salesSummaries[m][id]).map((id) => [id, n(c.shops[id] && c.shops[id].consumedSales)]));
+      const staff = Object.fromEntries(Object.entries(c.staff).map(([id, sm]) => [id, n(sm.consumedSales)]));
+      await saveConsumptionSnapshot(m, { shops, staff }, snaps);
+      done.push(m);
+    } catch (e) {
+      failed.push({ month: m, error: e && e.message ? e.message : String(e) });
+    }
+  }
+  return { mode: 'live', months: done, failed };
+}
+
+/**
+ * 設定画面の「プランの 1回分の金額」: プランごとの 1回分（自動で決まった金額・決め方・設定）と、その月に当てた来店の数
+ * @returns {Promise<{ mode, month, plans:Array<{ name, unit, source, samples, learned, price, sessions, priceUnit, setting, visits, unknownVisits }>, unknownVisits:number }>}
+ */
+export async function buildPlanUnits(staffCtx, { month }) {
+  const { appCtx, master, mapping, scope } = await prepare(staffCtx);
+  if (!scope.all) throw new AccessError('管理者またはオーナーのみ利用できます');
+  const shopIds = [...new Set(mapping.storeToShop.values())];
+  const data = await loadDataset(appCtx, master, { months: [month], retention: false, shopIds });
+  const overrides = appCtx.config[PLAN_UNITS_KEY] || {};
+  const settingOf = (key) => {
+    const hit = Object.entries(overrides).find(([k]) => planKey(k) === key);
+    return hit && Number(hit[1]) > 0 ? Number(hit[1]) : null;
+  };
+  const visits = new Map();
+  const unknown = new Map();
+  for (const r of data.receptions) {
+    if (monthOf(r.date) !== month || !r.valuePlan) continue;
+    const key = planKey(r.valuePlan);
+    const target = r.valueSource === 'unknown' ? unknown : r.valueSource === 'plan' ? visits : null;
+    if (target) target.set(key, (target.get(key) || 0) + 1);
+  }
+  const plans = ((data.consumption && data.consumption.units) || []).map((u) => ({
+    name: u.name, unit: u.unit, source: u.source, samples: u.samples, learned: u.learned, price: u.price, sessions: u.sessions,
+    priceUnit: u.priceUnit, setting: settingOf(u.key), visits: visits.get(u.key) || 0, unknownVisits: unknown.get(u.key) || 0,
+  })).sort((a, b) => (b.unknownVisits - a.unknownVisits) || (b.visits - a.visits) || a.name.localeCompare(b.name, 'ja'));
+  return {
+    mode: master.mode,
+    month,
+    plans,
+    unknownVisits: [...unknown.values()].reduce((s, v) => s + v, 0),
     warnings: dataWarnings(master, data),
   };
 }

@@ -97,7 +97,7 @@ export function SalesTierCard({ item, daily, progress, rules, goal, title = '施
   const goalGap = goal ? goal - current : null;
 
   return (
-    <Card title={title} icon="banknote" subtitle={`評価基準額 1回あたり ${yen(rules.unitPrice)}（SalonOne「消化売上」）`}>
+    <Card title={title} icon="banknote" subtitle={`評価基準額 1回あたり ${yen(rules.unitPrice)}（施術 1回分の金額の合計）`}>
       <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-2">
         <div>
           <div className="text-xs font-semibold text-ink-2">今月の施術消化売上</div>

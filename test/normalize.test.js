@@ -46,7 +46,11 @@ test('受付履歴の明細（仕様の項目名）', () => {
   assert.equal(r.salesAmount, 53000);
   assert.equal(r.cashAmount, 3000); // 分割決済は現金の分だけ
   assert.equal(r.joined, true);
-  assert.deepEqual(r.plans, [{ name: '月2回プラン', kind: 'subscription', amount: 50000 }]);
+  assert.deepEqual(r.plans, [{ name: '月2回プラン', kind: 'subscription', amount: 50000, totalSessions: null }]);
+  assert.equal(r.billing, false);
+  // SalonOne の区分「サブスク課金」の行（来店ではない）は施術 1回分の金額を付けない
+  assert.equal(normalizeReception({ ...HISTORY_ROW, classification: 'subscription_billing' }).billing, true);
+  assert.equal(normalizeReception({ ...HISTORY_ROW, plans: [{ plan_name: '回数券 6回', plan_kind: 'ticket', amount: 30000, total_sessions: 6 }] }).plans[0].totalSessions, 6);
 });
 
 test('状態・区分・現金の判定', () => {
@@ -128,7 +132,7 @@ test('売上サマリ（売上分析）: 全体・日別・スタッフ別。未
   assert.equal(s.repeatCount, 4);
   assert.equal(s.treatmentCount, 6);
   assert.equal(s.purchaseCount, 1);
-  assert.deepEqual(s.daily[0], { date: '2026-10-03', consumedSales: 3000, depositSales: 53000, newCount: 1, repeatCount: 0, treatmentCount: 1, customerCount: null, purchaseCount: null });
+  assert.deepEqual(s.daily[0], { date: '2026-10-03', consumedSales: 3000, depositSales: 53000, newCount: 1, repeatCount: 0, treatmentCount: 1, customerCount: null, purchaseCount: null, productSales: null });
   assert.equal(s.staff.length, 1);
   assert.equal(s.staff[0].staffId, '25');
   assert.equal(s.staff[0].treatmentCount, 4); // 施術数が無ければ 新規 + リピート

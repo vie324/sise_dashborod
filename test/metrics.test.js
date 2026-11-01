@@ -95,7 +95,7 @@ test('最初の予約をキャンセルして後日来店したお客様も新�
   assert.equal(m.staff.s2, undefined); // キャンセルした予約の担当には付けない
 });
 
-test('SalonOne の売上分析の数字（売上サマリ）があればそちらを使う', () => {
+test('売上分析の数字（売上サマリ）を使う。施術消化売上は施術 1回分の合計から物販を差し引く（SalonOne の消化売上は参考）', () => {
   const receptions = [
     R({ date: '2026-11-02', customerId: 'c1', consumedAmount: 8000, salesAmount: 8000, cashAmount: 8000 }),
     R({ date: '2026-11-03', customerId: 'n1', customerClass: 'new', sourceName: 'ホットペッパー', consumedAmount: 3000, salesAmount: 3000, cashAmount: 3000 }),
@@ -103,7 +103,7 @@ test('SalonOne の売上分析の数字（売上サマリ）があればそち�
   ];
   const salesSummaries = {
     A: {
-      consumedSales: 21000, depositSales: 15000, newCount: 1, repeatCount: 3, treatmentCount: 4, customerCount: 3, purchaseCount: 1,
+      consumedSales: 21000, depositSales: 15000, newCount: 1, repeatCount: 3, treatmentCount: 4, customerCount: 3, purchaseCount: 1, productSales: 1700,
       daily: [
         { date: '2026-11-02', consumedSales: 8000, depositSales: 8000, newCount: 0, treatmentCount: 1 },
         { date: '2026-11-03', consumedSales: 3000, depositSales: 3000, newCount: 1, treatmentCount: 1 },
@@ -111,8 +111,8 @@ test('SalonOne の売上分析の数字（売上サマリ）があればそち�
         { date: '2026-11-15', consumedSales: 4000, depositSales: 4000, newCount: 0, treatmentCount: 1 }, // 失効益など
       ],
       staff: [
-        { staffId: 's1', name: '佐藤', consumedSales: 15000, depositSales: 15000, newCount: 1, repeatCount: 2, treatmentCount: 3, customerCount: 2, purchaseCount: 1 },
-        { staffId: 's2', name: '鈴木', consumedSales: 6000, depositSales: 0, newCount: 0, repeatCount: 1, treatmentCount: 1, customerCount: 1, purchaseCount: null },
+        { staffId: 's1', name: '佐藤', consumedSales: 15000, depositSales: 15000, newCount: 1, repeatCount: 2, treatmentCount: 3, customerCount: 2, purchaseCount: 1, productSales: 1100 },
+        { staffId: 's2', name: '鈴木', consumedSales: 6000, depositSales: 0, newCount: 0, repeatCount: 1, treatmentCount: 1, customerCount: 1, purchaseCount: null, productSales: 0 },
         { staffId: 's9', name: '受付履歴に無い人', consumedSales: 1000, depositSales: 0, newCount: 0, repeatCount: 0, treatmentCount: 0, customerCount: 0, purchaseCount: 0 },
       ],
     },
@@ -120,31 +120,47 @@ test('SalonOne の売上分析の数字（売上サマリ）があればそち�
   const m = computeMonth({ receptions, contracts: [], month: '2026-11', asOf: '2026-11-30', salesSummaries });
   const shop = m.shops.A;
   assert.equal(shop.basis, 'salonone');
-  assert.equal(shop.consumedSales, 21000);
+  // 施術 1回分の合計 17,000 − 物販 1,700。物販は初回来店とそれ以外の比（3,000 : 14,000）で分けて差し引く
+  assert.equal(shop.consumedSales, 15300);
+  assert.equal(shop.firstVisitConsumed, 2700);
+  assert.equal(shop.existingConsumedSales, 12600);
+  assert.equal(shop.salonOneConsumedSales, 21000); // SalonOne の売上分析の消化売上（参考）
+  assert.equal(shop.productSales, 1700);
   assert.equal(shop.depositSales, 15000);
   assert.equal(shop.newCount, 1);
   assert.equal(shop.repeatCount, 3);
   assert.equal(shop.treatmentCount, 4);
   assert.equal(shop.purchaseCount, 1);
-  assert.equal(shop.existingConsumedSales, 18000); // 21,000 − 初回来店の 3,000
   assert.equal(shop.cashSales, 11000); // 現金は受付履歴から
-  assert.deepEqual(shop.daily.map((d) => [d.date, d.consumedSales, d.newVisits, d.cashSales]), [
-    ['2026-11-02', 8000, 0, 8000], ['2026-11-03', 3000, 1, 3000], ['2026-11-04', 6000, 0, 0], ['2026-11-15', 4000, 0, 0],
+  // 日別の施術消化売上は受付履歴の形のまま合計に合わせる（入金・施術数は売上分析の日別）
+  assert.deepEqual(shop.daily.map((d) => [d.date, d.consumedSales, d.newVisits, d.cashSales, d.depositSales]), [
+    ['2026-11-02', 7200, 0, 8000, 8000], ['2026-11-03', 2700, 1, 3000, 3000], ['2026-11-04', 5400, 0, 0, 0], ['2026-11-15', 0, 0, 0, 4000],
   ]);
   assert.equal(shop.newVisits.hotpepper, 1); // 経路別は受付履歴から
 
   const sato = m.staff.s1;
-  assert.equal(sato.consumedSales, 15000);
-  assert.equal(sato.existingConsumedSales, 12000);
+  assert.equal(sato.consumedSales, 9900); // 8,000 + 3,000 − 物販 1,100
+  assert.equal(sato.firstVisitConsumed, 2700);
+  assert.equal(sato.existingConsumedSales, 7200);
+  assert.equal(sato.salonOneConsumedSales, 15000);
   assert.equal(sato.purchaseCount, 1);
-  // スタッフの日別は受付履歴の形のまま、合計を売上分析に合わせる
-  assert.equal(sato.daily.reduce((a, d) => a + d.consumedSales, 0), 15000);
-  assert.deepEqual(sato.daily.map((d) => d.consumedSales), [10909, 4091]);
+  assert.deepEqual(sato.daily.map((d) => d.consumedSales), [7200, 2700]);
+  assert.equal(m.staff.s2.consumedSales, 6000);
   assert.equal(m.staff.s2.purchaseCount, 0); // 売上分析に無い項目は受付履歴のまま
-  assert.equal(m.staff.s9.consumedSales, 1000);
+  // 受付履歴に施術の無い人は 0円（SalonOne の消化売上は参考に残す）
+  assert.equal(m.staff.s9.consumedSales, 0);
+  assert.equal(m.staff.s9.salonOneConsumedSales, 1000);
   assert.equal(m.staff.s9.name, '受付履歴に無い人');
   assert.equal(m.staff.s9.shopId, 'A');
-  assert.equal(combineShops([shop]).newCount, 1);
+  const all = combineShops([shop]);
+  assert.equal(all.newCount, 1);
+  assert.equal(all.salonOneConsumedSales, 21000);
+  assert.equal(all.productSales, 1700);
+
+  // その月の受付履歴を取っていない店舗は、物販を差し引かない（施術の合計に入っていないので）
+  const other = computeMonth({ receptions: [], contracts: [], month: '2026-11', asOf: '2026-11-30', salesSummaries });
+  assert.equal(other.shops.A.consumedSales, 0);
+  assert.equal(other.staff.s1.consumedSales, 0);
 });
 
 test('現金は分割決済の内訳（cashAmount）を優先する', () => {

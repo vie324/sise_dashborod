@@ -8,6 +8,7 @@ import { yen, yenShort, num, pct } from '../../lib/format.js';
 import { navigate } from '../../app/router.js';
 import { buildGoalPlan, monthFrequency, CONTRACT_VISITS } from '../../../shared/goal-plan.js';
 import { monthOf, monthProgress, formatMonthJa, monthsBetween } from '../../../shared/dates.js';
+import ConsumedBasisNote from '../shared/ConsumedBasisNote.jsx';
 
 // ============================================================
 // 特別目標の「達成までの道すじ」
@@ -244,6 +245,7 @@ function HistoryBlock({ plan, trend, goal }) {
     <div>
       <ColumnChart data={chart} target={goal.target} targetLabel="目標" format={short} height={190} ariaLabel={`月別の${metric === 'consumedSales' ? '施術消化売上' : metric === 'newCount' ? '新規数' : '会員数'}と目標`} />
       <p className="mt-1 text-[11px] text-muted">* 今月は途中までの実績。横線が目標です。</p>
+      {metric === 'consumedSales' ? <ConsumedBasisNote months={rows.filter((m) => m.consumedBasis === 'salonone').map((m) => m.month)} /> : null}
       <ChartTable
         columns={[
           { key: 'month', label: '月', render: (r) => <span className="whitespace-nowrap">{formatMonthJa(r.month)}{baseMonths.has(r.month) ? ' ●' : ''}</span> },

@@ -10,6 +10,7 @@ import { CHANNELS, channelLabel } from '../../../shared/channels.js';
 import { formatMonthJa, dayOfMonth, weekdayOf } from '../../../shared/dates.js';
 import { forecastMonthEnd } from '../../../shared/metrics.js';
 import { ScopeBar, DataWarnings } from '../shared/ScopeBar.jsx';
+import ConsumedBasisNote from '../shared/ConsumedBasisNote.jsx';
 import { navigate } from '../../app/router.js';
 
 const WD = ['日', '月', '火', '水', '木', '金', '土'];
@@ -24,7 +25,8 @@ function Kpis({ data }) {
   const rate = s.newCount > 0 && s.purchaseCount != null ? (s.purchaseCount / s.newCount) * 100 : null;
   return (
     <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-6">
-      <StatTile label="施術消化売上" icon="banknote" value={yen(s.consumedSales)} delta={changeRate(fc(s.consumedSales), prev && prev.consumedSales)} deltaSuffix={suffix} sub="SalonOne の消化売上" />
+      <StatTile label="施術消化売上" icon="banknote" value={yen(s.consumedSales)} delta={changeRate(fc(s.consumedSales), prev && prev.consumedSales)} deltaSuffix={suffix}
+        sub={s.salonOneConsumedSales != null ? `SalonOne の消化売上 ${yen(s.salonOneConsumedSales)}` : '施術 1回分の合計'} />
       <StatTile label="入金売上" icon="wallet" value={yen(s.depositSales)} delta={changeRate(fc(s.depositSales), prev && prev.depositSales)} deltaSuffix={suffix} />
       <StatTile label="施術数" icon="hand-heart" value={`${num(s.treatmentCount)}回`} delta={changeRate(fc(s.treatmentCount), prev && prev.treatmentCount)} deltaSuffix={suffix}
         sub={s.treatmentCount ? `1回あたり ${yen(s.consumedSales / s.treatmentCount)}` : null} />
@@ -39,6 +41,8 @@ function Kpis({ data }) {
 function TrendCard({ trend, month }) {
   if (!trend) return <Skeleton className="h-[320px] rounded-2xl" />;
   const rows = trend.months.filter((m) => !m.future);
+  // 施術消化売上の記録が無い月（SalonOne の売上分析の消化売上で埋めた月）
+  const oldBasis = rows.filter((m) => m.consumedBasis === 'salonone');
   const data = rows.map((m) => ({ key: m.month, label: `${Number(m.month.slice(5))}月`, value: m.consumedSales, sub: `施術 ${num(m.treatmentCount)}回・新規 ${num(m.newCount)}名` }));
   return (
     <Card title="施術消化売上の推移（月別）" icon="chart-column" subtitle={`直近${rows.length}ヶ月・${formatMonthJa(month)}を強調`}>
@@ -57,6 +61,7 @@ function TrendCard({ trend, month }) {
         ]}
         rows={rows}
       />
+      {oldBasis.length ? <ConsumedBasisNote months={oldBasis.map((m) => m.month)} /> : null}
     </Card>
   );
 }
@@ -197,7 +202,7 @@ export default function SalesPage() {
   const data = summary.shown;
   return (
     <div>
-      <PageHeader title="売上分析" subtitle="消化売上・入金売上・施術数・新規数・既存数・契約数は SalonOne の売上分析と同じ数字です" />
+      <PageHeader title="売上分析" subtitle="施術消化売上は施術 1回分の金額の合計、入金売上・施術数・新規数・既存数・契約数は SalonOne の売上分析と同じ数字です" />
       <ScopeBar data={data} />
       <DataWarnings data={data} error={summary.error} />
       {!data ? <Skeleton className="h-[480px] rounded-2xl" /> : (
@@ -216,7 +221,7 @@ export default function SalesPage() {
           ) : null}
           <p className="flex items-center gap-1.5 text-xs text-muted">
             <Icon name="info" size={13} />
-            SalonOne の売上分析と同じ数字です：施術消化売上 ＝ 消化売上、既存数 ＝ リピート（2回目以降の来店）数、契約数 ＝ 購入数（新規のお客様のうち回数券・サブスクを契約した人数。後の月の契約も含む）。経路別は受付履歴から集計しています。
+            施術消化売上は施術 1回分の金額の合計です（都度・初回は払った施術代、サブスクは月額 ÷ 月の回数、回数券は購入額 ÷ 回数。プランの購入・失効・物販は含めません）。入金売上・施術数・新規数・既存数（2回目以降の来店）・契約数（新規のお客様のうち回数券・サブスクを契約した人数。後の月の契約も含む）は SalonOne の売上分析と同じ数字、経路別は受付履歴から集計しています。
           </p>
         </div>
       )}

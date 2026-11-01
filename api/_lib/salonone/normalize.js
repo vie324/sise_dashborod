@@ -159,8 +159,13 @@ function normalizePlans(raw) {
     name: String(pick(p, ['plan_name', 'name'], '')),
     kind: String(pick(p, ['plan_kind', 'kind', 'type'], '')).toLowerCase(),
     amount: toNum(pick(p, ['amount'], 0)),
+    // 回数券の回数（サブスクは null。施術 1回分の金額 = 購入額 ÷ 回数 に使う）
+    totalSessions: toNumOrNull(pick(p, ['total_sessions', 'totalSessions'])),
   }));
 }
+
+// 来店ではない課金の行（SalonOne の受付履歴の区分「サブスク課金」）。施術 1回分の金額を付けない
+const BILLING = /bill|課金|charge/i;
 
 /**
  * 受付履歴の明細 1行 → 受付レコード
@@ -182,6 +187,7 @@ export function normalizeReception(raw) {
     date: toJstDate(pick(raw, ['reserved_at', 'reservedAt', 'start_at', 'visit_date', 'date'])),
     status,
     customerClass: normalizeCustomerClass(raw),
+    billing: BILLING.test(String(pick(raw, ['classification', 'customer_class', 'customerClass'], ''))),
     sourceName: sourceName == null ? '' : String(sourceName),
     consumedAmount: toNum(pick(raw, ['consumed_amount', 'consumedAmount', 'consumed', 'consumed_sales'], 0)),
     salesAmount,
@@ -297,6 +303,8 @@ function normalizeSalesRow(raw) {
     treatmentCount: numOrNull(['treatment_count', 'treatments']) ?? visits,
     customerCount: numOrNull(['customer_count']),
     purchaseCount: numOrNull(['purchase_count']),
+    // 物販売上（入金売上に含まれる商品の売上。施術消化売上から差し引く）
+    productSales: numOrNull(['product_sales']),
   };
 }
 
@@ -331,6 +339,19 @@ export function retentionCounts(summary) {
 }
 
 export const isChurnedStatus = (v) => /churn|離反/i.test(String(v || ''));
+
+/**
+ * 継続管理の顧客一覧 → お客様のプラン（施術 1回分の金額で、消化額が 0円の来店に当てるプランを探す）
+ * @returns {Array<{ customerId:string, planName:string, churned:boolean, paymentAt:string }>}
+ */
+export function normalizeRetentionPlans(customers) {
+  return (customers || []).map((c) => ({
+    customerId: toId(pick(c, ['customer_id', 'customerId', 'id'])),
+    planName: String(pick(c, ['plan_name', 'planName'], '')),
+    churned: isChurnedStatus(pick(c, ['status', 'state'])),
+    paymentAt: String(pick(c, ['payment_at', 'paymentAt'], '') || ''),
+  })).filter((p) => p.customerId && p.planName);
+}
 
 /**
  * 継続管理の顧客一覧をお客様ごとにまとめる（1人が複数のプランを持つと複数行になるため）。

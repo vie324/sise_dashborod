@@ -18,7 +18,7 @@ export const INCENTIVE_RULES = Object.freeze({
   // の平均 8,250円 を元に、分かりやすい基準額として 8,000円 に設定。
   unitPrice: 8000,
 
-  // 1. 施術消化売上インセンティブ（SalonOne「消化売上」を評価基準とする）
+  // 1. 施術消化売上インセンティブ（施術 1回分の金額の合計を評価基準とする。shared/consumption.js。2026年11月から）
   sales: {
     key: 'sales',
     label: '施術消化売上',

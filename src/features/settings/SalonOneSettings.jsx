@@ -7,6 +7,8 @@ import { useResource, useStores, useStaffList, saveDashConfig, refreshSalonOne, 
 import { CHANNELS, guessChannel, channelLabel } from '../../../shared/channels.js';
 import { copyText } from './clipboard.js';
 import { roleLabel, isOwnerRole } from '../../../shared/roles.js';
+import { monthOf, todayJst, addMonths, formatMonthJa } from '../../../shared/dates.js';
+import { yen } from '../../lib/format.js';
 
 // 名前の表記ゆれ（全角/半角スペース・敬称）を吸収して比較する
 const normName = (s) => String(s || '').replace(/[\s　]/g, '').replace(/(さん|先生)$/, '').toLowerCase();
@@ -194,6 +196,99 @@ function MappingSection({ title, icon, subtitle, rows, options, value, onChange,
   );
 }
 
+/** 自動で決まった 1回分の金額の説明 */
+function autoLabel(p) {
+  if (p.learned) return `${yen(p.learned)}（SalonOne の消化額・${p.samples}件）`;
+  if (p.priceUnit) return `${yen(p.priceUnit)}（${yen(p.price)} ÷ ${p.sessions}回）`;
+  return '自動では決まりません';
+}
+
+/**
+ * プランの施術 1回分の金額（施術消化売上で、SalonOne の消化額が 0円のサブスクの来店に当てる金額）。
+ * 自動で決まった金額と決め方を出し、決まらない・違うプランだけ金額を入れる（dash_config 'salonone.planUnits'）
+ */
+function PlanUnitsCard({ demo }) {
+  const thisMonth = monthOf(todayJst());
+  const [month, setMonth] = useState(thisMonth);
+  const res = useResource(demo ? null : `salonone-plan-units:${month}`, () => salonOne('planUnits', { month }), { maxAge: 5 * 60 * 1000 });
+  const data = res.shown;
+  const [draft, setDraft] = useState({});
+  const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    if (data) setDraft(Object.fromEntries(data.plans.filter((p) => p.setting).map((p) => [p.name, String(p.setting)])));
+  }, [data]);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const clean = Object.fromEntries(Object.entries(draft).map(([k, v]) => [k, Math.round(Number(String(v).replace(/[,，円\s]/g, '')))]).filter(([, v]) => v > 0));
+      await saveDashConfig('salonone.planUnits', clean);
+      refreshSalonOne();
+      invalidate('salonone-plan-units:');
+      showToast('プランの 1回分の金額を保存しました', 'success');
+    } catch (e) {
+      showToast(e.message, 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Card title="プランの 1回分の金額" icon="calculator"
+      subtitle="施術消化売上は施術 1回分の金額の合計です。SalonOne の消化額が 0円のサブスクの来店には、そのお客様のプランのこの金額を当てます。自動で決まらない・違うプランだけ入れてください">
+      {demo ? null : (
+        <div className="mb-3 flex items-center justify-between gap-2">
+          <span className="text-xs text-muted">来店の数を見る月</span>
+          <Select value={month} onChange={(e) => setMonth(e.target.value)} aria-label="来店の数を見る月" className="h-9 w-auto py-1 text-[13px]">
+            {[0, 1, 2].map((i) => addMonths(thisMonth, -i)).map((m) => <option key={m} value={m}>{formatMonthJa(m)}</option>)}
+          </Select>
+        </div>
+      )}
+      {demo ? (
+        <p className="text-[13px] text-muted">APIキーを登録すると、SalonOne のプランが並びます。</p>
+      ) : res.error && !data ? (
+        <Banner tone="bad" title="プランの情報を取得できませんでした">{res.error.message}</Banner>
+      ) : !data ? (
+        <Skeleton className="h-40 rounded-xl" />
+      ) : data.plans.length === 0 ? (
+        <EmptyState compact icon="tags" title="プランがまだありません" message="サブスク・回数券のお客様が来店すると、ここに並びます" />
+      ) : (
+        <>
+          {data.unknownVisits > 0 ? (
+            <Banner tone="warn" className="mb-3" title={`${formatMonthJa(month)}に 1回分の金額がわからない来店が ${data.unknownVisits}件あります`}>
+              施術消化売上に入っていません。「わからない来店」のあるプランに金額を入れて保存してください。
+            </Banner>
+          ) : null}
+          <ul className="divide-y divide-line overflow-hidden rounded-xl border border-line">
+            {data.plans.map((p) => (
+              <li key={p.name} className="flex flex-col gap-2 px-3 py-2.5 sm:flex-row sm:items-center sm:gap-3">
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="truncate text-sm font-bold text-ink">{p.name}</span>
+                    {p.unknownVisits > 0 ? <Badge tone="bad" icon="circle-alert">わからない来店 {p.unknownVisits}件</Badge> : null}
+                    {p.visits > 0 ? <Badge tone="info">0円の来店に当てた {p.visits}件</Badge> : null}
+                  </div>
+                  <div className="mt-0.5 text-xs text-muted">自動: {autoLabel(p)}</div>
+                </div>
+                <label className="flex shrink-0 items-center gap-2">
+                  <span className="text-xs text-ink-2 sm:hidden">設定</span>
+                  <Input inputMode="numeric" value={draft[p.name] || ''} placeholder={p.learned || p.priceUnit ? String(p.learned || p.priceUnit) : '金額'}
+                    onChange={(e) => setDraft((d) => ({ ...d, [p.name]: e.target.value }))} aria-label={`${p.name} の 1回分の金額`} className="h-10 w-full py-1 text-right sm:w-32" />
+                  <span className="text-sm text-ink-2">円</span>
+                </label>
+              </li>
+            ))}
+          </ul>
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+            <p className="text-xs text-muted">空欄のプランは自動の金額を使います。物販は来店ごとに分けられないため、月の合計から SalonOne の物販売上を差し引きます。</p>
+            <Button variant="primary" icon="save" loading={saving} onClick={save}>保存</Button>
+          </div>
+        </>
+      )}
+    </Card>
+  );
+}
+
 export default function SalonOneSettings() {
   const status = useResource('salonone-status', () => salonOne('status'), { maxAge: 60 * 1000 });
   const masterRes = useResource('salonone-master', () => salonOne('master'), { maxAge: 5 * 60 * 1000 });
@@ -300,6 +395,7 @@ export default function SalonOneSettings() {
                 onClick={() => save('salonone.planRules', planRules, 'プランの判定')}>保存</Button>
             </div>
           </Card>
+          <PlanUnitsCard demo={demo} />
           <p className={cx('flex items-start gap-1.5 text-xs leading-relaxed text-muted')}>
             <Icon name="shield-check" size={14} className="mt-px" />
             APIキーはサーバーの環境変数にのみ保存され、ブラウザやスタッフの端末には送られません。SalonOne のデータは読み取りのみで、書き換えることはありません。

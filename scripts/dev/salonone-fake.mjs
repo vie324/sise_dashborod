@@ -49,8 +49,10 @@ const staffName = (id) => {
 /**
  * 1店舗・1ヶ月分の受付履歴。どの月を指定しても同じ並びを返す（日付だけ月に合わせる）。
  * 中央店（101）の 1ヶ月の期待値:
- *   会計完了 6件 / 消化 29,000 / 会計金額 103,000 / 現金 17,000（分割決済は現金の分だけ）
- *   佐藤（201）消化 20,000・4回 / 鈴木（202）消化 9,000・2回
+ *   会計完了 7件 / SalonOne の消化額 31,000 / 会計金額 105,000 / 現金 17,000（分割決済は現金の分だけ）
+ *   施術 1回分の合計 37,000（10日の鈴木の来店は SalonOne の消化額が 0円のサブスクの来店 → 月2回プランの 1回分 6,000円。
+ *   1回分は 6日の同じプランのお客様の来店で SalonOne が付けた 6,000円から）。物販 2,000円（7日・佐藤）を差し引いて 35,000
+ *   佐藤（201）22,000 − 物販 2,000 = 20,000・4回 / 鈴木（202）15,000・3回
  *   新規（会計完了）3名: HPB（佐藤・サブスク契約）/ Instagram（鈴木・契約なし）/ 紹介（佐藤・入会のみ）
  * 駅前店（102）: 田中（203）消化 14,000・2回 / 現金 7,000
  */
@@ -78,12 +80,15 @@ function receptionRows(shopId, month) {
       row({ id: Number(`${p}03`), customer: nc(2), day: 4, staff: 202, cls: 'new', source: 'Instagram', sourceId: 2, consumed: 3000, amount: 3000, method: '現金' }),
       row({ id: Number(`${p}04`), customer: nc(3), day: 5, staff: 202, cls: 'new', source: 'ホットペッパー', sourceId: 1, status: 'cancelled', cancelType: 'same_day' }),
       row({ id: Number(`${p}05`), customer: 9002, day: 6, staff: 202, consumed: 6000, amount: 0 }),
+      // 回数券を買って 1回目を使い、物販 2,000円も買った（消化額 = 回数券の 1回分 6,000 + 物販 2,000）
       row({
-        id: Number(`${p}06`), customer: 9003, day: 7, staff: 201, cls: 'continuing', consumed: 6000, amount: 36000, method: 'クレジットカード',
+        id: Number(`${p}06`), customer: 9003, day: 7, staff: 201, cls: 'continuing', consumed: 8000, amount: 38000, method: 'クレジットカード',
         plans: [{ plan_name: '回数券 6回', plan_kind: 'ticket', amount: 30000, total_sessions: 6 }],
       }),
       row({ id: Number(`${p}07`), customer: nc(4), day: 8, staff: 201, cls: 'new', source: '紹介', sourceId: 3, consumed: 3000, amount: 3000, joined: true, method: '現金' }),
       row({ id: Number(`${p}08`), customer: 9004, day: 27, hm: '18:00', staff: 201, status: 'booked' }),
+      // サブスクの来店だが SalonOne の消化額が 0円（継続管理の顧客一覧で 月2回プラン のお客様）
+      row({ id: Number(`${p}09`), customer: 9005, day: 10, staff: 202, consumed: 0, amount: 0 }),
     ];
   }
   if (shopId === 102) {
@@ -139,10 +144,11 @@ function salesSummary(shopId, month) {
     cancellation_fee_amount: 0, refund_amount: o.refund ?? 0, non_sales_refund_amount: 0,
     new_visit_count: o.newCount ?? 0, repeat_visit_count: o.repeat ?? 0, customer_count: o.customers ?? 0,
     cancel_count: o.cancel ?? 0, no_show_count: 0, treatment_count: o.treatments ?? 0, purchase_count: o.purchase ?? 0,
+    product_sales: o.product ?? 0,
   });
   if (shopId === 101) {
     return {
-      ...row({ consumed: 34000, digest: 98000, refund: 5000, newCount: 2, repeat: 4, customers: 6, cancel: 1, treatments: 6, purchase: 1 }),
+      ...row({ consumed: 34000, digest: 98000, refund: 5000, newCount: 2, repeat: 4, customers: 6, cancel: 1, treatments: 6, purchase: 1, product: 2000 }),
       by_day: [
         { date: d(2), ...row({ consumed: 8000, digest: 8000, repeat: 1, customers: 1, treatments: 1 }) },
         { date: d(3), ...row({ consumed: 3000, digest: 53000, newCount: 1, customers: 1, treatments: 1, purchase: 1 }) },
@@ -153,7 +159,7 @@ function salesSummary(shopId, month) {
         { date: d(20), ...row({ consumed: 5000, digest: -5000, refund: 5000 }) },
       ],
       by_staff: [
-        { staff_id: 201, staff_name: '佐藤 美咲', ...row({ consumed: 25000, digest: 94000, newCount: 1, repeat: 3, customers: 4, treatments: 4, purchase: 1 }) },
+        { staff_id: 201, staff_name: '佐藤 美咲', ...row({ consumed: 25000, digest: 94000, newCount: 1, repeat: 3, customers: 4, treatments: 4, purchase: 1, product: 2000 }) },
         { staff_id: 202, staff_name: '鈴木 健太', ...row({ consumed: 9000, digest: 3000, newCount: 1, repeat: 1, customers: 2, treatments: 2 }) },
         { staff_id: null, staff_name: '未割当', ...row({ refund: 0 }) },
       ],
@@ -182,6 +188,7 @@ const RETENTION = {
       threshold_days: 30,
     },
     months: [2, 4, 6],
+    planCustomers: [9002, 9005],
   },
   102: {
     summary: { continuing_count: 10, follow_count: 1, attention_count: 1, churned_count: 2, balance_total: 0, previous_month: { continuing_count: 12, follow_count: 0, attention_count: 0, churned_count: 2 } },
@@ -262,6 +269,13 @@ export function fakeSalonOne(url, headers = {}) {
         customer_id: shopId * 100 + i, shop_id: shopId, status: 'normal', plan_name: '月2回プラン', subscription_months: m,
         remaining_sessions: null, service_balance: 0, cumulative_sales: 50000 * (m + 1), payment_at: '2026-10-01', last_visit_at: '2026-10-05',
       }));
+      // 受付履歴のお客様のプラン（施術 1回分の金額に使う。継続月数が無いので平均継続期間には入らない）
+      for (const id of (r && r.planCustomers) || []) {
+        rows.push({
+          customer_id: id, shop_id: shopId, status: 'normal', plan_name: '月2回プラン', subscription_months: null,
+          remaining_sessions: null, service_balance: 0, cumulative_sales: 0, payment_at: '2026-10-01', last_visit_at: '2026-10-06',
+        });
+      }
       return json(200, { data: rows, meta: meta(rows.length, false) });
     }
     default:

@@ -367,10 +367,12 @@ function personalBest(trend, me, month) {
   if (!trend || !trend.staff) return null;
   const row = trend.staff.find((r) => r.key === me.key) || (trend.staff.length === 1 ? trend.staff[0] : null);
   if (!row) return null;
+  // 施術消化売上の記録が無い月（SalonOne の売上分析の消化売上で埋めた月）は数え方が違うので比べない
+  const oldBasis = new Set((trend.months || []).filter((m) => m.consumedBasis === 'salonone').map((m) => m.month));
   let best = 0;
   let bestMonth = null;
   for (const [m, v] of Object.entries(row.values || {})) {
-    if (m >= month) continue;
+    if (m >= month || oldBasis.has(m)) continue;
     if (v > best) { best = v; bestMonth = m; }
   }
   return best > 0 ? { value: best, month: bestMonth } : null;
