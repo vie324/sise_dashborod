@@ -38,9 +38,11 @@ function sourceDb() {
     daily_check_items: [
       { id: 'dci-1', brand_id: 'b1', section: 'start', label: '当日の予約確認', sort_order: 20, is_active: true, created_at: T },
       { id: 'dci-2', brand_id: 'b1', section: 'end', label: '看板をしまう', sort_order: 200, is_active: true, created_at: T },
+      { id: 'dci-3', brand_id: 'b1', section: 'end', label: '戸締り(入口)', sort_order: 70, is_active: true, created_at: T },
+      { id: 'dci-4', brand_id: 'b2', section: 'end', label: '別ブランドだけの項目', sort_order: 10, is_active: true, created_at: T },
     ],
     daily_reports: [{ id: 'd1', user_id: 'u-sato', report_date: '2026-10-20', condition: null, learnings: '学び', challenges: null, tomorrow: null, memo: 'メモ', status: 'submitted', submitted_at: T, created_at: T, updated_at: T }],
-    daily_report_checks: [{ id: 'dc1', report_id: 'd1', check_item_id: 'dci-1', checked: true }, { id: 'dc2', report_id: 'd1', check_item_id: 'dci-2', checked: false }],
+    daily_report_checks: [{ id: 'dc1', report_id: 'd1', check_item_id: 'dci-1', checked: true }, { id: 'dc2', report_id: 'd1', check_item_id: 'dci-2', checked: false }, { id: 'dc3', report_id: 'd1', check_item_id: 'dci-3', checked: true }],
     daily_report_comments: [],
   }));
   return createMockClient(file);
@@ -65,6 +67,15 @@ test('名前の対応付け: 同じ名前・名前で始まる人が 1人・--ma
   assert.deepEqual(unmatched.map((u) => u.profile.id), ['p2', 'p4']);
   const forced = mapProfiles(profiles, staff, { 鈴木: 'c' });
   assert.equal(forced.map.get('p2').id, 'c');
+});
+
+test('名前の対応付け: 同じ名前が複数いても、在籍中が 1人ならその人', () => {
+  const staff = [{ id: 'x1', name: '佐藤 享哉', status: 'inactive' }, { id: 'x2', name: '佐藤 享哉 ', status: 'active' }, { id: 'x3', name: '佐藤　享哉', status: 'inactive' }];
+  const { map, unmatched } = mapProfiles([{ id: 'p1', display_name: '佐藤' }], staff);
+  assert.equal(map.get('p1').id, 'x2');
+  assert.equal(unmatched.length, 0);
+  const both = mapProfiles([{ id: 'p1', display_name: '佐藤' }], staff.map((s) => ({ ...s, status: 'active' })));
+  assert.equal(both.unmatched[0].reason, '同じ名前のスタッフが複数います');
 });
 
 test('確認だけ（--apply なし）では書き込まない', async () => {
@@ -101,6 +112,10 @@ test('移行: チャート・週報・日報・コメント・設定を移し、
   const common = db.mandala_daily_check_items.find((i) => i.label === '当日の予約確認' && i.id !== 'dci-1');
   assert.ok(reportChecks.some((x) => x.check_item_id === common.id && x.checked));
   assert.ok(db.mandala_daily_check_items.some((i) => i.id === 'dci-2' && i.store_id === null));
+  // 全角・半角の違いは同じ項目として扱い、移す日報で使っていない別ブランドの項目は足さない
+  const lock = db.mandala_daily_check_items.find((i) => i.label === '戸締り（入口）');
+  assert.ok(reportChecks.some((x) => x.id === 'dc3' && x.check_item_id === lock.id));
+  assert.ok(!db.mandala_daily_check_items.some((i) => i.id === 'dci-3' || i.id === 'dci-4'));
   assert.equal(db.mandala_daily_reports[0].memo, 'メモ');
   // メンバーの設定と共有の範囲（ブランド内 → 同じ店舗内）
   const sato = db.mandala_members.find((m) => m.staff_id === 'st-sato');
