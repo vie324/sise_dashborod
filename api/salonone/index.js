@@ -29,7 +29,7 @@ import {
 } from '../_lib/salonone/summary.js';
 import { buildVisits } from '../_lib/salonone/visits.js';
 import { listCrossStore, crossStoreCandidates, addCrossStore, deleteCrossStore } from '../_lib/salonone/cross-handlers.js';
-import { salonOneConfig, probe } from '../_lib/salonone/client.js';
+import { salonOneConfig, probe, apiKeyHint } from '../_lib/salonone/client.js';
 import { clearSalonOneCache, snapshotRetention, loadAppContext, planPatterns } from '../_lib/salonone/provider.js';
 import { isMonth, todayJst, monthOf, addMonths, monthRange } from '../../shared/dates.js';
 import { INCENTIVE_RULES } from '../../shared/incentive-rules.js';
@@ -116,6 +116,8 @@ export default async function handler(req, res) {
           // URL やキーの値そのものは管理者にだけ見せる
           baseUrl: isAdminOrOwner(staffCtx) ? cfg.baseUrl : undefined,
           endpoints: isAdminOrOwner(staffCtx) ? cfg.endpoints : undefined,
+          // 使っているキーの先頭（SalonOne の「API連携」の一覧と見比べる用）。キー全体は返さない
+          key: isAdminOrOwner(staffCtx) && cfg.configured ? apiKeyHint(cfg.apiKey) : undefined,
           today,
           rules: INCENTIVE_RULES,
         });
@@ -195,7 +197,7 @@ export default async function handler(req, res) {
         // 継続管理のプラン名が都度払いのキーワード（設定）に当たるかも出す
         const { payPerVisitPattern } = planPatterns(await loadAppContext());
         const results = await probe(cfg, { from: monthRange(prev).from, to: today, payPerVisitPattern });
-        return res.json({ configured: true, baseUrl: cfg.baseUrl, results });
+        return res.json({ configured: true, baseUrl: cfg.baseUrl, key: apiKeyHint(cfg.apiKey), results });
       }
       case 'clearCache': {
         if (req.method !== 'POST') return res.status(405).json({ error: 'POST で呼び出してください' });
