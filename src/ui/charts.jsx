@@ -331,12 +331,13 @@ export function RadarChart({ axes, values, max = 5, size = 240, stroke = '#2f855
 }
 
 /** チャートと同じ値を表で見せる（アクセシビリティ / 正確な値の確認用） */
-export function ChartTable({ columns, rows, className = '' }) {
+export function ChartTable({ columns, rows, className = '', label = '表で見る', children }) {
   return (
     <details className={cx('group mt-3', className)}>
       <summary className="inline-flex cursor-pointer list-none items-center gap-1 rounded-lg px-2 py-1 text-xs font-semibold text-ink-2 hover:bg-surface-3">
-        <span className="transition-transform group-open:rotate-90">›</span> 表で見る
+        <span className="transition-transform group-open:rotate-90">›</span> {label}
       </summary>
+      {children}
       <div className="scroll-x mt-2 rounded-xl border border-line">
         <table className="data-table">
           <thead>

@@ -7,6 +7,13 @@ export function currentPath() {
   return h.startsWith('/') ? h.split('?')[0] : '/';
 }
 
+/** ハッシュの ? より後（#/sales?focus=new → focus=new） */
+export function currentQuery() {
+  const h = window.location.hash;
+  const i = h.indexOf('?');
+  return new URLSearchParams(i >= 0 ? h.slice(i + 1) : '');
+}
+
 /** '/mandala/review/2026-10-26' → '/mandala' */
 export function basePath(path) {
   const seg = String(path || '/').split('/')[1] || '';

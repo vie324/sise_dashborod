@@ -91,7 +91,7 @@ export function StatusPill({ status, label, className = '' }) {
 }
 
 /** 目標に対する進捗。marker = 今日時点で本来あるべき位置（ペース） */
-export function Meter({ value, max, marker, tone = 'brand', height = 8, className = '', label }) {
+export function Meter({ value, max, marker, markerTitle = '今日時点のペース', tone = 'brand', height = 8, className = '', label }) {
   const ratio = max > 0 ? Math.max(0, Math.min(1, value / max)) : 0;
   const markerRatio = marker != null && max > 0 ? Math.max(0, Math.min(1, marker / max)) : null;
   const fill = tone === 'gold' ? 'bg-gold-500' : tone === 'warn' ? 'bg-[var(--status-warn)]' : tone === 'good' ? 'bg-[var(--status-good)]' : 'bg-[var(--chart-sales)]';
@@ -102,7 +102,7 @@ export function Meter({ value, max, marker, tone = 'brand', height = 8, classNam
         <div className={cx('h-full rounded-full transition-[width] duration-500', fill)} style={{ width: `${ratio * 100}%` }} />
       </div>
       {markerRatio != null ? (
-        <span className="absolute top-1/2 h-[calc(100%+6px)] w-[2px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-ink/60" style={{ left: `${markerRatio * 100}%` }} title="今日時点のペース" />
+        <span className="absolute top-1/2 h-[calc(100%+6px)] w-[2px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-ink/60" style={{ left: `${markerRatio * 100}%` }} title={markerTitle} />
       ) : null}
     </div>
   );
