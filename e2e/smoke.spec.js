@@ -18,6 +18,18 @@ test.describe('基本起動', () => {
     await expect(page.locator('h1').first()).toBeVisible();
   });
 
+  test('売上分析に「新規の内訳と媒体別の契約率」が出る（ホームの新規数から開く URL）', async ({ page }) => {
+    await page.goto('/#/sales?focus=new');
+    const card = page.getByRole('heading', { name: '新規の内訳と媒体別の契約率' });
+    const login = page.getByRole('heading', { name: '管理者ログイン' });
+    await expect(card.or(login)).toBeVisible({ timeout: 20000 });
+    // 管理者ログインが必要な環境（REQUIRE_ADMIN_AUTH=true）では、ここから先は確かめない
+    test.skip(await login.isVisible(), '管理者ログインが必要な環境');
+    await expect(page.getByRole('heading', { name: '新規の内訳', exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '媒体別の契約率', exact: true })).toBeVisible();
+    await expect(page.getByText('3経路の合計')).toBeVisible();
+  });
+
   test('ビルド成果物 (JS / CSS) が配信される', async ({ request }) => {
     const js = await request.get('/assets/app.js');
     expect(js.status()).toBe(200);

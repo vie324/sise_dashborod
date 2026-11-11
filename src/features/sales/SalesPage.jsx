@@ -1,17 +1,17 @@
+import { useEffect } from 'react';
 import { useApp } from '../../app/state.jsx';
 import { useSummary, useTrend } from '../../lib/hooks.js';
-import { isAdminLike } from '../../lib/access.js';
 import { PageHeader, Card, Skeleton, EmptyState, Badge, cx } from '../../ui/primitives.jsx';
 import { StatTile } from '../../ui/stats.jsx';
-import { ColumnChart, BarList, ChartTable } from '../../ui/charts.jsx';
+import { ColumnChart, ChartTable } from '../../ui/charts.jsx';
 import Icon from '../../ui/Icon.jsx';
 import { yen, yenShort, num, pct, changeRate } from '../../lib/format.js';
-import { CHANNELS, channelLabel } from '../../../shared/channels.js';
 import { formatMonthJa, dayOfMonth, weekdayOf } from '../../../shared/dates.js';
 import { forecastMonthEnd } from '../../../shared/metrics.js';
 import { ScopeBar, DataWarnings } from '../shared/ScopeBar.jsx';
 import ConsumedBasisNote from '../shared/ConsumedBasisNote.jsx';
-import { navigate } from '../../app/router.js';
+import { currentQuery } from '../../app/router.js';
+import NewBreakdownCard from './NewBreakdownCard.jsx';
 
 const WD = ['日', '月', '火', '水', '木', '金', '土'];
 
@@ -92,56 +92,6 @@ function DailyCard({ data }) {
   );
 }
 
-function ChannelCard({ data }) {
-  const s = data.store;
-  const items = CHANNELS.map((c) => ({
-    key: c.key,
-    label: c.label,
-    value: s.newVisits[c.key] || 0,
-    contracts: s.newContracts[c.key] || 0,
-  })).filter((i) => i.value > 0 || ['hotpepper', 'meta', 'homepage'].includes(i.key))
-    .sort((a, b) => b.value - a.value);
-  return (
-    <Card title="経路別の新規来店と契約" icon="route" subtitle="SalonOne の「来店経由」を経路にまとめて集計（インセンティブの判定に使う数字）">
-      <div className="grid gap-x-8 gap-y-5 lg:grid-cols-2">
-        <div className="min-w-0">
-          <BarList
-            items={items.map((i) => ({ ...i, sub: `契約 ${i.contracts}件${i.value ? `（${pct((i.contracts / i.value) * 100, 0)}）` : ''}` }))}
-            format={(v) => `${num(v)}名`}
-            emptyText="この月の新規来店はまだありません"
-          />
-          {s.newCount != null && s.newVisitTotal !== s.newCount ? (
-            <p className="mt-3 text-xs leading-relaxed text-muted">
-              経路別は SalonOne の受付履歴の「区分」から数えているため、合計（{num(s.newVisitTotal)}名）が新規数（{num(s.newCount)}名）と少し違います（「既存顧客として扱う」にしたお客様など）。インセンティブの 3経路・SNS・紹介はこの経路別の数字で判定します。
-            </p>
-          ) : null}
-        </div>
-        {data.sources && data.sources.length > 0 ? (
-          <div className="min-w-0 border-t border-line pt-4 lg:border-l lg:border-t-0 lg:pl-8 lg:pt-0">
-            <div className="mb-2 flex items-center justify-between">
-              <span className="text-xs font-semibold text-ink-2">来店経由（SalonOne）→ 経路</span>
-              {isAdminLike() ? (
-                <button type="button" onClick={() => navigate('/settings')} className="text-xs font-semibold text-brand-700 hover:underline dark:text-brand-300">対応付けを変更</button>
-              ) : null}
-            </div>
-            <ul className="space-y-1 text-[13px]">
-              {data.sources.map((src) => (
-                <li key={src.name} className="flex items-center justify-between gap-2">
-                  <span className="min-w-0 truncate text-ink">{src.name}</span>
-                  <span className="flex shrink-0 items-center gap-2">
-                    <Badge tone={src.channel === 'other' ? 'neutral' : 'brand'}>{channelLabel(src.channel)}</Badge>
-                    <span className="w-14 text-right text-ink-2 num">{src.newVisits}名</span>
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        ) : null}
-      </div>
-    </Card>
-  );
-}
-
 function StaffTable({ data }) {
   // 表示中の店舗での実績（SalonOne の売上分析で店舗を絞った時と同じ）。インセンティブは全店舗の実績で計算する
   const rows = data.staffInScope || data.staff;
@@ -159,6 +109,7 @@ function StaffTable({ data }) {
               <th className="text-right">新規数</th>
               <th className="text-right">既存数</th>
               <th className="text-right">契約数</th>
+              <th className="text-right">契約率</th>
               <th className="text-right">施術数</th>
               <th className="text-right">顧客数</th>
               <th className="text-right">入金売上</th>
@@ -179,6 +130,7 @@ function StaffTable({ data }) {
                   <td className="num-cell">{num(m.newCount)}</td>
                   <td className="num-cell">{num(m.repeatCount)}</td>
                   <td className="num-cell">{num(m.purchaseCount)}</td>
+                  <td className="num-cell">{m.newCount > 0 && m.purchaseCount != null ? pct((m.purchaseCount / m.newCount) * 100, 0) : '—'}</td>
                   <td className="num-cell">{num(m.treatmentCount)}</td>
                   <td className="num-cell">{num(m.customerCount)}</td>
                   <td className="num-cell">{yen(m.depositSales)}</td>
@@ -200,6 +152,13 @@ export default function SalesPage() {
   // 6ヶ月（SalonOne の受付履歴は店舗・月ごとに取得するため、1分 60回の上限に収まる範囲）
   const trend = useTrend(month, storeId, 6);
   const data = summary.shown;
+  // ホームの「新規数」から来たとき（#/sales?focus=new）は、新規の内訳までスクロールする
+  const ready = !!data;
+  useEffect(() => {
+    if (!ready || currentQuery().get('focus') !== 'new') return;
+    const el = document.getElementById('new-breakdown');
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [ready]);
   return (
     <div>
       <PageHeader title="売上分析" subtitle="施術消化売上は施術 1回分の金額の合計、入金売上・施術数・新規数・既存数・契約数は SalonOne の売上分析と同じ数字です" />
@@ -208,20 +167,18 @@ export default function SalesPage() {
       {!data ? <Skeleton className="h-[480px] rounded-2xl" /> : (
         <div className={cx('space-y-4 transition-opacity', summary.stale || summary.loading ? 'opacity-60' : '')}>
           <Kpis data={data} />
+          <NewBreakdownCard data={data} id="new-breakdown" />
           <div className="grid gap-4 lg:grid-cols-2">
             <TrendCard trend={trend.shown} month={month} />
             <DailyCard data={data} />
           </div>
-          <div className="space-y-4">
-            <StaffTable data={data} />
-            <ChannelCard data={data} />
-          </div>
+          <StaffTable data={data} />
           {data.store.treatmentCount === 0 ? (
             <Card><EmptyState icon="calendar-x" title={`${formatMonthJa(month)}の実績はまだありません`} /></Card>
           ) : null}
           <p className="flex items-center gap-1.5 text-xs text-muted">
             <Icon name="info" size={13} />
-            施術消化売上は施術 1回分の金額の合計です（都度・初回は払った施術代、サブスクは月額 ÷ 月の回数、回数券は購入額 ÷ 回数。プランの購入・失効・物販は含めません）。入金売上・施術数・新規数・既存数（2回目以降の来店）・契約数（新規のお客様のうち回数券・サブスクを契約した人数。後の月の契約も含む）は SalonOne の売上分析と同じ数字、経路別は受付履歴から集計しています。
+            施術消化売上は施術 1回分の金額の合計です（都度・初回は払った施術代、サブスクは月額 ÷ 月の回数、回数券は購入額 ÷ 回数。プランの購入・失効・物販は含めません）。入金売上・施術数・新規数・既存数（2回目以降の来店）・契約数（新規のお客様のうち回数券・サブスクを契約した人数。後の月の契約も含む）は SalonOne の売上分析と同じ数字、新規の内訳・媒体別の契約率は受付履歴から集計しています。
           </p>
         </div>
       )}

@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useApp } from '../../app/state.jsx';
 import { useSummary, useGoals, useTrend } from '../../lib/hooks.js';
-import { currentAccess, currentRole } from '../../lib/access.js';
+import { currentAccess, currentRole, isManagerOrAbove } from '../../lib/access.js';
 import { Card, Modal, PageHeader, Skeleton, EmptyState, Badge, cx } from '../../ui/primitives.jsx';
 import { StatTile, StatusPill, Meter } from '../../ui/stats.jsx';
 import { CumulativeChart, ChartTable } from '../../ui/charts.jsx';
@@ -46,6 +46,8 @@ function StoreKpis({ summary, storeGoal }) {
   const prevTotal = s.prev ? s.prev.consumedSales : null;
   const ret = s.retention || {};
   const unit = s.treatmentCount > 0 ? s.consumedSales / s.treatmentCount : null;
+  // 新規数のタイルから売上分析の「新規の内訳と媒体別の契約率」を開く（売上分析を見られる人だけ）
+  const canOpenSales = isManagerOrAbove();
   return (
     <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
       <StatTile
@@ -75,7 +77,14 @@ function StoreKpis({ summary, storeGoal }) {
         sub={[
           s.purchaseCount != null ? `契約 ${num(s.purchaseCount)}件${s.newCount ? `（${pct((s.purchaseCount / s.newCount) * 100, 0)}）` : ''}` : null,
           `3経路 ${num(s.contract3ch.visits)}名`,
-        ].filter(Boolean).join('・')} />
+        ].filter(Boolean).join('・')}
+        onClick={canOpenSales ? () => navigate('/sales?focus=new') : undefined}>
+        {canOpenSales ? (
+          <span className="mt-auto inline-flex items-center gap-0.5 pt-2 text-[11px] font-semibold text-brand-700 dark:text-brand-300">
+            媒体別の内訳と契約率<Icon name="chevron-right" size={12} />
+          </span>
+        ) : null}
+      </StatTile>
       <StatTile label="会員数（サブスク）" icon="id-card" value={ret.memberCount != null ? `${num(ret.memberCount)}名` : '—'}
         sub={[
           `退会率 ${pct(ret.churnRatePct)}`,
