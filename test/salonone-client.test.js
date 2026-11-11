@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { fakeFetch, FAKE_KEY } from '../scripts/dev/salonone-fake.mjs';
 import {
   salonOneConfig, fetchShops, fetchStaff, fetchReceptions, fetchRetentionCustomers, fetchObject, probe, SalonOneError,
+  cleanApiKey, apiKeyHint,
 } from '../api/_lib/salonone/client.js';
 
 const BASE = 'http://fake.salonone.test/api/analytics/v1';
@@ -84,6 +85,54 @@ test('エラーは仕様のコードから日本語の説明にする', async ()
     assert.match(e.message, /項目: shop_id/);
     return true;
   });
+});
+
+test('Vercel に貼ったキーの崩れ（空白・改行・引用符・変数名ごと）を直して送る', async () => {
+  let seen = null;
+  globalThis.fetch = async (url, init) => {
+    seen = init.headers['X-SalonOne-Api-Key'];
+    return new Response(JSON.stringify({ data: {} }), { status: 200 });
+  };
+  const KEY = 'so_analytics_pbaeAbCdEf0123456789xyz';
+  for (const pasted of [
+    ` ${KEY}\n`,
+    `"${KEY}"`,
+    `「${KEY}」`,
+    `SALONONE_API_KEY=${KEY}`,
+    `so_analytics_pbaeAbCdEf\n0123456789xyz`, // 折り返したままコピー
+    `\uFEFF${KEY}\u200B`,
+  ]) {
+    process.env.SALONONE_API_KEY = pasted;
+    assert.equal(cleanApiKey(pasted), KEY);
+    await fetchObject(salonOneConfig(), '/meta');
+    assert.equal(seen, KEY, JSON.stringify(pasted));
+  }
+});
+
+test('設定画面のキーの手がかり: 一覧と同じ先頭だけを返し、切れたキー・別の値を知らせる', () => {
+  const ok = apiKeyHint('so_analytics_pbaeAbCdEf0123456789xyz');
+  assert.deepEqual(ok, { prefix: 'so_analytics_pbae', length: 36, issues: [] });
+  assert.ok(!JSON.stringify(ok).includes('AbCdEf')); // キー全体は返さない
+  const cut = apiKeyHint('so_analytics_pbae…');
+  assert.equal(cut.issues.length, 1);
+  assert.match(cut.issues[0], /途中で切れています/);
+  assert.equal(cut.prefix, 'so_analy');
+  assert.match(apiKeyHint('abc123').issues[0], /so_analytics_ で始まる/);
+  assert.equal(apiKeyHint('abc123').prefix, 'abc123'.slice(0, 8));
+  assert.match(apiKeyHint('so_analytics_ｐｂａｅAbCdEf0123456789').issues[0], /全角文字/);
+});
+
+test('キーに「…」や全角文字があれば、送る前にわかる説明にする（fetch の ByteString エラーにしない）', async () => {
+  let called = false;
+  globalThis.fetch = async () => { called = true; return new Response('{}', { status: 200 }); };
+  process.env.SALONONE_API_KEY = 'so_analytics_pbae…';
+  await assert.rejects(fetchShops(salonOneConfig()), (e) => {
+    assert.ok(e instanceof SalonOneError);
+    assert.equal(e.code, 'invalid_key');
+    assert.match(e.message, /使えない文字/);
+    return true;
+  });
+  assert.equal(called, false);
 });
 
 test('error.code の無い 404（ルートが無い）も説明をつける', async () => {

@@ -49,8 +49,40 @@ function resolveBaseUrl(raw) {
   return base;
 }
 
+/**
+ * Vercel に貼った値のよくある崩れを直す: 前後・途中の空白や改行（折り返したままコピー）、見えない文字、
+ * 引用符で囲んだもの、「SALONONE_API_KEY=」ごと貼ったもの。キーに空白・引用符は含まれない
+ */
+export function cleanApiKey(raw) {
+  let key = String(raw || '').replace(/[\u200B-\u200D\u2060\uFEFF]/g, '').trim();
+  key = key.replace(/^SALONONE_API_KEY\s*=\s*/i, '');
+  key = key.replace(/^["'“”‘’「『]+|["'“”‘’」』]+$/g, '');
+  return key.replace(/\s+/g, '');
+}
+
+/** HTTP ヘッダに入らない文字（全角文字・「…」・制御文字）がある。キーは英数字と記号だけ */
+const hasInvalidKeyChars = (key) => /[^\x21-\x7e]/.test(String(key || ''));
+
+/**
+ * 設定画面に出すキーの手がかり（管理者・オーナーだけ）。キー全体は返さず、SalonOne の「API連携」の一覧に
+ * 出るのと同じ先頭（so_analytics_ + 4文字）だけを返す。一覧と見比べて、本番がどのキーを使っているか確かめる用
+ * @returns {{ prefix:string, length:number, issues:string[] }}
+ */
+export function apiKeyHint(apiKey) {
+  const key = String(apiKey || '');
+  const issues = [];
+  if (/…|\.\.\./.test(key)) {
+    issues.push('キーが途中で切れています（「…」が入っています）。SalonOne の一覧に出る「so_analytics_xxxx…」は先頭だけなので使えません。キーを発行した時に表示された全体を貼ってください');
+  } else if (hasInvalidKeyChars(key)) {
+    issues.push('キーに使えない文字（全角文字など）が入っています。キーを発行した時に表示された全体を貼り直してください');
+  } else if (!key.startsWith('so_analytics_')) {
+    issues.push('SalonOne の分析API のキー（so_analytics_ で始まる文字列）ではないようです。Vercel の SALONONE_API_KEY に貼った値を確認してください');
+  }
+  return { prefix: key.length > 24 ? key.slice(0, 17) : key.slice(0, Math.min(8, key.length)), length: key.length, issues };
+}
+
 export function salonOneConfig() {
-  const apiKey = (process.env.SALONONE_API_KEY || '').trim();
+  const apiKey = cleanApiKey(process.env.SALONONE_API_KEY);
   const baseUrl = resolveBaseUrl(process.env.SALONONE_API_BASE_URL);
   let endpoints = { ...DEFAULT_ENDPOINTS };
   const raw = process.env.SALONONE_API_ENDPOINTS;
@@ -69,8 +101,8 @@ export function salonOneConfig() {
 
 // 分析API のエラーコード → 画面に出す説明
 const ERROR_MESSAGES = {
-  unauthorized: 'APIキーが無効です（入力ミス・失効・期限切れ）。SalonOne で発行したキーと Vercel の SALONONE_API_KEY を確認してください',
-  user_auth_required: 'このキーは「サロンワンのログインを必須にする」で発行されています。オフにしたキーを発行し直してください',
+  unauthorized: 'APIキーが無効です（入力ミス・途中で切れている・失効済み・期限切れ）。設定 > SalonOne連携 の「使っているキー」の先頭が、SalonOne の「API連携」の一覧の有効なキーと同じか確認してください',
+  user_auth_required: 'このキーは「サロンワンのログインを必須にする」で発行されています（SalonOne の一覧で「ログイン必須」が付いたキー）。このチェックを外してキーを発行し直してください',
   invalid_token: 'ログインの有効期限が切れています',
   forbidden: 'このキーでは取得できない範囲です（他ブランドの店舗・閲覧権限のない機能）',
   shop_forbidden: 'アクセス権のない店舗を指定しました',
@@ -81,6 +113,7 @@ const ERROR_MESSAGES = {
   method_not_allowed: '許可されていない呼び出し方です',
   not_found: 'API の URL が見つかりません（SALONONE_API_BASE_URL・SALONONE_API_ENDPOINTS を設定している場合は外してください）',
   internal_error: 'SalonOne 側でエラーが発生しました',
+  invalid_key: 'SALONONE_API_KEY にキーに使えない文字（「…」や全角文字）が入っています。SalonOne でキーを発行した時に表示された全体を貼り直してください',
 };
 // error.code が無い応答（ルートが無い 404 など）は HTTP ステータスから判断する
 const STATUS_CODES = { 401: 'unauthorized', 403: 'forbidden', 404: 'not_found', 405: 'method_not_allowed', 429: 'rate_limited' };
@@ -136,6 +169,9 @@ function release() {
 }
 
 async function request(cfg, path, params = {}, { retried = false } = {}) {
+  if (hasInvalidKeyChars(cfg.apiKey)) {
+    throw new SalonOneError(`SalonOne API エラー (${path}): ${ERROR_MESSAGES.invalid_key}`, { endpoint: path, code: 'invalid_key' });
+  }
   const url = new URL(cfg.baseUrl + path);
   for (const [k, v] of Object.entries(params)) {
     if (v !== undefined && v !== null && v !== '') url.searchParams.set(k, String(v));

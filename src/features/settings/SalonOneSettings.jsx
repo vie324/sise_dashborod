@@ -17,9 +17,14 @@ function SetupSteps() {
   return (
     <ol className="space-y-3 text-[13px] leading-relaxed text-ink-2">
       {[
-        <>SalonOne の管理画面で <strong className="text-ink">ブランド管理 &gt; 「API連携」</strong> を開き、新しいキーを発行します（用途: 社内分析ダッシュボード／有効期限: 1年がおすすめ）。<span className="block text-xs text-muted">「サロンワンのログインを必須にする」はオフにします。「個人情報を含める」もオフで構いません（集計に氏名などは使いません。施術ツールのカウンセリングでお客様のお名前も一覧に出したい場合だけオンにします。オフの時は顧客番号で選びます）。</span></>,
-        <>Vercel のプロジェクト設定 &gt; Environment Variables に <code className="rounded bg-surface-3 px-1">SALONONE_API_KEY</code> を追加し、再デプロイします（キーはサーバーだけで使い、画面には出しません）。</>,
-        <>このページの <strong className="text-ink">接続テスト</strong> で各データが取得できるか確認し、下で店舗・スタッフ・来店経由を対応付けます。</>,
+        <>SalonOne の管理画面で <strong className="text-ink">ブランド管理 &gt; 「API連携」</strong> を開き、新しいキーを発行します（名前: 社内分析ダッシュボード／有効期限: 1年がおすすめ）。
+          <span className="mt-1 block text-xs text-muted">
+            <strong className="text-ink-2">「サロンワンのログインを必須にする」は最初からチェックが入っているので、外します</strong>（このダッシュボードはサロンワンにログインせずにデータを読むため、ログイン必須のキーは使えません）。
+            「カルテ・問診票を含める」は不要です（カルテは読みません）。「個人情報を含める」は、施術ツールのカウンセリングでお客様のお名前を出したい場合だけチェックします（外すと顧客番号で選びます）。
+          </span></>,
+        <>発行した時に表示された<strong className="text-ink">キーの全体</strong>をコピーします（一覧に出る「so_analytics_xxxx…」は先頭だけなので使えません）。
+          Vercel の Settings &gt; Environment Variables で <code className="rounded bg-surface-3 px-1">SALONONE_API_KEY</code> に貼り、Environments に <strong className="text-ink">Production</strong> を入れて保存し、Deployments から本番を <strong className="text-ink">Redeploy</strong> します。</>,
+        <>このページの <strong className="text-ink">使っているキー</strong> の先頭が SalonOne の一覧のキーと同じか確かめ、<strong className="text-ink">接続テスト</strong> で各データが取得できるか確認します。店舗・スタッフ・来店経由の対応付けは下で行います。</>,
       ].map((t, i) => (
         <li key={i} className="flex gap-3">
           <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-brand-600 text-xs font-bold text-white">{i + 1}</span>
@@ -27,6 +32,30 @@ function SetupSteps() {
         </li>
       ))}
     </ol>
+  );
+}
+
+/** 本番が使っているキーの先頭（SalonOne の「API連携」の一覧と見比べる）と、貼り方の間違い */
+function KeyHint({ hint, failed }) {
+  if (!hint) return null;
+  return (
+    <div className="rounded-xl border border-line px-3 py-2.5">
+      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-[13px]">
+        <span className="text-xs font-semibold text-ink-2">使っているキー</span>
+        <code className="font-semibold text-ink">{hint.prefix}…</code>
+        <span className="text-xs text-muted">（{hint.length}文字）</span>
+      </div>
+      <p className="mt-1 text-xs leading-relaxed text-muted">
+        {failed
+          ? 'SalonOne の「API連携」の一覧で、使うキーの先頭と同じか確かめてください。違う時は、Vercel の SALONONE_API_KEY が本番（Production）で差し替わっていないか、差し替えた後に再デプロイしていません。同じ時は、そのキーが失効済みでないか、貼った値が途中で切れていないかを確かめてください。'
+          : 'SalonOne の「API連携」の一覧の、このキーの先頭と同じキーで接続しています。'}
+      </p>
+      {hint.issues.map((t) => (
+        <p key={t} className="mt-1.5 flex gap-1.5 text-xs font-medium leading-relaxed text-[#8f2121] dark:text-[#f2b0b0]">
+          <Icon name="circle-alert" size={13} className="mt-0.5 shrink-0" />{t}
+        </p>
+      ))}
+    </div>
   );
 }
 
@@ -77,7 +106,7 @@ function ProbeDetail({ r }) {
   );
 }
 
-function ConnectionCard({ status, master }) {
+function ConnectionCard({ status, master, failed = false }) {
   const [probe, setProbe] = useState(null);
   const [busy, setBusy] = useState(false);
   const live = status && status.mode === 'live';
@@ -107,14 +136,24 @@ function ConnectionCard({ status, master }) {
   };
   return (
     <Card title="SalonOne との接続" icon="plug"
-      actions={status ? (live ? <Badge tone="good" icon="circle-check">接続済み</Badge> : <Badge tone="gold" icon="flask-conical">デモデータ</Badge>) : null}>
+      actions={status ? (!live ? <Badge tone="gold" icon="flask-conical">デモデータ</Badge>
+        : failed ? <Badge tone="bad" icon="circle-x">接続できません</Badge>
+          : <Badge tone="good" icon="circle-check">接続済み</Badge>) : null}>
       {!status ? <Skeleton className="h-24" /> : (
         <div className="space-y-4">
-          {live ? (
+          {live && !failed ? (
             <p className="text-[13px] text-ink-2">
               <span className="font-semibold text-ink">{status.baseUrl}</span> の分析APIから、受付履歴・継続管理・店舗・スタッフを読み取っています（読み取り専用）。
             </p>
-          ) : (
+          ) : null}
+          {live ? <KeyHint hint={(probe && probe.key) || status.key} failed={failed || !!(probe && probe.results && probe.results.some((r) => r.ok === false))} /> : null}
+          {live && failed ? (
+            <div>
+              <h3 className="mb-2 text-[13px] font-bold text-ink">キーを発行し直して差し替える手順</h3>
+              <SetupSteps />
+            </div>
+          ) : null}
+          {live ? null : (
             <>
               <Banner tone="demo" title="APIキーが未設定のため、デモデータで表示しています">
                 実際の店舗・スタッフ名に、それらしい数字を当てはめています。次の手順で SalonOne とつなぐと実データに切り替わります。
@@ -343,7 +382,12 @@ export default function SalonOneSettings() {
   };
 
   if (masterRes.error && !master) {
-    return <Banner tone="bad" title="SalonOne の情報を取得できませんでした">{masterRes.error.message}</Banner>;
+    return (
+      <div className="space-y-4">
+        <Banner tone="bad" title="SalonOne の情報を取得できませんでした">{masterRes.error.message}</Banner>
+        <ConnectionCard status={status.shown} master={null} failed />
+      </div>
+    );
   }
 
   return (
