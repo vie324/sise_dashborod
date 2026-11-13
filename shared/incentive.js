@@ -38,8 +38,35 @@ export function isBeforeStart(month, rules = INCENTIVE_RULES) {
 }
 
 // ------------------------------------------------------------
-// 1. 施術消化売上
+// 1. 施術消化売上（店舗の設定で入金売上・別の段階にできる）
 // ------------------------------------------------------------
+
+/** 売上インセンティブで見る指標（店舗ごとに設定。既定は施術消化売上） */
+export const SALES_METRICS = Object.freeze({ consumedSales: '施術消化売上', depositSales: '入金売上' });
+
+/** 設定の段階（金額の下限が昇順・1〜10段）。正しくなければ null */
+export function validSalesTiers(tiers) {
+  if (!Array.isArray(tiers) || tiers.length < 1 || tiers.length > 10) return null;
+  const out = tiers.map((t) => ({ min: Math.round(num(t && t.min)), amount: Math.round(num(t && t.amount)) }));
+  for (let i = 0; i < out.length; i++) {
+    if (out[i].min <= 0 || out[i].amount < 0) return null;
+    if (i > 0 && out[i].min <= out[i - 1].min) return null;
+  }
+  return out;
+}
+
+/**
+ * 店舗の設定（設定 > インセンティブ制度 > 店舗ごとの売上インセンティブ）を当てた制度。
+ * 売上インセンティブの指標と段階だけを変え、ほかの項目は全店共通のまま
+ * @param {{ metric?:string, tiers?:Array<{min:number, amount:number}> }|null} storeRule
+ */
+export function rulesForStore(storeRule, rules = INCENTIVE_RULES) {
+  if (!storeRule) return rules;
+  const metric = Object.prototype.hasOwnProperty.call(SALES_METRICS, storeRule.metric) ? storeRule.metric : 'consumedSales';
+  const tiers = validSalesTiers(storeRule.tiers);
+  if (metric === 'consumedSales' && !tiers) return rules;
+  return { ...rules, sales: { ...rules.sales, metric, label: SALES_METRICS[metric], tiers: tiers || rules.sales.tiers, custom: true } };
+}
 
 export function computeSalesIncentive(consumedSales, rules = INCENTIVE_RULES) {
   const r = rules.sales;
@@ -59,6 +86,9 @@ export function computeSalesIncentive(consumedSales, rules = INCENTIVE_RULES) {
   return {
     key: r.key,
     label: r.label,
+    // 判定に使った指標（consumedSales: 施術消化売上 / depositSales: 入金売上）
+    metric: r.metric || 'consumedSales',
+    custom: !!r.custom,
     amount,
     achieved: amount > 0,
     current,
@@ -278,8 +308,14 @@ export function computeCrossStoreIncentive(m, rules = INCENTIVE_RULES) {
  */
 export function computeStaffIncentive(metrics, retention, month, rules = INCENTIVE_RULES) {
   const m = metrics || {};
+  // 売上インセンティブは店舗の設定の指標で判定する（既定は施術消化売上）。確定の記録・CSV 用に両方の金額も残す
+  const sales = {
+    ...computeSalesIncentive(m[rules.sales.metric || 'consumedSales'], rules),
+    consumedSales: num(m.consumedSales),
+    depositSales: num(m.depositSales),
+  };
   const items = [
-    computeSalesIncentive(m.consumedSales, rules),
+    sales,
     computeRetentionIncentive(retention, rules),
     computeNewContractIncentive(m, rules),
     computeSnsIncentive(m, rules),
@@ -312,7 +348,10 @@ export function summarizeIncentive(res) {
     total: res.total,
     items: Object.fromEntries(res.items.map((it) => [it.key, it.amount])),
     basis: {
-      consumedSales: by.sales.current,
+      // 施術消化売上・入金売上と、売上インセンティブの判定に使った指標（以前の記録は施術消化売上だけ）
+      consumedSales: by.sales.consumedSales != null ? by.sales.consumedSales : by.sales.current,
+      depositSales: by.sales.depositSales != null ? by.sales.depositSales : null,
+      salesMetric: by.sales.metric || 'consumedSales',
       existingConsumedSales: cond(by.newContract, 'existingSales'),
       newVisits3ch: by.newContract.visits,
       contracts3ch: by.newContract.contracts,
@@ -350,7 +389,8 @@ export function incentiveCsv(rows, { periodLabel = '', status = '' } = {}) {
     '支給期間', '状態', '店舗', 'スタッフ', 'SalonOne スタッフID', '対象月',
     '施術消化売上', '既存顧客の消化売上', '3経路の新規', '3経路の契約', 'SNSの集客', 'SNSの契約', '紹介のサブスク契約', '系列店での契約',
     '会員数', '退会率(%)', '平均継続(ヶ月)', '会員数の記録日',
-    '①施術消化売上', '②継続率', '③新規契約', '④Minimo・Threads・Instagram', '⑤紹介', '⑥系列店での契約', '月の合計', '支給期間の合計',
+    '①売上', '②継続率', '③新規契約', '④Minimo・Threads・Instagram', '⑤紹介', '⑥系列店での契約', '月の合計', '支給期間の合計',
+    '入金売上', '①の判定の指標',
   ];
   const lines = [head];
   for (const r of rows || []) {
@@ -364,6 +404,7 @@ export function incentiveCsv(rows, { periodLabel = '', status = '' } = {}) {
         b.retentionKnown ? b.memberCount : null, b.retentionKnown ? round1(b.churnRatePct) : null, b.retentionKnown ? round1(b.avgTenureMonths) : null,
         b.retentionKnown ? b.retentionAsOf || null : null,
         it.sales, it.retention, it.newContract, it.sns, it.referral, it.crossStore || 0, m.total, r.total,
+        b.depositSales != null ? b.depositSales : null, SALES_METRICS[b.salesMetric] || SALES_METRICS.consumedSales,
       ]);
     }
   }

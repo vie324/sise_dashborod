@@ -343,3 +343,70 @@ test('設定画面のマスタ: 削除済みの店舗・スタッフ・流入元
   assert.deepEqual(m.sources, ['ホットペッパー', 'Instagram', '紹介']);
   assert.equal(m.resolved.storeToShop['store-1'], '101');
 });
+
+test('店舗の合算の対応付け: 1つ目の後に足し、ほかの店舗に対応付いた店舗は合算せず重複として知らせる', () => {
+  const appCtx = {
+    stores: [{ id: 'yamato', name: '大和店' }, { id: 'yokohama', name: '横浜店' }],
+    staff: [],
+    config: {
+      'salonone.shopMap': { yamato: '101', yokohama: '103' },
+      [provider.SHOP_MERGE_KEY]: { yamato: ['102', '103', '101', '102'], yokohama: ['102'] },
+    },
+  };
+  const m = provider.buildMapping(appCtx, { mode: 'live', shops: [], staff: [] });
+  assert.deepEqual(m.shopsOf('yamato'), ['101', '102']); // 103 は横浜店の 1つ目なので足さない・重なりは 1つ
+  assert.deepEqual(m.shopsOf('yokohama'), ['103']); // 102 は先に大和店に足した
+  assert.equal(m.shopToStore.get('102'), 'yamato');
+  assert.deepEqual(m.duplicateShops.sort(), ['102', '103']);
+  assert.equal(m.storeToShop.get('yamato'), '101');
+  assert.deepEqual(m.shopsOf('none'), []);
+});
+
+test('店舗の合算: 数字・内訳・スタッフ・出納帳・本日のお客様を合わせ、店舗ごとの売上インセンティブ（入金売上）で判定する', async () => {
+  // 合算の前（店舗ごと）の現金売上
+  const before101 = await summary.dailyCashSales(null, { storeId: 'store-1', months: [PREV] });
+  const before102 = await summary.dailyCashSales(null, { storeId: 'store-2', months: [PREV] });
+  await db.from('dash_config').upsert([
+    { key: 'salonone.shopMap', value: { 'store-1': '101' } },
+    { key: provider.SHOP_MERGE_KEY, value: { 'store-1': ['102'] } },
+    { key: provider.STORE_SALES_RULES_KEY, value: { 'store-1': { metric: 'depositSales' } } },
+  ], { onConflict: 'key' });
+  try {
+    provider.clearSalonOneCache();
+    const s = await summary.buildSummary(null, { month: PREV, storeId: 'store-1' });
+    const parts = s.store.parts;
+    assert.deepEqual(parts.map((p) => p.shopId), ['101', '102']);
+    for (const k of ['consumedSales', 'depositSales', 'treatmentCount', 'newCount', 'purchaseCount']) {
+      assert.equal(s.store[k], parts.reduce((a, p) => a + p[k], 0), k);
+      assert.equal(s.stores[0][k], s.store[k], k);
+    }
+    assert.ok(s.store.consumedSales > 0);
+    assert.deepEqual(s.stores[0].parts.map((p) => p.name), ['中央店', '駅前店']);
+    assert.equal(s.warnings.some((w) => w.code === 'unmappedShop'), false); // 足した店舗は対応付いた店舗として扱う
+    // 足した店舗が所属のスタッフも、その店舗のスタッフ
+    assert.equal(s.staff.find((r) => r.key === '203').storeId, 'store-1');
+    // 売上インセンティブは店舗の設定（入金売上）で判定し、確定の記録にも指標を残す
+    const sato = s.staff.find((r) => r.key === '201');
+    assert.equal(sato.incentive.items[0].metric, 'depositSales');
+    assert.equal(sato.incentive.items[0].label, '入金売上');
+    assert.equal(sato.incentive.items[0].current, sato.metrics.depositSales);
+    assert.equal(sato.period.months.find((pm) => pm.month === PREV).basis.salesMetric, 'depositSales');
+    assert.deepEqual(s.salesRules.map((r) => [r.storeId, r.metric]), [['store-1', 'depositSales']]);
+    // 全店舗の合計は 1回だけ数える
+    const all = await summary.buildSummary(null, { month: PREV, storeId: 'all' });
+    assert.equal(all.store.consumedSales, s.store.consumedSales);
+    // 出納帳は 2つの店舗の現金を合わせる（同じレジ）
+    const cash = await summary.dailyCashSales(null, { storeId: 'store-1', months: [PREV] });
+    const days = new Set([...Object.keys(before101.days), ...Object.keys(before102.days)]);
+    for (const d of days) assert.equal(cash.days[d], (before101.days[d] || 0) + (before102.days[d] || 0), d);
+    // 本日のお客様は 2つの店舗の予約を合わせ、どちらの店舗かを付ける
+    const { buildVisits } = await import('../api/_lib/salonone/visits.js');
+    const v = await buildVisits(null, { storeId: 'store-1' });
+    assert.equal(v.linked, true);
+    assert.ok(v.visits.every((x) => ['中央店', '駅前店'].includes(x.shopName)));
+  } finally {
+    await db.from('dash_config').upsert({ key: 'salonone.shopMap', value: { 'store-1': '101', 'store-2': '102' } }, { onConflict: 'key' });
+    await db.from('dash_config').delete().eq('key', provider.SHOP_MERGE_KEY);
+    await db.from('dash_config').delete().eq('key', provider.STORE_SALES_RULES_KEY);
+  }
+});

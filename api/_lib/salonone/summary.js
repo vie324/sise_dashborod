@@ -10,14 +10,14 @@
 //   スタッフ                    … 所属店舗の合計 + 自分の行だけ
 // ============================================================
 
-import { computeMonth, combineShops, cashByDay, cashUnknownByDay } from '../../../shared/metrics.js';
+import { computeMonth, combineShops, combineRetention, cashByDay, cashUnknownByDay } from '../../../shared/metrics.js';
 import {
-  computeStaffIncentive, computeRetentionIncentive, paymentPeriodOf, sumPeriod, summarizeIncentive,
+  computeStaffIncentive, computeRetentionIncentive, paymentPeriodOf, sumPeriod, summarizeIncentive, rulesForStore,
 } from '../../../shared/incentive.js';
 import { INCENTIVE_RULES } from '../../../shared/incentive-rules.js';
 import { addMonths, monthProgress, monthsBetween, monthOf, monthRange, listMonths, todayJst, formatMonthJa } from '../../../shared/dates.js';
 import {
-  loadAppContext, loadMaster, buildMapping, loadDataset, saveConsumptionSnapshot, CONSUMPTION_KEY, PLAN_UNITS_KEY,
+  loadAppContext, loadMaster, buildMapping, loadDataset, saveConsumptionSnapshot, CONSUMPTION_KEY, PLAN_UNITS_KEY, SHOP_MERGE_KEY, STORE_SALES_RULES_KEY,
 } from './provider.js';
 import { loadCloseDoc, saveCloseDoc, closeView } from './closes.js';
 import { loadCrossEntries, crossExclusions, crossCreditsByMonth } from './cross.js';
@@ -143,6 +143,27 @@ function allShopIdsOf(master, selectedShopIds) {
   return [...new Set([...master.shops.map((s) => String(s.id)), ...selectedShopIds])];
 }
 
+/** 売上インセンティブを全店共通と変えている店舗（画面に出す形） */
+function salesRulesView(appCtx, storeSalesRules) {
+  return appCtx.stores
+    .map((st) => {
+      const r = rulesForStore(storeSalesRules[st.id] || null);
+      return r === INCENTIVE_RULES ? null : { storeId: st.id, storeName: st.name, metric: r.sales.metric, label: r.sales.label, tiers: r.sales.tiers };
+    })
+    .filter(Boolean);
+}
+
+/**
+ * 店舗の合算: 1つの店舗の SalonOne の店舗すべての数字を合わせる（1つだけならその店舗のまま。無ければ null）。
+ * 継続指標も合わせる（会員数・退会率・平均継続期間。shared/metrics.js の combineRetention）
+ */
+function mergedShop(c, shopIds) {
+  const list = (shopIds || []).map((id) => c && c.shops[id]).filter(Boolean);
+  if (list.length <= 1) return list[0] || null;
+  const combined = combineShops(list);
+  return { ...combined, shopId: shopIds[0], basis: list.every((sh) => sh.basis === 'salonone') ? 'salonone' : list[0].basis, retention: combineRetention(list.map((sh) => sh.retention)) };
+}
+
 /** 受付履歴・契約・売上サマリ・継続指標を、表示中の店舗のぶんだけにする */
 function onlyShops(data, m, shopSet) {
   const pickShops = (obj) => Object.fromEntries(Object.entries(obj || {}).filter(([id]) => shopSet.has(id)));
@@ -251,7 +272,7 @@ async function saveSnapshots(master, appCtx, data, computed, months, { shopIds, 
 export async function buildSummary(staffCtx, { month, storeId, refresh, refreshOlderThan = null }) {
   const { appCtx, master, mapping, scope } = await prepare(staffCtx, { refresh: typeof refreshOlderThan === 'number' ? refreshOlderThan : refresh });
   const selectedStoreIds = resolveSelection(scope, storeId);
-  const selectedShopIds = [...new Set(selectedStoreIds.map((id) => mapping.storeToShop.get(id)).filter(Boolean))];
+  const selectedShopIds = [...new Set(selectedStoreIds.flatMap((id) => mapping.shopsOf(id)))];
   const shopSet = new Set(selectedShopIds);
   // スタッフのインセンティブは、表示中の店舗にかかわらず全店舗の実績で計算する
   // （店舗を絞った時・スタッフ本人が見た時も、オーナーが全店舗で見た時と同じ金額にする）。
@@ -261,7 +282,9 @@ export async function buildSummary(staffCtx, { month, storeId, refresh, refreshO
   const myS1 = scope.staffId ? mapping.staffToS1.get(scope.staffId) : null;
   const relevant = relevantStaffIds(master, mapping, scope, shopSet, myS1);
   // 他の店舗に所属するスタッフ（ダッシュボードの所属と SalonOne の所属店舗が違う人）の継続率の判定に、その店舗の継続管理も取る
-  const homeShops = master.staff.filter((s) => relevant.has(s.id) && s.shopId && mapping.shopToStore.has(s.shopId)).map((s) => s.shopId);
+  const homeShops = [...new Set(master.staff
+    .filter((s) => relevant.has(s.id) && s.shopId && mapping.shopToStore.has(s.shopId))
+    .flatMap((s) => mapping.shopsOf(mapping.shopToStore.get(s.shopId))))];
 
   const period = paymentPeriodOf(month);
   const prevMonth = addMonths(month, -1);
@@ -313,21 +336,26 @@ export async function buildSummary(staffCtx, { month, storeId, refresh, refreshO
   // 表示中の店舗だけの集計（売上分析のスタッフ別・来店経由）。店舗ごとの数字は cur と同じ
   const curSel = wholeBrand || !computed[month] ? cur : computeMonth({ ...monthInput(month), ...onlyShops(data, month, shopSet) });
 
-  // 店舗（選択範囲の合計 + 店舗別）
+  // 店舗（選択範囲の合計 + 店舗別）。店舗の合算で足した SalonOne の店舗も合わせ、内訳（parts）を付ける
+  const shopName = (id) => (master.shops.find((sh) => String(sh.id) === String(id)) || {}).name || String(id);
   const storeRows = selectedStoreIds.map((sid) => {
-    const shopId = mapping.storeToShop.get(sid);
-    const shop = shopId ? cur.shops[shopId] : null;
-    const prevShop = shopId && prev ? prev.shops[shopId] : null;
-    const retention = shop ? shop.retention : null;
+    const shopIds = mapping.shopsOf(sid);
+    const merged = mergedShop(cur, shopIds);
+    const prevMerged = prev ? mergedShop(prev, shopIds) : null;
+    const retention = merged ? merged.retention : null;
     return {
       storeId: sid,
       name: (appCtx.stores.find((s) => s.id === sid) || {}).name || sid,
-      linked: !!shopId,
-      ...(pickMetrics(shop) || EMPTY_METRICS),
-      contract3ch: contract3ch(shop || {}),
-      prevConsumedSales: prevShop ? n(prevShop.consumedSales) : null,
+      linked: shopIds.length > 0,
+      ...(pickMetrics(merged) || EMPTY_METRICS),
+      contract3ch: contract3ch(merged || {}),
+      prevConsumedSales: prevMerged ? n(prevMerged.consumedSales) : null,
       retention,
       retentionIncentive: computeRetentionIncentive(retention),
+      parts: shopIds.length > 1 ? shopIds.map((id) => {
+        const sh = cur.shops[id] || null;
+        return { shopId: id, name: shopName(id), ...(pickMetrics(sh) || EMPTY_METRICS), contract3ch: contract3ch(sh || {}), retention: sh ? sh.retention || null : null };
+      }) : null,
     };
   });
   const combined = combineShops(selectedShopIds.map((id) => cur.shops[id]).filter(Boolean));
@@ -339,6 +367,8 @@ export async function buildSummary(staffCtx, { month, storeId, refresh, refreshO
     daily: combined.daily,
     retention: selectedShopIds.length === 1 ? (cur.shops[selectedShopIds[0]] || {}).retention || null : combined.retention,
     prev: combinedPrev ? { ...pickMetrics(combinedPrev), contract3ch: contract3ch(combinedPrev) } : null,
+    // 1つの店舗を見ていて、その店舗に合算した SalonOne の店舗がある時の内訳
+    parts: storeRows.length === 1 ? storeRows[0].parts : null,
   };
 
   // スタッフ（SalonOne スタッフ + この月・支給期間に実績のあるスタッフ。
@@ -360,6 +390,12 @@ export async function buildSummary(staffCtx, { month, storeId, refresh, refreshO
       else if (!known.name && sm.name) s1StaffById.set(id, { ...known, name: sm.name });
     }
   }
+  // 店舗ごとの売上インセンティブ（設定 > インセンティブ制度）。SalonOne の店舗 → ダッシュボードの店舗 → 設定
+  const storeSalesRules = appCtx.config[STORE_SALES_RULES_KEY] || {};
+  const rulesOfShop = (shopId) => {
+    const sid = shopId ? mapping.shopToStore.get(shopId) : null;
+    return rulesForStore(sid ? storeSalesRules[sid] || null : null);
+  };
   const activityShop = (c, id) => (c && c.staff[id] ? c.staff[id].shopId : null);
   const mappedShop = (id) => (id && mapping.shopToStore.has(id) ? id : null);
   const rows = [];
@@ -382,12 +418,18 @@ export async function buildSummary(staffCtx, { month, storeId, refresh, refreshO
     const retentionIn = (c) => {
       if (!retentionEligible(c)) return null;
       const shopId = homeIn(c);
-      return shopId && c.shops[shopId] ? c.shops[shopId].retention : null;
+      if (!shopId) return null;
+      // 店舗の合算をしている店舗は、合わせた継続指標で判定する
+      const storeId = mapping.shopToStore.get(shopId);
+      const merged = mergedShop(c, storeId ? mapping.shopsOf(storeId) : [shopId]);
+      return merged ? merged.retention : null;
     };
     const homeRetention = retentionIn(cur);
-    const incentive = computeStaffIncentive(withCross(m, month, s1.id), homeRetention, month);
+    // 売上インセンティブは所属店舗の設定（指標・段階）で判定する（例: 大和店は入金売上）。月ごとの所属店舗で見る
+    const rulesIn = (c) => rulesOfShop(homeIn(c));
+    const incentive = computeStaffIncentive(withCross(m, month, s1.id), homeRetention, month, rulesIn(cur));
     const periodResults = period.months.map((pm) => (computed[pm]
-      ? computeStaffIncentive(withCross(computed[pm].staff[s1.id], pm, s1.id), retentionIn(computed[pm]), pm)
+      ? computeStaffIncentive(withCross(computed[pm].staff[s1.id], pm, s1.id), retentionIn(computed[pm]), pm, rulesIn(computed[pm]))
       : null));
     const periodSum = sumPeriod(periodResults);
     rows.push({
@@ -398,7 +440,7 @@ export async function buildSummary(staffCtx, { month, storeId, refresh, refreshO
       // 表示中の店舗での実績（売上分析のスタッフ別・店舗内シェア）
       scopeMetrics: pickMetrics(inScope) || EMPTY_METRICS,
       prevConsumedSales: prev && prev.staff[s1.id] ? n(prev.staff[s1.id].consumedSales) : (prev ? 0 : null),
-      daily: m ? m.daily.map((d) => ({ date: d.date, consumedSales: d.consumedSales, treatmentCount: d.treatmentCount })) : [],
+      daily: m ? m.daily.map((d) => ({ date: d.date, consumedSales: d.consumedSales, depositSales: d.depositSales, treatmentCount: d.treatmentCount })) : [],
       // この月の系列店での契約（2,000円の内訳）
       crossStore: cross.entries
         .filter((e) => e.creditKey === s1.id && String(e.date).slice(0, 7) === month)
@@ -481,6 +523,8 @@ export async function buildSummary(staffCtx, { month, storeId, refresh, refreshO
     asOf: data.asOf,
     generatedAt: new Date().toISOString(),
     rules: INCENTIVE_RULES,
+    // 売上インセンティブを全店共通と変えている店舗（指標・段階）。インセンティブ制度の画面に出す
+    salesRules: salesRulesView(appCtx, storeSalesRules),
     period,
     progress: monthProgress(month, data.asOf),
     scope: { storeId: storeId || 'all', storeIds: selectedStoreIds, canSeeAll: scope.all, role: scope.role },
@@ -512,13 +556,20 @@ export async function dailyCashSales(staffCtx, { storeId, months, refresh = fals
   if (!id) throw new AccessError('店舗を選んでください', 400);
   const { appCtx, master, mapping, scope } = await prepare(staffCtx);
   if (!scope.storeIds.includes(id)) throw new AccessError('この店舗を表示する権限がありません');
-  const shopId = mapping.storeToShop.get(id);
-  const out = { mode: master.mode, storeId: id, asOf: todayJst(), linked: !!shopId, days: {}, unknown: {}, fetchedAt: Date.now(), warnings: [] };
-  if (!shopId) return out;
-  const data = await loadDataset(appCtx, master, { months, shopIds: [shopId], summaries: false, retention: false, refresh });
+  // 店舗の合算をしている店舗は、SalonOne の店舗すべての現金を合わせる（同じレジで締めるため）
+  const shopIds = mapping.shopsOf(id);
+  const out = { mode: master.mode, storeId: id, asOf: todayJst(), linked: shopIds.length > 0, days: {}, unknown: {}, fetchedAt: Date.now(), warnings: [] };
+  if (!shopIds.length) return out;
+  const data = await loadDataset(appCtx, master, { months, shopIds, summaries: false, retention: false, refresh });
   for (const m of months) {
-    Object.assign(out.days, cashByDay(data.receptions, shopId, m));
-    Object.assign(out.unknown, cashUnknownByDay(data.receptions, shopId, m));
+    for (const shopId of shopIds) {
+      for (const [day, v] of Object.entries(cashByDay(data.receptions, shopId, m))) out.days[day] = (out.days[day] || 0) + v;
+      for (const [day, v] of Object.entries(cashUnknownByDay(data.receptions, shopId, m))) {
+        const d = out.unknown[day] || (out.unknown[day] = { count: 0, amount: 0 });
+        d.count += v.count;
+        d.amount += v.amount;
+      }
+    }
   }
   return { ...out, asOf: data.asOf, fetchedAt: data.fetchedAt, warnings: dataWarnings(master, data) };
 }
@@ -634,7 +685,7 @@ export async function reopenPeriod(staffCtx, { month, operator = '' } = {}) {
 export async function buildTrend(staffCtx, { months: count = 6, endMonth, storeId, refresh }) {
   const { appCtx, master, mapping, scope } = await prepare(staffCtx, { refresh });
   const selectedStoreIds = resolveSelection(scope, storeId);
-  const selectedShopIds = [...new Set(selectedStoreIds.map((id) => mapping.storeToShop.get(id)).filter(Boolean))];
+  const selectedShopIds = [...new Set(selectedStoreIds.flatMap((id) => mapping.shopsOf(id)))];
   const last = endMonth;
   const first = addMonths(last, -(Math.min(Math.max(count, 1), 24) - 1));
   const months = listMonths(first, last);
@@ -746,7 +797,7 @@ export async function snapshotConsumption({ asOf = todayJst() } = {}) {
 export async function buildPlanUnits(staffCtx, { month }) {
   const { appCtx, master, mapping, scope } = await prepare(staffCtx);
   if (!scope.all) throw new AccessError('管理者またはオーナーのみ利用できます');
-  const shopIds = [...new Set(mapping.storeToShop.values())];
+  const shopIds = [...new Set([...mapping.storeToShops.values()].flat())];
   const data = await loadDataset(appCtx, master, { months: [month], retention: false, shopIds });
   const overrides = appCtx.config[PLAN_UNITS_KEY] || {};
   const settingOf = (key) => {
@@ -799,9 +850,12 @@ export async function buildMaster(staffCtx, { refresh } = {}) {
       staffMap: appCtx.config['salonone.staffMap'] || {},
       channelMap: appCtx.config['salonone.channelMap'] || {},
       planRules: appCtx.config['salonone.planRules'] || {},
+      shopMerge: appCtx.config[SHOP_MERGE_KEY] || {},
     },
     resolved: {
       storeToShop: Object.fromEntries(mapping.storeToShop),
+      // 店舗の合算（店舗 → 足した SalonOne の店舗。1つ目は storeToShop）
+      shopMerge: Object.fromEntries([...mapping.storeToShops].filter(([, ids]) => ids.length > 1).map(([sid, ids]) => [sid, ids.slice(1)])),
       staffToS1: Object.fromEntries(mapping.staffToS1),
     },
   };

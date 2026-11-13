@@ -33,7 +33,11 @@ import { monthRange, monthOf, monthsBetween, todayJst, addDays } from '../../../
 export const RETENTION_KEY = 'salonone.retentionSnapshots';
 export const PLAN_UNITS_KEY = 'salonone.planUnits';
 export const CONSUMPTION_KEY = 'incentive.consumption';
-export const CONFIG_KEYS = ['salonone.shopMap', 'salonone.staffMap', 'salonone.channelMap', 'salonone.planRules', PLAN_UNITS_KEY, RETENTION_KEY, CONSUMPTION_KEY];
+// 店舗の合算: ダッシュボードの 1店舗に足す SalonOne の店舗（同じ住所・同じスタッフの別ブランドの店舗。例: 大和店に titi 大和店）
+export const SHOP_MERGE_KEY = 'salonone.shopMerge';
+// 店舗ごとの売上インセンティブ（指標・段階）。例: 大和店は入金売上（合算）で判定する
+export const STORE_SALES_RULES_KEY = 'rules.storeSales';
+export const CONFIG_KEYS = ['salonone.shopMap', 'salonone.staffMap', 'salonone.channelMap', 'salonone.planRules', SHOP_MERGE_KEY, STORE_SALES_RULES_KEY, PLAN_UNITS_KEY, RETENTION_KEY, CONSUMPTION_KEY];
 
 // ------------------------------------------------------------
 // インスタンス内キャッシュ（サーバーレスのウォーム中だけ有効）
@@ -156,28 +160,52 @@ export async function loadMaster(appCtx, { refresh } = {}) {
 
 /**
  * ダッシュボード ⇔ SalonOne の ID 対応付け
+ *   storeToShop  店舗 → 対応付けた SalonOne の店舗（1つ目）
+ *   storeToShops 店舗 → 数字を合わせる SalonOne の店舗すべて（1つ目 + 店舗の合算で足した店舗）
+ *   shopToStore  SalonOne の店舗 → 店舗（合算で足した店舗も、その店舗として扱う）
  */
 export function buildMapping(appCtx, master) {
   const demo = master.mode === 'demo';
   const shopMap = demo ? {} : (appCtx.config['salonone.shopMap'] || {});
+  const shopMerge = demo ? {} : (appCtx.config[SHOP_MERGE_KEY] || {});
   const staffMap = demo ? {} : (appCtx.config['salonone.staffMap'] || {});
   const storeIds = new Set(appCtx.stores.map((s) => s.id));
   const staffIds = new Set(appCtx.staff.map((s) => s.id));
 
   const storeToShop = new Map();
+  const storeToShops = new Map();
   const shopToStore = new Map();
   // 2つの店舗を同じ SalonOne の店舗に対応付けている（全店舗の合計では 1回だけ数える）
   const duplicateShops = [];
+  const claim = (shopId, storeId) => {
+    if (!shopToStore.has(shopId)) shopToStore.set(shopId, storeId);
+    else if (shopToStore.get(shopId) !== storeId && !duplicateShops.includes(shopId)) duplicateShops.push(shopId);
+  };
   for (const store of appCtx.stores) {
     const shopId = demo ? store.id : (shopMap[store.id] ? String(shopMap[store.id]) : '');
     if (!shopId) continue;
     storeToShop.set(store.id, shopId);
-    if (!shopToStore.has(shopId)) shopToStore.set(shopId, store.id);
-    else if (!duplicateShops.includes(shopId)) duplicateShops.push(shopId);
+    // 合算する店舗は、1つ目の店舗を対応付けた店舗だけ（1つ目と同じ店舗・重なりは除く）
+    const extras = [].concat(shopMerge[store.id] || []).map((v) => String(v || '')).filter((v) => v && v !== shopId);
+    storeToShops.set(store.id, [shopId, ...new Set(extras)]);
+    claim(shopId, store.id);
+  }
+  // 1つ目の対応付けを先に取り、合算の店舗はそのあと。ほかの店舗にもう対応付いている店舗は合算せず、重複として知らせる
+  for (const [storeId, shops] of storeToShops) {
+    const kept = [shops[0]];
+    for (const shopId of shops.slice(1)) {
+      if (shopToStore.has(shopId) && shopToStore.get(shopId) !== storeId) {
+        if (!duplicateShops.includes(shopId)) duplicateShops.push(shopId);
+        continue;
+      }
+      shopToStore.set(shopId, storeId);
+      kept.push(shopId);
+    }
+    storeToShops.set(storeId, kept);
   }
   if (demo && appCtx.stores.length === 0) {
     // サンプル店舗しか無い場合は、その ID をそのまま店舗 ID として使う
-    for (const shop of master.shops) { storeToShop.set(shop.id, shop.id); shopToStore.set(shop.id, shop.id); }
+    for (const shop of master.shops) { storeToShop.set(shop.id, shop.id); storeToShops.set(shop.id, [shop.id]); shopToStore.set(shop.id, shop.id); }
   }
 
   const staffToS1 = new Map();
@@ -192,9 +220,11 @@ export function buildMapping(appCtx, master) {
     }
   }
   return {
-    storeToShop, shopToStore, staffToS1, s1ToStaff, duplicateShops,
+    storeToShop, storeToShops, shopToStore, staffToS1, s1ToStaff, duplicateShops,
     unmappedStores: appCtx.stores.filter((s) => !storeToShop.has(s.id)).map((s) => s.id),
     knownStore: (id) => storeIds.has(id),
+    /** 店舗の SalonOne の店舗すべて（対応付けが無ければ空） */
+    shopsOf: (storeId) => storeToShops.get(storeId) || [],
   };
 }
 

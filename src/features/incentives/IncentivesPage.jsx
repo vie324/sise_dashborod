@@ -10,12 +10,13 @@ import StaffDetail from './StaffDetail.jsx';
 import RulesView from './RulesView.jsx';
 import PeriodCloseBar from './PeriodClose.jsx';
 import CrossStorePanel from './CrossStore.jsx';
-import { INCENTIVE_META, periodAmount } from './parts.jsx';
+import { INCENTIVE_META, periodAmount, salesLabel, salesGoal } from './parts.jsx';
 import { INCENTIVE_RULES } from '../../../shared/incentive-rules.js';
 import { takeFocusIncentive, scrollToIncentive } from './focus.js';
 
 const ITEM_KEYS = ['sales', 'retention', 'newContract', 'sns', 'referral', 'crossStore'];
-const goalOf = (goals, row) => (goals && goals.staff && row.staffId && goals.staff[row.staffId] ? goals.staff[row.staffId].consumedSales : null);
+// 売上インセンティブの指標（所属店舗の設定。例: 大和店は入金売上）に合わせた目標
+const goalOf = (goals, row) => salesGoal(goals && goals.staff && row.staffId ? goals.staff[row.staffId] : null, row.incentive.items[0]);
 
 function Amount({ value, strong }) {
   return <span className={cx('num', value > 0 ? (strong ? 'font-bold text-ink' : 'text-ink') : 'text-muted')}>{yen(value)}</span>;
@@ -42,6 +43,10 @@ function StaffTable({ summary, onOpen }) {
   const closedTotal = summary.close ? summary.close.total : null;
   const hiddenClosed = summary.close ? closedTotal - total((r) => (r.closed ? r.closed.total : 0)) : 0;
   const itemAmount = (r, key) => (r.incentive.items.find((i) => i.key === key) || {}).amount || 0;
+  // 売上インセンティブを入金売上で判定しているスタッフ（所属店舗の設定）がいれば、見出しを「売上」にして行に指標を出す
+  const salesItem = (r) => r.incentive.items.find((i) => i.key === 'sales') || {};
+  const mixedSales = rows.some((r) => salesItem(r).metric === 'depositSales');
+  const header = (k) => (k === 'sales' && mixedSales ? '売上' : INCENTIVE_META[k].column || INCENTIVE_META[k].title);
   return (
     <>
       {/* PC: 表 */}
@@ -51,7 +56,7 @@ function StaffTable({ summary, onOpen }) {
             <thead>
               <tr>
                 <th>スタッフ</th>
-                {ITEM_KEYS.map((k) => <th key={k} className="text-right">{INCENTIVE_META[k].column || INCENTIVE_META[k].title}</th>)}
+                {ITEM_KEYS.map((k) => <th key={k} className="text-right">{header(k)}</th>)}
                 <th className="text-right">今月合計</th>
                 <th className="text-right">支給期間の合計{summary.close ? '（確定）' : ''}</th>
               </tr>
@@ -63,7 +68,12 @@ function StaffTable({ summary, onOpen }) {
                     <div className="flex items-center gap-2 font-semibold text-ink">{r.name}{!r.linked ? <Badge tone="warn">未連携</Badge> : null}</div>
                     <div className="text-[11px] text-muted">{r.storeName}</div>
                   </td>
-                  {ITEM_KEYS.map((k) => <td key={k} className="num-cell"><Amount value={itemAmount(r, k)} /></td>)}
+                  {ITEM_KEYS.map((k) => (
+                    <td key={k} className="num-cell">
+                      <Amount value={itemAmount(r, k)} />
+                      {k === 'sales' && mixedSales ? <div className="text-[11px] text-muted">{salesLabel(salesItem(r))}</div> : null}
+                    </td>
+                  ))}
                   <td className="num-cell"><Amount value={r.incentive.total} strong /></td>
                   <td className="num-cell"><PeriodCell summary={summary} r={r} /></td>
                 </tr>
@@ -142,7 +152,7 @@ export default function IncentivesPage() {
       <PageHeader title="インセンティブ" subtitle="制度（2026年11月〜・2ヶ月ごと支給）に沿って、SalonOne の実績から自動計算しています" />
       <Segmented value={tab} onChange={setTab} options={tabs} className="mb-4" ariaLabel="表示の切り替え" />
       {tab === 'rules' ? (
-        <RulesView rules={(data && data.rules) || INCENTIVE_RULES} />
+        <RulesView rules={(data && data.rules) || INCENTIVE_RULES} salesRules={data && data.salesRules} />
       ) : (
         <>
           <ScopeBar data={data} />

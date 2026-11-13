@@ -7,12 +7,15 @@ import {
   computeSnsIncentive,
   computeReferralIncentive,
   computeStaffIncentive,
+  rulesForStore,
+  validSalesTiers,
   contractsNeededForRate,
   paymentPeriodOf,
   sumPeriod,
   summarizeIncentive,
   incentiveCsv,
 } from '../shared/incentive.js';
+import { INCENTIVE_RULES } from '../shared/incentive-rules.js';
 
 test('施術消化売上: 各段階の境界は「以上」で判定する', () => {
   const cases = [
@@ -181,7 +184,8 @@ test('確定・CSV 用のまとめ: 支給額（項目ごと）と判定に使�
   assert.deepEqual(s.items, { sales: 30000, retention: 5000, newContract: 15000, sns: 4000, referral: 2000, crossStore: 4000 });
   assert.equal(s.total, 60000);
   assert.deepEqual(s.basis, {
-    consumedSales: 700000, existingConsumedSales: 450000, newVisits3ch: 10, contracts3ch: 6, snsCustomers: 10, snsContracts: 2,
+    consumedSales: 700000, depositSales: 0, salesMetric: 'consumedSales',
+    existingConsumedSales: 450000, newVisits3ch: 10, contracts3ch: 6, snsCustomers: 10, snsContracts: 2,
     referralSubscriptions: 1, crossStoreContracts: 2, retentionKnown: true, memberCount: 60, churnRatePct: 8, avgTenureMonths: 4.2,
   });
   assert.equal(summarizeIncentive(null), null);
@@ -199,7 +203,45 @@ test('支給一覧の CSV: BOM 付き・月ごとの行・数式にならない�
   const lines = csv.slice(1).trim().split('\r\n');
   assert.equal(lines.length, 2); // 見出し + 11月（まだ無い 12月は出さない）
   assert.match(lines[0], /^支給期間,状態,店舗,スタッフ/);
-  assert.equal(lines[1], `2026年11月〜12月,確定,"中央店, 本店",'=佐藤,201,2026-11,576000,0,0,0,0,0,0,0,10,3,2,2026-11-30,5000,0,0,0,0,0,5000,5000`);
+  assert.equal(lines[1], `2026年11月〜12月,確定,"中央店, 本店",'=佐藤,201,2026-11,576000,0,0,0,0,0,0,0,10,3,2,2026-11-30,5000,0,0,0,0,0,5000,5000,0,施術消化売上`);
+  assert.match(lines[0], /月の合計,支給期間の合計,入金売上,①の判定の指標$/);
   assert.match(lines[0], /紹介のサブスク契約,系列店での契約,会員数/);
   assert.match(lines[0], /⑤紹介,⑥系列店での契約,月の合計/);
+});
+
+test('店舗ごとの売上インセンティブ: 入金売上で判定・段階の変更（大和店など）', () => {
+  const m = { consumedSales: 500000, depositSales: 700000 };
+  // 既定は施術消化売上
+  const base = computeStaffIncentive(m, null, '2026-11');
+  assert.equal(base.items[0].metric, 'consumedSales');
+  assert.equal(base.items[0].current, 500000);
+  assert.equal(base.items[0].amount, 0);
+
+  // 入金売上で判定（段階は全店共通のまま）
+  const rules = rulesForStore({ metric: 'depositSales' });
+  const dep = computeStaffIncentive(m, null, '2026-11', rules);
+  assert.deepEqual({ label: dep.items[0].label, metric: dep.items[0].metric, current: dep.items[0].current, amount: dep.items[0].amount },
+    { label: '入金売上', metric: 'depositSales', current: 700000, amount: 30000 });
+  // ほかの項目は全店共通の制度のまま
+  assert.equal(rules.retention, INCENTIVE_RULES.retention);
+  assert.equal(rules.sales.tiers, INCENTIVE_RULES.sales.tiers);
+  // 確定の記録・CSV には両方の金額と判定の指標を残す
+  const sum = summarizeIncentive(dep);
+  assert.deepEqual({ c: sum.basis.consumedSales, d: sum.basis.depositSales, m: sum.basis.salesMetric }, { c: 500000, d: 700000, m: 'depositSales' });
+  const csv = incentiveCsv([{ key: '201', name: '佐藤', storeName: '大和店', total: dep.total, months: [{ month: '2026-11', ...sum }] }]);
+  assert.match(csv.trim().split('\r\n')[1], /,700000,入金売上$/);
+
+  // 段階も変えられる（金額の下限が昇順でなければ全店共通の段階のまま）
+  const custom = rulesForStore({ metric: 'depositSales', tiers: [{ min: 600000, amount: 10000 }, { min: 900000, amount: 40000 }] });
+  const c = computeStaffIncentive(m, null, '2026-11', custom);
+  assert.deepEqual({ amount: c.items[0].amount, tierIndex: c.items[0].tierIndex, next: c.items[0].nextTier.min, custom: c.items[0].custom }, { amount: 10000, tierIndex: 0, next: 900000, custom: true });
+  assert.equal(rulesForStore({ metric: 'depositSales', tiers: [{ min: 900000, amount: 1 }, { min: 600000, amount: 2 }] }).sales.tiers, INCENTIVE_RULES.sales.tiers);
+  assert.equal(validSalesTiers([{ min: 0, amount: 1 }]), null);
+  assert.equal(validSalesTiers([]), null);
+  assert.deepEqual(validSalesTiers([{ min: '600000', amount: '5000' }]), [{ min: 600000, amount: 5000 }]);
+
+  // 設定が無い・施術消化売上で段階もそのままなら全店共通の制度そのもの
+  assert.equal(rulesForStore(null), INCENTIVE_RULES);
+  assert.equal(rulesForStore({ metric: 'consumedSales' }), INCENTIVE_RULES);
+  assert.equal(rulesForStore({ metric: 'unknown' }), INCENTIVE_RULES);
 });

@@ -34,7 +34,27 @@ function Section({ no, title, icon, children }) {
   );
 }
 
-export default function RulesView({ rules }) {
+/** 売上インセンティブを全店共通と変えている店舗（設定 > インセンティブ制度 > 店舗ごとの売上インセンティブ） */
+function StoreSalesRulesNote({ salesRules }) {
+  if (!salesRules || !salesRules.length) return null;
+  return (
+    <div className="rounded-xl border border-line px-3.5 py-3">
+      <p className="font-semibold text-ink">店舗ごとの設定</p>
+      <ul className="mt-1 space-y-1">
+        {salesRules.map((r) => (
+          <li key={r.storeId}>
+            <span className="font-semibold text-ink">{r.storeName}</span>：<strong className="text-ink">{r.label}</strong>で判定
+            {r.metric === 'depositSales' ? '（店舗の合算をしている店舗は合算した金額）' : ''}
+            <span className="block text-xs text-muted">段階: {r.tiers.map((t) => `${yen(t.min)}以上 ${yen(t.amount)}`).join(' / ')}</span>
+          </li>
+        ))}
+      </ul>
+      <p className="mt-1 text-xs text-muted">スタッフは所属店舗の設定で判定します。ほかの項目は全店共通です。</p>
+    </div>
+  );
+}
+
+export default function RulesView({ rules, salesRules = null }) {
   const s = rules.sales.tiers;
   const salesRows = [[`${yen(s[0].min)} 未満`, yen(0)]];
   s.forEach((t, i) => {
@@ -70,6 +90,7 @@ export default function RulesView({ rules }) {
         </ul>
         <p className="text-xs text-muted">SalonOne の消化額が 0円になっているサブスクの来店は、そのお客様のプランの 1回分の金額で数えます（2026年11月から。SalonOne の売上分析の「消化売上」とは数え方が違います）。</p>
         <TierTable head={['月間施術消化売上（条件）', 'インセンティブ支給額']} rows={salesRows} />
+        <StoreSalesRulesNote salesRules={salesRules} />
         <div className="rounded-xl bg-surface-2 px-3.5 py-3">
           <p className="font-semibold text-ink">評価基準額の算出根拠：1回あたり {yen(rules.unitPrice)}</p>
           <ul className="mt-1 list-disc space-y-0.5 pl-5">

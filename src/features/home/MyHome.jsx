@@ -7,7 +7,7 @@ import { CountUp, Confetti } from '../../ui/motion.jsx';
 import { yen, yenShort, num, pct, changeRate, signedPct } from '../../lib/format.js';
 import { forecastMonthEnd } from '../../../shared/metrics.js';
 import { dayOfMonth } from '../../../shared/dates.js';
-import { itemStatus, ChartLegend, INCENTIVE_META } from '../incentives/parts.jsx';
+import { itemStatus, ChartLegend, INCENTIVE_META, salesLabel, salesGoal } from '../incentives/parts.jsx';
 import { focusIncentive } from '../incentives/focus.js';
 
 // ============================================================
@@ -50,9 +50,9 @@ function RankBadge({ index, count }) {
   );
 }
 
-function RankLadder({ tiers, reached }) {
+function RankLadder({ tiers, reached, label = '施術消化売上' }) {
   return (
-    <ol className="mt-4 grid grid-cols-5 gap-1.5" aria-label="施術消化売上のランク">
+    <ol className={cx('mt-4 grid gap-1.5', tiers.length === 5 ? 'grid-cols-5' : tiers.length <= 4 ? 'grid-cols-4' : 'grid-cols-5')} aria-label={`${label}のランク`}>
       {tiers.map((t, i) => {
         const done = i <= reached;
         const isNext = i === reached + 1;
@@ -60,7 +60,7 @@ function RankLadder({ tiers, reached }) {
           <li key={t.min}
             className={cx('rounded-xl px-1 py-2 text-center ring-1 ring-inset transition-colors',
               done ? 'bg-gold-400/20 ring-gold-300/40' : isNext ? 'bg-white/[0.08] ring-white/35' : 'bg-white/[0.03] ring-white/10')}
-            aria-label={`ランク${i + 1}: 施術消化売上 ${thresholdShort(t.min)}以上で ${yen(t.amount)}${done ? '（達成）' : ''}`}
+            aria-label={`ランク${i + 1}: ${label} ${thresholdShort(t.min)}以上で ${yen(t.amount)}${done ? '（達成）' : ''}`}
           >
             <div className={cx('mx-auto flex h-5 w-5 items-center justify-center rounded-full',
               done ? 'bg-gold-300 text-brand-950' : isNext ? 'border border-dashed border-white/70 text-white/80' : 'border border-white/20 text-white/40')}>
@@ -78,7 +78,8 @@ function RankLadder({ tiers, reached }) {
 function HeroWallet({ summary, me }) {
   const { rules, period } = summary;
   const sales = byKey(me.incentive.items).sales;
-  const tiers = rules.sales.tiers;
+  // 段階・指標は所属店舗の設定（例: 大和店は入金売上）
+  const tiers = sales.tiers || rules.sales.tiers;
   const next = sales.nextTier;
   const floor = sales.tierIndex >= 0 ? tiers[sales.tierIndex].min : 0;
   const seg = next ? clamp01((sales.current - floor) / (next.min - floor)) : 1;
@@ -128,11 +129,11 @@ function HeroWallet({ summary, me }) {
         ) : (
           <div className="mt-5 flex items-center gap-2.5 rounded-2xl bg-gold-400/15 p-3.5 ring-1 ring-inset ring-gold-300/30">
             <Icon name="trophy" size={20} className="shrink-0 text-gold-300" />
-            <p className="text-[13px] font-semibold">施術消化売上は最上位ランクに到達しています</p>
+            <p className="text-[13px] font-semibold">{salesLabel(sales)}は最上位ランクに到達しています</p>
           </div>
         )}
 
-        <RankLadder tiers={tiers} reached={sales.tierIndex} />
+        <RankLadder tiers={tiers} reached={sales.tierIndex} label={salesLabel(sales)} />
 
         <div className="mt-4 flex items-center justify-between gap-3 border-t border-white/10 pt-3.5 text-[13px]">
           <span className="flex min-w-0 items-center gap-1.5 text-white/70">
@@ -164,16 +165,17 @@ function MiniStat({ label, value, sub, tone }) {
 function OutlookCard({ summary, me, goal }) {
   const { progress, rules } = summary;
   const sales = byKey(me.incentive.items).sales;
-  const tiers = rules.sales.tiers;
+  const tiers = sales.tiers || rules.sales.tiers;
   const current = sales.current;
-  const prev = me.prevConsumedSales;
+  // 前月比は施術消化売上で比べる（入金売上で判定する店舗は前月の値が無いので出さない）
+  const prev = (sales.metric || 'consumedSales') === 'consumedSales' ? me.prevConsumedSales : null;
 
   if (!isCurrentMonth(progress)) {
     const delta = changeRate(current, prev);
     return (
       <Card title="この月の結果" icon="flag-triangle-right">
         <div className="grid grid-cols-3 divide-x divide-line">
-          <MiniStat label="施術消化売上" value={yenShort(current)} sub={sales.tierIndex >= 0 ? `ランク${sales.tierIndex + 1}` : 'ランク外'} />
+          <MiniStat label={salesLabel(sales)} value={yenShort(current)} sub={sales.tierIndex >= 0 ? `ランク${sales.tierIndex + 1}` : 'ランク外'} />
           <MiniStat label="インセンティブ" value={yen(me.incentive.total)} />
           <MiniStat label="前月比" value={delta == null ? '—' : signedPct(delta)} tone={delta > 0 ? 'good' : undefined} />
         </div>
@@ -314,7 +316,7 @@ function MissionRow({ m, item }) {
         </span>
         <span className="min-w-0 flex-1">
           <span className="flex items-center justify-between gap-2">
-            <span className="truncate text-[14px] font-bold text-ink">{meta.short || meta.title}</span>
+            <span className="truncate text-[14px] font-bold text-ink">{m.key === 'sales' ? salesLabel(item) : meta.short || meta.title}</span>
             <span className={cx('shrink-0 text-[15px] font-bold num', earned ? 'text-ink' : 'text-muted')}>{yen(m.amount)}</span>
           </span>
           {m.progress ? (
@@ -419,20 +421,24 @@ function MySalesChart({ summary, me, goal }) {
   const live = isCurrentMonth(progress);
   const forecast = live ? Math.round(forecastMonthEnd(sales.current, progress.elapsed, progress.total) / 1000) * 1000 : null;
   const next = sales.nextTier;
+  // 指標は所属店舗の設定（例: 大和店は入金売上）
+  const metric = sales.metric || 'consumedSales';
+  const label = salesLabel(sales);
+  const valueOf = (d) => (d[metric] != null ? d[metric] : d.consumedSales);
   let acc = 0;
-  const rows = me.daily.map((d) => { acc += d.consumedSales; return { date: d.date, day: d.consumedSales, cum: acc, n: d.treatmentCount }; });
+  const rows = me.daily.map((d) => { acc += valueOf(d); return { date: d.date, day: valueOf(d), cum: acc, n: d.treatmentCount }; });
   return (
-    <Card title="施術消化売上の推移" icon="chart-line" subtitle={`1回 ${yen(rules.unitPrice)} で計算・日ごとの累計`}>
+    <Card title={`${label}の推移`} icon="chart-line" subtitle={metric === 'consumedSales' ? `1回 ${yen(rules.unitPrice)} で計算・日ごとの累計` : '日ごとの累計'}>
       <CumulativeChart
         days={progress.total}
         elapsed={progress.elapsed || progress.total}
-        daily={me.daily.map((d) => ({ day: dayOfMonth(d.date), value: d.consumedSales }))}
+        daily={me.daily.map((d) => ({ day: dayOfMonth(d.date), value: valueOf(d) }))}
         target={goal || undefined}
         forecast={forecast || undefined}
         refLines={next ? [{ value: next.min, label: `次 ${yenShort(next.min)}` }] : []}
         format={yenShort}
         height={210}
-        ariaLabel="今月の施術消化売上の累計推移"
+        ariaLabel={`今月の${label}の累計推移`}
       />
       <ChartLegend items={[
         { label: '実績（累計）', color: 'var(--chart-sales)' },
@@ -443,7 +449,7 @@ function MySalesChart({ summary, me, goal }) {
       <ChartTable
         columns={[
           { key: 'date', label: '日付' },
-          { key: 'day', label: '消化売上', align: 'right', render: (r) => yen(r.day) },
+          { key: 'day', label: metric === 'consumedSales' ? '消化売上' : label, align: 'right', render: (r) => yen(r.day) },
           { key: 'cum', label: '累計', align: 'right', render: (r) => yen(r.cum) },
           { key: 'n', label: '施術数', align: 'right', render: (r) => num(r.n) },
         ]}
@@ -460,8 +466,8 @@ function achievementsOf(me, rules) {
   const it = byKey(me.incentive.items);
   const list = [];
   for (let i = 0; i <= it.sales.tierIndex; i += 1) {
-    const t = rules.sales.tiers[i];
-    list.push({ key: `sales:${i}`, weight: 100 + i, title: `ランク${i + 1} 達成`, text: `施術消化売上が ${yenShort(t.min)} を超えて、${yen(t.amount)} ランクになりました` });
+    const t = (it.sales.tiers || rules.sales.tiers)[i];
+    list.push({ key: `sales:${i}`, weight: 100 + i, title: `ランク${i + 1} 達成`, text: `${salesLabel(it.sales)}が ${yenShort(t.min)} を超えて、${yen(t.amount)} ランクになりました` });
   }
   if (it.newContract.amount > 0) {
     list.push({ key: `newContract:${it.newContract.tierIndex}`, weight: 60 + it.newContract.tierIndex, title: '新規契約インセンティブ獲得', text: `3経路の契約率 ${pct(it.newContract.ratePct, 0)} で ${yen(it.newContract.amount)}` });
@@ -532,7 +538,8 @@ export default function MyHome({ summary, goals, trend, stale }) {
       </Card>
     );
   }
-  const goal = goals && goals.staff && goals.staff[me.staffId] ? goals.staff[me.staffId].consumedSales : null;
+  // 売上インセンティブの指標（所属店舗の設定）に合わせた目標
+  const goal = salesGoal(goals && goals.staff ? goals.staff[me.staffId] : null, me.incentive.items[0]);
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 lg:items-start">
