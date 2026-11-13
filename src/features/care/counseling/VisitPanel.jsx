@@ -63,6 +63,8 @@ function VisitRow({ v, sheet, onSelect }) {
           <span className="flex flex-wrap items-center gap-1.5">
             <span className={cx('truncate text-sm font-bold', v.customerName ? 'text-ink' : 'text-ink-2')}>{guestLabel(v)}</span>
             {v.isNew ? <Badge tone="gold">初回</Badge> : null}
+            {/* 店舗の合算をしている店舗（例: 大和店に titi 大和店）は、どちらの店舗の予約か */}
+            {v.shopName ? <Badge tone="neutral" icon="store">{v.shopName}</Badge> : null}
             {sheet ? <Badge tone="info" icon="file-text">シートあり</Badge> : null}
             {v.contracted ? <Badge tone="good" icon="check">ご契約</Badge> : null}
           </span>

@@ -62,7 +62,7 @@ export function IncentiveBreakdown({ incentive, onSelect, className = '' }) {
                 <Icon name={meta.icon} size={16} />
               </span>
               <span className="min-w-0 flex-1">
-                <span className="block truncate text-[13px] font-semibold text-ink">{meta.title}</span>
+                <span className="block truncate text-[13px] font-semibold text-ink">{item.key === 'sales' ? salesLabel(item) : meta.title}</span>
                 <StatusPill status={st.status} label={st.label} className="mt-0.5" />
               </span>
               <span className={cx('shrink-0 text-[15px] font-bold num', item.amount > 0 ? 'text-ink' : 'text-muted')}>{yen(item.amount)}</span>
@@ -82,25 +82,38 @@ export function nextStepText(salesItem) {
   return `あと${yen(gap)}（約${sessions}回）で ${yen(amount)} ランク`;
 }
 
+/** 売上インセンティブの指標の名前（店舗の設定で入金売上の時がある） */
+export const salesLabel = (item) => (item && item.label) || '施術消化売上';
+
+/** 売上インセンティブの指標に合わせたスタッフの目標（施術消化売上 / 入金売上の目標） */
+export const salesGoal = (staffGoal, item) => (staffGoal ? staffGoal[(item && item.metric) || 'consumedSales'] || null : null);
+
 /**
- * 施術消化売上の段階カード: 段階付きメーター + 月末予測 + 1日あたり必要額 + 累計グラフ
+ * 売上インセンティブの段階カード: 段階付きメーター + 月末予測 + 1日あたり必要額 + 累計グラフ。
+ * 指標と段階はスタッフの所属店舗の設定（item.metric / item.tiers。例: 大和店は入金売上）
  */
-export function SalesTierCard({ item, daily, progress, rules, goal, title = '施術消化売上インセンティブ', showChart = true }) {
+export function SalesTierCard({ item, daily, progress, rules, goal, title, showChart = true }) {
   const current = item.current;
+  const label = salesLabel(item);
+  const metric = item.metric || 'consumedSales';
+  const tiers = item.tiers || rules.sales.tiers;
   const isCurrent = progress && progress.elapsed > 0 && progress.remaining > 0;
   // 月末予測は 1,000円単位に丸める（細かい桁は精度があるように見えてしまうため）
   const forecast = isCurrent ? Math.round(forecastMonthEnd(current, progress.elapsed, progress.total) / 1000) * 1000 : null;
-  const forecastTier = forecast != null ? rules.sales.tiers.filter((t) => forecast >= t.min).pop() : null;
-  const steps = rules.sales.tiers.map((t) => ({ at: t.min, label: yen(t.amount) }));
+  const forecastTier = forecast != null ? tiers.filter((t) => forecast >= t.min).pop() : null;
+  const steps = tiers.map((t) => ({ at: t.min, label: yen(t.amount) }));
   const next = item.nextTier;
   const perDay = isCurrent && next ? Math.ceil(next.gap / Math.max(1, progress.remaining)) : null;
   const goalGap = goal ? goal - current : null;
 
   return (
-    <Card title={title} icon="banknote" subtitle={`評価基準額 1回あたり ${yen(rules.unitPrice)}（施術 1回分の金額の合計）`}>
+    <Card title={title || `${label}インセンティブ`} icon="banknote"
+      subtitle={metric === 'depositSales'
+        ? `所属店舗の設定で、${label}（店舗の合算をしていれば合算）で判定します${item.custom ? '・段階は店舗の設定' : ''}`
+        : `評価基準額 1回あたり ${yen(rules.unitPrice)}（施術 1回分の金額の合計）${item.custom ? '・段階は店舗の設定' : ''}`}>
       <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-2">
         <div>
-          <div className="text-xs font-semibold text-ink-2">今月の施術消化売上</div>
+          <div className="text-xs font-semibold text-ink-2">今月の{label}</div>
           <div className="mt-1 text-3xl font-bold tracking-tight text-ink">{yen(current)}</div>
         </div>
         <div className="text-right">
@@ -147,13 +160,13 @@ export function SalesTierCard({ item, daily, progress, rules, goal, title = '施
           <CumulativeChart
             days={progress.total}
             elapsed={progress.elapsed}
-            daily={daily.map((d) => ({ day: dayOfMonth(d.date), value: d.consumedSales }))}
+            daily={daily.map((d) => ({ day: dayOfMonth(d.date), value: d[metric] != null ? d[metric] : d.consumedSales }))}
             target={goal || undefined}
             forecast={forecast || undefined}
             refLines={next ? [{ value: next.min, label: `次 ${yenShort(next.min)}` }] : []}
             format={yenShort}
             height={200}
-            ariaLabel="今月の施術消化売上の累計推移"
+            ariaLabel={`今月の${label}の累計推移`}
           />
           <ChartLegend items={[
             { label: '実績（累計）', color: 'var(--chart-sales)' },
@@ -346,7 +359,7 @@ export function buildNextActions(incentive, rules) {
   const s = by.sales;
   if (s && s.nextTier) {
     out.push({ key: 'sales', icon: 'banknote', gain: s.nextTier.amount - s.amount,
-      text: `施術消化売上 あと${yen(s.nextTier.gap)}（約${s.nextTier.sessions}回）`,
+      text: `${salesLabel(s)} あと${yen(s.nextTier.gap)}（約${s.nextTier.sessions}回）`,
       reward: `${yen(s.nextTier.amount)}ランク` });
   }
   const nc = by.newContract;

@@ -8,6 +8,7 @@ import CounselingSettings from './CounselingSettings.jsx';
 import StaffSection from './StaffSection.jsx';
 import StoreSection from './StoreSection.jsx';
 import RulesView from '../incentives/RulesView.jsx';
+import StoreSalesRules from './StoreSalesRules.jsx';
 
 const TAB_KEY = 'sise_settings_tab';
 
@@ -65,10 +66,13 @@ export default function SettingsPage() {
       {tab === 'staff' ? <StaffSection /> : null}
       {tab === 'stores' ? <StoreSection /> : null}
       {tab === 'rules' ? (
-        <>
-          <p className="mb-3 text-xs text-muted">制度の金額・条件を変える場合は shared/incentive-rules.js を更新します（計算と画面の表示がまとめて切り替わります）。</p>
-          <RulesView rules={INCENTIVE_RULES} />
-        </>
+        <div className="space-y-4">
+          <StoreSalesRules />
+          <div>
+            <p className="mb-3 text-xs text-muted">全店共通の制度の金額・条件を変える場合は shared/incentive-rules.js を更新します（計算と画面の表示がまとめて切り替わります）。店舗ごとの売上インセンティブは上で変えられます。</p>
+            <RulesView rules={INCENTIVE_RULES} />
+          </div>
+        </div>
       ) : null}
       {tab === 'display' ? <DisplaySettings /> : null}
     </div>

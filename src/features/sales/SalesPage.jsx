@@ -12,6 +12,7 @@ import { ScopeBar, DataWarnings } from '../shared/ScopeBar.jsx';
 import ConsumedBasisNote from '../shared/ConsumedBasisNote.jsx';
 import { currentQuery } from '../../app/router.js';
 import NewBreakdownCard from './NewBreakdownCard.jsx';
+import StoreParts from '../shared/StoreParts.jsx';
 
 const WD = ['日', '月', '火', '水', '木', '金', '土'];
 
@@ -167,6 +168,7 @@ export default function SalesPage() {
       {!data ? <Skeleton className="h-[480px] rounded-2xl" /> : (
         <div className={cx('space-y-4 transition-opacity', summary.stale || summary.loading ? 'opacity-60' : '')}>
           <Kpis data={data} />
+          <StoreParts parts={data.store.parts} total={data.store} storeName={data.stores.length === 1 ? data.stores[0].name : ''} />
           <NewBreakdownCard data={data} id="new-breakdown" />
           <div className="grid gap-4 lg:grid-cols-2">
             <TrendCard trend={trend.shown} month={month} />

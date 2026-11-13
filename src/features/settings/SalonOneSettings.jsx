@@ -235,6 +235,67 @@ function MappingSection({ title, icon, subtitle, rows, options, value, onChange,
   );
 }
 
+/**
+ * 店舗の合算: ダッシュボードの 1店舗に、別の SalonOne の店舗の数字を足す（同じ住所・同じスタッフの別ブランドの店舗。例: 大和店に titi 大和店）。
+ * 売上・施術・新規・契約・会員数・退会率・目標・出納帳（同じレジ）・本日のお客様を合わせ、売上分析・ホームに内訳を出す
+ */
+function ShopMergeCard({ stores, shops, shopMap, value, onChange, onSave, saving, disabled }) {
+  const nameOf = (id) => (shops.find((x) => String(x.id) === String(id)) || {}).name || String(id);
+  const primaryIds = new Set(Object.values(shopMap).filter(Boolean).map(String));
+  const rows = stores.filter((st) => shopMap[st.id]);
+  const extrasOf = (sid) => [].concat(value[sid] || []).map(String);
+  const takenElsewhere = (sid) => new Set(Object.entries(value).filter(([k]) => k !== sid).flatMap(([, ids]) => [].concat(ids || [])).map(String));
+  return (
+    <Card title="店舗の合算" icon="combine"
+      subtitle="同じ住所・同じスタッフで営業している別ブランドの店舗を、1つの店舗として数えます（例: 大和店に titi 大和店）。売上・施術・新規・契約・会員数・退会率・目標・出納帳・本日のお客様を合わせ、売上分析とホームに内訳を出します">
+      {rows.length === 0 ? <EmptyState compact icon="store" title="先に「店舗の対応付け」を保存してください" /> : (
+        <ul className="divide-y divide-line">
+          {rows.map((st) => {
+            const extras = extrasOf(st.id);
+            const taken = takenElsewhere(st.id);
+            const options = shops.filter((x) => {
+              const id = String(x.id);
+              return id !== String(shopMap[st.id]) && !primaryIds.has(id) && !taken.has(id) && !extras.includes(id);
+            });
+            return (
+              <li key={st.id} className="py-3">
+                <div className="flex flex-wrap items-center gap-1.5 text-[13px]">
+                  <span className="font-semibold text-ink">{st.name}</span>
+                  <span className="text-muted">＝</span>
+                  <Badge tone="neutral">{nameOf(shopMap[st.id])}</Badge>
+                  {extras.map((id) => (
+                    <span key={id} className="inline-flex items-center gap-1">
+                      <span className="text-muted">＋</span>
+                      <span className="inline-flex items-center gap-1 rounded-full bg-brand-50 py-0.5 pl-2.5 pr-1 text-[11px] font-semibold text-brand-800 dark:bg-brand-500/15 dark:text-brand-200">
+                        {nameOf(id)}
+                        <button type="button" disabled={disabled} onClick={() => onChange(st.id, extras.filter((x) => x !== id))}
+                          className="flex h-6 w-6 items-center justify-center rounded-full hover:bg-brand-100 dark:hover:bg-brand-500/25" aria-label={`${nameOf(id)}の合算をやめる`}>
+                          <Icon name="x" size={12} />
+                        </button>
+                      </span>
+                    </span>
+                  ))}
+                </div>
+                {options.length ? (
+                  <Select className="mt-2 sm:w-72" value="" disabled={disabled} aria-label={`${st.name}に合算する SalonOne の店舗`}
+                    onChange={(e) => { if (e.target.value) onChange(st.id, [...extras, e.target.value]); }}>
+                    <option value="">＋ 合算する SalonOne の店舗を追加</option>
+                    {options.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+                  </Select>
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs text-muted">合算した店舗のスタッフは、その店舗のスタッフとして一覧に出ます。インセンティブの売上の指標は「インセンティブ制度」で店舗ごとに変えられます。</p>
+        <Button variant="primary" icon="save" onClick={onSave} loading={saving} disabled={disabled || rows.length === 0}>保存</Button>
+      </div>
+    </Card>
+  );
+}
+
 /** 自動で決まった 1回分の金額の説明 */
 function autoLabel(p) {
   if (p.learned) return `${yen(p.learned)}（SalonOne の消化額・${p.samples}件）`;
@@ -339,6 +400,7 @@ export default function SalonOneSettings() {
   const [shopMap, setShopMap] = useState({});
   const [staffMap, setStaffMap] = useState({});
   const [channelMap, setChannelMap] = useState({});
+  const [mergeMap, setMergeMap] = useState({});
   const [planRules, setPlanRules] = useState({ sharePlanKeyword: '', payPerVisitKeyword: '' });
   const [saving, setSaving] = useState('');
 
@@ -347,6 +409,7 @@ export default function SalonOneSettings() {
     setShopMap(master.mapping.shopMap || {});
     setStaffMap(master.mapping.staffMap || {});
     setChannelMap(master.mapping.channelMap || {});
+    setMergeMap(master.mapping.shopMerge || {});
     setPlanRules({ sharePlanKeyword: '', payPerVisitKeyword: '', ...(master.mapping.planRules || {}) });
   }, [master]);
 
@@ -406,6 +469,12 @@ export default function SalonOneSettings() {
             onAuto={() => autoMatch(stores.map((s) => ({ id: String(s.id), name: s.name })), master.shops, shopMap, setShopMap)}
             onSave={() => save('salonone.shopMap', shopMap, '店舗の対応付け')} saving={saving === 'salonone.shopMap'}
             disabled={demo} emptyText="店舗が登録されていません（店舗タブで追加）"
+          />
+          <ShopMergeCard
+            stores={stores.map((s) => ({ id: String(s.id), name: s.name }))} shops={master.shops} shopMap={master.mapping.shopMap || {}}
+            value={mergeMap} onChange={(id, ids) => setMergeMap((m) => ({ ...m, [id]: ids }))}
+            onSave={() => save('salonone.shopMerge', Object.fromEntries(Object.entries(mergeMap).filter(([, ids]) => ids && ids.length)), '店舗の合算')}
+            saving={saving === 'salonone.shopMerge'} disabled={demo}
           />
           <MappingSection
             title="スタッフの対応付け" icon="users" subtitle="スタッフURLでログインした人が、SalonOne のどのスタッフの実績を見るか"

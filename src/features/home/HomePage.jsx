@@ -11,10 +11,11 @@ import { forecastMonthEnd } from '../../../shared/metrics.js';
 import { dayOfMonth, formatMonthJa } from '../../../shared/dates.js';
 import { ScopeBar, DataWarnings } from '../shared/ScopeBar.jsx';
 import StaffDetail from '../incentives/StaffDetail.jsx';
-import { ChartLegend, itemStatus, retentionSourceText } from '../incentives/parts.jsx';
+import { ChartLegend, itemStatus, retentionSourceText, salesGoal } from '../incentives/parts.jsx';
 import MyHome from './MyHome.jsx';
 import SpecialGoalStrip from '../goals/SpecialGoalStrip.jsx';
 import MandalaHomeStrip from '../mandala/HomeStrip.jsx';
+import StoreParts from '../shared/StoreParts.jsx';
 import { navigate } from '../../app/router.js';
 
 function greeting() {
@@ -148,7 +149,12 @@ function RankChip({ item }) {
  */
 function TeamStatusCard({ summary, onOpen }) {
   const rows = summary.staff;
-  const tiers = summary.rules.sales.tiers;
+  // 店舗ごとの設定で段階の数が違うスタッフがいれば、いちばん多い段階の数で並べる
+  const tiers = rows.reduce((longest, r) => {
+    const t = r.incentive.items[0].tiers;
+    return t && t.length > longest.length ? t : longest;
+  }, summary.rules.sales.tiers);
+  const mixedSales = rows.some((r) => r.incentive.items[0].metric === 'depositSales');
   const totalMonth = rows.reduce((a, r) => a + r.incentive.total, 0);
   // 確定済みの支給期間は確定の記録の合計（表示中の店舗のスタッフ）
   const totalPeriod = summary.close ? summary.close.total : rows.reduce((a, r) => a + r.period.total, 0);
@@ -173,8 +179,8 @@ function TeamStatusCard({ summary, onOpen }) {
       </div>
 
       <div className="mt-4">
-        <div className="mb-1.5 text-xs font-semibold text-ink-2">施術消化売上のランク分布</div>
-        <div className="grid grid-cols-6 gap-1">
+        <div className="mb-1.5 text-xs font-semibold text-ink-2">{mixedSales ? '売上' : '施術消化売上'}のランク分布</div>
+        <div className={cx('grid gap-1', dist.length === 6 ? 'grid-cols-6' : dist.length <= 4 ? 'grid-cols-4' : dist.length === 5 ? 'grid-cols-5' : 'grid-cols-6')}>
           {dist.map((d) => (
             <div key={d.ti} className={cx('rounded-lg px-1 py-1.5 text-center', d.count > 0 ? (d.ti >= 0 ? 'bg-gold-50 dark:bg-gold-500/15' : 'bg-surface-3') : 'bg-surface-2')}>
               <div className={cx('text-[15px] font-bold leading-tight num', d.count > 0 ? 'text-ink' : 'text-muted')}>{d.count}</div>
@@ -291,6 +297,10 @@ function StaffRanking({ summary, goals, onOpen }) {
                     <div className="mt-1 flex items-baseline justify-between gap-2 text-[11px] text-muted num">
                       {sales.nextTier ? <><span>あと{yen(sales.nextTier.gap)}</span><span>約{sales.nextTier.sessions}回</span></> : <span className="text-ink-2">最上位ランク</span>}
                     </div>
+                    {/* 所属店舗の設定で施術消化売上以外（入金売上）で判定している時は、判定に使った金額を出す */}
+                    {sales.metric && sales.metric !== 'consumedSales' ? (
+                      <div className="mt-0.5 text-[11px] text-ink-2 num">{sales.label} {yen(sales.current)} で判定</div>
+                    ) : null}
                   </td>
                   <td className="num-cell">
                     {nc.visits > 0 ? <><div className="text-ink">{pct(nc.ratePct)}</div><div className="text-[11px] text-muted">{nc.contracts}/{nc.visits}名</div></> : <span className="text-muted">—</span>}
@@ -358,7 +368,7 @@ function StoresTable({ summary }) {
           <tbody>
             {summary.stores.map((s) => (
               <tr key={s.storeId}>
-                <td className="font-semibold text-ink">{s.name}{!s.linked ? <Badge tone="warn" className="ml-2">未連携</Badge> : null}</td>
+                <td className="font-semibold text-ink">{s.name}{s.parts ? <Badge tone="neutral" icon="combine" className="ml-2">合算</Badge> : null}{!s.linked ? <Badge tone="warn" className="ml-2">未連携</Badge> : null}</td>
                 <td className="num-cell">{yen(s.consumedSales)}</td>
                 <td className="num-cell">{num(s.treatmentCount)}</td>
                 <td className="num-cell">{num(s.contract3ch.visits)}</td>
@@ -375,7 +385,7 @@ function StoresTable({ summary }) {
         {summary.stores.map((s) => (
           <li key={s.storeId} className="rounded-2xl border border-line p-3">
             <div className="flex items-center justify-between gap-2">
-              <span className="truncate text-[14px] font-bold text-ink">{s.name}{!s.linked ? <Badge tone="warn" className="ml-2">未連携</Badge> : null}</span>
+              <span className="truncate text-[14px] font-bold text-ink">{s.name}{s.parts ? <Badge tone="neutral" icon="combine" className="ml-2">合算</Badge> : null}{!s.linked ? <Badge tone="warn" className="ml-2">未連携</Badge> : null}</span>
               <StatusPill {...itemStatus(s.retentionIncentive)} />
             </div>
             <dl className="mt-2 grid grid-cols-3 gap-2 text-[11px]">
@@ -415,7 +425,7 @@ function StoreHome({ summary, goals }) {
           <span className="relative min-w-0 flex-1">
             <span className="block text-xs font-semibold text-white/70">あなたの今月のインセンティブ{summary.period.preview ? '（試算）' : ''}</span>
             <span className="block text-xl font-bold num">{yen(me.incentive.total)}</span>
-            <span className="block text-[11px] text-white/70 num">施術消化売上 {yen(me.metrics.consumedSales)}・施術 {num(me.metrics.treatmentCount)}回</span>
+            <span className="block text-[11px] text-white/70 num">{me.incentive.items[0].label || '施術消化売上'} {yen(me.incentive.items[0].current)}・施術 {num(me.metrics.treatmentCount)}回</span>
           </span>
           {me.incentive.items[0].nextTier ? (
             <span className="relative hidden text-right text-xs text-white/70 sm:block">
@@ -426,6 +436,8 @@ function StoreHome({ summary, goals }) {
         </button>
       ) : null}
       <StoreKpis summary={summary} storeGoal={storeGoal} />
+      {/* 店舗の合算をしている店舗（例: 大和店 = si'se 大和店 + titi 大和店）の内訳 */}
+      <StoreParts parts={summary.store.parts} total={summary.store} storeName={summary.stores.length === 1 ? summary.stores[0].name : ''} />
       <div className="grid gap-4 lg:grid-cols-3">
         <StoreTrendCard summary={summary} storeGoal={storeGoal} />
         <TeamStatusCard summary={summary} onOpen={setOpen} />
@@ -435,7 +447,7 @@ function StoreHome({ summary, goals }) {
       <Modal open={!!open} onClose={() => setOpen(null)} title={open ? `${open.name} さんのインセンティブ` : ''} size="lg">
         {open ? (
           <StaffDetail row={open} summary={summary}
-            goal={goals && goals.staff && open.staffId && goals.staff[open.staffId] ? goals.staff[open.staffId].consumedSales : null} />
+            goal={salesGoal(goals && goals.staff && open.staffId ? goals.staff[open.staffId] : null, open.incentive.items[0])} />
         ) : null}
       </Modal>
     </div>

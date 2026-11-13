@@ -17,9 +17,10 @@ import { todayJst } from '../../../shared/dates.js';
 
 const HIDDEN = new Set(['cancelled', 'no_show']);
 
-/** 画面に返す 1行（SalonOne の顧客ID・店舗IDは返さない） */
-function toRow(v) {
+/** 画面に返す 1行（SalonOne の顧客ID・店舗IDは返さない）。shopName は店舗の合算をしている時だけ（どちらの店舗の予約か） */
+function toRow(v, shopName = null) {
   return {
+    shopName,
     id: v.id,
     time: v.time,
     status: v.status,
@@ -48,25 +49,30 @@ export async function buildVisits(staffCtx, { storeId, date, refresh = false, no
   const store = appCtx.stores.find((s) => s.id === id);
   const base = { mode: master.mode, storeId: id, storeName: store ? store.name : id, date: day };
 
-  const shopId = mapping.storeToShop.get(id);
-  if (!shopId) return { ...base, linked: false, names: false, visits: [], fetchedAt: null, stale: null };
+  // 店舗の合算をしている店舗（例: 大和店に titi 大和店）は、SalonOne の店舗すべての予約を合わせて出す
+  const shopIds = mapping.shopsOf(id);
+  if (!shopIds.length) return { ...base, linked: false, names: false, visits: [], fetchedAt: null, stale: null };
 
   if (master.mode === 'demo') {
-    const visits = demoVisits({ shopId, staff: master.staff, date: day, now });
-    return { ...base, linked: true, names: true, visits: visits.sort(byTime).map(toRow), fetchedAt: new Date(now).toISOString(), stale: null };
+    const visits = demoVisits({ shopId: shopIds[0], staff: master.staff, date: day, now });
+    return { ...base, linked: true, names: true, visits: visits.sort(byTime).map((v) => toRow(v)), fetchedAt: new Date(now).toISOString(), stale: null };
   }
 
-  const res = await loadDayVisits(shopId, day, { refresh });
-  const visits = res.value.filter((v) => !HIDDEN.has(v.status));
+  const merged = shopIds.length > 1;
+  const shopName = (sid) => (merged ? (master.shops.find((sh) => String(sh.id) === String(sid)) || {}).name || null : null);
+  const results = await Promise.all(shopIds.map((sid) => loadDayVisits(sid, day, { refresh }).then((res) => ({ sid, res }))));
+  const rows = results.flatMap(({ sid, res }) => res.value.filter((v) => !HIDDEN.has(v.status)).map((v) => ({ v, name: shopName(sid) })));
+  const fetchedAt = Math.min(...results.map(({ res }) => res.fetchedAt));
+  const staleOne = results.find(({ res }) => res.stale);
   return {
     ...base,
     linked: true,
     // 1件でも氏名の項目があれば「個人情報を含める」キー（予約が無い日は判断できないので false）
-    names: res.value.some((v) => v.hasNameField),
-    visits: visits.sort(byTime).map(toRow),
-    fetchedAt: new Date(res.fetchedAt).toISOString(),
-    stale: res.stale
-      ? `SalonOne から最新の予約を取得できなかったため、${jstStamp(res.fetchedAt)} 時点の予約を表示しています${res.error ? `（${String(res.error).replace(/^SalonOne API エラー \([^)]*\): /, '')}）` : ''}`
+    names: results.some(({ res }) => res.value.some((v) => v.hasNameField)),
+    visits: rows.sort((a, b) => byTime(a.v, b.v)).map(({ v, name }) => toRow(v, name)),
+    fetchedAt: new Date(fetchedAt).toISOString(),
+    stale: staleOne
+      ? `SalonOne から最新の予約を取得できなかったため、${jstStamp(staleOne.res.fetchedAt)} 時点の予約を表示しています${staleOne.res.error ? `（${String(staleOne.res.error).replace(/^SalonOne API エラー \([^)]*\): /, '')}）` : ''}`
       : null,
   };
 }

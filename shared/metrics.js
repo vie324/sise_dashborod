@@ -528,7 +528,37 @@ export function computeMonth({ receptions, contracts, month, asOf, channelMap, r
   };
 }
 
-/** 複数店舗の合計（「全店舗」表示用） */
+/**
+ * 複数の店舗の継続指標を合わせる（店舗の合算・全店舗の合計）。
+ * 会員数・1か月前の会員数・離反・都度払いで除いた人数は足し、退会率は合わせた人数から、平均継続期間は会員数の重み付き平均。
+ * 記録日（asOf）はいちばん古い店舗の日（その日時点までしか分からないため）
+ * @returns {Object|null} 継続指標のある店舗が無ければ null
+ */
+export function combineRetention(list) {
+  const rs = (list || []).filter(Boolean);
+  if (!rs.length) return null;
+  const out = { memberCount: 0, membersAtStart: 0, churnCount: 0, churnRatePct: null, avgTenureMonths: null, payPerVisitExcluded: 0, asOf: null, basis: 'combined' };
+  let tenureWeighted = 0;
+  let tenureWeight = 0;
+  let churnKnown = true;
+  for (const r of rs) {
+    if (r.membersAtStart == null || r.churnCount == null) churnKnown = false;
+    out.memberCount += n(r.memberCount);
+    out.membersAtStart += n(r.membersAtStart);
+    out.churnCount += n(r.churnCount);
+    out.payPerVisitExcluded += n(r.payPerVisitExcluded);
+    if (r.asOf && (!out.asOf || r.asOf < out.asOf)) out.asOf = r.asOf;
+    if (r.avgTenureMonths != null && n(r.memberCount) > 0) {
+      tenureWeighted += n(r.avgTenureMonths) * n(r.memberCount);
+      tenureWeight += n(r.memberCount);
+    }
+  }
+  out.churnRatePct = churnKnown && out.membersAtStart > 0 ? (out.churnCount / out.membersAtStart) * 100 : null;
+  out.avgTenureMonths = tenureWeight > 0 ? tenureWeighted / tenureWeight : null;
+  return out;
+}
+
+/** 複数店舗の合計（「全店舗」表示用・店舗の合算） */
 export function combineShops(shopList) {
   const out = {
     consumedSales: 0, existingConsumedSales: 0, depositSales: 0, treatmentCount: 0, customerCount: 0, cashSales: 0,
@@ -539,10 +569,6 @@ export function combineShops(shopList) {
     retention: { memberCount: 0, membersAtStart: 0, churnCount: 0, churnRatePct: null, avgTenureMonths: null, basis: 'combined' },
   };
   const daily = new Map();
-  let tenureWeighted = 0;
-  let tenureWeight = 0;
-  let retentionShops = 0;
-  let churnKnown = true;
   for (const s of shopList || []) {
     if (!s) continue;
     for (const k of ['consumedSales', 'existingConsumedSales', 'depositSales', 'treatmentCount', 'customerCount', 'cashSales', 'newVisitTotal', 'newContractTotal', 'referralSubscriptions']) {
@@ -566,29 +592,11 @@ export function combineShops(shopList) {
       b.newVisits += n(d.newVisits);
       b.cashSales += n(d.cashSales);
     }
-    const r = s.retention;
-    if (r) {
-      retentionShops += 1;
-      if (r.membersAtStart == null || r.churnCount == null) churnKnown = false;
-      out.retention.memberCount += n(r.memberCount);
-      out.retention.membersAtStart += n(r.membersAtStart);
-      out.retention.churnCount += n(r.churnCount);
-      if (r.avgTenureMonths != null && n(r.memberCount) > 0) {
-        tenureWeighted += n(r.avgTenureMonths) * n(r.memberCount);
-        tenureWeight += n(r.memberCount);
-      }
-    }
   }
   out.daily = Array.from(daily.values()).sort((a, b) => (a.date < b.date ? -1 : 1));
-  const rr = out.retention;
-  if (!retentionShops) {
-    // 継続指標が 1店舗も無い（ライブで過去の月の記録が無いなど）
-    rr.memberCount = null;
-    rr.membersAtStart = null;
-    rr.churnCount = null;
-  }
-  rr.churnRatePct = retentionShops && churnKnown && rr.membersAtStart > 0 ? (rr.churnCount / rr.membersAtStart) * 100 : null;
-  rr.avgTenureMonths = tenureWeight > 0 ? tenureWeighted / tenureWeight : null;
+  // 継続指標が 1店舗も無い（ライブで過去の月の記録が無いなど）時は人数を null にする
+  out.retention = combineRetention((shopList || []).map((s) => s && s.retention))
+    || { memberCount: null, membersAtStart: null, churnCount: null, churnRatePct: null, avgTenureMonths: null, basis: 'combined' };
   return out;
 }
 

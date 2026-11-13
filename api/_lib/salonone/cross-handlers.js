@@ -124,14 +124,16 @@ export async function crossStoreCandidates(staffCtx, { storeId, date } = {}) {
   if (!isDate(date) || date > todayJst()) throw new AccessError('契約日を正しく選んでください（今日まで）', 400);
   const store = c.appCtx.stores.find((s) => s.id === String(storeId || ''));
   if (!store) throw new AccessError('契約した店舗を選んでください', 400);
-  const shopId = c.mapping.storeToShop.get(store.id);
-  if (!shopId || c.master.mode !== 'live') return { storeId: store.id, date, linked: !!shopId && c.master.mode === 'live', items: [] };
-  const res = await loadDayVisits(shopId, date);
+  // 店舗の合算をしている店舗は、SalonOne の店舗すべての契約から選べる
+  const shopIds = c.mapping.shopsOf(store.id);
+  if (!shopIds.length || c.master.mode !== 'live') return { storeId: store.id, date, linked: shopIds.length > 0 && c.master.mode === 'live', items: [] };
+  const results = await Promise.all(shopIds.map((sid) => loadDayVisits(sid, date).then((res) => ({ shopId: sid, res }))));
   const month = monthOf(date);
   const docs = await loadCrossDocs([addMonths(month, -1), month, addMonths(month, 1)]);
   const used = new Set([...docs.values()].flatMap((d) => d.items).map((e) => linkKeyOf(e.link)).filter(Boolean));
   const showNames = c.scope.all || c.scope.storeIds.includes(store.id);
-  const items = res.value
+  const items = results
+    .flatMap(({ shopId, res }) => res.value.map((v) => ({ ...v, shopId })))
     .filter((v) => v.status === 'completed' && v.customerId && (v.joined || (v.plans && v.plans.length)))
     .map((v) => ({
       receptionId: v.id,
@@ -142,7 +144,7 @@ export async function crossStoreCandidates(staffCtx, { storeId, date } = {}) {
       isNew: !!v.isNew,
       customerNumber: v.customerNumber || '',
       customerName: showNames ? v.customerName || null : null,
-      registered: used.has(`${shopId}|${v.customerId}`),
+      registered: used.has(`${v.shopId}|${v.customerId}`),
     }))
     .sort((a, b) => a.time.localeCompare(b.time));
   return { storeId: store.id, date, linked: true, items };
@@ -176,10 +178,16 @@ export async function addCrossStore(staffCtx, input = {}, operator = '') {
   // 契約した店舗の SalonOne の契約と結びつける（その店舗の新規契約の数から除く）
   let link = null;
   if (input.receptionId) {
-    const shopId = c.mapping.storeToShop.get(contractStore.id);
-    if (!shopId || c.master.mode !== 'live') throw new AccessError('契約した店舗が SalonOne とつながっていないため、SalonOne の契約は選べません', 400);
-    const res = await loadDayVisits(shopId, date);
-    const v = res.value.find((x) => String(x.id) === String(input.receptionId));
+    const shopIds = c.mapping.shopsOf(contractStore.id);
+    if (!shopIds.length || c.master.mode !== 'live') throw new AccessError('契約した店舗が SalonOne とつながっていないため、SalonOne の契約は選べません', 400);
+    // 店舗の合算をしている店舗は、SalonOne の店舗すべてから探す
+    let shopId = null;
+    let v = null;
+    for (const sid of shopIds) {
+      const res = await loadDayVisits(sid, date);
+      v = res.value.find((x) => String(x.id) === String(input.receptionId)) || null;
+      if (v) { shopId = sid; break; }
+    }
     if (!v || v.status !== 'completed' || !v.customerId) {
       throw new AccessError('選んだ SalonOne の契約が見つかりません。契約日と店舗を確かめてください', 400);
     }
