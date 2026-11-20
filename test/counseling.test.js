@@ -157,10 +157,16 @@ test('受付履歴 1行 → 本日のお客様。氏名は「含める」キー�
   assert.equal(normalizeVisit({ ...raw, status: 'cancelled', cancel_type: 'no_show' }).status, 'no_show');
   assert.equal(normalizeVisit({ ...raw, status: 'checked_in' }).status, 'checked_in');
   assert.equal(normalizeVisit({ ...raw, classification: 'continuing' }).isNew, false);
+  // サブスクの決済だけの受付（来店ではない）
+  assert.equal(v.billing, false);
+  assert.equal(normalizeVisit({ ...raw, classification: 'subscription_billing' }).billing, true);
+  assert.equal(normalizeVisit({ ...raw, classification: 'existing', menus: [{ name: 'サブスク決済' }] }).billing, true);
+  assert.equal(normalizeVisit({ ...raw, classification: 'existing', menus: [{ name: 'サブスク決済' }, { name: '骨格矯正 60分' }] }).billing, false);
 });
 
-test('本日のお客様: 時刻順・キャンセルは出さない・初回と契約が分かる。顧客ID・予約メモは返さない', async () => {
+test('本日のお客様: 時刻順・キャンセルとサブスクの決済だけの受付は出さない・初回と契約が分かる。顧客ID・予約メモは返さない', async () => {
   const r = await visits.buildVisits(OWNER, { storeId: 'store-1', date: DAY });
+  // 9:00（区分がサブスク課金）・9:05（メニューが「サブスク決済」だけ）の受付は来店ではないので出ない
   assert.equal(r.mode, 'live');
   assert.equal(r.linked, true);
   assert.equal(r.storeName, '中央店');

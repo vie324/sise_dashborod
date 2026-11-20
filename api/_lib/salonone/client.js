@@ -16,7 +16,9 @@
 //                                   上げてもらった場合だけ、その値より少し小さい値に変える）
 // ============================================================
 
-import { extractList, retentionCounts, normalizeStatus, normalizeCustomerClass, cashPortion, isChurnedStatus } from './normalize.js';
+import {
+  extractList, retentionCounts, normalizeStatus, normalizeCustomerClass, cashPortion, isChurnedStatus, isBillingClass, isBillingMenu, menuNamesOf,
+} from './normalize.js';
 
 export const DEFAULT_BASE_URL = 'https://salonone.net/api/analytics/v1';
 
@@ -341,17 +343,24 @@ function safeInfo(obj) {
 const distinctValues = (list, fn) => [...new Set(list.flatMap((r) => [].concat(fn(r) ?? []).filter((v) => v != null && v !== '').map(String)))].slice(0, 20);
 
 /**
- * 受付履歴に出てくる値の種類と、ダッシュボードでの扱い（状態・区分・プラン種別・決済方法。顧客の情報は含まない）。
+ * 受付履歴に出てくる値の種類と、ダッシュボードでの扱い（状態・区分・メニュー・プラン種別・決済方法。顧客の情報は含まない）。
  * 集計の前提（どの状態を会計完了として数えるか・どの決済を現金とするか）が実際のデータと合っているかを確かめる用。
  */
-function receptionValues(list) {
+export function receptionValues(list) {
   const distinct = (fn) => distinctValues(list, fn);
   const STATUS_LABEL = { completed: '会計完了（集計する）', reserved: '予約', checked_in: '来店中', cancelled: 'キャンセル', no_show: '無断キャンセル' };
   const CLASS_LABEL = { new: '新規（初回の判定に使う）', repeat: '継続', existing: '既存' };
   return {
     status: distinct((r) => r.status).map((v) => ({ value: v, as: STATUS_LABEL[normalizeStatus(v)] || '不明（集計しない）' })),
     cancelType: distinct((r) => r.cancel_type).map((v) => ({ value: v, as: v === 'no_show' ? '無断キャンセル' : 'キャンセル' })),
-    classification: distinct((r) => r.classification).map((v) => ({ value: v, as: CLASS_LABEL[normalizeCustomerClass({ classification: v })] })),
+    classification: distinct((r) => r.classification).map((v) => ({
+      value: v,
+      as: isBillingClass(v) ? '来店ではない課金（本日のお客様に出さない・施術消化売上に入れない）' : CLASS_LABEL[normalizeCustomerClass({ classification: v })],
+    })),
+    // メニュー（決済だけのメニューしか無い受付は、来店ではない課金として扱う）
+    menu: distinct((r) => menuNamesOf(r)).map((v) => ({
+      value: v, as: isBillingMenu(v) ? '決済だけのメニュー（これだけの受付は来店ではない）' : '施術のメニュー',
+    })),
     planKind: distinct((r) => (Array.isArray(r.plans) ? r.plans.map((p) => p && p.plan_kind) : [])).map((v) => ({
       value: v, as: v === 'subscription' ? 'サブスク（契約）' : v === 'ticket' ? '回数券（契約）' : '契約に数えない',
     })),

@@ -106,6 +106,7 @@ function receptionRows(shopId, month) {
 /**
  * 1日だけの取得（from = to）で返す、その日の予約（施術ツールの「本日のお客様」の確認用）。
  * 中央店（101）: 初回 5件（会計済み・契約あり / 来店中 / 予約 / 当日キャンセル / 無断キャンセル）+ 既存 2件
+ *               + サブスクの決済だけの受付 2件（区分がサブスク課金 / メニューが「サブスク決済」だけ。本日のお客様に出さない）
  * 駅前店（102）: 初回 1件
  */
 function dayRows(shopId, date) {
@@ -116,6 +117,7 @@ function dayRows(shopId, date) {
     staff_id: o.staff, staff_name: staffName(o.staff), visit_source_id: null, visit_source_name: o.source || null,
     classification: o.cls || 'existing', joined: !!o.joined, plans: o.plans || [],
     amount: o.amount || 0, consumed_amount: o.consumed || 0, payment_method_name: null, payment_splits: [],
+    ...(o.menus ? { menus: o.menus } : {}),
     _name: o.name,
   });
   if (shopId === 101) {
@@ -128,6 +130,9 @@ function dayRows(shopId, date) {
       row({ n: 15, hm: '16:30', staff: 201, name: '継続 二郎' }),
       row({ n: 16, hm: '18:00', staff: 201, cls: 'new', source: '紹介', name: '森 さやか' }),
       row({ n: 17, hm: '19:00', staff: 202, cls: 'new', source: 'ホットペッパー', status: 'cancelled', cancelType: 'no_show', name: '無断 太郎' }),
+      // サブスクの決済だけの受付（来店ではない。本日のお客様に出さない）: 区分がサブスク課金 / メニューが「サブスク決済」だけ
+      row({ n: 18, hm: '09:00', staff: 201, cls: 'subscription_billing', status: 'completed', amount: 9800, name: '課金 さくら' }),
+      row({ n: 19, hm: '09:05', staff: 202, status: 'completed', amount: 9800, menus: [{ id: 90, name: 'サブスク決済' }], name: '決済 ももこ' }),
     ];
   }
   if (shopId === 102) return [row({ n: 51, hm: '12:00', staff: 203, cls: 'new', source: 'ホットペッパー', name: '駅前 はな' })];

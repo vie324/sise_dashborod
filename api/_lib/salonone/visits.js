@@ -6,6 +6,7 @@
 // お客様の氏名は「個人情報を含める」キーのときだけ SalonOne が返す（names: true）。
 // 含めないキーでは顧客番号だけになる（画面でお呼びする名前を手入力できる）。
 // 予約メモ・電話番号などは返さない。
+// サブスク課金・決済だけの受付（区分がサブスク課金・決済、またはメニューが「サブスク決済」などだけ）は来店ではないので出さない。
 //
 // 見える範囲: スタッフ・店長・マネージャーは所属・管轄の店舗、オーナー・管理者は全店舗。
 // ============================================================
@@ -16,6 +17,8 @@ import { demoVisits } from './demo.js';
 import { todayJst } from '../../../shared/dates.js';
 
 const HIDDEN = new Set(['cancelled', 'no_show']);
+/** 本日のお客様に出す受付: キャンセル・無断キャンセルと、来店ではないサブスク課金・決済だけの受付は出さない */
+const isShown = (v) => !HIDDEN.has(v.status) && !v.billing;
 
 /** 画面に返す 1行（SalonOne の顧客ID・店舗IDは返さない）。shopName は店舗の合算をしている時だけ（どちらの店舗の予約か） */
 function toRow(v, shopName = null) {
@@ -61,7 +64,7 @@ export async function buildVisits(staffCtx, { storeId, date, refresh = false, no
   const merged = shopIds.length > 1;
   const shopName = (sid) => (merged ? (master.shops.find((sh) => String(sh.id) === String(sid)) || {}).name || null : null);
   const results = await Promise.all(shopIds.map((sid) => loadDayVisits(sid, day, { refresh }).then((res) => ({ sid, res }))));
-  const rows = results.flatMap(({ sid, res }) => res.value.filter((v) => !HIDDEN.has(v.status)).map((v) => ({ v, name: shopName(sid) })));
+  const rows = results.flatMap(({ sid, res }) => res.value.filter(isShown).map((v) => ({ v, name: shopName(sid) })));
   const fetchedAt = Math.min(...results.map(({ res }) => res.fetchedAt));
   const staleOne = results.find(({ res }) => res.stale);
   return {

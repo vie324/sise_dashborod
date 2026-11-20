@@ -164,8 +164,36 @@ function normalizePlans(raw) {
   }));
 }
 
-// 来店ではない課金の行（SalonOne の受付履歴の区分「サブスク課金」）。施術 1回分の金額を付けない
-const BILLING = /bill|課金|charge/i;
+// 来店ではない課金の行（SalonOne の受付履歴の区分「サブスク課金」「サブスク決済」など）。
+// 施術 1回分の金額を付けない・施術ツールの「本日のお客様」に出さない
+const BILLING = /bill|課金|charge|決済|payment/i;
+// 決済だけの受付のメニュー（例:「サブスク決済」「月額課金」）。メニューがこれだけの受付は来店ではない
+const BILLING_MENU = /決済|課金|bill|charge|payment/i;
+
+/** 区分の値が、来店ではない課金（サブスク課金・決済）か */
+export const isBillingClass = (value) => BILLING.test(String(value == null ? '' : value));
+/** メニュー名が、決済だけのメニュー（サブスク決済など）か */
+export const isBillingMenu = (name) => BILLING_MENU.test(String(name == null ? '' : name));
+/**
+ * 受付が来店ではない課金か: 区分がサブスク課金・決済、またはメニューがすべて決済のメニュー（「サブスク決済」だけの受付など）。
+ * 施術のメニューが 1つでもあれば来店として扱う
+ */
+export function isBillingReception(raw, menus = menuNamesOf(raw)) {
+  if (isBillingClass(pick(raw, ['classification', 'customer_class', 'customerClass', 'visit_type', 'visitType'], ''))) return true;
+  return menus.length > 0 && menus.every(isBillingMenu);
+}
+
+// メニューの項目名の候補（決まった名前が無い時は、名前に menu を含む項目を見る。ID・金額・時間などの項目は除く）
+const MENU_KEYS = ['menus', 'menu_items', 'reservation_menus', 'appointment_menus', 'services', 'treatment_menus', 'menu_names', 'menu_name', 'menuName', 'menu', 'course_name'];
+const MENU_KEY_LIKE = /menu/i;
+const MENU_KEY_SKIP = /(?:_|^)(?:ids?|count|counts|price|prices|amount|amounts|minutes|duration|time|times|category|categories|type|kind)$|(?:Ids?|Count|Price|Amount|Minutes|Duration|Time|Category|Type|Kind)$/;
+const menuLabel = (m) => {
+  if (typeof m === 'string') return m;
+  if (!m || typeof m !== 'object') return null;
+  const v = m.name ?? m.menu_name ?? m.menuName ?? m.title ?? m.label ?? m.menu;
+  if (v && typeof v === 'object') return typeof (v.name ?? v.title) === 'string' ? (v.name ?? v.title) : null;
+  return typeof v === 'string' ? v : null; // 数字だけ（メニューID）はメニュー名にしない
+};
 
 /**
  * 予約のメニュー名（SalonOne が受付履歴に付けて返す場合だけ。項目名の候補を順に見る。無ければ空）。
@@ -178,19 +206,17 @@ export function menuNamesOf(raw) {
     const s = String(v == null ? '' : v).trim().slice(0, 60);
     if (s && !names.includes(s)) names.push(s);
   };
-  for (const key of ['menus', 'menu_items', 'reservation_menus', 'appointment_menus', 'services', 'treatment_menus']) {
-    const list = raw[key];
-    if (!Array.isArray(list)) continue;
-    for (const m of list) {
-      if (typeof m === 'string') add(m);
-      else if (m && typeof m === 'object') add(m.name ?? m.menu_name ?? m.menuName ?? m.title ?? (m.menu && typeof m.menu === 'object' ? m.menu.name : m.menu));
+  const take = (v) => {
+    if (Array.isArray(v)) v.forEach((m) => add(menuLabel(m)));
+    else if (typeof v === 'string') add(v);
+    else if (v && typeof v === 'object') add(menuLabel(v));
+  };
+  for (const key of MENU_KEYS) take(raw[key]);
+  if (!names.length) {
+    for (const key of Object.keys(raw)) {
+      if (MENU_KEYS.includes(key) || !MENU_KEY_LIKE.test(key) || MENU_KEY_SKIP.test(key)) continue;
+      take(raw[key]);
     }
-  }
-  if (Array.isArray(raw.menu_names)) raw.menu_names.forEach(add);
-  for (const key of ['menu_name', 'menuName', 'menu', 'course_name']) {
-    const v = raw[key];
-    if (typeof v === 'string') add(v);
-    else if (v && typeof v === 'object' && v.name) add(v.name);
   }
   return names.slice(0, 5);
 }
@@ -206,6 +232,7 @@ export function normalizeReception(raw) {
   const status = cancelType === 'no_show' ? 'no_show' : (rawStatus == null && cancelType ? 'cancelled' : normalizeStatus(rawStatus));
   const salesAmount = toNum(pick(raw, ['amount', 'sales', 'sales_amount', 'total_amount'], 0));
   const sourceName = pick(raw, ['visit_source_name', 'visit_source.name', 'visitSourceName', 'source_name']);
+  const menus = menuNamesOf(raw);
   return {
     id: toId(pick(raw, ['appointment_id', 'id', 'reception_id', 'reservation_id'])),
     shopId: toId(pick(raw, ['shop_id', 'shopId', 'shop.id'])),
@@ -215,7 +242,7 @@ export function normalizeReception(raw) {
     date: toJstDate(pick(raw, ['reserved_at', 'reservedAt', 'start_at', 'visit_date', 'date'])),
     status,
     customerClass: normalizeCustomerClass(raw),
-    billing: BILLING.test(String(pick(raw, ['classification', 'customer_class', 'customerClass'], ''))),
+    billing: isBillingReception(raw, menus),
     sourceName: sourceName == null ? '' : String(sourceName),
     consumedAmount: toNum(pick(raw, ['consumed_amount', 'consumedAmount', 'consumed', 'consumed_sales'], 0)),
     salesAmount,
@@ -230,7 +257,7 @@ export function normalizeReception(raw) {
     customerNumber: String(pick(raw, ['customer_number', 'customer_code', 'customerNumber'], '')),
     customerName: raw && typeof raw === 'object' && (raw.customer_name ?? raw.customerName) != null
       ? String(raw.customer_name ?? raw.customerName).trim().slice(0, 60) || null : null,
-    menus: menuNamesOf(raw),
+    menus,
   };
 }
 
@@ -251,6 +278,8 @@ export function normalizeVisit(raw) {
     time: toJstTime(at),
     status: r.status,
     isNew: r.customerClass === 'new',
+    // サブスク課金・決済だけの受付（来店ではない）。本日のお客様に出さない
+    billing: r.billing,
     // SalonOne の顧客 ID（系列店での契約を結びつける用。画面には返さない）
     customerId: r.customerId,
     customerNumber: String(pick(raw, ['customer_number', 'customer_code', 'customerNumber'], '')),
