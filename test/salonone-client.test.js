@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { fakeFetch, FAKE_KEY } from '../scripts/dev/salonone-fake.mjs';
 import {
   salonOneConfig, fetchShops, fetchStaff, fetchReceptions, fetchRetentionCustomers, fetchObject, probe, SalonOneError,
-  cleanApiKey, apiKeyHint,
+  cleanApiKey, apiKeyHint, receptionValues,
 } from '../api/_lib/salonone/client.js';
 
 const BASE = 'http://fake.salonone.test/api/analytics/v1';
@@ -191,6 +191,7 @@ test('接続テスト: 各エンドポイントの件数と項目名（値は返
   assert.equal(as(rec.values.paymentMethod, '現金'), '現金');
   assert.equal(as(rec.values.paymentMethod, '現金 / クレジットカード'), '分割決済（内訳の現金の分だけ）');
   assert.equal(as(rec.values.paymentMethod, 'クレジットカード'), '現金以外');
+  assert.equal(as(rec.values.menu, '初回体験 骨格矯正 60分'), '施術のメニュー');
   assert.ok(!JSON.stringify(rec).includes('customer_name'));
   // 継続管理の顧客一覧: 状態・プラン名と、会員数での扱い（都度払いのキーワードに当たるか）
   const cust = results.find((r) => r.name === 'retentionCustomers');
@@ -217,4 +218,17 @@ test('1分の上限に達したら、長く待たずに「上限」として返�
   } finally {
     delete process.env.SALONONE_RATE_LIMIT_PER_MINUTE;
   }
+});
+
+test('接続テスト: サブスク課金・決済の区分と、決済だけのメニューは「来店ではない」と表示する', () => {
+  const values = receptionValues([
+    { status: 'completed', classification: 'existing', menus: [{ name: '骨格矯正 60分' }] },
+    { status: 'completed', classification: 'subscription_billing', plans: [] },
+    { status: 'completed', classification: 'existing', menus: [{ name: 'サブスク決済' }] },
+  ]);
+  const as = (list, value) => (list.find((v) => v.value === value) || {}).as;
+  assert.equal(as(values.classification, 'existing'), '既存');
+  assert.equal(as(values.classification, 'subscription_billing'), '来店ではない課金（本日のお客様に出さない・施術消化売上に入れない）');
+  assert.equal(as(values.menu, '骨格矯正 60分'), '施術のメニュー');
+  assert.equal(as(values.menu, 'サブスク決済'), '決済だけのメニュー（これだけの受付は来店ではない）');
 });

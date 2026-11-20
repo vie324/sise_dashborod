@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   normalizeReception, normalizeStaff, normalizeShop, normalizeRetention, extractList, normalizeStatus,
   contractsFromReceptions, cashPortion, cashUnknownOf, normalizeSalesSummary,
+  isBillingReception, isBillingClass, isBillingMenu, menuNamesOf,
 } from '../api/_lib/salonone/normalize.js';
 import { cashUnknownByDay } from '../shared/metrics.js';
 import { toJstDate } from '../shared/dates.js';
@@ -50,6 +51,9 @@ test('受付履歴の明細（仕様の項目名）', () => {
   assert.equal(r.billing, false);
   // SalonOne の区分「サブスク課金」の行（来店ではない）は施術 1回分の金額を付けない
   assert.equal(normalizeReception({ ...HISTORY_ROW, classification: 'subscription_billing' }).billing, true);
+  assert.equal(normalizeReception({ ...HISTORY_ROW, classification: 'サブスク決済' }).billing, true);
+  assert.equal(normalizeReception({ ...HISTORY_ROW, classification: 'subscription_payment' }).billing, true);
+  assert.equal(normalizeReception({ ...HISTORY_ROW, classification: 'existing' }).billing, false);
   assert.equal(normalizeReception({ ...HISTORY_ROW, plans: [{ plan_name: '回数券 6回', plan_kind: 'ticket', amount: 30000, total_sessions: 6 }] }).plans[0].totalSessions, 6);
 });
 
@@ -185,4 +189,30 @@ test('継続管理: 都度払いのプランだけのお客様は会員数・平
   const plain = normalizeRetention(summary, customers);
   assert.equal(plain.memberCount, 52);
   assert.equal(plain.payPerVisitExcluded, 0);
+});
+
+test('サブスクの決済だけの受付（来店ではない）: 区分がサブスク課金・決済、またはメニューがすべて決済のメニュー', () => {
+  const row = { ...HISTORY_ROW, classification: 'existing', plans: [], amount: 9800, consumed_amount: 0 };
+  assert.equal(isBillingReception(row), false); // メニューが無い既存の来店
+  assert.equal(isBillingReception({ ...row, menus: [{ name: 'サブスク決済' }] }), true);
+  assert.equal(isBillingReception({ ...row, menus: ['月額課金'] }), true);
+  assert.equal(isBillingReception({ ...row, menus: [{ name: 'サブスク決済' }, { name: '骨格矯正 60分' }] }), false); // 施術もある
+  assert.equal(isBillingReception({ ...row, menus: [{ name: '骨格矯正 60分' }] }), false);
+  assert.equal(isBillingReception({ ...row, classification: 'サブスク課金' }), true);
+  assert.equal(isBillingClass('new'), false);
+  assert.equal(isBillingClass('continuing'), false);
+  assert.equal(isBillingMenu('初回体験 骨格矯正 60分'), false);
+  // 正規化した受付にも付く（施術 1回分の金額を付けない・本日のお客様に出さない）
+  assert.equal(normalizeReception({ ...row, menus: [{ name: 'サブスク決済' }] }).billing, true);
+});
+
+test('メニュー名: 決まった項目名に無い時は、名前に menu を含む項目から取る（ID・件数・金額などは除く）', () => {
+  assert.deepEqual(menuNamesOf({ menus: [{ id: 1, name: '骨格矯正 60分' }, '小顔矯正'] }), ['骨格矯正 60分', '小顔矯正']);
+  assert.deepEqual(menuNamesOf({ reservation_menu_names: ['A', 'B'] }), ['A', 'B']);
+  assert.deepEqual(menuNamesOf({ menu_detail: { name: 'C', price: 5000 } }), ['C']);
+  assert.deepEqual(menuNamesOf({ menus: [{ menu: { name: 'D' } }] }), ['D']);
+  assert.deepEqual(menuNamesOf({ menu_ids: [1, 2], menu_count: 2, menu_price: 5000, menuCategory: '整体' }), []);
+  assert.deepEqual(menuNamesOf({ menus: [{ id: 3, menu: 12 }] }), []); // 数字（メニューID）はメニュー名にしない
+  assert.deepEqual(menuNamesOf({ menu_name: '骨格矯正', reservation_menus: [{ title: '骨格矯正' }] }), ['骨格矯正']); // 重複は 1つ
+  assert.deepEqual(menuNamesOf(HISTORY_ROW), []);
 });
