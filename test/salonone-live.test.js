@@ -527,3 +527,61 @@ test('スタッフの合算: 合算したスタッフの実績（売上・施術
     await db.from('dash_config').delete().eq('key', provider.STAFF_MERGE_KEY);
   }
 });
+
+test('未契約の理由: タブとメモで記録し、理由ごとの人数と一覧を出す（記録だけから・顧客IDは返さない）', async () => {
+  const leads = await import('../api/_lib/salonone/leads.js');
+  const { LOST_REASONS } = await import('../shared/leads.js');
+  const base = { month: PREV, storeId: 'store-1' };
+  const list = await leads.buildLeads(null, base);
+  const insta = list.rows.find((r) => r.sourceName === 'Instagram');
+  const hpb = list.rows.find((r) => r.sourceName === 'ホットペッパー');
+  const intro = list.rows.find((r) => r.sourceName === '紹介');
+  try {
+    // タブは選択肢にあるものだけ・選択肢の順・重なりなく残す
+    const a = await leads.saveLead(null, { ...base, rid: insta.rid, outcome: 'lost', reasons: ['イベント直前', '料金が合わない', '知らない理由', 'イベント直前'] }, '鈴木');
+    assert.deepEqual(a.record.reasons, ['料金が合わない', 'イベント直前']);
+    assert.equal(a.record.reason, null);
+    await leads.saveLead(null, { ...base, rid: intro.rid, outcome: 'lost', reasons: ['旅行中'], reason: '来月の旅行のあとに考える' }, '佐藤');
+    await leads.saveLead(null, { ...base, rid: hpb.rid, outcome: 'contracted', plan: '月2回プラン' }, '佐藤');
+    // タブもメモも無いと記録できない
+    await assert.rejects(leads.saveLead(null, { ...base, rid: insta.rid, outcome: 'lost', reasons: ['知らない理由'] }), (e) => e.status === 400 && /理由/.test(e.message));
+    // 新規台帳の一覧にもタブとメモで返す
+    const after = await leads.buildLeads(null, base);
+    assert.deepEqual(after.rows.find((r) => r.rid === intro.rid).record.reasons, ['旅行中']);
+
+    const r = await leads.buildLeadReasons(null, { month: PREV, months: 1, storeId: 'store-1' });
+    assert.deepEqual(r.counts, { recorded: 3, contracted: 1, lost: 2, memoOnly: 0 });
+    assert.equal(r.reasons.length, LOST_REASONS.length);
+    assert.deepEqual(r.reasons.filter((x) => x.count).map((x) => [x.label, x.count]), [['料金が合わない', 1], ['イベント直前', 1], ['旅行中', 1]]);
+    const travel = r.rows.find((x) => x.reasons.includes('旅行中'));
+    assert.equal(travel.reason, '来月の旅行のあとに考える');
+    assert.equal(travel.staffName, '佐藤 美咲'); // 記録の時に担当・媒体を写して持つ
+    assert.equal(travel.sourceName, '紹介');
+    assert.match(travel.customerNumber, /^K9/);
+    assert.equal(r.rows.find((x) => x.reasons.includes('料金が合わない')).channelLabel, 'Instagram');
+    assert.ok(!JSON.stringify(r).includes('customerId'));
+    assert.ok(!JSON.stringify(r).includes('|')); // 記録のキー（SalonOne の店舗ID|顧客ID）も返さない
+
+    // 3ヶ月（今月まで）なら前の月の記録も入る。見られる店舗すべて
+    const r3 = await leads.buildLeadReasons(null, { month: CURRENT, months: 3, storeId: 'all' });
+    assert.equal(r3.monthList.length, 3);
+    assert.equal(r3.counts.lost, 2);
+    // 見られない店舗のスタッフ: 指定すると 403、すべてでは自分の店舗だけ
+    const TANAKA = { valid: true, staffId: 'st-tanaka', role: 'staff', storeIds: ['store-2'], name: '田中' };
+    await assert.rejects(leads.buildLeadReasons(TANAKA, { month: PREV, storeId: 'store-1' }), (e) => e.status === 403);
+    assert.equal((await leads.buildLeadReasons(TANAKA, { month: PREV, storeId: 'all' })).counts.lost, 0);
+
+    // 前の形の記録（理由の文にタブを「・」でつないでいた）も、タブとメモに分けて数える
+    const key = leads.leadsKeyOf(PREV, 'store-1');
+    const doc = (await db.from('dash_config').select('value').eq('key', key).maybeSingle()).data.value;
+    doc.records['101|old-style'] = { outcome: 'lost', reason: '料金が合わない・家族と相談\n来年また来るかも', receptionId: 'old1', date: `${PREV}-15`, updatedAt: '2026-01-01T00:00:00Z', updatedBy: '鈴木' };
+    await db.from('dash_config').upsert({ key, value: doc }, { onConflict: 'key' });
+    const r2 = await leads.buildLeadReasons(null, { month: PREV, storeId: 'store-1' });
+    const old = r2.rows.find((x) => x.reason === '来年また来るかも');
+    assert.deepEqual(old.reasons, ['料金が合わない', '家族と相談']);
+    assert.equal(old.staffName, ''); // 写しの無い前の記録は担当・媒体なし
+    assert.equal(r2.reasons.find((x) => x.label === '料金が合わない').count, 2);
+  } finally {
+    await db.from('dash_config').delete().eq('key', leads.leadsKeyOf(PREV, 'store-1'));
+  }
+});

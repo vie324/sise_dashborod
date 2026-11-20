@@ -38,6 +38,9 @@ test.describe('基本起動', () => {
     test.skip(await login.isVisible(), '管理者ログインが必要な環境');
     // 絞り込み（すべて・未記録・契約・契約なし）
     await expect(page.getByRole('tab', { name: /未記録/ })).toBeVisible({ timeout: 20000 });
+    // 未契約の理由のタブ
+    await page.getByRole('tab', { name: /未契約の理由/ }).click();
+    await expect(page.getByRole('heading', { name: '理由ごとの人数' })).toBeVisible({ timeout: 20000 });
   });
 
   test('ビルド成果物 (JS / CSS) が配信される', async ({ request }) => {
@@ -161,6 +164,17 @@ test.describe('SalonOne 連携 API', () => {
     expect(JSON.stringify(data)).not.toContain('customerId');
     const cfg = await (await request.get('/api/db?table=dashConfig&key=newcust.2026-11.store-1')).json();
     expect(cfg.error).toBeTruthy();
+  });
+
+  test('未契約の理由: 理由ごとの人数（選択肢すべて）と一覧を返し、SalonOne の顧客IDは返さない', async ({ request }) => {
+    const resp = await request.get('/api/salonone?action=leadReasons&month=2026-11&months=3&storeId=all');
+    if (resp.status() === 401) return;
+    expect(resp.status()).toBe(200);
+    const data = await resp.json();
+    expect(data.monthList).toEqual(['2026-09', '2026-10', '2026-11']);
+    expect(data.reasons.map((r) => r.label)).toContain('必要性を感じさせられなかった');
+    expect(Array.isArray(data.rows)).toBe(true);
+    expect(JSON.stringify(data)).not.toContain('customerId');
   });
 
   test('不正な staff token は 401', async ({ request }) => {
