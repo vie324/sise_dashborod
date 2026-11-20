@@ -65,6 +65,8 @@ function receptionRows(shopId, month) {
     classification: o.cls || 'existing', joined: !!o.joined, plans: o.plans || [],
     amount: o.amount || 0, consumed_amount: o.consumed || 0,
     payment_method_name: o.method === undefined ? null : o.method, payment_splits: o.splits || [],
+    // 予約のメニュー（SalonOne が返す時だけ。新規台帳はこれを出し、無ければダッシュボードのメニューから選ぶ）
+    ...(o.menus ? { menus: o.menus } : {}),
   });
   if (shopId === 101) {
     const p = `${month.replace('-', '')}`;
@@ -73,7 +75,7 @@ function receptionRows(shopId, month) {
       row({ id: Number(`${p}01`), customer: 9001, day: 2, staff: 201, consumed: 8000, amount: 8000, method: '現金' }),
       row({
         id: Number(`${p}02`), customer: nc(1), day: 3, staff: 201, cls: 'new', source: 'ホットペッパー', sourceId: 1,
-        consumed: 3000, amount: 53000, joined: true, method: '現金 / クレジットカード',
+        consumed: 3000, amount: 53000, joined: true, method: '現金 / クレジットカード', menus: [{ id: 11, name: '初回体験 骨格矯正 60分' }],
         plans: [{ plan_name: '月2回プラン', plan_kind: 'subscription', amount: 50000, total_sessions: null }],
         splits: [{ payment_method_name: '現金', amount: 3000 }, { payment_method_name: 'クレジットカード', amount: 50000 }],
       }),

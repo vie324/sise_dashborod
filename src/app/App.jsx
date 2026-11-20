@@ -14,6 +14,7 @@ import HomePage from '../features/home/HomePage.jsx';
 import IncentivesPage from '../features/incentives/IncentivesPage.jsx';
 import GoalsPage from '../features/goals/GoalsPage.jsx';
 import SalesPage from '../features/sales/SalesPage.jsx';
+import LeadsPage from '../features/leads/LeadsPage.jsx';
 
 // 出納帳・施術ツール・設定は開いた時に読み込む（最初の表示を軽くする）
 const CashbookPage = lazy(() => import('../features/cashbook/CashbookPage.jsx'));
@@ -36,6 +37,7 @@ const PAGES = {
   '/incentives': IncentivesPage,
   '/goals': GoalsPage,
   '/sales': SalesPage,
+  '/leads': LeadsPage,
   '/cashbook': CashbookPage,
   '/care': CarePage,
   '/settings': SettingsPage,

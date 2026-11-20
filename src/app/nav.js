@@ -8,6 +8,8 @@ export const NAV = [
   // マンダラ（チャート・週報・日報）。スマホはホームのカードと「その他」から開く
   { path: '/mandala', label: 'マンダラ', icon: 'grid-3x3' },
   { path: '/sales', label: '売上分析', icon: 'chart-column', show: isManagerOrAbove },
+  // 新規台帳（SalonOne の新規のお客様に、契約できたか・プラン・理由を記録する）。スタッフは所属店舗だけ
+  { path: '/leads', label: '新規台帳', icon: 'clipboard-list' },
   { path: '/cashbook', label: '出納帳', icon: 'wallet', mobile: true },
   { path: '/care', label: '施術ツール', icon: 'scan-line' },
   { path: '/settings', label: '設定', icon: 'settings', show: isAdminLike },

@@ -34,7 +34,7 @@ export function jstStamp(ms) {
 }
 
 /** SalonOne の取得状況に関する注意（前回の値を表示中・継続管理を取れなかった など） */
-function dataWarnings(master, data) {
+export function dataWarnings(master, data) {
   const out = [];
   const stale = [...(master.stale || []), ...(data.stale || [])];
   if (stale.length) {
@@ -66,7 +66,7 @@ export function accessScope(staffCtx, appCtx) {
   return { all: false, storeIds, role: normalizeRole(staffCtx.role), staffId: staffCtx.staffId };
 }
 
-function resolveSelection(scope, storeId) {
+export function resolveSelection(scope, storeId) {
   if (!storeId || storeId === 'all') {
     return scope.storeIds;
   }

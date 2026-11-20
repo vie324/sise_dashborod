@@ -168,6 +168,34 @@ function normalizePlans(raw) {
 const BILLING = /bill|課金|charge/i;
 
 /**
+ * 予約のメニュー名（SalonOne が受付履歴に付けて返す場合だけ。項目名の候補を順に見る。無ければ空）。
+ * 新規台帳でメニューを出す。取れない時は、スタッフがダッシュボードのメニュー一覧から選ぶ
+ */
+export function menuNamesOf(raw) {
+  if (!raw || typeof raw !== 'object') return [];
+  const names = [];
+  const add = (v) => {
+    const s = String(v == null ? '' : v).trim().slice(0, 60);
+    if (s && !names.includes(s)) names.push(s);
+  };
+  for (const key of ['menus', 'menu_items', 'reservation_menus', 'appointment_menus', 'services', 'treatment_menus']) {
+    const list = raw[key];
+    if (!Array.isArray(list)) continue;
+    for (const m of list) {
+      if (typeof m === 'string') add(m);
+      else if (m && typeof m === 'object') add(m.name ?? m.menu_name ?? m.menuName ?? m.title ?? (m.menu && typeof m.menu === 'object' ? m.menu.name : m.menu));
+    }
+  }
+  if (Array.isArray(raw.menu_names)) raw.menu_names.forEach(add);
+  for (const key of ['menu_name', 'menuName', 'menu', 'course_name']) {
+    const v = raw[key];
+    if (typeof v === 'string') add(v);
+    else if (v && typeof v === 'object' && v.name) add(v.name);
+  }
+  return names.slice(0, 5);
+}
+
+/**
  * 受付履歴の明細 1行 → 受付レコード
  * 日時は店舗のタイムゾーン（オフセット付き）なので、そのまま JST の日付にする。
  */
@@ -197,6 +225,12 @@ export function normalizeReception(raw) {
     joined: toBool(pick(raw, ['joined'], false)),
     plans: normalizePlans(raw),
     referralStaffId: toId(pick(raw, ['referral_staff_id', 'referralStaffId'])),
+    // 新規台帳用: 予約の時刻・顧客番号・メニュー・氏名（氏名は「個人情報を含める」キーのときだけ SalonOne が返す）
+    time: toJstTime(pick(raw, ['reserved_at', 'reservedAt', 'start_at', 'visit_start_at'])),
+    customerNumber: String(pick(raw, ['customer_number', 'customer_code', 'customerNumber'], '')),
+    customerName: raw && typeof raw === 'object' && (raw.customer_name ?? raw.customerName) != null
+      ? String(raw.customer_name ?? raw.customerName).trim().slice(0, 60) || null : null,
+    menus: menuNamesOf(raw),
   };
 }
 

@@ -30,6 +30,16 @@ test.describe('基本起動', () => {
     await expect(page.getByText('3経路の合計')).toBeVisible();
   });
 
+  test('新規台帳が開き、新規のお客様の一覧（または空の表示）が出る', async ({ page }) => {
+    await page.goto('/#/leads');
+    const title = page.getByRole('heading', { name: '新規台帳', exact: true }).first();
+    const login = page.getByRole('heading', { name: '管理者ログイン' });
+    await expect(title.or(login)).toBeVisible({ timeout: 20000 });
+    test.skip(await login.isVisible(), '管理者ログインが必要な環境');
+    // 絞り込み（すべて・未記録・契約・契約なし）
+    await expect(page.getByRole('tab', { name: /未記録/ })).toBeVisible({ timeout: 20000 });
+  });
+
   test('ビルド成果物 (JS / CSS) が配信される', async ({ request }) => {
     const js = await request.get('/assets/app.js');
     expect(js.status()).toBe(200);
@@ -137,6 +147,19 @@ test.describe('SalonOne 連携 API', () => {
     expect((await request.get('/api/salonone?action=cross&month=2026-13')).status()).toBe(200); // 月が正しくなければ今月
     expect((await request.get('/api/salonone?action=crossCandidates&storeId=all&date=2026-11-01')).status()).toBe(400);
     const cfg = await (await request.get('/api/db?table=dashConfig&key=incentive.cross.2026-11')).json();
+    expect(cfg.error).toBeTruthy();
+  });
+
+  test('新規台帳: 記録は POST だけ、一覧に SalonOne の顧客IDを返さない、記録は dashConfig から読めない', async ({ request }) => {
+    const save = await request.get('/api/salonone?action=saveLead');
+    if (save.status() === 401) return;
+    expect(save.status()).toBe(405);
+    const list = await request.get('/api/salonone?action=leads&month=2026-11&storeId=all');
+    expect(list.status()).toBe(200);
+    const data = await list.json();
+    expect(Array.isArray(data.rows)).toBe(true);
+    expect(JSON.stringify(data)).not.toContain('customerId');
+    const cfg = await (await request.get('/api/db?table=dashConfig&key=newcust.2026-11.store-1')).json();
     expect(cfg.error).toBeTruthy();
   });
 
