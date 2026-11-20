@@ -410,3 +410,55 @@ test('店舗の合算: 数字・内訳・スタッフ・出納帳・本日のお
     await db.from('dash_config').delete().eq('key', provider.STORE_SALES_RULES_KEY);
   }
 });
+
+test('新規台帳: その月の新規のお客様（媒体・メニュー・SalonOne の購入）と、契約できたか・プラン・理由の記録', async () => {
+  const leads = await import('../api/_lib/salonone/leads.js');
+  const list = await leads.buildLeads(null, { month: PREV, storeId: 'store-1' });
+  assert.equal(list.mode, 'live');
+  // 中央店（101）の新規（会計完了）は 3名。当日キャンセルの予約は入れない
+  assert.equal(list.rows.length, 3);
+  const hpb = list.rows.find((r) => r.sourceName === 'ホットペッパー');
+  assert.deepEqual(hpb.menus, ['初回体験 骨格矯正 60分']); // SalonOne が返すメニュー
+  assert.equal(hpb.channelLabel, 'ホットペッパー');
+  assert.deepEqual(hpb.salonOne.plans.map((p) => p.name), ['月2回プラン']);
+  assert.equal(hpb.staffName, '佐藤 美咲');
+  assert.equal(hpb.customerName, null); // 個人情報を含めないキーでは顧客番号
+  assert.match(hpb.customerNumber, /^K9/);
+  assert.equal(hpb.time, '10:00');
+  const insta = list.rows.find((r) => r.sourceName === 'Instagram');
+  assert.deepEqual(insta.menus, []); // 無い時はダッシュボードのメニューから選ぶ
+  assert.equal(list.rows.find((r) => r.sourceName === '紹介').salonOne.joined, true);
+  assert.deepEqual(list.planOptions.slice(0, 2).sort(), ['回数券 6回', '月2回プラン']);
+  assert.deepEqual({ total: list.counts.total, recorded: list.counts.recorded, salonOne: list.counts.salonOneContracted }, { total: 3, recorded: 0, salonOne: 2 });
+  // SalonOne の顧客 ID・店舗 ID は返さない
+  assert.ok(!JSON.stringify(list.rows).includes('"customerId"'));
+
+  const base = { month: PREV, storeId: 'store-1' };
+  try {
+    const saved = await leads.saveLead(null, { ...base, rid: hpb.rid, outcome: 'contracted', plan: '月2回プラン', menu: '初回体験 骨格矯正 60分' }, '佐藤');
+    assert.deepEqual({ o: saved.record.outcome, p: saved.record.plan, by: saved.record.updatedBy }, { o: 'contracted', p: '月2回プラン', by: '佐藤' });
+    await leads.saveLead(null, { ...base, rid: insta.rid, outcome: 'lost', reason: '  料金が合わない。\r\n家族と相談する  ', plan: '使わない' }, '鈴木');
+    // 入力の間違い
+    await assert.rejects(leads.saveLead(null, { ...base, rid: insta.rid, outcome: 'lost', reason: ' ' }), (e) => e.status === 400 && /理由/.test(e.message));
+    await assert.rejects(leads.saveLead(null, { ...base, rid: insta.rid, outcome: 'contracted' }), (e) => e.status === 400 && /プラン/.test(e.message));
+    await assert.rejects(leads.saveLead(null, { ...base, rid: insta.rid, outcome: 'maybe' }), (e) => e.status === 400);
+    await assert.rejects(leads.saveLead(null, { ...base, rid: 'no-such', outcome: 'lost', reason: 'x' }), (e) => e.status === 404);
+    // 見られない店舗のスタッフは記録できない
+    const TANAKA = { valid: true, staffId: 'st-tanaka', role: 'staff', storeIds: ['store-2'], name: '田中' };
+    await assert.rejects(leads.saveLead(TANAKA, { ...base, rid: insta.rid, outcome: 'lost', reason: 'x' }), (e) => e.status === 403);
+    await assert.rejects(leads.buildLeads(TANAKA, base), (e) => e.status === 403);
+
+    const after = await leads.buildLeads(SATO, base);
+    const lost = after.rows.find((r) => r.rid === insta.rid).record;
+    assert.deepEqual({ o: lost.outcome, r: lost.reason, p: lost.plan }, { o: 'lost', r: '料金が合わない。\n家族と相談する', p: null });
+    assert.deepEqual({ c: after.counts.contracted, l: after.counts.lost, u: after.counts.unrecorded }, { c: 1, l: 1, u: 1 });
+    // 記録は newcust.<月>.<店舗ID> にまとめ、ほかの人の記録を消さない
+    const doc = (await db.from('dash_config').select('value').eq('key', leads.leadsKeyOf(PREV, 'store-1')).maybeSingle()).data.value;
+    assert.equal(Object.keys(doc.records).length, 2);
+    // 空にすると消える
+    await leads.saveLead(null, { ...base, rid: insta.rid, outcome: '' }, '鈴木');
+    assert.equal((await leads.buildLeads(null, base)).rows.find((r) => r.rid === insta.rid).record, null);
+  } finally {
+    await db.from('dash_config').delete().eq('key', leads.leadsKeyOf(PREV, 'store-1'));
+  }
+});

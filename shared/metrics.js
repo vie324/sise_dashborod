@@ -194,9 +194,10 @@ const byDate = (a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
  * 店舗ごとの「初めての来店」を探す。
  *   区分 new（その店舗で最初の予約）が会計完了した来店。
  *   最初の予約がキャンセル・無断だったお客様は、その後の最初の会計完了の来店（SalonOne の売上分析と同じく来店で数える）。
- * @returns {Map<string, { r:Object, sourceName:string }>} `${shopId}|${customerId}` → その月の初回来店
+ *   新規の数（売上分析の新規の内訳）と新規台帳で使う。
+ * @returns {Map<string, { r:Object, sourceName:string }>} `${shopId}|${customerId}` → その月の初回来店と媒体
  */
-function findFirstVisits(receptions, month) {
+export function findFirstVisits(receptions, month) {
   const byKey = new Map();
   for (const r of receptions) {
     if (!r.customerId || !r.date) continue;

@@ -111,8 +111,22 @@ export function useTrend(month, storeId, months = 12) {
   return useResource(key, () => salonOne('trend', { month, storeId, months, refresh: refreshFlag() }), { maxAge: 10 * 60 * 1000 });
 }
 
+/** 新規台帳（その月の新規のお客様と、契約できたかの記録） */
+export function useLeads(month, storeId) {
+  const key = month ? `leads:${month}:${storeId || 'all'}` : null;
+  return useResource(key, () => salonOne('leads', { month, storeId, refresh: refreshFlag() }), { maxAge: 2 * 60 * 1000 });
+}
+
+/** 新規台帳の 1人の記録を保存する（outcome が空なら消す） */
+export async function saveLeadRecord(body) {
+  const r = await salonOnePost('saveLead', body);
+  invalidate('leads:');
+  return r;
+}
+
 export function refreshSalonOne() {
   forceRefreshUntil = Date.now() + 8000;
+  invalidate('leads:');
   invalidate('summary:');
   invalidate('trend:');
   invalidate('cash:');

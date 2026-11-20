@@ -20,7 +20,7 @@ function SetupSteps() {
         <>SalonOne の管理画面で <strong className="text-ink">ブランド管理 &gt; 「API連携」</strong> を開き、新しいキーを発行します（名前: 社内分析ダッシュボード／有効期限: 1年がおすすめ）。
           <span className="mt-1 block text-xs text-muted">
             <strong className="text-ink-2">「サロンワンのログインを必須にする」は最初からチェックが入っているので、外します</strong>（このダッシュボードはサロンワンにログインせずにデータを読むため、ログイン必須のキーは使えません）。
-            「カルテ・問診票を含める」は不要です（カルテは読みません）。「個人情報を含める」は、施術ツールのカウンセリングでお客様のお名前を出したい場合だけチェックします（外すと顧客番号で選びます）。
+            「カルテ・問診票を含める」はチェックを入れます（施術ツールに問診票の内容を出すため）。「個人情報を含める」は、施術ツールのカウンセリング・新規台帳でお客様のお名前を出したい場合にチェックします（外すと顧客番号で表示します）。
           </span></>,
         <>発行した時に表示された<strong className="text-ink">キーの全体</strong>をコピーします（一覧に出る「so_analytics_xxxx…」は先頭だけなので使えません）。
           Vercel の Settings &gt; Environment Variables で <code className="rounded bg-surface-3 px-1">SALONONE_API_KEY</code> に貼り、Environments に <strong className="text-ink">Production</strong> を入れて保存し、Deployments から本番を <strong className="text-ink">Redeploy</strong> します。</>,
