@@ -17,7 +17,8 @@ import {
 import { INCENTIVE_RULES } from '../../../shared/incentive-rules.js';
 import { addMonths, monthProgress, monthsBetween, monthOf, monthRange, listMonths, todayJst, formatMonthJa } from '../../../shared/dates.js';
 import {
-  loadAppContext, loadMaster, buildMapping, loadDataset, saveConsumptionSnapshot, CONSUMPTION_KEY, PLAN_UNITS_KEY, SHOP_MERGE_KEY, STORE_SALES_RULES_KEY,
+  loadAppContext, loadMaster, buildMapping, loadDataset, saveConsumptionSnapshot, staffAliasOf,
+  CONSUMPTION_KEY, PLAN_UNITS_KEY, SHOP_MERGE_KEY, STAFF_MERGE_KEY, STORE_SALES_RULES_KEY,
 } from './provider.js';
 import { loadCloseDoc, saveCloseDoc, closeView } from './closes.js';
 import { loadCrossEntries, crossExclusions, crossCreditsByMonth } from './cross.js';
@@ -110,7 +111,11 @@ function contract3ch(m) {
 
 export async function prepare(staffCtx, { refresh } = {}) {
   const appCtx = await loadAppContext();
-  const master = await loadMaster(appCtx, { refresh });
+  const loaded = await loadMaster(appCtx, { refresh });
+  // スタッフの合算: 合算したスタッフ（例: titi 大和店の「サロン」）は一覧に出さない（実績は合算先のスタッフに入る）。
+  // 設定画面は allStaff（SalonOne のスタッフすべて）を使う
+  const alias = staffAliasOf(appCtx, loaded);
+  const master = { ...loaded, allStaff: loaded.staff, staff: alias.size ? loaded.staff.filter((s) => !alias.has(String(s.id))) : loaded.staff };
   // デモでダッシュボード側に店舗が無い（未登録・DB未接続）ときはサンプル店舗を店舗として扱う
   if (master.mode === 'demo' && appCtx.stores.length === 0) {
     appCtx.stores = master.shops.map((s) => ({ id: s.id, name: s.name }));
@@ -245,7 +250,18 @@ function unknownPlanVisits(receptions, months, where = () => true) {
  * 月ごとの施術消化売上を記録する（推移のグラフ用）。売上分析・顧客一覧が取れていて、前回の値ではない時だけ。
  * 店舗は売上分析の取れた店舗、スタッフは全店舗の実績を取ったスタッフ（他の店舗の取得に失敗した時は残さない）
  */
-async function saveSnapshots(master, appCtx, data, computed, months, { shopIds, staffIds }) {
+/**
+ * スタッフの合算: 合算先のスタッフの記録に合算したスタッフの分が入っているので、合算したスタッフの記録は 0 にする
+ * （合算の前の月の記録と同じように、推移で合算先と合算したスタッフの記録を足して出すため）
+ */
+function withAliasZeros(staff, alias) {
+  if (!alias || !alias.size) return staff;
+  const out = { ...staff };
+  for (const [from, to] of alias) if (Object.prototype.hasOwnProperty.call(out, to)) out[from] = 0;
+  return out;
+}
+
+async function saveSnapshots(master, appCtx, data, computed, months, { shopIds, staffIds, alias = null }) {
   if (master.mode !== 'live' || appCtx.dbError || (data.stale || []).length) return;
   const codes = new Set((data.warnings || []).map((w) => w.code));
   if (codes.has('salesSummary') || codes.has('consumption')) return;
@@ -257,7 +273,7 @@ async function saveSnapshots(master, appCtx, data, computed, months, { shopIds, 
     const staff = {};
     if (!codes.has('otherShops')) for (const id of staffIds || []) staff[id] = n(c.staff[id] && c.staff[id].consumedSales);
     try {
-      await saveConsumptionSnapshot(m, { shops, staff }, appCtx.config[CONSUMPTION_KEY]);
+      await saveConsumptionSnapshot(m, { shops, staff: withAliasZeros(staff, alias) }, appCtx.config[CONSUMPTION_KEY]);
     } catch (e) {
       console.warn('[salonone] consumption snapshot save failed:', e.message);
     }
@@ -310,6 +326,8 @@ export async function buildSummary(staffCtx, { month, storeId, refresh, refreshO
     loadCloseRecord(period, appCtx),
     loadCrossRecord(crossMonths, appCtx),
   ]);
+  // スタッフの合算: 合算したスタッフに付けた系列店での契約は、合算先のスタッフの分
+  cross.entries = cross.entries.map((e) => (mapping.staffOf(e.creditKey) === e.creditKey ? e : { ...e, creditKey: mapping.staffOf(e.creditKey) }));
   const excludedContracts = crossExclusions(cross.entries);
   const crossCredits = crossCreditsByMonth(cross.entries);
   const crossCount = (m, id) => ((crossCredits.get(m) || new Map()).get(id) || 0);
@@ -515,7 +533,7 @@ export async function buildSummary(staffCtx, { month, storeId, refresh, refreshO
     }
   }
   warnings.push(...dataWarnings(master, data));
-  await saveSnapshots(master, appCtx, data, computed, [prevMonth, month], { shopIds: selectedShopIds, staffIds: relevant });
+  await saveSnapshots(master, appCtx, data, computed, [prevMonth, month], { shopIds: selectedShopIds, staffIds: relevant, alias: mapping.staffAlias });
 
   return {
     mode: master.mode,
@@ -704,6 +722,13 @@ export async function buildTrend(staffCtx, { months: count = 6, endMonth, storeI
 
   const series = [];
   const staffSeries = new Map();
+  // スタッフの合算: 記録は合算先と合算したスタッフの分を足す（合算の後の記録は、合算したスタッフの分が 0）
+  const aliasesOf = new Map();
+  for (const [from, to] of mapping.staffAlias) aliasesOf.set(to, [...(aliasesOf.get(to) || []), from]);
+  const savedStaff = (snap, id) => {
+    if (!snap.staff || snap.staff[id] == null) return null;
+    return (aliasesOf.get(id) || []).reduce((sum, a) => sum + n(snap.staff[a]), n(snap.staff[id]));
+  };
   for (const m of months) {
     if (monthsBetween(m, monthOf(data.asOf)) < 0) { series.push({ month: m, future: true }); continue; }
     const c = computeMonth({
@@ -729,7 +754,7 @@ export async function buildTrend(staffCtx, { months: count = 6, endMonth, storeI
         row = { ...staffIdentity(s1, mapping, appCtx, master), values: {} };
         staffSeries.set(s1Id, row);
       }
-      row.values[m] = consumedOf(sm, snap.staff ? snap.staff[s1Id] : null);
+      row.values[m] = consumedOf(sm, savedStaff(snap, s1Id));
     }
     series.push({
       month: m,
@@ -761,7 +786,7 @@ export async function buildTrend(staffCtx, { months: count = 6, endMonth, storeI
  * @returns {Promise<{ mode:string, months:string[], failed:Array<{ month:string, error:string }> }>}
  */
 export async function snapshotConsumption({ asOf = todayJst() } = {}) {
-  const { appCtx, master } = await prepare(null);
+  const { appCtx, master, mapping } = await prepare(null);
   if (master.mode !== 'live') return { mode: master.mode, months: [], failed: [] };
   if (appCtx.dbError) throw new Error(`Supabase に接続できません: ${appCtx.dbError}`);
   const current = monthOf(asOf);
@@ -781,7 +806,7 @@ export async function snapshotConsumption({ asOf = todayJst() } = {}) {
       const c = computeMonth({ receptions: data.receptions, contracts: data.contracts, month: m, asOf: data.asOf, salesSummaries: data.salesSummaries[m], retentionFromContracts: false });
       const shops = Object.fromEntries(shopIds.filter((id) => data.salesSummaries[m][id]).map((id) => [id, n(c.shops[id] && c.shops[id].consumedSales)]));
       const staff = Object.fromEntries(Object.entries(c.staff).map(([id, sm]) => [id, n(sm.consumedSales)]));
-      await saveConsumptionSnapshot(m, { shops, staff }, snaps);
+      await saveConsumptionSnapshot(m, { shops, staff: withAliasZeros(staff, mapping.staffAlias) }, snaps);
       done.push(m);
     } catch (e) {
       failed.push({ month: m, error: e && e.message ? e.message : String(e) });
@@ -843,7 +868,8 @@ export async function buildMaster(staffCtx, { refresh } = {}) {
   return {
     mode: master.mode,
     shops: master.shops,
-    staff: master.staff,
+    // 設定画面には合算したスタッフも出す（スタッフの合算・対応付けで選ぶ）
+    staff: master.allStaff || master.staff,
     sources: [...new Set([...master.sources, ...seen])],
     mapping: {
       shopMap: appCtx.config['salonone.shopMap'] || {},
@@ -851,12 +877,15 @@ export async function buildMaster(staffCtx, { refresh } = {}) {
       channelMap: appCtx.config['salonone.channelMap'] || {},
       planRules: appCtx.config['salonone.planRules'] || {},
       shopMerge: appCtx.config[SHOP_MERGE_KEY] || {},
+      staffMerge: appCtx.config[STAFF_MERGE_KEY] || {},
     },
     resolved: {
       storeToShop: Object.fromEntries(mapping.storeToShop),
       // 店舗の合算（店舗 → 足した SalonOne の店舗。1つ目は storeToShop）
       shopMerge: Object.fromEntries([...mapping.storeToShops].filter(([, ids]) => ids.length > 1).map(([sid, ids]) => [sid, ids.slice(1)])),
       staffToS1: Object.fromEntries(mapping.staffToS1),
+      // スタッフの合算（合算したスタッフ → 合算先。使えない組み合わせは入らない）
+      staffMerge: Object.fromEntries(mapping.staffAlias),
     },
   };
 }

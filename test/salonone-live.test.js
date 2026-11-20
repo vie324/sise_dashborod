@@ -462,3 +462,68 @@ test('新規台帳: その月の新規のお客様（媒体・メニュー・Sal
     await db.from('dash_config').delete().eq('key', leads.leadsKeyOf(PREV, 'store-1'));
   }
 });
+
+test('スタッフの合算の対応付け: 自分自身・合算先になっているスタッフ・2人目の合算先は使わない。対応付けは合算先のスタッフに', () => {
+  const appCtx = {
+    stores: [], staff: [{ id: 'st-a' }, { id: 'st-b' }],
+    config: {
+      [provider.STAFF_MERGE_KEY]: { 201: ['203', '201', '202'], 202: ['204'], 205: ['203'] },
+      'salonone.staffMap': { 'st-a': '203', 'st-b': '201' },
+    },
+  };
+  const alias = provider.staffAliasOf(appCtx, { mode: 'live' });
+  // 202 は合算先なので 201 に合算しない・203 は先に 201 に合算した
+  assert.deepEqual(Object.fromEntries(alias), { 203: '201', 204: '202' });
+  assert.equal(provider.staffAliasOf(appCtx, { mode: 'demo' }).size, 0);
+  const m = provider.buildMapping(appCtx, { mode: 'live', shops: [], staff: [] });
+  assert.equal(m.staffToS1.get('st-a'), '201'); // 合算したスタッフに対応付けた人は、合算先のスタッフとして見る
+  assert.equal(m.staffOf('203'), '201');
+  assert.equal(m.staffOf('201'), '201');
+});
+
+test('スタッフの合算: 合算したスタッフの実績（売上・施術・インセンティブ）は合算先のスタッフに入り、一覧に出ない', async () => {
+  await db.from('dash_config').upsert([
+    { key: 'salonone.shopMap', value: { 'store-1': '101' } },
+    { key: provider.SHOP_MERGE_KEY, value: { 'store-1': ['102'] } },
+  ], { onConflict: 'key' });
+  try {
+    provider.clearSalonOneCache();
+    const before = await summary.buildSummary(null, { month: PREV, storeId: 'store-1' });
+    const sato = before.staff.find((r) => r.key === '201');
+    const tanaka = before.staff.find((r) => r.key === '203');
+    assert.ok(sato && tanaka);
+
+    // 駅前店の田中（203）を、中央店の佐藤（201）に合算する
+    await db.from('dash_config').upsert({ key: provider.STAFF_MERGE_KEY, value: { 201: ['203'] } }, { onConflict: 'key' });
+    provider.clearSalonOneCache();
+    const s = await summary.buildSummary(null, { month: PREV, storeId: 'store-1' });
+    assert.equal(s.staff.some((r) => r.key === '203'), false);
+    assert.equal(s.staffInScope.some((r) => r.key === '203'), false);
+    const merged = s.staff.find((r) => r.key === '201');
+    assert.equal(merged.name, '佐藤 美咲');
+    for (const k of ['consumedSales', 'depositSales', 'treatmentCount']) {
+      assert.equal(merged.metrics[k], sato.metrics[k] + tanaka.metrics[k], k);
+    }
+    assert.equal(merged.incentive.items[0].current, merged.metrics.consumedSales); // インセンティブも合わせた実績で判定
+    // 店舗の数字は変わらない
+    assert.equal(s.store.consumedSales, before.store.consumedSales);
+    assert.equal(s.store.depositSales, before.store.depositSales);
+
+    // 設定画面: 合算したスタッフも選べるように出し、設定を返す
+    const m = await summary.buildMaster(null, {});
+    assert.ok(m.staff.some((x) => x.id === '203'));
+    assert.deepEqual(m.mapping.staffMerge, { 201: ['203'] });
+    assert.deepEqual(m.resolved.staffMerge, { 203: '201' });
+    assert.equal(m.resolved.staffToS1['st-tanaka'], '201');
+
+    // 本日のお客様: 合算したスタッフの予約は、合算先のスタッフの名前で出す（駅前店 12:00 の予約は田中）
+    const { buildVisits } = await import('../api/_lib/salonone/visits.js');
+    const v = await buildVisits(null, { storeId: 'store-1' });
+    const noon = v.visits.find((x) => x.time === '12:00');
+    assert.equal(noon.staffName, '佐藤 美咲');
+  } finally {
+    await db.from('dash_config').upsert({ key: 'salonone.shopMap', value: { 'store-1': '101', 'store-2': '102' } }, { onConflict: 'key' });
+    await db.from('dash_config').delete().eq('key', provider.SHOP_MERGE_KEY);
+    await db.from('dash_config').delete().eq('key', provider.STAFF_MERGE_KEY);
+  }
+});
