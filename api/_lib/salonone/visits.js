@@ -21,7 +21,7 @@ const HIDDEN = new Set(['cancelled', 'no_show']);
 const isShown = (v) => !HIDDEN.has(v.status) && !v.billing;
 
 /** 画面に返す 1行（SalonOne の顧客ID・店舗IDは返さない）。shopName は店舗の合算をしている時だけ（どちらの店舗の予約か） */
-function toRow(v, shopName = null) {
+function toRow(v, shopName = null, staffName = v.staffName) {
   return {
     shopName,
     id: v.id,
@@ -30,7 +30,7 @@ function toRow(v, shopName = null) {
     isNew: v.isNew,
     customerNumber: v.customerNumber || '',
     customerName: v.customerName || null,
-    staffName: v.staffName || '',
+    staffName: staffName || '',
     sourceName: v.isNew ? v.sourceName || '' : '',
     contracted: !!(v.joined || (v.plans && v.plans.length)),
     plans: (v.plans || []).map((p) => p.name).filter(Boolean),
@@ -63,6 +63,12 @@ export async function buildVisits(staffCtx, { storeId, date, refresh = false, no
 
   const merged = shopIds.length > 1;
   const shopName = (sid) => (merged ? (master.shops.find((sh) => String(sh.id) === String(sid)) || {}).name || null : null);
+  // スタッフの合算: 合算したスタッフ（例: titi 大和店の「サロン」）の予約は、合算先のスタッフの名前で出す
+  const staffName = (v) => {
+    const to = mapping.staffOf(v.staffId);
+    if (to === v.staffId) return v.staffName;
+    return (master.staff.find((s) => String(s.id) === String(to)) || {}).name || v.staffName;
+  };
   const results = await Promise.all(shopIds.map((sid) => loadDayVisits(sid, day, { refresh }).then((res) => ({ sid, res }))));
   const rows = results.flatMap(({ sid, res }) => res.value.filter(isShown).map((v) => ({ v, name: shopName(sid) })));
   const fetchedAt = Math.min(...results.map(({ res }) => res.fetchedAt));
@@ -72,7 +78,7 @@ export async function buildVisits(staffCtx, { storeId, date, refresh = false, no
     linked: true,
     // 1件でも氏名の項目があれば「個人情報を含める」キー（予約が無い日は判断できないので false）
     names: results.some(({ res }) => res.value.some((v) => v.hasNameField)),
-    visits: rows.sort((a, b) => byTime(a.v, b.v)).map(({ v, name }) => toRow(v, name)),
+    visits: rows.sort((a, b) => byTime(a.v, b.v)).map(({ v, name }) => toRow(v, name, staffName(v))),
     fetchedAt: new Date(fetchedAt).toISOString(),
     stale: staleOne
       ? `SalonOne から最新の予約を取得できなかったため、${jstStamp(staleOne.res.fetchedAt)} 時点の予約を表示しています${staleOne.res.error ? `（${String(staleOne.res.error).replace(/^SalonOne API エラー \([^)]*\): /, '')}）` : ''}`

@@ -5,6 +5,8 @@
 // 設定画面で対応付ける（dash_config に保存）。
 //   salonone.shopMap    : { [ダッシュボード店舗ID]: SalonOne店舗ID }
 //   salonone.staffMap   : { [ダッシュボードスタッフID]: SalonOneスタッフID }
+//   salonone.staffMerge : { [合算先の SalonOneスタッフID]: [合算する SalonOneスタッフID, ...] }
+//       スタッフの合算（同じ人が別ブランドの店舗で別のスタッフ名で施術している。例: titi 大和店の「サロン」→ 天野）
 //   salonone.channelMap : { [来店経由名]: 経路キー }
 //   salonone.planRules  : { sharePlanKeyword, payPerVisitKeyword }
 //   salonone.planUnits  : { [プラン名]: 施術 1回分の金額 }（自動で決まらない・違う時だけ。shared/consumption.js）
@@ -35,9 +37,60 @@ export const PLAN_UNITS_KEY = 'salonone.planUnits';
 export const CONSUMPTION_KEY = 'incentive.consumption';
 // 店舗の合算: ダッシュボードの 1店舗に足す SalonOne の店舗（同じ住所・同じスタッフの別ブランドの店舗。例: 大和店に titi 大和店）
 export const SHOP_MERGE_KEY = 'salonone.shopMerge';
+// スタッフの合算: SalonOne のスタッフの実績を、別のスタッフの実績として数える（例: titi 大和店の「サロン」→ 天野）
+export const STAFF_MERGE_KEY = 'salonone.staffMerge';
 // 店舗ごとの売上インセンティブ（指標・段階）。例: 大和店は入金売上（合算）で判定する
 export const STORE_SALES_RULES_KEY = 'rules.storeSales';
-export const CONFIG_KEYS = ['salonone.shopMap', 'salonone.staffMap', 'salonone.channelMap', 'salonone.planRules', SHOP_MERGE_KEY, STORE_SALES_RULES_KEY, PLAN_UNITS_KEY, RETENTION_KEY, CONSUMPTION_KEY];
+export const CONFIG_KEYS = ['salonone.shopMap', 'salonone.staffMap', 'salonone.channelMap', 'salonone.planRules', SHOP_MERGE_KEY, STAFF_MERGE_KEY, STORE_SALES_RULES_KEY, PLAN_UNITS_KEY, RETENTION_KEY, CONSUMPTION_KEY];
+
+/**
+ * スタッフの合算: 合算する SalonOne のスタッフ ID → 合算先のスタッフ ID。
+ * 合算先がほかのスタッフに合算されている・自分自身・2人に合算されているもの（2つ目以降）は使わない。デモでは使わない
+ */
+export function staffAliasOf(appCtx, master) {
+  const out = new Map();
+  if (!master || master.mode === 'demo') return out;
+  const merge = (appCtx && appCtx.config && appCtx.config[STAFF_MERGE_KEY]) || {};
+  const listOf = (v) => [].concat(v || []).map((x) => String(x == null ? '' : x)).filter(Boolean);
+  const targets = new Set(Object.keys(merge).filter((k) => listOf(merge[k]).length));
+  for (const [target, ids] of Object.entries(merge)) {
+    for (const id of listOf(ids)) {
+      if (id === String(target) || targets.has(id) || out.has(id)) continue;
+      out.set(id, String(target));
+    }
+  }
+  return out;
+}
+
+/** 受付・売上サマリのスタッフを合算先のスタッフにする（キャッシュの値は書き換えない） */
+function aliasStaffData(alias, master) {
+  if (!alias.size) return { reception: (r) => r, summary: (sum) => sum, id: (id) => id };
+  const nameOf = new Map(master.staff.map((s) => [String(s.id), s.name]));
+  const to = (id) => (id != null && alias.has(String(id)) ? alias.get(String(id)) : id);
+  return {
+    id: to,
+    reception: (r) => {
+      if (!r || (!alias.has(String(r.staffId)) && !alias.has(String(r.referralStaffId)))) return r;
+      const staffId = to(r.staffId);
+      return {
+        ...r,
+        staffId,
+        staffName: staffId !== r.staffId ? nameOf.get(String(staffId)) || r.staffName : r.staffName,
+        referralStaffId: to(r.referralStaffId),
+        salonOneStaffId: r.staffId,
+      };
+    },
+    summary: (sum) => {
+      if (!sum || !Array.isArray(sum.staff) || !sum.staff.some((x) => alias.has(String(x.staffId)))) return sum;
+      return {
+        ...sum,
+        staff: sum.staff.map((x) => (alias.has(String(x.staffId))
+          ? { ...x, staffId: to(x.staffId), name: nameOf.get(String(to(x.staffId))) || x.name }
+          : x)),
+      };
+    },
+  };
+}
 
 // ------------------------------------------------------------
 // インスタンス内キャッシュ（サーバーレスのウォーム中だけ有効）
@@ -208,19 +261,24 @@ export function buildMapping(appCtx, master) {
     for (const shop of master.shops) { storeToShop.set(shop.id, shop.id); storeToShops.set(shop.id, [shop.id]); shopToStore.set(shop.id, shop.id); }
   }
 
+  // スタッフの合算: 合算したスタッフに対応付けたダッシュボードのスタッフは、合算先のスタッフとして見る
+  const staffAlias = staffAliasOf(appCtx, master);
   const staffToS1 = new Map();
   const s1ToStaff = new Map();
   if (demo) {
     for (const s of master.staff) if (staffIds.has(s.id)) { staffToS1.set(s.id, s.id); s1ToStaff.set(s.id, s.id); }
   } else {
-    for (const [staffId, s1Id] of Object.entries(staffMap)) {
-      if (!s1Id || !staffIds.has(staffId)) continue;
-      staffToS1.set(staffId, String(s1Id));
-      if (!s1ToStaff.has(String(s1Id))) s1ToStaff.set(String(s1Id), staffId);
+    for (const [staffId, raw] of Object.entries(staffMap)) {
+      if (!raw || !staffIds.has(staffId)) continue;
+      const s1Id = staffAlias.get(String(raw)) || String(raw);
+      staffToS1.set(staffId, s1Id);
+      if (!s1ToStaff.has(s1Id)) s1ToStaff.set(s1Id, staffId);
     }
   }
   return {
-    storeToShop, storeToShops, shopToStore, staffToS1, s1ToStaff, duplicateShops,
+    storeToShop, storeToShops, shopToStore, staffToS1, s1ToStaff, duplicateShops, staffAlias,
+    /** スタッフの合算先（合算していなければそのまま） */
+    staffOf: (id) => (id != null && staffAlias.has(String(id)) ? staffAlias.get(String(id)) : id),
     unmappedStores: appCtx.stores.filter((s) => !storeToShop.has(s.id)).map((s) => s.id),
     knownStore: (id) => storeIds.has(id),
     /** 店舗の SalonOne の店舗すべて（対応付けが無ければ空） */
@@ -424,6 +482,8 @@ export async function loadDataset(appCtx, master, {
   }
 
   const cfg = salonOneConfig();
+  // スタッフの合算（合算したスタッフの実績は、合算先のスタッフの実績として数える）
+  const aka = aliasStaffData(staffAliasOf(appCtx, master), master);
   const targets = [...new Set((shopIds || master.shops.map((s) => s.id)).map(String).filter(Boolean))];
   const others = [...new Set((otherShopIds || []).map(String))].filter((id) => id && !targets.includes(id));
   const startedAt = Date.now();
@@ -457,7 +517,10 @@ export async function loadDataset(appCtx, master, {
       const listed = new Set(master.staff.map((x) => String(x.id)));
       want = new Set(want);
       for (const r of await Promise.all(sumJobs)) {
-        for (const x of (!r.failed && r.value && r.value.staff) || []) if (!listed.has(String(x.staffId))) want.add(String(x.staffId));
+        for (const x of (!r.failed && r.value && r.value.staff) || []) {
+          const id = String(aka.id(x.staffId));
+          if (!listed.has(id)) want.add(id);
+        }
       }
     }
     const need = new Set();
@@ -465,7 +528,7 @@ export async function loadDataset(appCtx, master, {
       if (r.failed) continue;
       const rows = r.value && r.value.staff;
       // スタッフ別が無い応答はいたかどうかわからないので取る
-      if (!rows || !want || rows.some((x) => want.has(String(x.staffId)))) need.add(r.shopId);
+      if (!rows || !want || rows.some((x) => want.has(String(aka.id(x.staffId))))) need.add(r.shopId);
     }
     const jobs = [];
     for (const shopId of need) for (const m of recMonths) jobs.push(recJob(m, shopId).catch((e) => ({ m, shopId, failed: e })));
@@ -476,7 +539,7 @@ export async function loadDataset(appCtx, master, {
   const warnings = [];
   const salesSummaries = Object.fromEntries(wanted.map((m) => [m, {}]));
   const failedSummaries = sumResults.filter((r) => r.failed);
-  for (const r of [...sumResults, ...other.sums]) if (!r.failed) salesSummaries[r.m][r.shopId] = r.value;
+  for (const r of [...sumResults, ...other.sums]) if (!r.failed) salesSummaries[r.m][r.shopId] = aka.summary(r.value);
   // 売上サマリが取れなかった店舗・月は受付履歴から集計する（推移で受付履歴を取っていない場合は取りに行く）
   if (failedSummaries.length) {
     const first = failedSummaries[0].failed;
@@ -494,7 +557,7 @@ export async function loadDataset(appCtx, master, {
   }
   const otherRecs = other.recs.filter((r) => !r.failed);
 
-  let receptions = [...recResults, ...otherRecs].flatMap((r) => r.value);
+  let receptions = [...recResults, ...otherRecs].flatMap((r) => r.value).map(aka.reception);
   const contracts = contractsFromReceptions(receptions, planPatterns(appCtx));
   const loaded = [...sumResults, ...recResults, ...other.sums, ...otherRecs];
   const stale = loaded.filter((r) => r.stale).map((r) => ({ fetchedAt: r.fetchedAt, error: r.error }));

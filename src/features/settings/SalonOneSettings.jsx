@@ -296,6 +296,79 @@ function ShopMergeCard({ stores, shops, shopMap, value, onChange, onSave, saving
   );
 }
 
+/**
+ * スタッフの合算: 同じ人が別ブランドの店舗で別のスタッフ名で施術している時（例: titi 大和店の「サロン」）、
+ * その実績を本人の実績として数える（dash_config 'salonone.staffMerge' { 合算先: [合算するスタッフ] }）。
+ * スタッフ別の数字・インセンティブ・推移に入り、合算したスタッフは一覧に出ない
+ */
+function StaffMergeCard({ staff, shops, value, onChange, onSave, saving, disabled }) {
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  const label = (id) => {
+    const s = staff.find((x) => String(x.id) === String(id));
+    if (!s) return `ID: ${id}`;
+    const shop = shops.find((x) => String(x.id) === String(s.shopId));
+    return `${s.name}${shop ? `（${shop.name}）` : ''}`;
+  };
+  const pairs = Object.entries(value).flatMap(([target, ids]) => [].concat(ids || []).map((id) => [String(id), String(target)]));
+  const aliases = new Set(pairs.map(([a]) => a));
+  const targets = new Set(pairs.map(([, t]) => t));
+  // 合算するスタッフ: まだ合算していない・合算先でもないスタッフ / 合算先: 合算したスタッフ以外
+  const fromOptions = staff.filter((s) => !aliases.has(String(s.id)) && !targets.has(String(s.id)));
+  const toOptions = staff.filter((s) => String(s.id) !== from && !aliases.has(String(s.id)));
+  const add = () => {
+    if (!from || !to || from === to) return;
+    onChange({ ...value, [to]: [...[].concat(value[to] || []).map(String), from] });
+    setFrom('');
+    setTo('');
+  };
+  const remove = (alias, target) => {
+    const rest = [].concat(value[target] || []).map(String).filter((x) => x !== alias);
+    const next = { ...value };
+    if (rest.length) next[target] = rest;
+    else delete next[target];
+    onChange(next);
+  };
+  return (
+    <Card title="スタッフの合算" icon="users-round"
+      subtitle="同じ人が別ブランドの店舗で別のスタッフ名で施術している時（例: titi 大和店の「サロン」）、その実績を本人の実績として数えます。スタッフ別の数字・インセンティブ・推移に入り、合算したスタッフは一覧に出ません">
+      {pairs.length ? (
+        <ul className="divide-y divide-line">
+          {pairs.map(([alias, target]) => (
+            <li key={alias} className="flex items-center justify-between gap-2 py-2.5">
+              <span className="flex min-w-0 flex-wrap items-center gap-1.5 text-[13px]">
+                <span className="font-semibold text-ink">{label(alias)}</span>
+                <Icon name="arrow-right" size={14} className="text-muted" />
+                <span className="font-semibold text-ink">{label(target)}</span>
+              </span>
+              <button type="button" disabled={disabled} onClick={() => remove(alias, target)}
+                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-muted hover:bg-surface-3 disabled:opacity-40" aria-label={`${label(alias)}の合算をやめる`}>
+                <Icon name="x" size={16} />
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : <p className="text-[13px] text-muted">合算しているスタッフはいません</p>}
+      <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_auto_1fr_auto] sm:items-center">
+        <Select value={from} disabled={disabled} onChange={(e) => setFrom(e.target.value)} aria-label="合算するスタッフ">
+          <option value="">合算するスタッフ（例: サロン）</option>
+          {fromOptions.map((s) => <option key={s.id} value={s.id}>{label(s.id)}</option>)}
+        </Select>
+        <Icon name="arrow-right" size={16} className="mx-auto hidden text-muted sm:block" />
+        <Select value={to} disabled={disabled} onChange={(e) => setTo(e.target.value)} aria-label="合算先のスタッフ">
+          <option value="">合算先のスタッフ（本人）</option>
+          {toOptions.map((s) => <option key={s.id} value={s.id}>{label(s.id)}</option>)}
+        </Select>
+        <Button icon="plus" onClick={add} disabled={disabled || !from || !to}>追加</Button>
+      </div>
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs text-muted">「追加」のあと「保存」で反映します。本日のお客様の担当も合算先の名前で出ます。</p>
+        <Button variant="primary" icon="save" onClick={onSave} loading={saving} disabled={disabled}>保存</Button>
+      </div>
+    </Card>
+  );
+}
+
 /** 自動で決まった 1回分の金額の説明 */
 function autoLabel(p) {
   if (p.learned) return `${yen(p.learned)}（SalonOne の消化額・${p.samples}件）`;
@@ -401,6 +474,7 @@ export default function SalonOneSettings() {
   const [staffMap, setStaffMap] = useState({});
   const [channelMap, setChannelMap] = useState({});
   const [mergeMap, setMergeMap] = useState({});
+  const [staffMerge, setStaffMerge] = useState({});
   const [planRules, setPlanRules] = useState({ sharePlanKeyword: '', payPerVisitKeyword: '' });
   const [saving, setSaving] = useState('');
 
@@ -410,6 +484,7 @@ export default function SalonOneSettings() {
     setStaffMap(master.mapping.staffMap || {});
     setChannelMap(master.mapping.channelMap || {});
     setMergeMap(master.mapping.shopMerge || {});
+    setStaffMerge(master.mapping.staffMerge || {});
     setPlanRules({ sharePlanKeyword: '', payPerVisitKeyword: '', ...(master.mapping.planRules || {}) });
   }, [master]);
 
@@ -484,6 +559,11 @@ export default function SalonOneSettings() {
             onAuto={() => autoMatch(staff.map((s) => ({ id: String(s.id), name: s.name })), master.staff, staffMap, setStaffMap)}
             onSave={() => save('salonone.staffMap', staffMap, 'スタッフの対応付け')} saving={saving === 'salonone.staffMap'}
             disabled={demo} emptyText="スタッフが登録されていません（スタッフタブで追加）"
+          />
+          <StaffMergeCard
+            staff={master.staff} shops={master.shops} value={staffMerge} onChange={setStaffMerge}
+            onSave={() => save('salonone.staffMerge', Object.fromEntries(Object.entries(staffMerge).filter(([, ids]) => ids && ids.length)), 'スタッフの合算')}
+            saving={saving === 'salonone.staffMerge'} disabled={demo}
           />
           <MappingSection
             title="来店経由 → 集客経路" icon="route"
