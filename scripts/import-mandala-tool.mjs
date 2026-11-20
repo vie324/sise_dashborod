@@ -14,6 +14,7 @@
 //   1. --map の指定（表示名 or 旧ツールのユーザーID → staff.id）
 //   2. 名前が同じ（空白は無視）
 //   3. ダッシュボードの名前が旧ツールの名前で始まる人が 1人だけ（「佐藤」→「佐藤 美咲」）
+//   （2・3 で候補が複数いても、在籍中が 1人だけならその人）
 // 対応付けられない人のデータは移さない（一覧に出す）。
 // 何度実行してもよい（ID をそのまま使って上書きする）。ダッシュボードで先に書いた週報・日報と
 // 同じ週・日の分は、ダッシュボードの方を残して旧ツールの分は飛ばす。
@@ -28,7 +29,8 @@ const PAGE = 1000;
 const CHUNK = 100;
 const SCOPE = { off: 'off', brand: 'store', group: 'all' };
 
-const norm = (s) => String(s || '').replace(/[\s　]/g, '');
+// 全角・半角の違い（「（」と「(」など）と空白は無視して比べる
+const norm = (s) => String(s || '').normalize('NFKC').replace(/\s/g, '');
 const day = (v) => (v ? String(v).slice(0, 10) : v);
 
 /** テーブルが無い（旧ツールで日報のマイグレーションを当てていない等）なら空として扱う */
@@ -77,9 +79,11 @@ export function mapProfiles(profiles, staff, explicit = {}) {
     }
     const exact = staff.filter((s) => norm(s.name) === norm(p.display_name));
     const prefix = staff.filter((s) => norm(s.name).startsWith(norm(p.display_name)));
-    const hit = exact.length === 1 ? exact[0] : exact.length === 0 && prefix.length === 1 ? prefix[0] : null;
+    const cands = exact.length ? exact : prefix;
+    const active = cands.filter((s) => s.status !== 'inactive');
+    const hit = cands.length === 1 ? cands[0] : active.length === 1 ? active[0] : null;
     if (hit) map.set(p.id, hit);
-    else unmatched.push({ profile: p, reason: exact.length + prefix.length > 1 ? '同じ名前のスタッフが複数います' : '名前の合うスタッフがいません' });
+    else unmatched.push({ profile: p, reason: cands.length > 1 ? '同じ名前のスタッフが複数います' : '名前の合うスタッフがいません' });
   }
   return { map, unmatched };
 }
@@ -131,12 +135,14 @@ export async function importMandala({ source, target, apply = false, explicit = 
   const hasOwnChart = new Set(tCharts.filter((c) => !sourceChartIds.has(c.id) && c.status !== 'archived').map((c) => c.staff_id));
 
   // 日報のチェック項目: 同じ区分・同じ名前の項目があればそれに結びつけ、無ければ全店舗共通として足す
+  // （旧ツールはブランドごとに項目を持っていたので、移す日報で使っている項目だけを見る）
+  const usedItemIds = new Set(dailyChecks.map((c) => c.check_item_id));
   const tItems = await readAll(target, 'mandala_daily_check_items');
   const itemKey = (section, label) => `${section || 'during'}|${norm(label)}`;
   const byKey = new Map(tItems.map((i) => [itemKey(i.section, i.label), i.id]));
   const newItems = [];
   const itemMap = new Map();
-  for (const ci of checkItems) {
+  for (const ci of checkItems.filter((x) => usedItemIds.has(x.id))) {
     const k = itemKey(ci.section, ci.label);
     if (byKey.has(k)) itemMap.set(ci.id, byKey.get(k));
     else {
