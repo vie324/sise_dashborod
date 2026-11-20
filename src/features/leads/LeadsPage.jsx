@@ -2,21 +2,23 @@
 // 新規台帳
 // ------------------------------------------------------------
 // SalonOne の新規のお客様（その月に初めて来店した人）を並べ、
-// 「契約できた（プラン）／できなかった（理由）」とメニューを記録する（api/_lib/salonone/leads.js）。
-// 媒体・担当・SalonOne でのプランの購入も出す。インセンティブ・新規契約の数は SalonOne のデータのまま
+// 「契約できた（プラン）／できなかった（理由のタブ・メモ）」とメニューを記録する（api/_lib/salonone/leads.js）。
+// 媒体・担当・SalonOne でのプランの購入も出す。インセンティブ・新規契約の数は SalonOne のデータのまま。
+// 「未契約の理由」のタブで、記録した理由の一覧と理由ごとの人数を見る（LeadReasons.jsx）
 // ============================================================
 import { useEffect, useMemo, useState } from 'react';
 import { useApp } from '../../app/state.jsx';
+import { currentQuery } from '../../app/router.js';
 import { useLeads, saveLeadRecord } from '../../lib/hooks.js';
 import { PageHeader, Card, Badge, Button, Select, Input, Textarea, Field, Modal, Segmented, EmptyState, Skeleton, cx } from '../../ui/primitives.jsx';
 import { showToast } from '../../ui/feedback.jsx';
 import Icon from '../../ui/Icon.jsx';
 import { num, dateJa, dateTimeJa } from '../../lib/format.js';
 import { ScopeBar, DataWarnings } from '../shared/ScopeBar.jsx';
+import { LOST_REASONS } from '../../../shared/leads.js';
+import LeadReasons, { ReasonTags } from './LeadReasons.jsx';
 
 const OTHER = '__other__';
-// 契約できなかった理由のよくある例（押すと理由に足す）
-const REASON_CHIPS = ['料金が合わない', '通う時間・頻度が合わない', '効果をもう少し見たい', '他店と比べたい', '家族と相談', '体験だけのつもり'];
 
 const who = (row) => row.customerName || (row.customerNumber ? `顧客番号 ${row.customerNumber}` : 'お客様');
 const menuOf = (row) => (row.menus.length ? row.menus.join('・') : (row.record && row.record.menu) || '');
@@ -60,7 +62,12 @@ function LeadCard({ row, showStore, onOpen }) {
         ) : null}
         {rec ? (
           <span className="rounded-xl bg-surface-2 px-3 py-2 text-[13px] text-ink">
-            {rec.outcome === 'contracted' ? <>契約: <strong>{rec.plan}</strong></> : <span className="line-clamp-2 whitespace-pre-line">理由: {rec.reason}</span>}
+            {rec.outcome === 'contracted' ? <>契約: <strong>{rec.plan}</strong></> : (
+              <>
+                <ReasonTags tags={rec.reasons} />
+                {rec.reason ? <span className={cx('line-clamp-2 block whitespace-pre-line', rec.reasons && rec.reasons.length ? 'mt-1 text-ink-2' : '')}>{rec.reasons && rec.reasons.length ? '' : '理由: '}{rec.reason}</span> : null}
+              </>
+            )}
             <span className="mt-0.5 block text-[11px] text-muted">{rec.updatedBy ? `${rec.updatedBy}・` : ''}{dateTimeJa(rec.updatedAt)}</span>
           </span>
         ) : null}
@@ -77,6 +84,7 @@ function LeadEditor({ row, data, month, onClose, onSaved }) {
   const [outcome, setOutcome] = useState(rec ? rec.outcome : (firstSalonOnePlan ? 'contracted' : ''));
   const [planSel, setPlanSel] = useState(initialPlan && !planList.includes(initialPlan) ? OTHER : initialPlan);
   const [planText, setPlanText] = useState(initialPlan && !planList.includes(initialPlan) ? initialPlan : '');
+  const [tags, setTags] = useState((rec && rec.reasons) || []);
   const [reason, setReason] = useState((rec && rec.reason) || '');
   const initialMenu = (rec && rec.menu) || '';
   const [menuSel, setMenuSel] = useState(initialMenu && !data.menuOptions.includes(initialMenu) ? OTHER : initialMenu);
@@ -89,12 +97,12 @@ function LeadEditor({ row, data, month, onClose, onSaved }) {
   const submit = async (nextOutcome) => {
     const o = nextOutcome === undefined ? outcome : nextOutcome;
     if (o === 'contracted' && !plan) { setError('契約したプランを選んでください'); return; }
-    if (o === 'lost' && !reason.trim()) { setError('契約できなかった理由を入力してください'); return; }
+    if (o === 'lost' && !tags.length && !reason.trim()) { setError('契約できなかった理由を選ぶか、メモを入力してください'); return; }
     if (o === '' && nextOutcome === undefined) { setError('契約できたか・できなかったかを選んでください'); return; }
     setBusy(true);
     setError('');
     try {
-      const res = await saveLeadRecord({ month, storeId: row.storeId, rid: row.rid, outcome: o, plan, reason, menu });
+      const res = await saveLeadRecord({ month, storeId: row.storeId, rid: row.rid, outcome: o, plan, reasons: tags, reason, menu });
       onSaved(row.rid, res.record);
       showToast(o ? '記録しました' : '記録を消しました', 'success');
       onClose();
@@ -152,16 +160,28 @@ function LeadEditor({ row, data, month, onClose, onSaved }) {
         ) : null}
 
         {outcome === 'lost' ? (
-          <Field label="契約できなかった理由" htmlFor="lead-reason">
-            <div className="mb-2 flex flex-wrap gap-1.5">
-              {REASON_CHIPS.map((c) => (
-                <button key={c} type="button" onClick={() => { setReason((r) => (r.includes(c) ? r : `${r ? `${r.trim()}・` : ''}${c}`)); setError(''); }}
-                  className="min-h-[36px] rounded-full border border-line bg-surface px-3 text-xs font-semibold text-ink-2 hover:bg-surface-2">{c}</button>
-              ))}
-            </div>
-            <Textarea id="lead-reason" value={reason} maxLength={400} onChange={(e) => { setReason(e.target.value); setError(''); }}
-              placeholder="例: 月2回は通えないので、月1回のプランがあれば考えたい" />
-          </Field>
+          <>
+            <fieldset>
+              <legend className="field-label">契約できなかった理由<span className="ml-1 font-normal text-muted">（当てはまるものをすべて）</span></legend>
+              <div className="flex flex-wrap gap-1.5">
+                {LOST_REASONS.map((c) => {
+                  const on = tags.includes(c);
+                  return (
+                    <button key={c} type="button" aria-pressed={on}
+                      onClick={() => { setTags((t) => (t.includes(c) ? t.filter((x) => x !== c) : [...t, c])); setError(''); }}
+                      className={cx('inline-flex min-h-[40px] items-center gap-1 rounded-full border px-3 text-xs font-semibold transition-colors',
+                        on ? 'border-brand-600 bg-brand-600 text-white dark:border-brand-400 dark:bg-brand-500' : 'border-line bg-surface text-ink-2 hover:bg-surface-2')}>
+                      {on ? <Icon name="check" size={13} /> : null}{c}
+                    </button>
+                  );
+                })}
+              </div>
+            </fieldset>
+            <Field label="メモ（任意）" htmlFor="lead-reason">
+              <Textarea id="lead-reason" value={reason} maxLength={400} onChange={(e) => { setReason(e.target.value); setError(''); }}
+                placeholder="例: 結婚式が終わる来月から始めたい" />
+            </Field>
+          </>
         ) : null}
 
         {row.menus.length ? null : (
@@ -181,8 +201,25 @@ function LeadEditor({ row, data, month, onClose, onSaved }) {
   );
 }
 
+const VIEWS = [{ value: 'list', label: 'お客様', icon: 'users' }, { value: 'reasons', label: '未契約の理由', icon: 'chart-bar-decreasing' }];
+
 export default function LeadsPage() {
   const { month, storeId } = useApp();
+  // #/leads?view=reasons で「未契約の理由」を開く（切り替えると URL も変える。リンクで共有できる）
+  const [view, setView] = useState(() => (currentQuery().get('view') === 'reasons' ? 'reasons' : 'list'));
+  useEffect(() => {
+    try { window.history.replaceState(null, '', view === 'reasons' ? '#/leads?view=reasons' : '#/leads'); } catch (_) { /* noop */ }
+  }, [view]);
+  return (
+    <div>
+      <PageHeader title="新規台帳" subtitle="SalonOne の新規のお客様に、契約できたか・プラン・できなかった理由を記録します（インセンティブの数字は SalonOne のまま）" />
+      <Segmented value={view} onChange={setView} options={VIEWS} ariaLabel="新規台帳の表示" className="mb-3" />
+      {view === 'reasons' ? <LeadReasons month={month} storeId={storeId} /> : <LeadList month={month} storeId={storeId} />}
+    </div>
+  );
+}
+
+function LeadList({ month, storeId }) {
   const res = useLeads(month, storeId);
   const data = res.shown;
   const [filter, setFilter] = useState('all');
@@ -205,7 +242,6 @@ export default function LeadsPage() {
 
   return (
     <div>
-      <PageHeader title="新規台帳" subtitle="SalonOne の新規のお客様に、契約できたか・プラン・できなかった理由を記録します（インセンティブの数字は SalonOne のまま）" />
       <ScopeBar data={data} />
       <DataWarnings data={data} error={res.error} />
       {!data ? <Skeleton className="h-[420px] rounded-2xl" /> : (

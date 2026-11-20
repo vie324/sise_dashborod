@@ -18,7 +18,8 @@
 // POST /api/salonone?action=crossAdd { date, customerName, planName, contractStoreId, creditKey, receptionId?, memo? }  登録（店長以上）
 // POST /api/salonone?action=crossDelete { id, month }      削除（店長以上）
 // GET /api/salonone?action=leads&month=YYYY-MM&storeId=   新規台帳（その月の新規のお客様と、契約できたかの記録）
-// POST /api/salonone?action=saveLead { month, storeId, rid, outcome, plan, reason, menu }  新規台帳の記録（outcome が空なら消す）
+// POST /api/salonone?action=saveLead { month, storeId, rid, outcome, plan, reasons, reason, menu }  新規台帳の記録（outcome が空なら消す）
+// GET /api/salonone?action=leadReasons&month=YYYY-MM&months=1|3|6|12&storeId=  未契約の理由の一覧（記録だけから。SalonOne は呼ばない）
 //
 // SalonOne の APIキーはサーバーの環境変数にだけ置き、ブラウザへは返さない。
 // ============================================================
@@ -30,7 +31,7 @@ import {
   buildSummary, buildTrend, buildMaster, dailyCashSales, closePeriod, reopenPeriod, snapshotConsumption, buildPlanUnits, AccessError,
 } from '../_lib/salonone/summary.js';
 import { buildVisits } from '../_lib/salonone/visits.js';
-import { buildLeads, saveLead } from '../_lib/salonone/leads.js';
+import { buildLeads, saveLead, buildLeadReasons } from '../_lib/salonone/leads.js';
 import { listCrossStore, crossStoreCandidates, addCrossStore, deleteCrossStore } from '../_lib/salonone/cross-handlers.js';
 import { salonOneConfig, probe, apiKeyHint } from '../_lib/salonone/client.js';
 import { clearSalonOneCache, snapshotRetention, loadAppContext, planPatterns } from '../_lib/salonone/provider.js';
@@ -188,6 +189,8 @@ export default async function handler(req, res) {
       }
       case 'leads':
         return res.json(await buildLeads(staffCtx, { month, storeId, refresh }));
+      case 'leadReasons':
+        return res.json(await buildLeadReasons(staffCtx, { month, months: q.months, storeId }));
       case 'saveLead': {
         if (req.method !== 'POST') return res.status(405).json({ error: 'POST で呼び出してください' });
         const body = bodyOf(req);

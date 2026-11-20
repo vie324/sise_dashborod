@@ -117,10 +117,17 @@ export function useLeads(month, storeId) {
   return useResource(key, () => salonOne('leads', { month, storeId, refresh: refreshFlag() }), { maxAge: 2 * 60 * 1000 });
 }
 
+/** 未契約の理由の一覧（month までの months ヶ月。記録だけから作る） */
+export function useLeadReasons(month, storeId, months = 1) {
+  const key = month ? `leadReasons:${month}:${storeId || 'all'}:${months}` : null;
+  return useResource(key, () => salonOne('leadReasons', { month, storeId, months }), { maxAge: 2 * 60 * 1000 });
+}
+
 /** 新規台帳の 1人の記録を保存する（outcome が空なら消す） */
 export async function saveLeadRecord(body) {
   const r = await salonOnePost('saveLead', body);
   invalidate('leads:');
+  invalidate('leadReasons:');
   return r;
 }
 

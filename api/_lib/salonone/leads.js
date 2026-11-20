@@ -9,19 +9,24 @@
 //   - SalonOne でのプランの購入（その来店・あとの来店）も参考に出す
 //   - 記録は dash_config の newcust.<月>.<店舗ID>（/api/db の dashConfig からは読み書きできない）
 //       { records: { '<SalonOne の店舗ID>|<顧客ID>': Record }, updatedAt, updatedBy }
-//       Record: { outcome: 'contracted' | 'lost', plan, reason, menu, receptionId, date, updatedAt, updatedBy }
+//       Record: { outcome: 'contracted' | 'lost', plan, reasons（理由のタブ。shared/leads.js）, reason（メモ）, menu,
+//                 receptionId, date, updatedAt, updatedBy,
+//                 未契約の理由の一覧で SalonOne を呼ばずに出すための写し: customerNumber, staffName, sourceName, channel, menus, shopName }
+//       前の形の記録（reasons が無く、理由の文にタブを「・」でつないでいた）は、文の中のタブを拾って同じように扱う
+//   - 未契約の理由の一覧（buildLeadReasons）は記録だけから作る（1・3・6・12ヶ月。SalonOne は呼ばない）
 //   - 画面には SalonOne の顧客ID・店舗IDを返さない（行の rid は初回の来店の受付ID）。
 //     氏名は「個人情報を含める」キーの時だけ（無ければ顧客番号）
 // 見る・記録する: その店舗を見られる人（スタッフは所属店舗だけ）。
 // インセンティブ・新規契約の数は SalonOne のデータのまま（この記録では変えない）
 // ============================================================
 
-import { prepare, AccessError, resolveSelection, dataWarnings } from './summary.js';
-import { loadDataset } from './provider.js';
+import { prepare, AccessError, resolveSelection, dataWarnings, accessScope } from './summary.js';
+import { loadDataset, loadAppContext } from './provider.js';
 import { supabase } from '../supabase.js';
 import { findFirstVisits } from '../../../shared/metrics.js';
 import { resolveChannel, channelLabel } from '../../../shared/channels.js';
-import { addMonths, isMonth } from '../../../shared/dates.js';
+import { addMonths, isMonth, listMonths } from '../../../shared/dates.js';
+import { LOST_REASONS, cleanReasonTags, reasonPartsOf } from '../../../shared/leads.js';
 
 export const LEADS_PREFIX = 'newcust.';
 export const leadsKeyOf = (month, storeId) => `${LEADS_PREFIX}${month}.${storeId}`;
@@ -35,6 +40,16 @@ const multiLine = (v, max) => String(v == null ? '' : v).replace(/\r\n?/g, '\n')
 /** 初回の来店の受付ID（デモの受付は ID が無いので、店舗・お客様・日から作る） */
 const ridOf = (r) => String(r.id || `${r.shopId}-${r.customerId}-${r.date}`);
 const byNewest = (a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : String(b.time || '').localeCompare(String(a.time || '')));
+
+/** 画面に返す記録（理由はタブとメモに分ける。前の形の記録も同じ形にする） */
+function recordView(rec) {
+  if (!rec) return null;
+  const { tags, memo } = reasonPartsOf(rec);
+  return {
+    outcome: rec.outcome, plan: rec.plan || null, reasons: tags, reason: memo || null, menu: rec.menu || null,
+    updatedAt: rec.updatedAt || null, updatedBy: rec.updatedBy || '',
+  };
+}
 
 /** 店舗ごとの記録（月） */
 export async function loadLeadDocs(month, storeIds) {
@@ -123,10 +138,7 @@ export async function buildLeads(staffCtx, { month, storeId, refresh = false } =
         plans: bought.filter((c) => c.type === 'subscription' || c.type === 'ticket').map((c) => ({ name: c.planName, date: c.startDate, kind: c.type })),
         joined: bought.some((c) => c.type === 'member'),
       },
-      record: rec ? {
-        outcome: rec.outcome, plan: rec.plan || null, reason: rec.reason || null, menu: rec.menu || null,
-        updatedAt: rec.updatedAt || null, updatedBy: rec.updatedBy || '',
-      } : null,
+      record: recordView(rec),
     };
   }).sort(byNewest);
 
@@ -191,16 +203,27 @@ export async function saveLead(staffCtx, input = {}, operator = '') {
   if (outcome) {
     if (!Object.prototype.hasOwnProperty.call(OUTCOMES, outcome)) throw new AccessError('契約できたか・できなかったかを選んでください', 400);
     const plan = outcome === 'contracted' ? oneLine(input.plan, PLAN_MAX) : '';
+    const reasons = outcome === 'lost' ? cleanReasonTags(input.reasons) : [];
     const reason = outcome === 'lost' ? multiLine(input.reason, REASON_MAX) : '';
     if (outcome === 'contracted' && !plan) throw new AccessError('契約したプランを選んでください', 400);
-    if (outcome === 'lost' && !reason) throw new AccessError('契約できなかった理由を入力してください', 400);
+    if (outcome === 'lost' && !reasons.length && !reason) throw new AccessError('契約できなかった理由を選ぶか、メモを入力してください', 400);
+    const { mapping, master, appCtx } = ctx;
+    const merged = mapping.shopsOf(storeId).length > 1;
     record = {
       outcome,
       plan: plan || null,
+      reasons: outcome === 'lost' ? reasons : null,
       reason: reason || null,
       menu: oneLine(input.menu, MENU_MAX) || null,
       receptionId: rid,
       date: hit.r.date,
+      // 未契約の理由の一覧で SalonOne を呼ばずに出すための写し（お名前は持たない）
+      customerNumber: String(hit.r.customerNumber || ''),
+      staffName: String(hit.r.staffName || ''),
+      sourceName: hit.sourceName || '',
+      channel: resolveChannel(hit.sourceName || '', appCtx.config['salonone.channelMap'] || {}),
+      menus: Array.isArray(hit.r.menus) ? hit.r.menus : [],
+      shopName: merged ? (master.shops.find((sh) => String(sh.id) === String(hit.r.shopId)) || {}).name || null : null,
       updatedAt: new Date().toISOString(),
       updatedBy: oneLine(operator, 40),
     };
@@ -216,8 +239,70 @@ export async function saveLead(staffCtx, input = {}, operator = '') {
     value: { records, updatedAt: new Date().toISOString(), updatedBy: oneLine(operator, 40) },
   }, { onConflict: 'key' });
   if (error) throw error;
-  return {
-    rid,
-    record: record ? { outcome: record.outcome, plan: record.plan, reason: record.reason, menu: record.menu, updatedAt: record.updatedAt, updatedBy: record.updatedBy } : null,
-  };
+  return { rid, record: recordView(record) };
+}
+
+const SPANS = [1, 3, 6, 12];
+
+/**
+ * 未契約の理由の一覧（契約できなかったと記録したお客様と、理由ごとの人数）。記録だけから作る（SalonOne は呼ばない）
+ * @param {Object|null} staffCtx
+ * @param {{ month:string, months?:number, storeId:string }} opts month までの months ヶ月（1・3・6・12）。storeId は 'all' で見られる店舗すべて
+ */
+export async function buildLeadReasons(staffCtx, { month, months = 1, storeId } = {}) {
+  if (!isMonth(month)) throw new AccessError('month (YYYY-MM) が必要です', 400);
+  const span = SPANS.includes(Number(months)) ? Number(months) : 1;
+  const appCtx = await loadAppContext();
+  const scope = accessScope(staffCtx, appCtx);
+  const storeIds = resolveSelection(scope, storeId);
+  const monthList = listMonths(addMonths(month, -(span - 1)), month);
+  const base = { month, months: span, monthList, storeIds, generatedAt: new Date().toISOString() };
+  const empty = { recorded: 0, contracted: 0, lost: 0, memoOnly: 0 };
+  if (appCtx.dbError) {
+    return { ...base, rows: [], counts: empty, reasons: LOST_REASONS.map((label) => ({ label, count: 0 })), warnings: [{ code: 'db', message: `Supabase に接続できません（記録を読めません）: ${appCtx.dbError}` }] };
+  }
+  const keys = monthList.flatMap((m) => storeIds.map((id) => leadsKeyOf(m, id)));
+  const { data, error } = keys.length ? await supabase.from('dash_config').select('key, value').in('key', keys) : { data: [] };
+  if (error) throw error;
+  const storeName = (sid) => (appCtx.stores.find((s) => s.id === sid) || {}).name || sid;
+  const counts = { ...empty };
+  const tally = new Map(LOST_REASONS.map((r) => [r, 0]));
+  const rows = [];
+  for (const row of data || []) {
+    const rest = String(row.key).slice(LEADS_PREFIX.length); // <月>.<店舗ID>
+    const m = rest.slice(0, 7);
+    const sid = rest.slice(8);
+    const records = row.value && typeof row.value.records === 'object' && row.value.records ? row.value.records : {};
+    for (const rec of Object.values(records)) {
+      if (!rec || !OUTCOMES[rec.outcome]) continue;
+      counts.recorded += 1;
+      if (rec.outcome === 'contracted') { counts.contracted += 1; continue; }
+      counts.lost += 1;
+      const { tags, memo } = reasonPartsOf(rec);
+      for (const t of tags) tally.set(t, tally.get(t) + 1);
+      if (!tags.length) counts.memoOnly += 1;
+      rows.push({
+        // 行は初回の来店の受付ID（SalonOne の顧客ID・店舗IDは返さない）
+        id: `${sid}:${rec.receptionId || rows.length}`,
+        month: m,
+        date: rec.date || '',
+        storeId: sid,
+        storeName: storeName(sid),
+        shopName: rec.shopName || null,
+        customerNumber: rec.customerNumber || '',
+        staffName: rec.staffName || '',
+        sourceName: rec.sourceName || '',
+        channelLabel: rec.sourceName ? channelLabel(rec.channel || resolveChannel(rec.sourceName, appCtx.config['salonone.channelMap'] || {})) : '',
+        menus: Array.isArray(rec.menus) && rec.menus.length ? rec.menus : (rec.menu ? [rec.menu] : []),
+        reasons: tags,
+        reason: memo || null,
+        updatedAt: rec.updatedAt || null,
+        updatedBy: rec.updatedBy || '',
+      });
+    }
+  }
+  rows.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : String(b.updatedAt || '').localeCompare(String(a.updatedAt || ''))));
+  const reasons = LOST_REASONS.map((label) => ({ label, count: tally.get(label) }))
+    .sort((a, b) => b.count - a.count || LOST_REASONS.indexOf(a.label) - LOST_REASONS.indexOf(b.label));
+  return { ...base, rows, counts, reasons, warnings: [] };
 }
